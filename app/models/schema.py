@@ -544,7 +544,7 @@ class ChatSession(Base):
     title = Column(String(500), nullable=True)
     session_type = Column(String(50), nullable=True)  # article_brain, topic, ad_hoc
     topic = Column(String(500), nullable=True)
-    llm_model = Column(String(100), nullable=False, default="openai:gpt-5.1")
+    llm_model = Column(String(100), nullable=False, default="openai:gpt-5.4")
     llm_provider = Column(String(50), nullable=False, default="openai")
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)

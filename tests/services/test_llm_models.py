@@ -26,6 +26,13 @@ def test_build_pydantic_model_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     assert model_settings is None
 
 
+def test_resolve_model_uses_gpt_5_4_for_openai_default() -> None:
+    provider, model_spec = llm_models.resolve_model(llm_models.LLMProvider.OPENAI, None)
+
+    assert provider == llm_models.LLMProvider.OPENAI.value
+    assert model_spec == "openai:gpt-5.4"
+
+
 def test_build_pydantic_model_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         llm_models,

@@ -53,7 +53,7 @@ def test_create_chat_session_with_content(
     session = data["session"]
     assert session["content_id"] == content.id
     assert session["llm_provider"] == "openai"
-    assert session["llm_model"] == "openai:gpt-5.1"
+    assert session["llm_model"] == "openai:gpt-5.4"
     assert session["session_type"] == "article_brain"
     assert session["article_title"] == "Test Article About AI"
 
@@ -147,7 +147,7 @@ def test_list_chat_sessions(
             content_id=content.id if i == 0 else None,
             title=f"Session {i}",
             session_type="article_brain" if i == 0 else "ad_hoc",
-            llm_model="openai:gpt-5.1",
+            llm_model="openai:gpt-5.4",
             llm_provider="openai",
         )
         db_session.add(session)
@@ -188,14 +188,14 @@ def test_list_chat_sessions_filter_by_content(
         user_id=test_user.id,
         content_id=content1.id,
         title="Session for Article 1",
-        llm_model="openai:gpt-5.1",
+        llm_model="openai:gpt-5.4",
         llm_provider="openai",
     )
     session2 = ChatSession(
         user_id=test_user.id,
         content_id=content2.id,
         title="Session for Article 2",
-        llm_model="openai:gpt-5.1",
+        llm_model="openai:gpt-5.4",
         llm_provider="openai",
     )
     db_session.add_all([session1, session2])
@@ -217,7 +217,7 @@ def test_get_chat_session_detail(
     session = ChatSession(
         user_id=test_user.id,
         title="Test Session",
-        llm_model="openai:gpt-5.1",
+        llm_model="openai:gpt-5.4",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -248,7 +248,7 @@ def test_get_chat_session_wrong_user(
     session = ChatSession(
         user_id=99999,  # Different user
         title="Other User's Session",
-        llm_model="openai:gpt-5.1",
+        llm_model="openai:gpt-5.4",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -266,7 +266,7 @@ def test_delete_chat_session_archives_session(
     session = ChatSession(
         user_id=test_user.id,
         title="Session to delete",
-        llm_model="openai:gpt-5.1",
+        llm_model="openai:gpt-5.4",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -295,7 +295,7 @@ def test_delete_chat_session_wrong_user(client: TestClient, db_session: Session)
     session = ChatSession(
         user_id=99999,  # Different user
         title="Other User Session",
-        llm_model="openai:gpt-5.1",
+        llm_model="openai:gpt-5.4",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -314,7 +314,7 @@ def test_different_llm_providers(
 ) -> None:
     """Test creating sessions with different LLM providers."""
     providers = [
-        ("openai", "openai:gpt-5.1"),
+        ("openai", "openai:gpt-5.4"),
         ("anthropic", "anthropic:claude-opus-4-5-20251101"),
         ("google", "google-gla:gemini-3-pro-preview"),
     ]

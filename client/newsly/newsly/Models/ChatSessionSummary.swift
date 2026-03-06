@@ -135,7 +135,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     var providerDisplayName: String {
         switch llmProvider.lowercased() {
         case "openai":
-            return "GPT"
+            return llmModel == "openai:gpt-5.4" ? "GPT-5.4" : "GPT"
         case "anthropic":
             return "Claude"
         case "google":

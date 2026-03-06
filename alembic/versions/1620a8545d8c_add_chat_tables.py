@@ -34,7 +34,7 @@ def upgrade() -> None:
             sa.Column("title", sa.String(500), nullable=True),
             sa.Column("session_type", sa.String(50), nullable=True),
             sa.Column("topic", sa.String(500), nullable=True),
-            sa.Column("llm_model", sa.String(100), nullable=False, server_default="openai:gpt-5.1"),
+            sa.Column("llm_model", sa.String(100), nullable=False, server_default="openai:gpt-5.4"),
             sa.Column("llm_provider", sa.String(50), nullable=False, server_default="openai"),
             sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
             sa.Column("updated_at", sa.DateTime(), nullable=True, onupdate=sa.func.now()),
