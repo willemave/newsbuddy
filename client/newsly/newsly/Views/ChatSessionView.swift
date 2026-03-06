@@ -219,6 +219,7 @@ struct SelectableAttributedText: UIViewRepresentable {
 }
 
 struct ChatSessionView: View {
+    private static let thinkingIndicatorScrollId = -1
     @StateObject private var viewModel: ChatSessionViewModel
     let onStartLiveVoice: ((LiveVoiceRoute) -> Void)?
     @FocusState private var isInputFocused: Bool
@@ -256,7 +257,7 @@ struct ChatSessionView: View {
 
     var body: some View {
         messageListView
-            .safeAreaInset(edge: .bottom) {
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 inputBar
             }
             .scrollDismissesKeyboard(.interactively)
@@ -344,7 +345,7 @@ struct ChatSessionView: View {
                                         await switchToProvider(provider)
                                     }
                                 } label: {
-                                    Label(provider.displayName, systemImage: provider.iconName)
+                                    Label(provider.chatDisplayName, systemImage: provider.iconName)
                                 }
                                 .disabled(provider.rawValue == session.llmProvider)
                             }
@@ -401,7 +402,7 @@ struct ChatSessionView: View {
     private var messageListView: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if viewModel.isLoading {
                         ChatLoadingView()
                             .frame(maxWidth: .infinity)
@@ -473,6 +474,8 @@ struct ChatSessionView: View {
                             ThinkingBubbleView(
                                 elapsedSeconds: viewModel.thinkingElapsedSeconds
                             )
+                            .id(Self.thinkingIndicatorScrollId)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }
@@ -480,7 +483,6 @@ struct ChatSessionView: View {
                 .scrollTargetLayout()
                 .padding()
             }
-            .defaultScrollAnchor(.bottom)
             .scrollPosition(id: $scrolledMessageId, anchor: .bottom)
             .onChange(of: scrolledMessageId) { _, newId in
                 updateIsAtBottom(anchorId: newId)
@@ -513,13 +515,16 @@ struct ChatSessionView: View {
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
-        guard let lastId = viewModel.allMessages.last?.id else { return }
+        let targetId = viewModel.isSending
+            ? Self.thinkingIndicatorScrollId
+            : viewModel.allMessages.last?.id
+        guard let targetId else { return }
         if animated {
             withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(lastId, anchor: .bottom)
+                proxy.scrollTo(targetId, anchor: .bottom)
             }
         } else {
-            proxy.scrollTo(lastId, anchor: .bottom)
+            proxy.scrollTo(targetId, anchor: .bottom)
         }
     }
 
@@ -528,7 +533,9 @@ struct ChatSessionView: View {
             isAtBottom = false
             return
         }
-        isAtBottom = anchorId == lastId
+        isAtBottom =
+            anchorId == lastId ||
+            (viewModel.isSending && anchorId == Self.thinkingIndicatorScrollId)
     }
 
     private func restoreScrollPositionIfNeeded(proxy: ScrollViewProxy) {
@@ -537,9 +544,7 @@ struct ChatSessionView: View {
 
         hasRestoredScroll = true
         guard let storedScrollState else {
-            if let firstId = viewModel.allMessages.first?.id {
-                proxy.scrollTo(firstId, anchor: .top)
-            }
+            scrollToBottom(proxy: proxy, animated: false)
             return
         }
 
@@ -637,8 +642,8 @@ struct ChatSessionView: View {
     // MARK: - Input Bar
 
     private var inputBar: some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .bottom, spacing: 12) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
                 // Clean input field with subtle border
                 HStack(spacing: 8) {
                     TextField("Message", text: $viewModel.inputText, axis: .vertical)
@@ -673,6 +678,7 @@ struct ChatSessionView: View {
                         .stroke(viewModel.isRecording ? Color.red.opacity(0.6) : Color(.separator), lineWidth: 1)
                 )
                 .cornerRadius(20)
+                .frame(maxWidth: .infinity)
 
                 // Clean send button
                 Button {
@@ -688,38 +694,42 @@ struct ChatSessionView: View {
                         }
                     }
                     .foregroundColor(sendButtonDisabled ? .secondary : .accentColor)
-                    .frame(width: 34, height: 34)
+                    .frame(width: 34, height: 34, alignment: .center)
                     .background(sendButtonDisabled ? Color.clear : Color.accentColor.opacity(0.1))
                     .clipShape(Circle())
                 }
                 .disabled(sendButtonDisabled)
             }
 
-            // Status area (fixed height to avoid scroll jumps)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                    Text("Transcribing...")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .opacity(viewModel.isTranscribing ? 1 : 0)
+            if viewModel.isTranscribing || viewModel.isRecording {
+                VStack(alignment: .leading, spacing: 4) {
+                    if viewModel.isTranscribing {
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Transcribing...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
 
-                HStack(spacing: 6) {
-                    Image(systemName: "waveform")
-                        .font(.caption)
-                        .foregroundColor(.red)
-                    Text("Listening — text will appear in the message box")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    if viewModel.isRecording {
+                        HStack(spacing: 6) {
+                            Image(systemName: "waveform")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                            Text("Listening — text will appear in the message box")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
-                .opacity(viewModel.isRecording ? 1 : 0)
+                .transition(.opacity)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
         .background(Color.surfaceSecondary)
         .overlay(
             Rectangle()
@@ -933,7 +943,7 @@ struct InitialSuggestionsLoadingView: View {
             sessionType: "ad_hoc",
             topic: nil,
             llmProvider: "openai",
-            llmModel: "openai:gpt-5.1",
+            llmModel: "openai:gpt-5.4",
             createdAt: "2025-11-28T12:00:00Z",
             updatedAt: nil,
             lastMessageAt: nil,

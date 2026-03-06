@@ -78,6 +78,18 @@ struct MarkdownNSRenderer {
     let baseFont: UIFont
     let textColor: UIColor
 
+    private enum TableColumnAlignment {
+        case leading
+        case center
+        case trailing
+    }
+
+    private struct ParsedTable {
+        let headers: [String]
+        let alignments: [TableColumnAlignment]
+        let rows: [[String]]
+    }
+
     func render(_ markdown: String) -> NSAttributedString {
         let result = NSMutableAttributedString()
         let rawLines = markdown.components(separatedBy: "\n")
@@ -175,6 +187,13 @@ struct MarkdownNSRenderer {
                 continue
             }
 
+            // --- GitHub-style table ---
+            if let (table, nextIndex) = parseTable(startingAt: i, in: rawLines) {
+                appendTable(table, to: result)
+                i = nextIndex
+                continue
+            }
+
             // --- Regular paragraph text ---
             if result.length > 0 && !result.string.hasSuffix("\n") {
                 // Continuation of same paragraph — add space
@@ -239,6 +258,188 @@ struct MarkdownNSRenderer {
         result.append(NSAttributedString(string: "\n", attributes: [.font: spacingFont]))
     }
 
+    private func parseTable(startingAt index: Int, in lines: [String]) -> (ParsedTable, Int)? {
+        guard index + 1 < lines.count else { return nil }
+        guard let headers = parseTableRow(lines[index]) else { return nil }
+        guard headers.count >= 2 else { return nil }
+        guard let alignments = parseTableSeparatorRow(lines[index + 1]) else { return nil }
+        guard alignments.count == headers.count else { return nil }
+
+        var rows: [[String]] = []
+        var currentIndex = index + 2
+
+        while currentIndex < lines.count {
+            let line = lines[currentIndex]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                break
+            }
+            guard let parsedRow = parseTableRow(line) else { break }
+            rows.append(normalizeTableRow(parsedRow, columnCount: headers.count))
+            currentIndex += 1
+        }
+
+        let table = ParsedTable(
+            headers: normalizeTableRow(headers, columnCount: headers.count),
+            alignments: alignments,
+            rows: rows
+        )
+        return (table, currentIndex)
+    }
+
+    private func parseTableRow(_ line: String) -> [String]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.contains("|") else { return nil }
+
+        var cells: [String] = []
+        var current = ""
+        var isEscaped = false
+
+        for char in trimmed {
+            if isEscaped {
+                current.append(char)
+                isEscaped = false
+                continue
+            }
+            if char == "\\" {
+                isEscaped = true
+                continue
+            }
+            if char == "|" {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
+                continue
+            }
+            current.append(char)
+        }
+
+        if isEscaped {
+            current.append("\\")
+        }
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+
+        if trimmed.hasPrefix("|"), !cells.isEmpty {
+            cells.removeFirst()
+        }
+        if trimmed.hasSuffix("|"), !cells.isEmpty {
+            cells.removeLast()
+        }
+
+        return cells.count >= 2 ? cells : nil
+    }
+
+    private func parseTableSeparatorRow(_ line: String) -> [TableColumnAlignment]? {
+        guard let cells = parseTableRow(line) else { return nil }
+
+        var alignments: [TableColumnAlignment] = []
+        for cell in cells {
+            let token = cell.replacingOccurrences(of: " ", with: "")
+            guard token.range(of: #"^:?-{3,}:?$"#, options: .regularExpression) != nil else {
+                return nil
+            }
+            if token.hasPrefix(":"), token.hasSuffix(":") {
+                alignments.append(.center)
+                continue
+            }
+            if token.hasSuffix(":") {
+                alignments.append(.trailing)
+                continue
+            }
+            alignments.append(.leading)
+        }
+
+        return alignments
+    }
+
+    private func normalizeTableRow(_ row: [String], columnCount: Int) -> [String] {
+        let padded = Array(row.prefix(columnCount))
+        if padded.count == columnCount {
+            return padded
+        }
+        return padded + Array(repeating: "", count: columnCount - padded.count)
+    }
+
+    private func appendTable(_ table: ParsedTable, to result: NSMutableAttributedString) {
+        let rows = [table.headers] + table.rows
+        let widths = (0..<table.headers.count).map { index in
+            rows.map { plainTextWidth(of: $0[index]) }.max() ?? 0
+        }
+
+        if result.length > 0, !result.string.hasSuffix("\n") {
+            result.append(NSAttributedString(string: "\n"))
+        }
+
+        let tableLines = [
+            renderTableLine(table.headers, widths: widths, alignments: table.alignments),
+            renderTableSeparator(widths: widths, alignments: table.alignments)
+        ] + table.rows.map {
+            renderTableLine($0, widths: widths, alignments: table.alignments)
+        }
+
+        let tableText = tableLines.joined(separator: "\n")
+        let tableAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.86, weight: .regular),
+            .foregroundColor: textColor
+        ]
+
+        let rendered = NSMutableAttributedString(string: tableText, attributes: tableAttrs)
+        applyTableStyle(to: rendered)
+        result.append(rendered)
+        result.append(NSAttributedString(string: "\n"))
+    }
+
+    private func renderTableLine(
+        _ row: [String],
+        widths: [Int],
+        alignments: [TableColumnAlignment]
+    ) -> String {
+        zip(zip(row, widths), alignments)
+            .map { item in
+                let ((cell, width), alignment) = item
+                let text = sanitizeTableCell(cell)
+                let padding = max(width - plainTextWidth(of: text), 0)
+                switch alignment {
+                case .leading:
+                    return " " + text + String(repeating: " ", count: padding) + " "
+                case .center:
+                    let left = padding / 2
+                    let right = padding - left
+                    return " " + String(repeating: " ", count: left) + text + String(repeating: " ", count: right) + " "
+                case .trailing:
+                    return " " + String(repeating: " ", count: padding) + text + " "
+                }
+            }
+            .joined(separator: "|")
+    }
+
+    private func renderTableSeparator(
+        widths: [Int],
+        alignments: [TableColumnAlignment]
+    ) -> String {
+        zip(widths, alignments)
+            .map { width, alignment in
+                let dashCount = max(width, 3)
+                switch alignment {
+                case .leading:
+                    return " " + String(repeating: "-", count: dashCount) + " "
+                case .center:
+                    return ":" + String(repeating: "-", count: dashCount) + ":"
+                case .trailing:
+                    return String(repeating: "-", count: dashCount + 1) + ":"
+                }
+            }
+            .joined(separator: "|")
+    }
+
+    private func sanitizeTableCell(_ text: String) -> String {
+        let rendered = renderInline(text).string
+        return rendered.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func plainTextWidth(of text: String) -> Int {
+        sanitizeTableCell(text).count
+    }
+
     // MARK: - Block Styling
 
     private func applyHeadingStyle(to attrStr: NSMutableAttributedString, level: Int) {
@@ -279,6 +480,14 @@ struct MarkdownNSRenderer {
         para.firstLineHeadIndent = 0
         para.paragraphSpacing = 3
         attrStr.addAttribute(.paragraphStyle, value: para, range: range)
+    }
+
+    private func applyTableStyle(to attrStr: NSMutableAttributedString) {
+        let range = NSRange(location: 0, length: attrStr.length)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 2
+        paragraph.paragraphSpacing = 6
+        attrStr.addAttribute(.paragraphStyle, value: paragraph, range: range)
     }
 
     // MARK: - Inline Rendering

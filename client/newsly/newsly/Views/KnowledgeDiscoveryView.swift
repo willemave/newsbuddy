@@ -63,15 +63,10 @@ struct KnowledgeDiscoveryView: View {
     private var scrollContent: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                // Editorial search bar + action buttons
-                VStack(spacing: 8) {
-                    editorialSearchBar
-
-                    discoveryActionBar
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
+                editorialSearchBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
 
                 // Podcast search results (inline)
                 if isPodcastSearchActive {
@@ -100,36 +95,6 @@ struct KnowledgeDiscoveryView: View {
                     suggestionContent
                 }
             }
-        }
-    }
-
-    // MARK: - Action Bar
-
-    private var discoveryActionBar: some View {
-        HStack(spacing: 12) {
-            Spacer()
-
-            Button {
-                Task { await viewModel.refreshDiscovery() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.textSecondary)
-            }
-            .accessibilityLabel("Refresh Discovery")
-
-            Menu {
-                Button(role: .destructive) {
-                    Task { await viewModel.clearAll() }
-                } label: {
-                    Label("Clear Suggestions", systemImage: "trash")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.textSecondary)
-            }
-            .accessibilityLabel("Discovery Options")
         }
     }
 
@@ -252,61 +217,44 @@ struct KnowledgeDiscoveryView: View {
         Button {
             Task { await viewModel.refreshDiscovery() }
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.textSecondary)
+                    .font(.system(size: 14, weight: .semibold))
 
-                Text("Generate More Suggestions")
-                    .font(.listTitle)
-                    .foregroundColor(.textPrimary)
-
-                Spacer()
-
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.textTertiary)
+                Text("Generate More")
+                    .font(.system(size: 15, weight: .semibold))
             }
-            .padding(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.editorialBorder, lineWidth: 1)
-            )
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.accentColor)
+            .cornerRadius(12)
         }
-        .buttonStyle(EditorialCardButtonStyle())
+        .buttonStyle(.plain)
     }
 
     private var personalizeCard: some View {
         Button {
             showPersonalizeSheet = true
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.textSecondary)
+                    .font(.system(size: 14, weight: .semibold))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Personalize this discovery")
-                        .font(.listTitle)
-                        .foregroundColor(.textPrimary)
-                    Text("Tell us your interests with voice")
-                        .font(.listCaption)
-                        .foregroundColor(.textSecondary)
-                }
-
-                Spacer()
-
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.textTertiary)
+                Text("Personalize")
+                    .font(.system(size: 15, weight: .semibold))
             }
-            .padding(16)
+            .foregroundColor(.textPrimary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.surfaceSecondary)
+            .cornerRadius(12)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Color.editorialBorder, lineWidth: 1)
             )
         }
-        .buttonStyle(EditorialCardButtonStyle())
+        .buttonStyle(.plain)
     }
 
     private var currentUserId: Int? {
