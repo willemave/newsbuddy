@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate interesting thumbnails for news articles using Google Gemini 2.5 Flash Image.
+Generate interesting thumbnails for news articles using Google Gemini 3.1 Flash Image.
 
 Uses information theory principles to craft prompts that maximize visual interest:
 - Information Density: How much meaning is packed per visual element
@@ -40,14 +40,15 @@ load_dotenv()
 
 from app.core.db import get_db  # noqa: E402
 from app.core.logging import get_logger, setup_logging  # noqa: E402
+from app.core.settings import get_settings  # noqa: E402
 from app.models.metadata import ContentStatus  # noqa: E402
 from app.models.schema import Content  # noqa: E402
 
 setup_logging()
 logger = get_logger(__name__)
 
-# Model for image generation - using 2.5 Flash Image for speed
-IMAGE_MODEL = "gemini-2.5-flash-image"
+# Model for image generation
+IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
 # Output directories
 OUTPUT_DIR = Path("static/images/thumbnails_experiment")
@@ -800,7 +801,21 @@ def main() -> None:
     # Initialize Gemini client
     client = None
     if not args.dry_run:
-        client = genai.Client()
+        settings = get_settings()
+        if settings.google_cloud_project:
+            client_kwargs: dict[str, str | bool] = {
+                "vertexai": True,
+                "project": settings.google_cloud_project,
+                "location": settings.google_cloud_location,
+            }
+        else:
+            if not settings.google_api_key:
+                raise ValueError("GOOGLE_API_KEY not configured for Vertex image generation.")
+            client_kwargs = {
+                "vertexai": True,
+                "api_key": settings.google_api_key,
+            }
+        client = genai.Client(**client_kwargs)
         print(f"Using model: {IMAGE_MODEL}")
 
     print(f"Output directory: {OUTPUT_DIR}")

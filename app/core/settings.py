@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     google_api_key: str | None = None
+    google_cloud_project: str | None = None
+    google_cloud_location: str = "global"
     cerebras_api_key: str | None = None
     exa_api_key: str | None = None
     elevenlabs_api_key: str | None = Field(

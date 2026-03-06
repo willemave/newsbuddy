@@ -2,8 +2,8 @@
 AI image generation service using Google Gemini.
 
 Generates two types of images:
-- News thumbnails: Simple, fast 1:1 images using gemini-2.5-flash-image
-- Infographics: Complex 16:9 editorial images using gemini-3-pro-image-preview
+- News thumbnails: Simple 1:1 images using gemini-3.1-flash-image-preview
+- Infographics: Complex 16:9 editorial images using gemini-3.1-flash-image-preview
 """
 
 import math
@@ -17,6 +17,7 @@ from google.genai.types import GenerateContentConfig, ImageConfig
 from PIL import Image
 
 from app.core.logging import get_logger
+from app.core.settings import get_settings
 from app.models.metadata import ContentData, ContentType
 from app.services.langfuse_tracing import (
     extract_google_usage_details,
@@ -30,9 +31,10 @@ from app.utils.image_paths import (
 
 logger = get_logger(__name__)
 
-# Models for image generation
-NEWS_THUMBNAIL_MODEL = "gemini-2.5-flash-image"
-INFOGRAPHIC_MODEL = "gemini-3-pro-image-preview"
+# Model for image generation
+IMAGE_GENERATION_MODEL = "gemini-3.1-flash-image-preview"
+NEWS_THUMBNAIL_MODEL = IMAGE_GENERATION_MODEL
+INFOGRAPHIC_MODEL = IMAGE_GENERATION_MODEL
 
 # Thumbnail settings
 THUMBNAIL_SIZE = (200, 200)  # Max dimensions for thumbnails
@@ -339,14 +341,28 @@ class ImageGenerationService:
     """Service for generating images from content summaries."""
 
     def __init__(self) -> None:
-        self.client = genai.Client()
+        settings = get_settings()
+        if settings.google_cloud_project:
+            client_kwargs: dict[str, str | bool] = {
+                "vertexai": True,
+                "project": settings.google_cloud_project,
+                "location": settings.google_cloud_location,
+            }
+        else:
+            if not settings.google_api_key:
+                raise ValueError("GOOGLE_API_KEY not configured for Vertex image generation.")
+            client_kwargs = {
+                "vertexai": True,
+                "api_key": settings.google_api_key,
+            }
+        self.client = genai.Client(**client_kwargs)
         # Ensure output directories exist
         get_news_thumbnails_dir().mkdir(parents=True, exist_ok=True)
         get_content_images_dir().mkdir(parents=True, exist_ok=True)
         get_thumbnails_dir().mkdir(parents=True, exist_ok=True)
 
         logger.info(
-            "Initialized ImageGenerationService with models: news=%s, infographic=%s",
+            "Initialized Vertex image generation service with models: news=%s, infographic=%s",
             NEWS_THUMBNAIL_MODEL,
             INFOGRAPHIC_MODEL,
         )
