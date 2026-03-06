@@ -52,6 +52,7 @@ def test_apple_signin_new_user(db: Session, monkeypatch):
         assert data["user"]["email"] == "newuser@icloud.com"
         assert data["user"]["full_name"] == "New User"
         assert data["is_new_user"] is True
+        assert "openai_api_key" not in data
     finally:
         app.dependency_overrides.clear()
 
@@ -95,6 +96,7 @@ def test_apple_signin_existing_user(db: Session, monkeypatch):
         assert data["user"]["id"] == existing_user.id
         assert data["user"]["email"] == "existing@icloud.com"
         assert data["is_new_user"] is False
+        assert "openai_api_key" not in data
     finally:
         app.dependency_overrides.clear()
 
@@ -148,6 +150,7 @@ def test_refresh_token_valid(db: Session):
         assert "access_token" in data
         assert "refresh_token" in data  # Should now return new refresh token
         assert data["token_type"] == "bearer"
+        assert "openai_api_key" not in data
     finally:
         app.dependency_overrides.clear()
 
@@ -234,6 +237,7 @@ def test_refresh_token_rotation(db: Session):
         assert "access_token" in data
         assert "refresh_token" in data
         assert data["token_type"] == "bearer"
+        assert "openai_api_key" not in data
 
         # Verify both tokens are valid strings
         new_refresh_token = data["refresh_token"]
@@ -257,6 +261,16 @@ def test_refresh_token_rotation(db: Session):
 
     finally:
         app.dependency_overrides.clear()
+
+
+def test_validation_error_response_does_not_echo_request_body():
+    """Validation errors should not include the raw request body."""
+    response = client.post("/auth/refresh", json={})
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert "detail" in payload
+    assert "body" not in payload
 
 
 def test_admin_login_valid(monkeypatch):
@@ -344,6 +358,7 @@ def test_get_current_user_info(db: Session, monkeypatch):
         assert data["email"] == "testme@icloud.com"
         assert data["full_name"] == "Test Me User"
         assert data["twitter_username"] is None
+        assert data["news_digest_timezone"] == "UTC"
         assert data["has_x_bookmark_sync"] is False
     finally:
         app.dependency_overrides.clear()
@@ -426,16 +441,22 @@ def test_update_current_user_info(db: Session, monkeypatch):
         response = client.patch(
             "/auth/me",
             headers={"Authorization": f"Bearer {access_token}"},
-            json={"full_name": "Updated Name", "twitter_username": "@Willem_AW"},
+            json={
+                "full_name": "Updated Name",
+                "twitter_username": "@Willem_AW",
+                "news_digest_timezone": "America/New_York",
+            },
         )
         assert response.status_code == 200
         data = response.json()
         assert data["full_name"] == "Updated Name"
         assert data["twitter_username"] == "willem_aw"
+        assert data["news_digest_timezone"] == "America/New_York"
 
         db.refresh(test_user)
         assert test_user.full_name == "Updated Name"
         assert test_user.twitter_username == "willem_aw"
+        assert test_user.news_digest_timezone == "America/New_York"
     finally:
         app.dependency_overrides.clear()
 
@@ -474,6 +495,44 @@ def test_update_current_user_info_rejects_invalid_username(db: Session, monkeypa
         )
         assert response.status_code == 400
         assert "Twitter username" in response.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_update_current_user_info_rejects_invalid_timezone(db: Session, monkeypatch):
+    """Test PATCH /auth/me validates timezone formatting."""
+    from app.core.db import get_db_session, get_readonly_db_session
+    from app.core.settings import get_settings
+
+    monkeypatch.setattr(get_settings(), "debug", False)
+
+    def override_get_db_session():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    app.dependency_overrides[get_readonly_db_session] = override_get_db_session
+
+    test_user = User(
+        apple_id="001234.test.invalidtimezone",
+        email="invalidtimezone@icloud.com",
+        full_name="Invalid Timezone",
+    )
+    db.add(test_user)
+    db.commit()
+    db.refresh(test_user)
+    access_token = create_access_token(test_user.id)
+
+    try:
+        response = client.patch(
+            "/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"news_digest_timezone": "Not/A_Real_Timezone"},
+        )
+        assert response.status_code == 400
+        assert "timezone" in response.json()["detail"].lower()
     finally:
         app.dependency_overrides.clear()
 

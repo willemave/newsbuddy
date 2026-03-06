@@ -2,6 +2,7 @@
 
 import secrets
 from typing import Annotated
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -68,6 +69,33 @@ def _build_user_response(db: Session, user: User) -> UserResponse:
     has_sync = has_active_x_connection(db, user.id)
     response = UserResponse.model_validate(user)
     return response.model_copy(update={"has_x_bookmark_sync": has_sync})
+
+
+def _normalize_news_digest_timezone(timezone_name: str | None) -> str | None:
+    """Normalize and validate an IANA timezone string.
+
+    Args:
+        timezone_name: Raw timezone string from client payload.
+
+    Returns:
+        Normalized timezone string, or ``None`` when not provided.
+
+    Raises:
+        ValueError: If timezone is invalid.
+    """
+    if timezone_name is None:
+        return None
+
+    candidate = timezone_name.strip()
+    if not candidate:
+        return "UTC"
+
+    try:
+        ZoneInfo(candidate)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Invalid timezone: {candidate}") from exc
+
+    return candidate
 
 
 @router.post("/apple", response_model=TokenResponse)
@@ -177,20 +205,11 @@ def apple_signin(
 
     logger.info(f"=== Apple Sign In Successful for user {user.id} ===")
 
-    # Log OpenAI key status for debugging voice dictation
-    if settings.openai_api_key:
-        logger.info(
-            f"🔑 [Auth] Sending OpenAI API key to client (length: {len(settings.openai_api_key)})"
-        )
-    else:
-        logger.warning("⚠️ [Auth] No OpenAI API key configured - voice dictation unavailable")
-
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         user=_build_user_response(db, user),
         is_new_user=is_new_user,
-        openai_api_key=settings.openai_api_key,
     )
 
 
@@ -223,7 +242,6 @@ def debug_create_user(
         refresh_token=refresh_token,
         user=_build_user_response(db, user),
         is_new_user=True,
-        openai_api_key=settings.openai_api_key,
     )
 
 
@@ -279,17 +297,9 @@ def refresh_token(
 
     logger.info(f"Token refresh successful for user {user.id}")
 
-    # Log OpenAI key status for debugging voice dictation
-    if settings.openai_api_key:
-        key_len = len(settings.openai_api_key)
-        logger.info(f"🔑 [Refresh] Sending OpenAI API key to client (length: {key_len})")
-    else:
-        logger.warning("⚠️ [Refresh] No OpenAI API key - voice dictation unavailable")
-
     return AccessTokenResponse(
         access_token=access_token,
         refresh_token=new_refresh_token,
-        openai_api_key=settings.openai_api_key,
     )
 
 
@@ -333,6 +343,14 @@ def update_current_user_info(
     if payload.twitter_username is not None:
         try:
             current_user.twitter_username = normalize_twitter_username(payload.twitter_username)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if payload.news_digest_timezone is not None:
+        try:
+            current_user.news_digest_timezone = _normalize_news_digest_timezone(
+                payload.news_digest_timezone
+            )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

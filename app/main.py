@@ -78,6 +78,34 @@ def _serialize_validation_errors(errors: list) -> list:
     return serialized
 
 
+def _redact_request_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Redact sensitive request headers before logging."""
+    sensitive_headers = {
+        "authorization",
+        "cookie",
+        "set-cookie",
+        "x-api-key",
+        "proxy-authorization",
+    }
+    redacted: dict[str, str] = {}
+    for key, value in headers.items():
+        if key.lower() in sensitive_headers:
+            redacted[key] = "<redacted>"
+        else:
+            redacted[key] = value
+    return redacted
+
+
+def _summarize_request_body(body: bytes | None, *, max_chars: int = 512) -> str:
+    """Return a bounded, text-safe request body summary for logs."""
+    if not body:
+        return "<empty>"
+    decoded = body.decode("utf-8", errors="replace")
+    if len(decoded) <= max_chars:
+        return decoded
+    return f"{decoded[:max_chars]}... <truncated>"
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """
@@ -89,17 +117,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     body = None
     try:
         body = await request.body()
-        body_text = body.decode("utf-8")
     except Exception as e:
         body_text = f"<unable to read body: {e}>"
+    else:
+        body_text = _summarize_request_body(body)
 
     # Log detailed validation error
     logger.error("=" * 80)
     logger.error("VALIDATION ERROR - Request failed Pydantic validation")
     logger.error(f"Path: {request.method} {request.url.path}")
     logger.error(f"Client: {request.client.host if request.client else 'unknown'}")
-    logger.error(f"Headers: {dict(request.headers)}")
-    logger.error(f"Raw body: {body_text}")
+    logger.error(f"Headers: {_redact_request_headers(dict(request.headers))}")
+    logger.error(f"Request body: {body_text}")
     logger.error("Validation errors:")
     for error in exc.errors():
         logger.error(f"  - Field: {error['loc']}, Error: {error['msg']}, Type: {error['type']}")
@@ -108,7 +137,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     # Return standard FastAPI validation error response with serialized errors
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        content={"detail": _serialize_validation_errors(exc.errors()), "body": body_text},
+        content={"detail": _serialize_validation_errors(exc.errors())},
     )
 
 

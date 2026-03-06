@@ -89,3 +89,56 @@ def test_workflow_propagates_non_retryable_twitter_failures(db_session) -> None:
     instruction_fanout.run.assert_not_called()
     payload_cleaner.run.assert_not_called()
     queue_gateway.enqueue.assert_not_called()
+
+
+def test_workflow_uses_content_metadata_for_feed_subscription(db_session) -> None:
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://example.com/article",
+        source="self submission",
+        status=ContentStatus.NEW.value,
+        content_metadata={"subscribe_to_feed": True},
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    feed_flow = Mock()
+    feed_flow.run.return_value = SimpleNamespace(handled=True, success=True)
+
+    twitter_flow = Mock()
+    analysis_flow = Mock()
+    instruction_fanout = Mock()
+    payload_cleaner = Mock()
+    queue_gateway = Mock()
+    context = _build_context(db_session, queue_gateway=queue_gateway)
+
+    workflow = AnalyzeUrlWorkflow(
+        feed_flow=feed_flow,
+        twitter_flow=twitter_flow,
+        analysis_flow=analysis_flow,
+        instruction_fanout=instruction_fanout,
+        payload_cleaner=payload_cleaner,
+    )
+
+    task = TaskEnvelope(
+        id=43,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=content.id,
+        payload={"content_id": content.id},
+    )
+
+    result = workflow.run(
+        task=task,
+        context=context,
+        analysis_instruction=None,
+        instruction=None,
+        crawl_links=False,
+        subscribe_to_feed=False,
+    )
+
+    assert result.success is True
+    assert feed_flow.run.call_args.args[4] is True
+    twitter_flow.run.assert_not_called()
+    analysis_flow.run.assert_not_called()
+    queue_gateway.enqueue.assert_not_called()

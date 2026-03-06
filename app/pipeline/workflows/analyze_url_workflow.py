@@ -112,13 +112,16 @@ class AnalyzeUrlWorkflow:
 
             url = content.url
             metadata = dict(content.content_metadata or {})
+            effective_subscribe_to_feed = subscribe_to_feed or bool(
+                metadata.get("subscribe_to_feed")
+            )
 
             feed_result = self._feed_flow.run(
                 db,
                 content,
                 metadata,
                 str(url),
-                subscribe_to_feed,
+                effective_subscribe_to_feed,
             )
             if feed_result.handled:
                 return TaskResult.ok() if feed_result.success else TaskResult.fail()

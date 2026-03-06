@@ -19,6 +19,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     full_name = Column(String(255), nullable=True)
     twitter_username = Column(String(50), nullable=True, index=True)
+    news_digest_timezone = Column(String(100), nullable=False, default="UTC")
     is_admin = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     has_completed_new_user_tutorial = Column(Boolean, default=False, nullable=False)
@@ -52,6 +53,7 @@ class UserResponse(UserBase):
     is_admin: bool
     is_active: bool
     twitter_username: str | None = None
+    news_digest_timezone: str = "UTC"
     has_x_bookmark_sync: bool = False
     has_completed_onboarding: bool
     has_completed_new_user_tutorial: bool
@@ -97,7 +99,6 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user: UserResponse
     is_new_user: bool = False
-    openai_api_key: str | None = None
 
 
 class RefreshTokenRequest(BaseModel):
@@ -112,7 +113,6 @@ class AccessTokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
-    openai_api_key: str | None = None
 
 
 class AdminLoginRequest(BaseModel):
@@ -132,3 +132,4 @@ class UpdateUserProfileRequest(BaseModel):
 
     full_name: str | None = Field(default=None, max_length=255)
     twitter_username: str | None = Field(default=None, max_length=50)
+    news_digest_timezone: str | None = Field(default=None, max_length=100)

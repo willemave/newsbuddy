@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from urllib.parse import urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
@@ -14,7 +15,12 @@ from app.core.deps import get_current_user
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.content_submission import SubmitContentRequest
-from app.models.schema import ContentFavorites, FeedDiscoveryRun, FeedDiscoverySuggestion
+from app.models.schema import (
+    ContentFavorites,
+    FeedDiscoveryRun,
+    FeedDiscoverySuggestion,
+    UserScraperConfig,
+)
 from app.models.user import User
 from app.routers.api.models import (
     DiscoveryAddItemRequest,
@@ -53,6 +59,26 @@ def _is_youtube_watch_url(url: str | None) -> bool:
         return False
     lowered = url.lower()
     return "youtube.com/watch" in lowered or "youtu.be/" in lowered
+
+
+def _normalize_feed_url_for_match(feed_url: str | None) -> str | None:
+    if not feed_url:
+        return None
+
+    trimmed = feed_url.strip()
+    if not trimmed:
+        return None
+
+    try:
+        parsed = urlparse(trimmed)
+    except Exception:  # noqa: BLE001
+        return trimmed.rstrip("/")
+
+    scheme = parsed.scheme.lower()
+    netloc = parsed.netloc.lower()
+    path = parsed.path.rstrip("/") or parsed.path
+    normalized = parsed._replace(scheme=scheme, netloc=netloc, path=path)
+    return urlunparse(normalized)
 
 
 def _suggestion_to_response(suggestion: FeedDiscoverySuggestion) -> DiscoverySuggestionResponse:
@@ -209,9 +235,36 @@ async def search_discovery_podcast_episodes(
         description="Podcast episode search query",
     ),
     limit: int = Query(10, ge=1, le=25),
-    _current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_readonly_db_session),
+    current_user: User = Depends(get_current_user),
 ) -> PodcastEpisodeSearchResponse:
-    results = search_podcast_episodes(query=q, limit=limit)
+    existing_feed_rows = (
+        db.query(UserScraperConfig.feed_url)
+        .filter(
+            UserScraperConfig.user_id == current_user.id,
+            UserScraperConfig.scraper_type == "podcast_rss",
+            UserScraperConfig.is_active.is_(True),
+        )
+        .all()
+    )
+    existing_feed_urls = {
+        normalized
+        for (feed_url,) in existing_feed_rows
+        if (normalized := _normalize_feed_url_for_match(feed_url)) is not None
+    }
+
+    provider_limit = min(25, max(limit, limit * 3))
+    provider_results = search_podcast_episodes(query=q, limit=provider_limit)
+
+    filtered_results = []
+    for item in provider_results:
+        normalized_feed_url = _normalize_feed_url_for_match(item.feed_url)
+        if normalized_feed_url and normalized_feed_url in existing_feed_urls:
+            continue
+        filtered_results.append(item)
+        if len(filtered_results) >= limit:
+            break
+
     return PodcastEpisodeSearchResponse(
         results=[
             PodcastEpisodeSearchResultResponse(
@@ -225,7 +278,7 @@ async def search_discovery_podcast_episodes(
                 provider=item.provider,
                 score=item.score,
             )
-            for item in results
+            for item in filtered_results
         ]
     )
 

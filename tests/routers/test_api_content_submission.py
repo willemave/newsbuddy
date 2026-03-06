@@ -166,6 +166,83 @@ def test_submit_with_subscribe_to_feed_skips_inbox_and_sets_payload(
     assert task.payload.get("subscribe_to_feed") is True
 
 
+def test_existing_submission_with_subscribe_to_feed_reuses_record_and_sets_feed_flag(
+    client,
+    db_session,
+    test_user,
+):
+    """Existing content should be reused and updated for feed subscription mode."""
+    existing = Content(
+        url="https://example.com/article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.NEW.value,
+        source=SELF_SUBMISSION_SOURCE,
+        content_metadata={},
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    response = client.post(
+        "/api/content/submit",
+        json={"url": existing.url, "subscribe_to_feed": True},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["already_exists"] is True
+    assert data["message"] == "Feed subscription queued"
+
+    db_session.refresh(existing)
+    assert existing.content_metadata.get("subscribe_to_feed") is True
+
+    status_entry = (
+        db_session.query(ContentStatusEntry)
+        .filter(
+            ContentStatusEntry.user_id == test_user.id,
+            ContentStatusEntry.content_id == existing.id,
+        )
+        .first()
+    )
+    assert status_entry is None
+
+    task = db_session.query(ProcessingTask).filter_by(content_id=existing.id).first()
+    assert task is not None
+    assert task.payload.get("subscribe_to_feed") is True
+
+
+def test_existing_pending_analyze_task_gets_subscribe_to_feed_flag(client, db_session):
+    """Existing pending analyze tasks should merge a later feed-subscribe request."""
+    existing = Content(
+        url="https://example.com/article",
+        content_type=ContentType.UNKNOWN.value,
+        status=ContentStatus.NEW.value,
+        source=SELF_SUBMISSION_SOURCE,
+        content_metadata={},
+    )
+    db_session.add(existing)
+    db_session.commit()
+    db_session.refresh(existing)
+
+    task = ProcessingTask(
+        task_type=TaskType.ANALYZE_URL.value,
+        content_id=existing.id,
+        payload={"content_id": existing.id},
+        status=TaskStatus.PENDING.value,
+        queue_name=TaskQueue.CONTENT.value,
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    response = client.post(
+        "/api/content/submit",
+        json={"url": existing.url, "subscribe_to_feed": True},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(task)
+    assert task.payload.get("subscribe_to_feed") is True
+
+
 def test_reject_invalid_scheme(client):
     """Non-http(s) schemes should fail validation."""
     response = client.post("/api/content/submit", json={"url": "ftp://example.com/file"})

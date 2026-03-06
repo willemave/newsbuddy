@@ -20,7 +20,7 @@ from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.content_analyzer import AnalysisError
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.content_submission import normalize_url
-from app.services.feed_detection import detect_feeds_from_html
+from app.services.feed_detection import FeedDetector, detect_feeds_from_html
 from app.services.feed_subscription import subscribe_to_detected_feed
 from app.services.gateways.http_gateway import get_http_gateway
 from app.services.gateways.llm_gateway import get_llm_gateway
@@ -88,6 +88,30 @@ class FlowOutcome:
 class FeedSubscriptionFlow:
     """Handle feed subscription requests during URL analysis."""
 
+    def _detect_direct_feed_url(
+        self,
+        url: str,
+        page_title: str | None,
+    ) -> dict[str, str] | None:
+        """Return detected feed metadata when the submitted URL is already a feed."""
+        detector = FeedDetector(use_exa_search=False)
+        validated_feed = detector.validate_feed_url(url)
+        if not validated_feed:
+            return None
+
+        classification = detector.classify_feed_type(
+            feed_url=url,
+            page_url=url,
+            page_title=page_title or validated_feed.get("title"),
+            html_content=None,
+        )
+        return {
+            "url": url,
+            "type": classification.feed_type,
+            "title": validated_feed.get("title") or page_title,
+            "format": validated_feed.get("feed_format", "rss"),
+        }
+
     def run(
         self,
         db,
@@ -102,42 +126,45 @@ class FeedSubscriptionFlow:
         if not subscribe_to_feed:
             return FlowOutcome(handled=False, success=True)
 
-        html_content: str | None = None
         fetch_status = "no_feed_found"
-        try:
-            http_gateway = get_http_gateway()
-            body, _headers = http_gateway.fetch_content(url)
-            if isinstance(body, str):
-                html_content = body
-        except Exception as exc:  # noqa: BLE001
-            fetch_status = "fetch_failed"
-            logger.error(
-                "Failed to fetch URL for feed detection: %s",
-                exc,
-                extra={
-                    "component": "sequential_task_processor",
-                    "operation": "feed_detect_fetch",
-                    "item_id": content.id,
-                    "context_data": {"url": url, "error": str(exc)},
-                },
-            )
-
-        detected_feed = None
+        detected_feed = self._detect_direct_feed_url(url, content.title)
         all_detected_feeds = None
-        if html_content:
-            feed_data = detect_feeds_from_html(
-                html_content,
-                str(url),
-                page_title=content.title,
-                source=SELF_SUBMISSION_SOURCE,
-                content_type=content.content_type,
-            )
-            if feed_data:
-                detected_feed = feed_data.get("detected_feed")
-                all_detected_feeds = feed_data.get("all_detected_feeds")
+        if not detected_feed:
+            html_content: str | None = None
+            try:
+                http_gateway = get_http_gateway()
+                body, _headers = http_gateway.fetch_content(url)
+                if isinstance(body, str):
+                    html_content = body
+            except Exception as exc:  # noqa: BLE001
+                fetch_status = "fetch_failed"
+                logger.error(
+                    "Failed to fetch URL for feed detection: %s",
+                    exc,
+                    extra={
+                        "component": "sequential_task_processor",
+                        "operation": "feed_detect_fetch",
+                        "item_id": content.id,
+                        "context_data": {"url": url, "error": str(exc)},
+                    },
+                )
 
-        processing_updates: dict[str, object] = {"subscribe_to_feed": True}
+            if html_content:
+                feed_data = detect_feeds_from_html(
+                    html_content,
+                    str(url),
+                    page_title=content.title,
+                    source=SELF_SUBMISSION_SOURCE,
+                    content_type=content.content_type,
+                )
+                if feed_data:
+                    detected_feed = feed_data.get("detected_feed")
+                    all_detected_feeds = feed_data.get("all_detected_feeds")
+
         if detected_feed:
+            fetch_status = "detected"
+        if detected_feed:
+            processing_updates: dict[str, object] = {"subscribe_to_feed": True}
             processing_updates["detected_feed"] = detected_feed
             if all_detected_feeds:
                 processing_updates["all_detected_feeds"] = all_detected_feeds
@@ -155,6 +182,7 @@ class FeedSubscriptionFlow:
                 "created": created,
             }
         else:
+            processing_updates = {"subscribe_to_feed": True}
             processing_updates["feed_subscription"] = {"status": fetch_status}
         metadata = update_processing_state(metadata, **processing_updates)
 

@@ -76,6 +76,23 @@ def _ensure_analyze_url_task(
         .first()
     )
     if existing_task:
+        if existing_task.task_type == TaskType.ANALYZE_URL.value:
+            payload = dict(existing_task.payload or {})
+            payload.setdefault("content_id", content_id)
+            updated = False
+            cleaned_instruction = instruction.strip() if instruction else None
+            if cleaned_instruction and payload.get("instruction") != cleaned_instruction:
+                payload["instruction"] = cleaned_instruction
+                updated = True
+            if crawl_links and payload.get("crawl_links") is not True:
+                payload["crawl_links"] = True
+                updated = True
+            if subscribe_to_feed and payload.get("subscribe_to_feed") is not True:
+                payload["subscribe_to_feed"] = True
+                updated = True
+            if updated:
+                existing_task.payload = payload
+                db.commit()
         return existing_task.id
 
     payload: dict[str, object] = {"content_id": content_id}
@@ -266,7 +283,11 @@ def submit_user_content(
         if not existing:
             raise
         task_id = _ensure_analyze_url_task(
-            db, existing.id, instruction=instruction, crawl_links=crawl_links
+            db,
+            existing.id,
+            instruction=instruction,
+            crawl_links=crawl_links,
+            subscribe_to_feed=subscribe_to_feed,
         )
         return ContentSubmissionResponse(
             content_id=existing.id,
@@ -274,7 +295,11 @@ def submit_user_content(
             status=ContentStatus(existing.status),
             platform=existing.platform,
             already_exists=True,
-            message="Content already submitted; using existing record",
+            message=(
+                "Feed subscription queued"
+                if subscribe_to_feed
+                else "Content already submitted; using existing record"
+            ),
             task_id=task_id,
             source=existing.source or SELF_SUBMISSION_SOURCE,
         )
