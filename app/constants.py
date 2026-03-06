@@ -48,7 +48,7 @@ SUMMARY_VERSION_V1 = 1
 SUMMARY_VERSION_V2 = 2
 
 # Daily digest synthesis model
-DAILY_NEWS_DIGEST_MODEL = "google-gla:gemini-3-flash-preview"
+DAILY_NEWS_DIGEST_MODEL = "google-gla:gemini-flash-latest"
 
 
 # Worker ID format: {worker_type}_{instance_id}_{pid}

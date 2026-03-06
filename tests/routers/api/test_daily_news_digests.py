@@ -24,7 +24,7 @@ def _create_digest(
         key_points=["Point 1", "Point 2"],
         source_content_ids=[1, 2],
         source_count=2,
-        llm_model="google-gla:gemini-3-flash-preview",
+        llm_model="google-gla:gemini-flash-latest",
         generated_at=datetime(2026, 3, 1, 3, 0, 0),
         read_at=read_at,
     )

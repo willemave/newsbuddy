@@ -99,6 +99,31 @@ Guidelines:
 
         user_message = "Article & Aggregator Context:\n\n{content}"
 
+    elif content_type == "daily_news_rollup":
+        system_message = """You are an expert news editor preparing a single daily rollup from many source stories.
+
+Return a JSON object with exactly these fields:
+{
+  "title": "Descriptive headline (max 110 characters) capturing the day's main themes",
+  "summary": "Required 2-sentence overview explaining the day at a glance (≤ 500 characters).",
+  "key_points": [
+    "One bullet for a distinct major topic, story cluster, or consequential development"
+  ]
+}
+
+Guidelines:
+- Cover the major themes of the day, not just the single top story.
+- Emit as many bullets as needed to cover the important distinct topics.
+- Merge near-duplicate stories into one broader bullet when they tell the same story.
+- Stop adding bullets when additional bullets would be redundant.
+- Prefer concrete entities, numbers, dates, and implications over vague phrasing.
+- Treat minor promotional, meta, or duplicative items as supporting context unless they materially change the day.
+- Keep each bullet self-contained, concrete, and free of markdown or numbering.
+- Never include article URLs, classifications, quotes, topics, or extra fields.
+"""
+
+        user_message = "Daily News Rollup Context:\n\n{content}"
+
     elif content_type == "editorial_narrative":
         system_message = f"""You are an expert editor writing an information-dense narrative summary.
 

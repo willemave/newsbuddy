@@ -469,6 +469,7 @@ class NewsSummary(BaseModel):
         description="Timestamp when the digest was generated",
     )
 
+
     @field_validator("article_url")
     @classmethod
     def validate_article_url(cls, value: str | None) -> str | None:
@@ -476,6 +477,48 @@ class NewsSummary(BaseModel):
             return None
         adapter = TypeAdapter(HttpUrl)
         return str(adapter.validate_python(value))
+
+
+class DailyNewsRollupSummary(BaseModel):
+    """Multi-source daily rollup payload for one user's digest."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={
+            "additionalProperties": False,
+            "example": {
+                "title": "AI tooling, privacy regulation, and fintech deals led the day",
+                "summary": (
+                    "The day was defined by a mix of AI product launches, growing "
+                    "regulatory pressure, and a steady stream of startup financings. "
+                    "Infrastructure, payments, and policy stories carried the most "
+                    "practical signal."
+                ),
+                "key_points": [
+                    "AI developer tooling and automation launches dominated software news.",
+                    "Privacy and child-safety regulation advanced across multiple jurisdictions.",
+                    "Payments, commerce, and rural retail funding rounds remained active.",
+                ],
+            },
+        },
+    )
+
+    title: str | None = Field(
+        None,
+        min_length=5,
+        max_length=240,
+        description="Generated title capturing the day's main themes",
+    )
+    summary: str | None = Field(
+        None,
+        min_length=0,
+        max_length=1000,
+        description="Short overview paragraph summarizing the day as a whole",
+    )
+    key_points: list[str] = Field(
+        default_factory=list,
+        description="Variable-length list of distinct major themes or stories from the day",
+    )
 
 
 class NewsArticleMetadata(BaseModel):

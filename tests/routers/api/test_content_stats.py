@@ -288,7 +288,7 @@ def test_unread_counts_require_inbox_for_news(client, db_session, test_user) -> 
             key_points=[],
             source_content_ids=[],
             source_count=0,
-            llm_model="google-gla:gemini-3-flash-preview",
+            llm_model="google-gla:gemini-flash-latest",
             generated_at=datetime(2026, 3, 1, 3, 0, 0),
         )
     )

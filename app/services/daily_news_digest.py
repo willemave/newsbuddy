@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import DAILY_NEWS_DIGEST_MODEL
 from app.core.logging import get_logger
-from app.models.metadata import NewsSummary
+from app.models.metadata import DailyNewsRollupSummary
 from app.models.schema import Content, DailyNewsDigest, ProcessingTask
 from app.repositories.content_feed_query import build_user_feed_query
 from app.services.llm_models import resolve_model
@@ -21,9 +21,10 @@ from app.services.queue import TaskStatus, TaskType, get_queue_service
 logger = get_logger(__name__)
 
 DAILY_DIGEST_GENERATION_HOUR = 3
-MAX_SOURCE_ITEMS = 200
 MAX_POINTS_PER_SOURCE = 5
 MAX_DAILY_DIGEST_BULLETS = 10
+ROLLUP_PROMPT_TOKEN_BUDGET = 900_000
+ROLLUP_ESTIMATED_CHARS_PER_TOKEN = 4
 
 
 @dataclass(frozen=True)
@@ -174,7 +175,7 @@ def collect_daily_news_sources(
     user_id: int,
     local_date: date,
     timezone_name: str,
-    max_items: int = MAX_SOURCE_ITEMS,
+    max_items: int | None = None,
 ) -> list[DailyDigestSourceItem]:
     """Collect digest source rows for one user and local day.
 
@@ -183,21 +184,23 @@ def collect_daily_news_sources(
         user_id: User ID.
         local_date: User-local day.
         timezone_name: User timezone.
-        max_items: Maximum news rows to include.
+        max_items: Optional limit for testing or backfill safety.
 
     Returns:
         List of digest source items.
     """
     start_utc, end_utc = get_local_day_utc_bounds(local_date, timezone_name)
 
-    rows = (
+    query = (
         build_user_feed_query(db, user_id, mode="inbox")
         .filter(Content.content_type == "news")
         .filter(Content.created_at >= start_utc, Content.created_at < end_utc)
-        .order_by(Content.created_at.asc(), Content.id.asc())
-        .limit(max_items)
-        .all()
+        .order_by(Content.created_at.desc(), Content.id.desc())
     )
+    if max_items is not None:
+        query = query.limit(max_items)
+
+    rows = query.all()
 
     sources: list[DailyDigestSourceItem] = []
     for row in rows:
@@ -211,6 +214,59 @@ def collect_daily_news_sources(
 
     return sources
 
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate prompt tokens with a conservative chars-per-token heuristic."""
+    return max(
+        1,
+        (len(text) + ROLLUP_ESTIMATED_CHARS_PER_TOKEN - 1) // ROLLUP_ESTIMATED_CHARS_PER_TOKEN,
+    )
+
+
+def _build_rollup_source_block(index: int, source: DailyDigestSourceItem) -> str:
+    """Render one source story into a compact prompt block."""
+    lines = [
+        f"Story {index}:",
+        f"Title: {source.title}",
+    ]
+    if source.key_points:
+        lines.append("Signals:")
+        lines.extend(f"- {point}" for point in source.key_points)
+    else:
+        lines.append("Signals: (none)")
+    return "\n".join(lines)
+
+
+def _select_rollup_prompt_sources(
+    *,
+    local_date: date,
+    sources: list[DailyDigestSourceItem],
+    token_budget: int = ROLLUP_PROMPT_TOKEN_BUDGET,
+) -> list[DailyDigestSourceItem]:
+    """Select as many newest-first sources as fit within the prompt token budget."""
+    selected: list[DailyDigestSourceItem] = []
+    static_text = "\n".join(
+        [
+            f"Digest date: {local_date.isoformat()}",
+            "",
+            "Synthesize a daily news rollup from the following source stories:",
+        ]
+    )
+    used_tokens = _estimate_tokens(static_text)
+
+    for source in sources:
+        next_index = len(selected) + 1
+        source_tokens = _estimate_tokens(_build_rollup_source_block(next_index, source))
+        if selected and used_tokens + source_tokens > token_budget:
+            break
+        if not selected and source_tokens >= token_budget:
+            return [source]
+        if used_tokens + source_tokens > token_budget:
+            break
+        selected.append(source)
+        used_tokens += source_tokens
+
+    return selected or sources[:1]
 
 
 def _build_rollup_prompt_input(local_date: date, sources: list[DailyDigestSourceItem]) -> str:
@@ -226,7 +282,7 @@ def _build_rollup_prompt_input(local_date: date, sources: list[DailyDigestSource
     lines: list[str] = [
         f"Digest date: {local_date.isoformat()}",
         "",
-        "Synthesize a single daily roll-up from the following news items:",
+        "Synthesize a daily news rollup from the following source stories:",
     ]
 
     if not sources:
@@ -241,14 +297,7 @@ def _build_rollup_prompt_input(local_date: date, sources: list[DailyDigestSource
 
     for index, source in enumerate(sources, start=1):
         lines.append("")
-        lines.append(f"Item {index}:")
-        lines.append(f"Title: {source.title}")
-        if source.key_points:
-            lines.append("Key points:")
-            for point in source.key_points:
-                lines.append(f"- {point}")
-        else:
-            lines.append("Key points: (none)")
+        lines.append(_build_rollup_source_block(index, source))
 
     return "\n".join(lines)
 
@@ -259,7 +308,7 @@ def _synthesize_daily_rollup(
     summarizer: ContentSummarizer,
     local_date: date,
     sources: list[DailyDigestSourceItem],
-) -> tuple[NewsSummary, str]:
+) -> tuple[DailyNewsRollupSummary, str]:
     """Generate a daily news digest with Google Flash.
 
     Args:
@@ -268,56 +317,76 @@ def _synthesize_daily_rollup(
         sources: Source rows.
 
     Returns:
-        Tuple ``(news_summary, resolved_model_spec)``.
+        Tuple ``(rollup_summary, resolved_model_spec)``.
 
     Raises:
         ValueError: When the summarizer returns an unexpected output.
     """
-    prompt_input = _build_rollup_prompt_input(local_date, sources)
-    _, resolved_model = resolve_model("google", "gemini-3-flash-preview")
+    prompt_sources = _select_rollup_prompt_sources(local_date=local_date, sources=sources)
+    prompt_input = _build_rollup_prompt_input(local_date, prompt_sources)
+    _, resolved_model = resolve_model(None, DAILY_NEWS_DIGEST_MODEL)
+    model_hint = resolved_model.split(":", 1)[1] if ":" in resolved_model else resolved_model
     summary = summarizer.summarize_content(
         prompt_input,
-        content_type="news_digest",
-        max_bullet_points=MAX_DAILY_DIGEST_BULLETS,
+        content_type="daily_news_rollup",
         max_quotes=0,
         provider_override="google",
-        model_hint="gemini-3-flash-preview",
+        model_hint=model_hint,
     )
-    if not isinstance(summary, NewsSummary):
+    logger.info(
+        "Daily digest rollup prompt built",
+        extra={
+            "component": "daily_news_digest",
+            "operation": "synthesize_rollup",
+            "context_data": {
+                "local_date": local_date.isoformat(),
+                "total_source_count": len(sources),
+                "prompt_source_count": len(prompt_sources),
+                "estimated_prompt_tokens": _estimate_tokens(prompt_input),
+                "model": resolved_model,
+            },
+        },
+    )
+    if not isinstance(summary, DailyNewsRollupSummary):
         raise ValueError("Daily digest synthesis returned unexpected summary payload")
     return summary, resolved_model
 
 
-def _daily_digest_title(local_date: date) -> str:
-    """Return the canonical title label for a daily digest."""
+def _daily_digest_title(local_date: date, generated_title: str | None = None) -> str:
+    """Return the stored title for a daily digest."""
+    title = (generated_title or "").strip()
+    if title:
+        return title
     return local_date.isoformat()
 
 
 def _daily_digest_summary_text(*, key_points: list[str], fallback_text: str | None = None) -> str:
     """Return the stored summary text for a digest.
 
-    Daily digests render as date + bullet points, so the summary body stays
-    empty when key points exist. A fallback sentence is kept for empty-source days.
+    Preserve the model overview when available and only synthesize fallback
+    copy when both the overview and bullets are empty.
     """
+    summary_text = (fallback_text or "").strip()
+    if summary_text:
+        return summary_text
     if key_points:
         return ""
-    return (fallback_text or "No major completed news stories were available for this day.").strip()
+    return "No major completed news stories were available for this day."
 
 
-def _fallback_rollup(local_date: date) -> NewsSummary:
+def _fallback_rollup(local_date: date) -> DailyNewsRollupSummary:
     """Create fallback summary payload when no source data exists.
 
     Args:
         local_date: Digest local date.
 
     Returns:
-        NewsSummary payload.
+        DailyNewsRollupSummary payload.
     """
-    return NewsSummary(
+    return DailyNewsRollupSummary(
         title=_daily_digest_title(local_date),
         key_points=[],
         summary="No major completed news stories were available for this day.",
-        classification="skip",
     )
 
 
@@ -386,7 +455,7 @@ def upsert_daily_news_digest_for_user_day(
         key_points=key_points,
         fallback_text=summary.summary,
     )
-    title = _daily_digest_title(local_date)
+    title = _daily_digest_title(local_date, summary.title)
 
     digest = existing or DailyNewsDigest(user_id=user_id, local_date=local_date)
     digest.timezone = timezone_name

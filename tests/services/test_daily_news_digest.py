@@ -5,9 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import Mock
 
-from app.models.metadata import NewsSummary
+from app.models.metadata import DailyNewsRollupSummary
 from app.models.schema import Content, DailyNewsDigest
 from app.services.daily_news_digest import (
+    DailyDigestSourceItem,
+    _select_rollup_prompt_sources,
     enqueue_daily_news_digest_task,
     upsert_daily_news_digest_for_user_day,
 )
@@ -15,7 +17,7 @@ from app.services.daily_news_digest import (
 
 class _StubSummarizer:
     def summarize_content(self, *_args, **_kwargs):
-        return NewsSummary(
+        return DailyNewsRollupSummary(
             title="Market and AI moved fast",
             key_points=[
                 "Chip demand remained elevated across cloud providers.",
@@ -25,7 +27,6 @@ class _StubSummarizer:
                 "A tight day with continued AI infrastructure demand "
                 "and incremental policy movement."
             ),
-            classification="to_read",
         )
 
 
@@ -95,10 +96,56 @@ def test_upsert_daily_news_digest_for_user_day_builds_row(db_session, test_user)
     assert digest.local_date.isoformat() == "2026-02-28"
     assert digest.source_count == 2
     assert digest.read_at is None
-    assert digest.title == "2026-02-28"
-    assert digest.summary == ""
+    assert digest.title == "Market and AI moved fast"
+    assert (
+        digest.summary
+        == "A tight day with continued AI infrastructure demand and incremental policy movement."
+    )
     assert isinstance(digest.key_points, list)
     assert len(digest.source_content_ids) == 2
+
+
+def test_select_rollup_prompt_sources_trims_only_when_budget_requires() -> None:
+    sources = [
+        DailyDigestSourceItem(
+            content_id=index,
+            title=f"Story {index}",
+            key_points=[
+                "A" * 320,
+                "B" * 320,
+            ],
+        )
+        for index in range(1, 6)
+    ]
+
+    selected = _select_rollup_prompt_sources(
+        local_date=datetime(2026, 2, 28).date(),
+        sources=sources,
+        token_budget=260,
+    )
+
+    assert len(selected) < len(sources)
+    assert len(selected) >= 1
+    assert selected == sources[: len(selected)]
+
+
+def test_select_rollup_prompt_sources_keeps_all_sources_when_under_budget() -> None:
+    sources = [
+        DailyDigestSourceItem(
+            content_id=index,
+            title=f"Story {index}",
+            key_points=["Short signal"],
+        )
+        for index in range(1, 4)
+    ]
+
+    selected = _select_rollup_prompt_sources(
+        local_date=datetime(2026, 2, 28).date(),
+        sources=sources,
+        token_budget=2_000,
+    )
+
+    assert selected == sources
 
 
 def test_enqueue_daily_news_digest_task_force_regenerate_ignores_existing_digest(
@@ -115,7 +162,7 @@ def test_enqueue_daily_news_digest_task_force_regenerate_ignores_existing_digest
         key_points=[],
         source_content_ids=[],
         source_count=0,
-        llm_model="google-gla:gemini-3-flash-preview",
+        llm_model="google-gla:gemini-flash-latest",
         generated_at=datetime(2026, 3, 1, 3, 0, 0),
     )
     db_session.add(existing_digest)
@@ -151,7 +198,7 @@ def test_enqueue_daily_news_digest_task_skips_existing_digest_without_force(
         key_points=[],
         source_content_ids=[],
         source_count=0,
-        llm_model="google-gla:gemini-3-flash-preview",
+        llm_model="google-gla:gemini-flash-latest",
         generated_at=datetime(2026, 3, 1, 3, 0, 0),
     )
     db_session.add(existing_digest)

@@ -12,6 +12,7 @@ from app.models.metadata import (
     BulletedSummary,
     ContentQuote,
     ContentType,
+    DailyNewsRollupSummary,
     EditorialNarrativeSummary,
     InterleavedSummary,
     InterleavedSummaryV2,
@@ -72,6 +73,7 @@ def _finalize_summary(
     | InterleavedSummaryV2
     | BulletedSummary
     | EditorialNarrativeSummary
+    | DailyNewsRollupSummary
     | NewsSummary,
     content_type: str | ContentType,
 ) -> (
@@ -80,6 +82,7 @@ def _finalize_summary(
     | InterleavedSummaryV2
     | BulletedSummary
     | EditorialNarrativeSummary
+    | DailyNewsRollupSummary
     | NewsSummary
 ):
     """Apply lightweight cleanup to keep summaries consistent."""
@@ -152,6 +155,7 @@ def _clip_payload(payload: str, max_chars: int) -> tuple[str, bool]:
 DEFAULT_SUMMARIZATION_MODELS: dict[str, str] = {
     "news": "openai:gpt-5.2",
     "news_digest": "openai:gpt-5.2",
+    "daily_news_rollup": "google-gla:gemini-flash-latest",
     "article": "openai:gpt-5.2",
     "podcast": "openai:gpt-5.2",
     "interleaved": "openai:gpt-5.2",
@@ -213,6 +217,7 @@ class ContentSummarizer:
         | InterleavedSummaryV2
         | BulletedSummary
         | EditorialNarrativeSummary
+        | DailyNewsRollupSummary
         | NewsSummary
         | None
     ):
@@ -256,6 +261,7 @@ class ContentSummarizer:
         | InterleavedSummaryV2
         | BulletedSummary
         | EditorialNarrativeSummary
+        | DailyNewsRollupSummary
         | NewsSummary
         | None
     ):
@@ -291,6 +297,7 @@ def summarize_content(
     | InterleavedSummaryV2
     | BulletedSummary
     | EditorialNarrativeSummary
+    | DailyNewsRollupSummary
     | NewsSummary
     | None
 ):

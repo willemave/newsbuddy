@@ -9,6 +9,7 @@ from pydantic_ai import Agent
 from app.models.metadata import (
     BulletedSummary,
     ContentType,
+    DailyNewsRollupSummary,
     EditorialNarrativeSummary,
     InterleavedSummary,
     InterleavedSummaryV2,
@@ -51,6 +52,7 @@ def get_summarization_agent(
     | InterleavedSummaryV2
     | BulletedSummary
     | EditorialNarrativeSummary
+    | DailyNewsRollupSummary
     | NewsSummary,
 ]:
     """Return a summarization agent for the requested content type."""
@@ -63,10 +65,13 @@ def get_summarization_agent(
         | InterleavedSummaryV2
         | BulletedSummary
         | EditorialNarrativeSummary
+        | DailyNewsRollupSummary
         | NewsSummary
     ]
     if content_kind in {"news", "news_digest"}:
         summary_type = NewsSummary
+    elif content_kind == "daily_news_rollup":
+        summary_type = DailyNewsRollupSummary
     elif content_kind == "editorial_narrative":
         summary_type = EditorialNarrativeSummary
     elif content_kind in {"long_bullets", "article", "podcast"}:
@@ -85,6 +90,7 @@ def get_summarization_agent(
             | InterleavedSummaryV2
             | BulletedSummary
             | EditorialNarrativeSummary
+            | DailyNewsRollupSummary
             | NewsSummary,
         ],
         agent,
