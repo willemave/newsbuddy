@@ -159,9 +159,9 @@ DEFAULT_SUMMARIZATION_MODELS: dict[str, str] = {
     "editorial_narrative": "openai:gpt-5.2",
 }
 
-FALLBACK_SUMMARIZATION_MODEL = "openai:gpt-5.2-mini"
+FALLBACK_SUMMARIZATION_MODEL = "google-gla:gemini-2.5-flash-preview-09-2025"
 CROSS_PROVIDER_FALLBACK_MODELS: tuple[str, ...] = (
-    "openai:gpt-5.2-mini",
+    "openai:gpt-4o",
 )
 
 

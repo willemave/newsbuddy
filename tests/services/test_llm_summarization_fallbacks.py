@@ -41,7 +41,7 @@ def test_summarize_content_falls_back_cross_provider_on_precondition_error(monke
 
     assert result is not None
     assert calls[0] == "google-gla:gemini-3-pro-preview"
-    assert calls[1] == "openai:gpt-5.2-mini"
+    assert calls[1] == "openai:gpt-4o"
 
 
 def test_summarize_content_uses_context_fallback_model(monkeypatch) -> None:
@@ -107,7 +107,7 @@ def test_summarize_content_returns_none_when_openai_fallback_is_unconfigured(
     assert result is None
     assert calls == [
         "google-gla:gemini-3-pro-preview",
-        "openai:gpt-5.2-mini",
+        "openai:gpt-4o",
     ]
 
 

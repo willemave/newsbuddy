@@ -8,7 +8,11 @@ scripts/run_daily_news_digest.py >> /var/log/news_app/daily-news-digest.log 2>&1
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from datetime import UTC, datetime
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.db import get_db
 from app.core.logging import get_logger, setup_logging
