@@ -211,6 +211,10 @@ struct SettingsView: View {
             SectionHeader(title: "Display")
 
             textSizeRow
+
+            RowDivider()
+
+            fastNewsModeRow
         }
     }
 
@@ -289,6 +293,36 @@ struct SettingsView: View {
             .padding(.horizontal, Spacing.rowHorizontal)
             .padding(.bottom, Spacing.rowVertical)
         }
+    }
+
+    private var fastNewsModeRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.teal)
+                    .frame(width: Spacing.iconSize, height: Spacing.iconSize)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Fast News View")
+                        .font(.listTitle)
+                        .foregroundStyle(Color.textPrimary)
+                    Text("Choose between article stream and daily roll-up cards")
+                        .font(.listCaption)
+                        .foregroundStyle(Color.textTertiary)
+                }
+                Spacer(minLength: 8)
+            }
+
+            Picker("Fast News View", selection: $settings.fastNewsMode) {
+                ForEach(FastNewsMode.allCases, id: \.rawValue) { mode in
+                    Text(mode.title).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.vertical, Spacing.rowVertical)
     }
 
     // MARK: - Sources Section

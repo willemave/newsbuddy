@@ -10,6 +10,7 @@ import Foundation
 
 enum APIEndpoints {
     static let contentList = "/api/content/"
+    static let dailyNewsDigests = "/api/content/daily-digests"
     static let submitContent = "/api/content/submit"
     static let submissionStatusList = "/api/content/submissions/list"
     static let searchContent = "/api/content/search"
@@ -21,6 +22,15 @@ enum APIEndpoints {
     }
     static func markContentUnread(id: Int) -> String {
         return "/api/content/\(id)/mark-unread"
+    }
+    static func markDailyDigestRead(id: Int) -> String {
+        return "/api/content/daily-digests/\(id)/mark-read"
+    }
+    static func markDailyDigestUnread(id: Int) -> String {
+        return "/api/content/daily-digests/\(id)/mark-unread"
+    }
+    static func dailyDigestVoiceSummary(id: Int) -> String {
+        return "/api/content/daily-digests/\(id)/voice-summary"
     }
     static let analytics = "/api/analytics"
     static let bulkMarkRead = "/api/content/bulk-mark-read"
