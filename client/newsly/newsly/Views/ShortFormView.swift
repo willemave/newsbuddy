@@ -68,7 +68,7 @@ struct ShortFormView: View {
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
-                                .background(Color.secondary.opacity(0.12))
+                                .background(Color.surfaceSecondary)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
                         .buttonStyle(.plain)
@@ -188,8 +188,8 @@ private struct ShortNewsRow: View {
         return topic.uppercased()
     }
 
-    /// Metadata parts for the line below the headline: platform, source, comments, time.
-    private var metadataParts: [String] {
+    /// Text-only metadata parts (platform, source, time) joined by " · ".
+    private var metadataTextParts: [String] {
         var parts: [String] = []
         if let platform = item.platform, !platform.isEmpty {
             parts.append(platform.uppercased())
@@ -197,9 +197,6 @@ private struct ShortNewsRow: View {
         if let source = item.source, !source.isEmpty,
            source.caseInsensitiveCompare(item.platform ?? "") != .orderedSame {
             parts.append(source.uppercased())
-        }
-        if let comments = item.commentCountDisplay {
-            parts.append("💬 \(comments)")
         }
         if let time = item.relativeTimeDisplay {
             parts.append(time.uppercased())
@@ -226,23 +223,33 @@ private struct ShortNewsRow: View {
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // Platform · source · time metadata below headline
-            let parts = metadataParts
-            if !parts.isEmpty {
+            // Platform · source · comments · time metadata below headline
+            let textParts = metadataTextParts
+            if !textParts.isEmpty || item.commentCountDisplay != nil {
                 HStack(spacing: 6) {
-                    ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
-                        if index > 0 {
+                    Text(textParts.joined(separator: " · "))
+                        .font(.feedMeta)
+                        .tracking(0.4)
+                        .foregroundStyle(hasPlatform ? Color.platformLabel : Color.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    if let comments = item.commentCountDisplay {
+                        HStack(spacing: 3) {
                             Text("·")
                                 .font(.feedMeta)
                                 .foregroundStyle(Color.textTertiary)
+                            Image(systemName: "bubble.left")
+                                .font(.system(size: 9, weight: .medium))
+                            Text(comments)
+                                .font(.feedMeta)
+                                .tracking(0.4)
                         }
-                        Text(part)
-                            .font(.feedMeta)
-                            .tracking(0.4)
-                            .foregroundStyle(index == 0 && hasPlatform ? Color.platformLabel : Color.textSecondary)
+                        .foregroundStyle(Color.textTertiary)
+                        .fixedSize()
                     }
-                    Spacer()
                 }
+                .lineLimit(1)
             }
 
             // Discussion snippet

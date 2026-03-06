@@ -476,12 +476,12 @@ class ContentDetailViewModel: ObservableObject {
             return items
         case .medium:
             if let mediumText = buildMediumMarkdown() {
-                return [MarkdownItemProvider(markdown: mediumText)]
+                return [MarkdownItemProvider(markdown: mediumText, subject: content.displayTitle)]
             }
             return buildShareItems(option: .light)
         case .full:
             if let fullText = buildFullMarkdown() {
-                return [MarkdownItemProvider(markdown: fullText)]
+                return [MarkdownItemProvider(markdown: fullText, subject: content.displayTitle)]
             }
             return buildShareItems(option: .medium)
         }
@@ -500,7 +500,7 @@ class ContentDetailViewModel: ObservableObject {
         UIPasteboard.general.string = fullText
 
         // Create custom item provider that converts markdown to HTML for Mail
-        let itemProvider = MarkdownItemProvider(markdown: fullText)
+        let itemProvider = MarkdownItemProvider(markdown: fullText, subject: content.displayTitle)
 
         // Prepare share sheet with custom provider
         let activityVC = UIActivityViewController(activityItems: [itemProvider], applicationActivities: nil)
@@ -576,9 +576,11 @@ class ContentDetailViewModel: ObservableObject {
 // MARK: - Custom Item Provider for Markdown Sharing
 class MarkdownItemProvider: NSObject, UIActivityItemSource {
     private let markdown: String
+    private let subject: String?
 
-    init(markdown: String) {
+    init(markdown: String, subject: String? = nil) {
         self.markdown = markdown
+        self.subject = subject
         super.init()
     }
 
@@ -595,6 +597,19 @@ class MarkdownItemProvider: NSObject, UIActivityItemSource {
         case .other:
             return markdown
         }
+    }
+
+    func activityViewController(
+        _ activityViewController: UIActivityViewController,
+        subjectForActivityType activityType: UIActivity.ActivityType?
+    ) -> String {
+        if let subject, !subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return subject
+        }
+        return markdown
+            .components(separatedBy: .newlines)
+            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     func activityViewController(
@@ -674,44 +689,50 @@ class MarkdownItemProvider: NSObject, UIActivityItemSource {
     private func gmailFriendlyText(_ markdown: String) -> String {
         let normalized = markdown.replacingOccurrences(of: "\r\n", with: "\n")
         let lines = normalized.components(separatedBy: "\n")
-        var tokens: [String] = []
+        var outputLines: [String] = []
+        var lastLineWasSpacer = false
 
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
+            if trimmed.isEmpty {
+                if !outputLines.isEmpty, !lastLineWasSpacer {
+                    outputLines.append("")
+                    lastLineWasSpacer = true
+                }
+                continue
+            }
 
             if trimmed == "---" {
+                if !outputLines.isEmpty, !lastLineWasSpacer {
+                    outputLines.append("")
+                    lastLineWasSpacer = true
+                }
                 continue
             }
 
+            let nextLine: String
             if trimmed.hasPrefix("### ") {
-                tokens.append(String(trimmed.dropFirst(4)) + ":")
-                continue
+                nextLine = String(trimmed.dropFirst(4)) + ":"
+            } else if trimmed.hasPrefix("## ") {
+                nextLine = String(trimmed.dropFirst(3)) + ":"
+            } else if trimmed.hasPrefix("# ") {
+                nextLine = String(trimmed.dropFirst(2)) + ":"
+            } else if trimmed.hasPrefix("- ") {
+                nextLine = "- " + String(trimmed.dropFirst(2))
+            } else if trimmed.hasPrefix("> ") {
+                nextLine = "\"\(String(trimmed.dropFirst(2)))\""
+            } else {
+                nextLine = trimmed
             }
 
-            if trimmed.hasPrefix("## ") {
-                tokens.append(String(trimmed.dropFirst(3)) + ":")
-                continue
-            }
-
-            if trimmed.hasPrefix("# ") {
-                tokens.append(String(trimmed.dropFirst(2)) + ":")
-                continue
-            }
-
-            if trimmed.hasPrefix("- ") {
-                tokens.append(String(trimmed.dropFirst(2)))
-                continue
-            }
-
-            if trimmed.hasPrefix("> ") {
-                tokens.append("\"" + String(trimmed.dropFirst(2)) + "\"")
-                continue
-            }
-
-            tokens.append(trimmed)
+            outputLines.append(nextLine)
+            lastLineWasSpacer = false
         }
 
-        return tokens.joined(separator: " | ")
+        while outputLines.last == "" {
+            outputLines.removeLast()
+        }
+
+        return outputLines.joined(separator: "\n")
     }
 }

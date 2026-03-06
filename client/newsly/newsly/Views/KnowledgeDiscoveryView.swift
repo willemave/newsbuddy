@@ -21,15 +21,7 @@ struct KnowledgeDiscoveryView: View {
     }
 
     var body: some View {
-        Group {
-            if isEmptyState {
-                DiscoveryEmptyStateView {
-                    Task { await viewModel.refreshDiscovery() }
-                }
-            } else {
-                scrollContent
-            }
-        }
+        scrollContent
         .background(Color.surfacePrimary)
         .onAppear {
             Task { await viewModel.loadSuggestions() }
@@ -94,6 +86,10 @@ struct KnowledgeDiscoveryView: View {
                 } else if let error = viewModel.errorMessage, !viewModel.hasSuggestions {
                     DiscoveryErrorStateView(error: error) {
                         Task { await viewModel.loadSuggestions(force: true) }
+                    }
+                } else if isEmptyState {
+                    DiscoveryEmptyStateView {
+                        Task { await viewModel.refreshDiscovery() }
                     }
                 } else if !viewModel.hasSuggestions && viewModel.isJobRunning {
                     DiscoveryProcessingStateView(

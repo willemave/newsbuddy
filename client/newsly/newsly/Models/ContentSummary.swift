@@ -246,10 +246,10 @@ struct ContentSummary: Codable, Identifiable {
         return nil
     }
 
-    /// Display string for comment count (e.g., "42 comments")
+    /// Display string for comment count (e.g., "42")
     var commentCountDisplay: String? {
         guard let count = commentCount, count > 0 else { return nil }
-        return count == 1 ? "1 COMMENT" : "\(count) COMMENTS"
+        return "\(count)"
     }
 
     var formattedDate: String {

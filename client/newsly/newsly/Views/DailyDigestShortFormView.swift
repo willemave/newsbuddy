@@ -116,10 +116,6 @@ private struct DailyDigestCard: View {
     let onToggleRead: () -> Void
     let onVoiceSummary: () -> Void
 
-    private var pointColor: Color {
-        digest.isRead ? .textSecondary : .textPrimary
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Date header
@@ -127,7 +123,7 @@ private struct DailyDigestCard: View {
                 Text(digest.displayDateLabel.uppercased())
                     .font(.system(size: 12, weight: .bold))
                     .tracking(1.0)
-                    .foregroundStyle(digest.isRead ? Color.textTertiary : Color.sectionDelimiter)
+                    .foregroundStyle(digest.isRead ? Color.textTertiary : Color.textSecondary)
 
                 Spacer()
 
@@ -145,10 +141,10 @@ private struct DailyDigestCard: View {
                     HStack(alignment: .top, spacing: 10) {
                         Text("–")
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color.textTertiary)
+                            .foregroundStyle(Color.textSecondary)
                         Text(point)
                             .font(.subheadline)
-                            .foregroundStyle(pointColor)
+                            .foregroundStyle(digest.isRead ? Color.textSecondary : .primary)
                             .lineSpacing(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -161,7 +157,7 @@ private struct DailyDigestCard: View {
                 if digest.sourceCount > 0 {
                     Text("\(digest.sourceCount) sources")
                         .font(.feedMeta)
-                        .foregroundStyle(Color.textTertiary)
+                        .foregroundStyle(Color.textSecondary)
                 }
 
                 Spacer()
@@ -172,7 +168,7 @@ private struct DailyDigestCard: View {
                         systemImage: digest.isRead ? "envelope.badge" : "checkmark.circle"
                     )
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(Color.textTertiary)
+                    .foregroundStyle(Color.textSecondary)
                 }
                 .buttonStyle(.plain)
                 .padding(.trailing, 16)
@@ -188,7 +184,7 @@ private struct DailyDigestCard: View {
                             systemImage: isSpeaking ? "speaker.slash.fill" : "speaker.wave.2.fill"
                         )
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(isSpeaking ? Color.accentColor : Color.textTertiary)
+                        .foregroundStyle(isSpeaking ? Color.accentColor : Color.textSecondary)
                     }
                 }
                 .buttonStyle(.plain)

@@ -66,6 +66,7 @@ struct KnowledgeView: View {
                 contentBody
             }
         }
+        .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             // Capture previous threshold before updating (for "New" indicators)

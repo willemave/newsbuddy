@@ -19,12 +19,12 @@ struct EditorialNarrativeSummaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: EditorialNarrativeDesign.sectionSpacing) {
-            sectionHeader("Editorial Narrative", icon: "newspaper.fill", tint: .indigo, uppercase: false)
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
                 ForEach(Array(summary.narrativeParagraphs.enumerated()), id: \.offset) { _, paragraph in
                     Text(paragraph)
                         .font(.callout)
                         .foregroundColor(.primary.opacity(0.92))
+                        .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
