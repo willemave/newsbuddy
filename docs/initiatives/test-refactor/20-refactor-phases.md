@@ -1,6 +1,6 @@
 # Python Test Refactor Strategy and Execution Phases
 
-Derived from: `docs/research/test-refactor/01-test-inventory.md` and coverage data.
+Derived from: `docs/initiatives/test-refactor/10-test-inventory.md` and coverage data.
 
 ## Key Findings
 

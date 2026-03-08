@@ -444,7 +444,7 @@ Some documentation already reflects known gaps, but implementation details can d
 
 - Update `docs/architecture.md` after major auth and module-boundary changes.
 - Document the canonical realtime token flow for iOS voice.
-- Add CI commands to `README.md` or `docs/operations/command-index.md` if needed.
+- Add CI commands to `README.md` or `docs/library/operations/command-index.md` if needed.
 - Document any new admin session storage or environment variables.
 
 ### Acceptance Criteria

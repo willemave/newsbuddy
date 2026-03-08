@@ -8,7 +8,7 @@
 
 **Tech Stack:** SwiftUI (TabView, State management), iOS 15.0+
 
-**Design Document:** `docs/plans/2025-11-01-news-button-navigation-design.md`
+**Design Document:** `docs/initiatives/news-button-navigation-2025-11/10-design.md`
 
 ---
 
@@ -557,7 +557,7 @@ source .venv/bin/activate
 
 **Action:** Create test summary document.
 
-**File:** Create `docs/plans/2025-11-01-news-button-navigation-test-results.md`
+**File:** Create `docs/initiatives/news-button-navigation-2025-11/30-test-results.md`
 
 **Template:**
 ```markdown
@@ -595,7 +595,7 @@ PASS / FAIL (with issues) / FAIL
 [Any follow-up work needed]
 ```
 
-**Verification:** Document saved to docs/plans/
+**Verification:** Document saved to `docs/initiatives/news-button-navigation-2025-11/`
 
 ---
 

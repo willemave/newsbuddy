@@ -2,10 +2,15 @@
 
 > Technical reference for the FastAPI backend, content pipeline, chat system, and SwiftUI client contracts.
 
-**Last Updated:** 2026-02-12  
+**Last Updated:** 2026-03-08  
 **Runtime:** Python 3.13, FastAPI + SQLAlchemy 2, Pydantic v2, pydantic-ai  
 **Database:** PostgreSQL (prod) / SQLite (dev)  
 **Clients:** SwiftUI (iOS 17+), Jinja admin views
+
+## Documentation Layout
+- `docs/codebase/` is the folder-by-folder reference for `app/`, `client/`, and `config/`.
+- `docs/initiatives/` holds historical plans, specs, and research grouped by initiative rather than document type.
+- `docs/library/` holds durable operational, integration, deploy, feature, and reference docs.
 
 ## System Overview
 - Unified content ingestion (scrapers + user submissions) feeding a DB-backed task queue (`analyze → process → summarize → image`) plus feed/discovery and dig-deeper follow-up task flows.
@@ -38,19 +43,28 @@ flowchart LR
 ```
 
 ## Codebase Map
-- `app/main.py` – FastAPI creation, middleware (CORS *), router mounting, startup DB init.
+- `app/main.py` – FastAPI creation, middleware (CORS *), router mounting, lifespan bootstrap, request logging.
 - `app/core/` – settings (`Settings`), DB bootstrap, JWT/security, dependencies, logging helpers.
 - `app/models/` – SQLAlchemy tables (`schema.py`, `user.py`), Pydantic metadata/types, pagination helpers, scraper stats dataclass.
 - `app/domain/` – converters between ORM and `ContentData` domain model.
+- `app/http_client/` – resilient low-level HTTP client used by processing strategies and scraper-adjacent fetch paths.
+- `app/repositories/` – shared feed/search/visibility query builders used by list and stats endpoints.
 - `app/routers/` – auth, admin/content Jinja pages, logs, and API routers under `app/routers/api/`.
 - `app/services/` – queue, LLM models/agents/prompts, summarization, chat agent, event logging, HTTP client, scraper config management, content analyzer, feed detection, image generation, tweet suggestions, Exa client, content submission helpers.
+- `app/services/voice/` – live voice session orchestration, persistence, streaming, and ElevenLabs/TTS glue.
+- `app/services/gateways/` – small infrastructure interfaces for HTTP, LLM, and queue dependencies.
 - `app/pipeline/` – checkout manager, sequential processor, task dispatcher/handlers, content worker, podcast download/transcribe workers.
+- `app/pipeline/workflows/` – focused state-transition helpers used by larger task handlers.
 - `app/processing_strategies/` – URL strategy implementations + registry.
+- `app/presenters/` – API response shaping and list/detail readiness rules.
 - `app/scraping/` – scrapers (HN, Reddit, Substack, Techmeme, podcasts, Atom), runner, base class.
+- `app/utils/` – shared helpers for URLs, paths, pagination, dates, summaries, and image paths.
 - `client/newsly/` – SwiftUI app + ShareExtension consuming the API.
+- `config/` – file-backed feed defaults plus tooling guardrails.
+- `docs/codebase/` – generated reference inventory for the folders above.
 
 ## Core Runtime & Infrastructure
-- **FastAPI app (`app/main.py`)**: CORS `*`, static files at `/static`, routers for auth/content/admin/logs/api. Startup event calls `init_db()`. Health at `/health`.
+- **FastAPI app (`app/main.py`)**: CORS `*`, static files at `/static`, routers for auth/content/admin/logs/api. Lifespan startup initializes Langfuse tracing and the database. Health at `/health`.
 - **Settings (`app/core/settings.py`)**: DB URL + pool tuning, JWT settings, worker timeouts, content length limits, API keys (OpenAI/Anthropic/Google/Exa), HTTP timeouts, Reddit creds, media/log paths, Crawl4AI toggles.
 - **Database (`app/core/db.py`)**: lazy engine/session creation, `get_db()` context manager, `get_db_session()` dependency, optional `run_migrations()` helper.
 - **Security (`app/core/security.py`)**: JWT create/verify; refresh/access expiries come from settings. Apple token verification currently skips signature validation (dev-only). Admin password check against env.
@@ -137,6 +151,7 @@ flowchart LR
 - **BaseScraper (`app/scraping/base.py`)**: ensures `platform` (scraper name) and immutable `source` (feed name/domain); dedupes by URL+type; sets `status=new`, queues processing; ensures per-user inbox rows for articles/podcasts.
 - **Runner (`app/scraping/runner.py`)**: sequentially runs `HackerNewsUnifiedScraper`, `RedditUnifiedScraper`, `SubstackScraper`, `TechmemeScraper`, `PodcastUnifiedScraper`, `AtomScraper` (Twitter/YouTube currently disabled); logs stats via `EventLog`.
 - **User-managed scrapers**: configs stored in `user_scraper_configs`; `build_feed_payloads` converts configs into feed inputs for scrapers.
+- **File-backed configs**: `app/utils/paths.py` resolves `config/` defaults and env overrides such as `NEWSAPP_CONFIG_DIR`, while `config/twitter.yml` and `config/youtube.yml` remain available even though those scheduled scrapers are disabled in the default runner.
 
 ## User-Driven Content & State
 - **Submissions (`POST /api/submit`)**: normalizes URL, creates `content_type=unknown`, sets `source="self submission"`, enqueues `ANALYZE_URL` then `PROCESS_CONTENT`, ensures `content_status` inbox row for the submitter. HTML extraction may detect RSS/Atom feeds and stores `detected_feed` metadata.
@@ -149,7 +164,7 @@ flowchart LR
 - **Agent**: `app/services/chat_agent.py` builds pydantic-ai `Agent` with system prompt + Exa search tool (`exa_web_search`); article context pulled from summaries/content; model resolution via `app/services/llm_models.py` (OpenAI/Anthropic/Google with API-key aware construction).
 - **Deep Research**: `app/services/deep_research.py` uses OpenAI's Responses API with `o4-mini-deep-research-2025-06-26` model for comprehensive research. Runs as a background task with web search and code interpreter tools. Uses `background=True` mode with ~2-second polling via `AsyncOpenAI` SDK (up to 10 minutes by default).
 - **Session Types**: `article_brain` (dig deeper into article), `topic` (search/corroborate), `ad_hoc` (general chat), `deep_research` (comprehensive async research).
-- **Endpoints**: create/list/get sessions, send messages (runs agent, appends DB message list), initial suggestions for article sessions; list includes favorite/pending flags. Deep research sessions route to `process_deep_research_message` background task instead of pydantic-ai agent. Message displays extract user/assistant text from stored message lists.
+- **Endpoints**: create/list/get sessions, send messages (runs agent, appends DB message list), initial suggestions for article sessions; list includes favorite/pending flags. Deep research sessions route to `process_deep_research_message` background task instead of pydantic-ai agent. Message displays extract user/assistant text from stored message lists and may add a compact `process_summary` display row for intermediate tool/thinking activity without changing session previews.
 
 ## iOS Client (high level)
 - Located in `client/newsly/`; SwiftUI app uses Apple Sign In → `POST /auth/apple`, stores JWT in Keychain, refreshes via `/auth/refresh`.

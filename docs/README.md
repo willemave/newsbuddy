@@ -1,16 +1,16 @@
 # Docs Index
 
-This folder is organized by doc type for easier browsing.
+This folder is organized into durable reference docs plus concat-friendly generated references and initiative history.
 
 - `docs/architecture.md` — canonical system architecture reference
-- `docs/features/` — feature-specific documentation
-- `docs/guides/` — operational, setup, and product guides
-- `docs/integrations/` — third-party integration notes
-- `docs/operations/` — deployment and maintenance playbooks
-  - Start with `docs/operations/command-index.md` for script entrypoints
-- `docs/reference/` — exported API/SDK/technology references
-- `docs/specs/` — implementation plans for new functionality
-- `docs/plans/` — historical plans and long-form design notes
-- `docs/deploy/` — deployment-specific runbooks
+- `docs/codebase/` — generated folder-by-folder codebase reference for `app/`, `client/`, and `config/`
+- `docs/library/` — durable guides, integrations, operations, reference material, deploy docs, and shipped feature notes
+  - Start with `docs/library/operations/command-index.md` for script entrypoints
+- `docs/initiatives/` — consolidated plans, specs, and research docs organized by initiative
 
-If you want, I can also add a generated tree index with short summaries for each file.
+Useful concat commands:
+
+```bash
+find docs/codebase -type f -name '*.md' | sort | xargs cat
+find docs/initiatives -type f -name '*.md' | sort | xargs cat
+```

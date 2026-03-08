@@ -1121,12 +1121,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ## Task 8: Documentation and Final Testing
 
 **Files:**
-- Create: `docs/features/news-grouped-view.md`
+- Create: `docs/library/features/news-grouped-view.md`
 - Modify: `client/newsly/CLAUDE.md` (add section about news grouped view)
 
 **Step 1: Create feature documentation**
 
-Create `docs/features/news-grouped-view.md`:
+Create `docs/library/features/news-grouped-view.md`:
 
 ```markdown
 # News Grouped View Feature
@@ -1280,7 +1280,7 @@ Expected: All tests pass (or manual testing if no test suite)
 
 ```bash
 cd /Users/willem/Development/news_app
-git add docs/features/news-grouped-view.md client/newsly/CLAUDE.md
+git add docs/library/features/news-grouped-view.md client/newsly/CLAUDE.md
 git commit -m "docs: add news grouped view feature documentation
 
 - Document grouped display pattern

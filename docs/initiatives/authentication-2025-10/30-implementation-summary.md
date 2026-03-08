@@ -568,9 +568,9 @@ Views/SettingsView.swift                # Logout UI
 ## References
 
 ### Documentation
-- Design: `docs/plans/2025-10-24-authentication-system-design.md`
-- Implementation Plan: `docs/plans/2025-10-24-authentication-implementation.md`
-- This Summary: `docs/plans/2025-10-24-authentication-implementation-summary.md`
+- Design: `docs/initiatives/authentication-2025-10/10-design.md`
+- Implementation Plan: `docs/initiatives/authentication-2025-10/20-implementation-plan.md`
+- This Summary: `docs/initiatives/authentication-2025-10/30-implementation-summary.md`
 
 ### API Documentation
 - Auth Endpoints: http://localhost:8000/docs#/auth

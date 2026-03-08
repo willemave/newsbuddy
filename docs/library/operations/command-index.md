@@ -27,14 +27,14 @@ Use this index as the single entrypoint for operational scripts.
 
 ## Data and Backfills
 
-- `scripts/backfill_images.py` - Backfill generated images for content.
 - `scripts/backfill_summary_kind.py` - Backfill summary discriminator metadata.
+- `scripts/cancel_ineligible_generate_image_tasks.py` - Cancel pending image tasks outside visible feed rules.
 - `scripts/reset_content_processing.py` - Reset stuck/failed processing state.
 - `scripts/reset_errored_content.py` - Reset errored content records.
 
 ## Contracts and Tooling
 
-- `scripts/export_openapi_schema.py` - Export current OpenAPI schema to `docs/reference/openapi.json`.
+- `scripts/export_openapi_schema.py` - Export current OpenAPI schema to `docs/library/reference/openapi.json`.
 - `scripts/generate_ios_contracts.py` - Generate iOS API contracts from OpenAPI.
 - `client/newsly/scripts/regenerate_api_contracts.sh` - One-command iOS contract regeneration workflow.
 - `scripts/check_duplicate_tests.py` - Detect duplicate test module names between roots.

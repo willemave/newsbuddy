@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export OpenAPI schema to JSON")
     parser.add_argument(
         "--output",
-        default="docs/reference/openapi.json",
+        default="docs/library/reference/openapi.json",
         help="Output path for OpenAPI JSON",
     )
     return parser.parse_args()
@@ -45,4 +45,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
