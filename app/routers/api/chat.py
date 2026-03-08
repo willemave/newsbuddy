@@ -29,6 +29,7 @@ from app.models.schema import (
 )
 from app.models.user import User
 from app.routers.api.chat_models import (
+    ChatMessageDisplayType,
     ChatMessageDto,
     ChatMessageRole,
     ChatSessionDetailDto,
@@ -54,6 +55,30 @@ from app.services.llm_models import is_deep_research_provider, resolve_model
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+_SEARCH_TOOL_NAMES = {
+    "exa_web_search",
+}
+
+
+def _format_process_summary_label(
+    tool_names: list[str],
+    *,
+    has_intermediate_assistant_text: bool,
+) -> str | None:
+    """Build a compact transcript label for intermediate tool/thinking activity."""
+    normalized_tool_names = {name.strip().lower() for name in tool_names if name and name.strip()}
+
+    if normalized_tool_names & _SEARCH_TOOL_NAMES:
+        return "Thinking • Searched the web and reviewed sources"
+
+    if normalized_tool_names:
+        return "Thinking • Used tools and reviewed results"
+
+    if has_intermediate_assistant_text:
+        return "Thinking • Considered the request"
+
+    return None
 
 
 def _session_to_summary(
@@ -162,6 +187,7 @@ def _extract_messages_for_display(
         ModelRequest,
         ModelResponse,
         TextPart,
+        ToolCallPart,
         UserPromptPart,
     )
 
@@ -181,12 +207,19 @@ def _extract_messages_for_display(
             # Deserialize JSON to list of ModelMessage
             msg_list = ModelMessagesTypeAdapter.validate_json(db_msg.message_list)
             status = MessageProcessingStatusDto(db_msg.status)
+            assistant_responses: list[str] = []
+            tool_names: list[str] = []
+            user_text_emitted = False
 
             for model_msg in msg_list:
                 if isinstance(model_msg, ModelRequest):
-                    # Only show user-authored parts; hide tool-return/system parts
+                    # Only show the first user-authored prompt for this stored turn.
+                    # Hide tool-return/system parts and any later internal requests.
                     for part in model_msg.parts:
+                        if user_text_emitted:
+                            break
                         if isinstance(part, UserPromptPart) and part.content:
+                            user_text_emitted = True
                             display_id += 1
                             messages.append(
                                 ChatMessageDto(
@@ -200,21 +233,52 @@ def _extract_messages_for_display(
                                 )
                             )
                 elif isinstance(model_msg, ModelResponse):
-                    # Only show assistant text parts; hide tool calls/returns
+                    response_text_parts: list[str] = []
                     for part in model_msg.parts:
                         if isinstance(part, TextPart) and part.content:
-                            display_id += 1
-                            messages.append(
-                                ChatMessageDto(
-                                    id=display_id,  # Unique display ID
-                                    session_id=session_id,
-                                    role=ChatMessageRole.ASSISTANT,
-                                    timestamp=db_msg.created_at,
-                                    content=part.content,
-                                    status=status,
-                                    error=db_msg.error,
-                                )
-                            )
+                            response_text_parts.append(part.content)
+                        elif isinstance(part, ToolCallPart):
+                            tool_names.append(part.tool_name)
+
+                    if response_text_parts:
+                        assistant_responses.append("\n\n".join(response_text_parts))
+
+            latest_assistant_text = assistant_responses[-1] if assistant_responses else None
+            process_summary_label = _format_process_summary_label(
+                tool_names,
+                has_intermediate_assistant_text=len(assistant_responses) > 1,
+            )
+
+            if process_summary_label:
+                display_id += 1
+                messages.append(
+                    ChatMessageDto(
+                        id=display_id,
+                        session_id=session_id,
+                        role=ChatMessageRole.TOOL,
+                        timestamp=db_msg.created_at,
+                        content=process_summary_label,
+                        display_type=ChatMessageDisplayType.PROCESS_SUMMARY,
+                        process_label=process_summary_label,
+                        status=status,
+                        error=db_msg.error,
+                    )
+                )
+
+            if latest_assistant_text:
+                display_id += 1
+                messages.append(
+                    ChatMessageDto(
+                        id=display_id,  # Unique display ID
+                        session_id=session_id,
+                        role=ChatMessageRole.ASSISTANT,
+                        timestamp=db_msg.created_at,
+                        content=latest_assistant_text,
+                        display_type=ChatMessageDisplayType.MESSAGE,
+                        status=status,
+                        error=db_msg.error,
+                    )
+                )
         except Exception as e:
             logger.warning(f"Failed to deserialize message {db_msg.id}: {e}")
             continue

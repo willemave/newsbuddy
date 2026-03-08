@@ -7,10 +7,17 @@ import SwiftUI
 
 struct DailyDigestShortFormView: View {
     @ObservedObject var viewModel: DailyDigestListViewModel
+    let onOpenChatSession: (ChatSessionRoute) -> Void
     @StateObject private var narrationService = DigestNarrationService.shared
     @AppStorage("daily_digest_narration_playback_rate") private var narrationPlaybackRate = 1.0
     @State private var loadingVoiceDigestIds: Set<Int> = []
-    @State private var voiceErrorMessage: String?
+    @State private var activeAlert: ViewAlert?
+
+    private struct ViewAlert: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+    }
 
     var body: some View {
         ScrollView {
@@ -38,13 +45,15 @@ struct DailyDigestShortFormView: View {
                             digest: digest,
                             isSpeaking: narrationService.isSpeaking && narrationService.speakingDigestId == digest.id,
                             isLoadingVoice: loadingVoiceDigestIds.contains(digest.id),
+                            isStartingDigDeeper: viewModel.isStartingDigDeeperChat(for: digest.id),
                             playbackRate: narrationPlaybackRate,
                             onSelectPlaybackRate: { rate in
                                 narrationPlaybackRate = rate
                                 narrationService.setPlaybackRate(Float(rate))
                             },
                             onToggleRead: { toggleRead(for: digest) },
-                            onVoiceSummary: { handleVoiceSummary(for: digest) }
+                            onVoiceSummary: { handleVoiceSummary(for: digest) },
+                            onDigDeeper: { handleDigDeeper(for: digest) }
                         )
                         .onAppear {
                             if digest.id == viewModel.currentItems().last?.id {
@@ -72,17 +81,12 @@ struct DailyDigestShortFormView: View {
                 viewModel.refreshTrigger.send(())
             }
         }
-        .alert("Voice Summary", isPresented: Binding(
-            get: { voiceErrorMessage != nil },
-            set: { newValue in
-                if !newValue {
-                    voiceErrorMessage = nil
-                }
-            }
-        )) {
-            Button("OK", role: .cancel) { voiceErrorMessage = nil }
-        } message: {
-            Text(voiceErrorMessage ?? "")
+        .alert(item: $activeAlert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .cancel(Text("OK"))
+            )
         }
     }
 
@@ -113,11 +117,31 @@ struct DailyDigestShortFormView: View {
                 try narrationService.playAudio(audioData, digestId: digest.id)
             } catch {
                 do {
-                    let response = try await viewModel.fetchVoiceSummary(id: digest.id)
-                    narrationService.speak(text: response.narrationText, digestId: digest.id)
-                } catch {
-                    voiceErrorMessage = "Failed to load voice summary: \(error.localizedDescription)"
-                }
+                let response = try await viewModel.fetchVoiceSummary(id: digest.id)
+                narrationService.speak(text: response.narrationText, digestId: digest.id)
+            } catch {
+                activeAlert = ViewAlert(
+                    title: "Voice Summary",
+                    message: "Failed to load voice summary: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+    }
+
+    private func handleDigDeeper(for digest: DailyNewsDigest) {
+        guard !viewModel.isStartingDigDeeperChat(for: digest.id) else { return }
+
+        Task {
+            do {
+                let route = try await viewModel.startDigDeeperChat(id: digest.id)
+                onOpenChatSession(route)
+            } catch {
+                activeAlert = ViewAlert(
+                    title: "Dig Deeper",
+                    message: viewModel.digDeeperError(for: digest.id) ?? error.localizedDescription
+                )
+                viewModel.clearDigDeeperError(for: digest.id)
             }
         }
     }
@@ -129,10 +153,12 @@ private struct DailyDigestCard: View {
     let digest: DailyNewsDigest
     let isSpeaking: Bool
     let isLoadingVoice: Bool
+    let isStartingDigDeeper: Bool
     let playbackRate: Double
     let onSelectPlaybackRate: (Double) -> Void
     let onToggleRead: () -> Void
     let onVoiceSummary: () -> Void
+    let onDigDeeper: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -220,6 +246,23 @@ private struct DailyDigestCard: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isLoadingVoice)
+
+                if !digest.keyPoints.isEmpty {
+                    Button(action: onDigDeeper) {
+                        if isStartingDigDeeper {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .frame(width: 16, height: 16)
+                        } else {
+                            Label("Dig Deeper", systemImage: "brain.head.profile")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Color.textSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isStartingDigDeeper)
+                    .padding(.leading, 16)
+                }
             }
         }
         .padding(.horizontal, Spacing.rowHorizontal)

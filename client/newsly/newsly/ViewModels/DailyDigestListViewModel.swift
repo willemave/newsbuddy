@@ -13,6 +13,8 @@ private let logger = Logger(subsystem: "com.newsly", category: "DailyDigestList"
 final class DailyDigestListViewModel: ObservableObject {
     @Published private(set) var items: [DailyNewsDigest] = []
     @Published private(set) var state: LoadingState = .idle
+    @Published private(set) var digDeeperLoadingIds: Set<Int> = []
+    @Published private(set) var digDeeperErrors: [Int: String] = [:]
 
     let refreshTrigger = PassthroughSubject<Void, Never>()
     let loadMoreTrigger = PassthroughSubject<Void, Never>()
@@ -109,6 +111,32 @@ final class DailyDigestListViewModel: ObservableObject {
 
     func fetchVoiceSummary(id: Int) async throws -> DailyNewsDigestVoiceSummaryResponse {
         try await repository.fetchVoiceSummary(id: id)
+    }
+
+    func isStartingDigDeeperChat(for id: Int) -> Bool {
+        digDeeperLoadingIds.contains(id)
+    }
+
+    func digDeeperError(for id: Int) -> String? {
+        digDeeperErrors[id]
+    }
+
+    func clearDigDeeperError(for id: Int) {
+        digDeeperErrors[id] = nil
+    }
+
+    func startDigDeeperChat(id: Int) async throws -> ChatSessionRoute {
+        digDeeperErrors[id] = nil
+        digDeeperLoadingIds.insert(id)
+        defer { digDeeperLoadingIds.remove(id) }
+
+        do {
+            let response = try await repository.startDigDeeperChat(id: id)
+            return ChatSessionRoute(sessionId: response.session.id)
+        } catch {
+            digDeeperErrors[id] = error.localizedDescription
+            throw error
+        }
     }
 
     private func bind() {

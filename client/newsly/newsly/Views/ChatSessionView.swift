@@ -757,46 +757,53 @@ struct MessageBubble: View {
     var onShare: ((String) -> Void)?
 
     var body: some View {
-        HStack {
-            if message.isUser {
-                Spacer(minLength: 60)
-            }
+        Group {
+            if message.isProcessSummary {
+                ProcessSummaryRow(message: message)
+            } else {
+                HStack {
+                    if message.isUser {
+                        Spacer(minLength: 60)
+                    }
 
-            VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
-                messageContent
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(bubbleBackground)
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(message.isUser ? Color.clear : Color(.separator), lineWidth: 0.5)
-                    )
+                    VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
+                        messageContent
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(bubbleBackground)
+                            .cornerRadius(16)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(
+                                        message.isUser ? Color.clear : Color(.separator),
+                                        lineWidth: 0.5
+                                    )
+                            )
 
-                // Minimal timestamp only
-                if !message.formattedTime.isEmpty {
-                    Text(message.formattedTime)
-                        .font(.caption2)
-                        .foregroundColor(Color(.tertiaryLabel))
-                        .padding(.horizontal, 4)
-                }
-            }
-            .contextMenu {
-                if message.isAssistant {
-                    Button {
-                        onShare?(message.content)
-                    } label: {
-                        Label("Share", systemImage: "square.and.arrow.up")
+                        if !message.formattedTime.isEmpty {
+                            Text(message.formattedTime)
+                                .font(.caption2)
+                                .foregroundColor(Color(.tertiaryLabel))
+                                .padding(.horizontal, 4)
+                        }
+                    }
+                    .contextMenu {
+                        if message.isAssistant {
+                            Button {
+                                onShare?(message.content)
+                            } label: {
+                                Label("Share", systemImage: "square.and.arrow.up")
+                            }
+                        }
+
+                        Button {
+                            UIPasteboard.general.string = message.content
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
                     }
                 }
-
-                Button {
-                    UIPasteboard.general.string = message.content
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                }
             }
-
         }
     }
 
@@ -826,6 +833,32 @@ struct MessageBubble: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: message.isUser ? .trailing : .leading)
+    }
+}
+
+struct ProcessSummaryRow: View {
+    let message: ChatMessage
+
+    var body: some View {
+        HStack {
+            Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.caption2)
+                Text(message.processSummaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .font(.caption)
+            .foregroundColor(Color(.secondaryLabel))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.surfaceSecondary.opacity(0.8))
+            .clipShape(Capsule())
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel(message.processSummaryText)
     }
 }
 

@@ -104,7 +104,17 @@ struct ContentView: View {
 
             NavigationStack(path: $shortFormPath) {
                 if (FastNewsMode(rawValue: settings.fastNewsMode) ?? .newsList) == .dailyDigest {
-                    DailyDigestShortFormView(viewModel: tabCoordinator.dailyDigestVM)
+                    DailyDigestShortFormView(
+                        viewModel: tabCoordinator.dailyDigestVM,
+                        onOpenChatSession: { route in
+                            shortFormPath.append(route)
+                        }
+                    )
+                    .withContentRoutes(
+                        path: $shortFormPath,
+                        readingStateStore: readingStateStore,
+                        contentTextSize: contentTextSize
+                    )
                 } else {
                     ShortFormView(
                         viewModel: tabCoordinator.shortNewsVM,

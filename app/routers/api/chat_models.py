@@ -19,6 +19,13 @@ class ChatMessageRole(StrEnum):
     TOOL = "tool"
 
 
+class ChatMessageDisplayType(StrEnum):
+    """Display type for a chat message row."""
+
+    MESSAGE = "message"
+    PROCESS_SUMMARY = "process_summary"
+
+
 class MessageProcessingStatus(StrEnum):
     """Processing status for async chat messages."""
 
@@ -93,6 +100,14 @@ class ChatMessageDto(BaseModel):
     role: ChatMessageRole = Field(..., description="Message role")
     content: str = Field(..., description="Message content")
     timestamp: datetime = Field(..., description="Timestamp when message was stored")
+    display_type: ChatMessageDisplayType = Field(
+        default=ChatMessageDisplayType.MESSAGE,
+        description="Display treatment for this row in the chat transcript",
+    )
+    process_label: str | None = Field(
+        default=None,
+        description="Compact label for process-summary rows",
+    )
     status: MessageProcessingStatus = Field(
         default=MessageProcessingStatus.COMPLETED,
         description="Processing status for async messages",
@@ -184,3 +199,15 @@ class CreateChatSessionResponse(BaseModel):
     """Response wrapper for session creation."""
 
     session: ChatSessionSummaryDto
+
+
+class StartDailyDigestChatResponse(BaseModel):
+    """Response returned after starting a daily-digest dig-deeper chat."""
+
+    session: ChatSessionSummaryDto
+    user_message: ChatMessageDto = Field(..., description="Seeded processing user message")
+    message_id: int = Field(..., description="Pending message identifier")
+    status: MessageProcessingStatus = Field(
+        default=MessageProcessingStatus.PROCESSING,
+        description="Current processing status for the seeded message",
+    )

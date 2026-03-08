@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.models.schema import DailyNewsDigest
+from app.models.schema import ChatMessage, ChatSession, DailyNewsDigest
 from app.models.user import User
 
 
@@ -216,3 +216,119 @@ def test_daily_digest_endpoints_are_user_scoped(client, db_session, test_user) -
 
     response = client.post(f"/api/content/daily-digests/{other_digest.id}/mark-read")
     assert response.status_code == 404
+
+
+def test_start_daily_digest_chat_creates_fresh_session_each_time(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    digest = _create_digest(user_id=test_user.id, local_date="2026-02-28", title="Daily AI Digest")
+    db_session.add(digest)
+    db_session.commit()
+    db_session.refresh(digest)
+
+    captured: list[tuple[int, int, str]] = []
+
+    async def _fake_process_message_async(session_id: int, message_id: int, prompt: str) -> None:
+        captured.append((session_id, message_id, prompt))
+
+    monkeypatch.setattr(
+        "app.routers.api.daily_news_digests.process_message_async",
+        _fake_process_message_async,
+    )
+    monkeypatch.setattr("app.routers.api.daily_news_digests.log_event", lambda *args, **kwargs: 0)
+
+    first_response = client.post(f"/api/content/daily-digests/{digest.id}/dig-deeper")
+    second_response = client.post(f"/api/content/daily-digests/{digest.id}/dig-deeper")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+
+    first_payload = first_response.json()
+    second_payload = second_response.json()
+
+    assert first_payload["session"]["session_type"] == "daily_digest_brain"
+    assert first_payload["session"]["content_id"] is None
+    assert first_payload["session"]["title"] == "Daily AI Digest"
+    assert first_payload["status"] == "processing"
+    assert second_payload["session"]["id"] != first_payload["session"]["id"]
+
+    sessions = (
+        db_session.query(ChatSession)
+        .filter(
+            ChatSession.user_id == test_user.id,
+            ChatSession.session_type == "daily_digest_brain",
+        )
+        .order_by(ChatSession.id.asc())
+        .all()
+    )
+    assert len(sessions) == 2
+    assert sessions[0].context_snapshot == "Digest bullets:\n- Point 1\n- Point 2"
+    assert "Daily summary body." not in sessions[0].context_snapshot
+    assert "source_content_ids" not in sessions[0].context_snapshot
+
+    messages = (
+        db_session.query(ChatMessage)
+        .filter(ChatMessage.session_id.in_([sessions[0].id, sessions[1].id]))
+        .order_by(ChatMessage.id.asc())
+        .all()
+    )
+    assert len(messages) == 2
+    assert all(message.status == "processing" for message in messages)
+    assert len(captured) == 2
+    assert captured[0][0] == sessions[0].id
+    assert captured[1][0] == sessions[1].id
+    assert "Dig deeper into these digest bullets." in captured[0][2]
+
+
+def test_start_daily_digest_chat_is_user_scoped(client, db_session, test_user, monkeypatch) -> None:
+    other_user = User(
+        apple_id="daily_digest_chat_other_user",
+        email="digest-chat-other@example.com",
+        full_name="Digest Chat Other",
+        is_active=True,
+    )
+    db_session.add(other_user)
+    db_session.commit()
+    db_session.refresh(other_user)
+
+    other_digest = _create_digest(user_id=other_user.id, local_date="2026-02-28")
+    db_session.add(other_digest)
+    db_session.commit()
+    db_session.refresh(other_digest)
+
+    monkeypatch.setattr(
+        "app.routers.api.daily_news_digests.process_message_async",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("app.routers.api.daily_news_digests.log_event", lambda *args, **kwargs: 0)
+
+    response = client.post(f"/api/content/daily-digests/{other_digest.id}/dig-deeper")
+
+    assert response.status_code == 404
+
+
+def test_start_daily_digest_chat_requires_key_points(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    digest = _create_digest(user_id=test_user.id, local_date="2026-02-28")
+    digest.key_points = []
+    db_session.add(digest)
+    db_session.commit()
+    db_session.refresh(digest)
+
+    monkeypatch.setattr(
+        "app.routers.api.daily_news_digests.process_message_async",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("app.routers.api.daily_news_digests.log_event", lambda *args, **kwargs: 0)
+
+    response = client.post(f"/api/content/daily-digests/{digest.id}/dig-deeper")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Daily digest dig-deeper requires summary bullets"

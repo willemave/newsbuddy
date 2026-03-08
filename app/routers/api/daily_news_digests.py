@@ -7,7 +7,7 @@ import json
 from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query, Response
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
@@ -16,12 +16,24 @@ from app.core.deps import get_current_user
 from app.models.pagination import PaginationMetadata
 from app.models.schema import DailyNewsDigest
 from app.models.user import User
+from app.routers.api.chat_models import (
+    ChatMessageDto,
+    ChatMessageRole,
+    ChatSessionSummaryDto,
+    StartDailyDigestChatResponse,
+)
+from app.routers.api.chat_models import (
+    MessageProcessingStatus as MessageProcessingStatusDto,
+)
 from app.routers.api.models import (
     DailyNewsDigestListResponse,
     DailyNewsDigestResponse,
     DailyNewsDigestVoiceSummaryResponse,
 )
+from app.services.chat_agent import process_message_async
+from app.services.daily_digest_chat import start_daily_digest_chat
 from app.services.daily_news_digest import MAX_DAILY_DIGEST_BULLETS
+from app.services.event_logger import log_event
 from app.services.voice.narration_tts import get_digest_narration_tts_service
 
 router = APIRouter()
@@ -283,4 +295,75 @@ def get_daily_digest_voice_summary_audio(
             "Cache-Control": "no-store",
             "Content-Disposition": f'inline; filename="daily-digest-{digest.id}.mp3"',
         },
+    )
+
+
+@router.post(
+    "/daily-digests/{digest_id}/dig-deeper",
+    response_model=StartDailyDigestChatResponse,
+    summary="Start a daily digest dig-deeper chat",
+)
+async def start_daily_digest_dig_deeper(
+    digest_id: Annotated[int, Path(..., gt=0)],
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> StartDailyDigestChatResponse:
+    """Create a fresh daily-digest chat seeded from digest bullets only."""
+    digest = _get_user_digest_or_404(db=db, user_id=current_user.id, digest_id=digest_id)
+
+    try:
+        session, db_message, prompt = start_daily_digest_chat(
+            db,
+            digest=digest,
+            user_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    background_tasks.add_task(process_message_async, session.id, db_message.id, prompt)
+
+    log_event(
+        event_type="chat",
+        event_name="daily_digest_chat_started",
+        status="started",
+        user_id=current_user.id,
+        session_id=session.id,
+        digest_id=digest.id,
+        model=session.llm_model,
+    )
+
+    return StartDailyDigestChatResponse(
+        session=ChatSessionSummaryDto(
+            id=session.id,
+            title=session.title,
+            content_id=session.content_id,
+            session_type=session.session_type,
+            topic=session.topic,
+            llm_model=session.llm_model,
+            llm_provider=session.llm_provider,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            last_message_at=session.last_message_at,
+            is_archived=session.is_archived,
+            article_title=None,
+            article_url=None,
+            article_summary=None,
+            article_source=None,
+            has_pending_message=True,
+            is_favorite=False,
+            has_messages=True,
+            last_message_preview=None,
+            last_message_role=None,
+        ),
+        user_message=ChatMessageDto(
+            id=db_message.id,
+            session_id=session.id,
+            role=ChatMessageRole.USER,
+            content=prompt,
+            timestamp=db_message.created_at,
+            status=MessageProcessingStatusDto.PROCESSING,
+        ),
+        message_id=db_message.id,
+        status=MessageProcessingStatusDto.PROCESSING,
     )

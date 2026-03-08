@@ -17,6 +17,7 @@ protocol DailyNewsDigestRepositoryType {
     func markUnread(id: Int) -> AnyPublisher<Void, Error>
     func fetchVoiceSummaryAudio(id: Int) async throws -> Data
     func fetchVoiceSummary(id: Int) async throws -> DailyNewsDigestVoiceSummaryResponse
+    func startDigDeeperChat(id: Int) async throws -> StartDailyDigestChatResponse
 }
 
 final class DailyNewsDigestRepository: DailyNewsDigestRepositoryType {
@@ -65,5 +66,12 @@ final class DailyNewsDigestRepository: DailyNewsDigestRepositoryType {
 
     func fetchVoiceSummary(id: Int) async throws -> DailyNewsDigestVoiceSummaryResponse {
         try await client.request(APIEndpoints.dailyDigestVoiceSummary(id: id))
+    }
+
+    func startDigDeeperChat(id: Int) async throws -> StartDailyDigestChatResponse {
+        try await client.request(
+            APIEndpoints.dailyDigestDigDeeper(id: id),
+            method: "POST"
+        )
     }
 }

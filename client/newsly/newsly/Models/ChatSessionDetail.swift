@@ -34,6 +34,21 @@ struct SendChatMessageResponse: Codable {
     }
 }
 
+/// Response returned after starting a daily-digest dig-deeper chat
+struct StartDailyDigestChatResponse: Codable {
+    let session: ChatSessionSummary
+    let userMessage: ChatMessage
+    let messageId: Int
+    let status: MessageProcessingStatus
+
+    enum CodingKeys: String, CodingKey {
+        case session
+        case userMessage = "user_message"
+        case messageId = "message_id"
+        case status
+    }
+}
+
 /// Response when polling for message completion status
 struct MessageStatusResponse: Codable {
     let messageId: Int

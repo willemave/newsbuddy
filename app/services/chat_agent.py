@@ -1,5 +1,6 @@
 """Chat agent service using pydantic-ai for deep-dive conversations."""
 
+import json
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -193,7 +194,8 @@ class ChatDeps:
 
     session: ChatSession
     content: Content | None
-    article_context: str | None  # Pre-built context string from article
+    article_context: str | None  # Pre-built context string from article/session snapshot
+    context_label: str = "Article Context"
 
 
 # Agent cache - one per model spec
@@ -209,6 +211,38 @@ def _build_article_header(content: Content | None, session: ChatSession) -> list
     if session.topic:
         parts.append(f"\nFocus Topic: {session.topic}")
     return parts
+
+
+def _build_context_prompt_parts(
+    content: Content | None,
+    session: ChatSession,
+    article_context: str | None,
+    context_label: str,
+) -> list[str]:
+    """Build dynamic prompt sections that expose reference context to the model."""
+    parts = _build_article_header(content, session)
+
+    if article_context:
+        parts.append(
+            "\nProvided reference context is available below. Treat it as the "
+            "conversation's source material even if the user does not repeat it, "
+            "and do not ask the user to paste it again unless the context is actually missing."
+        )
+        parts.append(f"\n{context_label}:\n{article_context}")
+
+    return parts
+
+
+def _build_run_user_prompt(user_prompt: str, deps: ChatDeps) -> str:
+    """Build the model-facing user prompt for a chat turn."""
+    if deps.session.context_snapshot and deps.article_context:
+        return (
+            "Use the provided session context below as the source material for this "
+            "conversation, even if the user does not repeat it.\n\n"
+            f"{deps.context_label}:\n{deps.article_context}\n\n"
+            f"User request:\n{user_prompt}"
+        )
+    return user_prompt
 
 
 def get_chat_agent(model_spec: str) -> Agent[ChatDeps, str]:
@@ -237,11 +271,12 @@ def get_chat_agent(model_spec: str) -> Agent[ChatDeps, str]:
     @agent.system_prompt
     def add_article_context(ctx: RunContext[ChatDeps]) -> str:
         """Add article context to the system prompt."""
-        parts = _build_article_header(ctx.deps.content, ctx.deps.session)
-
-        if ctx.deps.article_context:
-            parts.append(f"\nArticle Context:\n{ctx.deps.article_context}")
-
+        parts = _build_context_prompt_parts(
+            ctx.deps.content,
+            ctx.deps.session,
+            ctx.deps.article_context,
+            ctx.deps.context_label,
+        )
         if parts:
             return "\n".join(parts)
         return ""
@@ -453,11 +488,37 @@ def load_message_history(db: Session, session_id: int) -> list[ModelMessage]:
     return messages
 
 
+def _dump_messages_json(
+    messages: list[ModelMessage],
+    *,
+    display_user_prompt: str | None = None,
+) -> str:
+    """Serialize messages for storage, preserving the user-visible prompt text."""
+    message_json = ModelMessagesTypeAdapter.dump_json(messages).decode("utf-8")
+    if display_user_prompt is None:
+        return message_json
+
+    payload = json.loads(message_json)
+    for message in payload:
+        if message.get("kind") != "request":
+            continue
+        parts = message.get("parts") or []
+        if not parts:
+            break
+        first_part = parts[0]
+        if isinstance(first_part, dict) and "content" in first_part:
+            first_part["content"] = display_user_prompt
+        break
+    return json.dumps(payload, separators=(",", ":"))
+
+
 def save_messages(
     db: Session,
     session_id: int,
     messages: list[ModelMessage],
     status: MessageProcessingStatus = MessageProcessingStatus.COMPLETED,
+    *,
+    display_user_prompt: str | None = None,
 ) -> ChatMessage:
     """Save new messages to the database.
 
@@ -466,13 +527,18 @@ def save_messages(
         session_id: Chat session ID.
         messages: List of ModelMessage objects to save.
         status: Processing status for the message.
+        display_user_prompt: Optional user-visible prompt text to persist
+            instead of the model-facing request content.
 
     Returns:
         The created ChatMessage record.
     """
     try:
         # Serialize messages to JSON (empty list if no messages)
-        message_json = ModelMessagesTypeAdapter.dump_json(messages).decode("utf-8")
+        message_json = _dump_messages_json(
+            messages,
+            display_user_prompt=display_user_prompt,
+        )
 
         # Create new ChatMessage record
         db_message = ChatMessage(
@@ -521,6 +587,8 @@ def update_message_completed(
     db: Session,
     message_id: int,
     messages: list[ModelMessage],
+    *,
+    display_user_prompt: str | None = None,
 ) -> ChatMessage:
     """Update a processing message with the completed result.
 
@@ -528,6 +596,8 @@ def update_message_completed(
         db: Database session.
         message_id: ChatMessage ID to update.
         messages: Full list of messages (user + assistant).
+        display_user_prompt: Optional user-visible prompt text to persist
+            instead of the model-facing request content.
 
     Returns:
         The updated ChatMessage record.
@@ -536,7 +606,10 @@ def update_message_completed(
     if not db_message:
         raise ValueError(f"Message {message_id} not found")
 
-    message_json = ModelMessagesTypeAdapter.dump_json(messages).decode("utf-8")
+    message_json = _dump_messages_json(
+        messages,
+        display_user_prompt=display_user_prompt,
+    )
     db_message.message_list = message_json
     db_message.status = MessageProcessingStatus.COMPLETED.value
     db.commit()
@@ -588,6 +661,15 @@ def _build_chat_deps(
     """Construct chat dependencies (content + context) for a session."""
     content: Content | None = None
     article_context: str | None = None
+    context_label = "Article Context"
+
+    if session.context_snapshot:
+        return ChatDeps(
+            session=session,
+            content=None,
+            article_context=session.context_snapshot,
+            context_label="Session Context",
+        )
 
     if session.content_id:
         content = db.query(Content).filter(Content.id == session.content_id).first()
@@ -603,7 +685,12 @@ def _build_chat_deps(
                 max_tokens=available_tokens,
             )
 
-    return ChatDeps(session=session, content=content, article_context=article_context)
+    return ChatDeps(
+        session=session,
+        content=content,
+        article_context=article_context,
+        context_label=context_label,
+    )
 
 
 def _log_chat_usage(
@@ -645,6 +732,7 @@ def _run_agent_sync(
 ):
     """Run the chat agent synchronously in a worker thread."""
     agent = get_chat_agent(model_spec)
+    model_user_prompt = _build_run_user_prompt(user_prompt, deps)
     metadata = {
         "source": source,
         "model_spec": model_spec,
@@ -660,7 +748,7 @@ def _run_agent_sync(
         metadata=metadata,
         tags=tags,
     ):
-        return agent.run_sync(user_prompt, deps=deps, message_history=history)
+        return agent.run_sync(model_user_prompt, deps=deps, message_history=history)
 
 
 async def run_chat_turn(
@@ -716,7 +804,12 @@ async def run_chat_turn(
         agent_ms = (perf_counter() - agent_start) * 1000
         _log_chat_usage(result, session.id, None, "sync")
         new_messages = result.new_messages()
-        save_messages(db, session.id, new_messages)
+        save_messages(
+            db,
+            session.id,
+            new_messages,
+            display_user_prompt=user_prompt,
+        )
 
         session.last_message_at = datetime.now(UTC)
         session.updated_at = datetime.now(UTC)
@@ -873,7 +966,12 @@ async def process_message_async(
         # Update the message with the complete result
         save_start = perf_counter()
         new_messages = result.new_messages()
-        update_message_completed(db, message_id, new_messages)
+        update_message_completed(
+            db,
+            message_id,
+            new_messages,
+            display_user_prompt=user_prompt,
+        )
         save_ms = (perf_counter() - save_start) * 1000
 
         # Update session timestamps
