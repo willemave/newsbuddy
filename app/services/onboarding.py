@@ -50,6 +50,7 @@ from app.scraping.substack_unified import load_substack_feeds
 from app.services.exa_client import ExaSearchResult, exa_search
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_agents import get_basic_agent
+from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
 from app.services.queue import TaskType
 from app.services.scraper_configs import CreateUserScraperConfig, create_user_scraper_config
 from app.services.x_integration import normalize_twitter_username
@@ -2121,6 +2122,10 @@ def _seed_default_feed_content_for_user(
         ]
     )
     db.commit()
+    enqueue_visible_long_form_images_for_content_ids(
+        db,
+        [content_id for (content_id,) in content_ids],
+    )
     return len(content_ids)
 
 

@@ -29,6 +29,7 @@ from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.dig_deeper import enqueue_dig_deeper_task
+from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.queue import TaskType
 
 logger = get_logger(__name__)
@@ -499,15 +500,24 @@ class SummarizeHandler:
                             share_and_chat_user_ids,
                         )
 
-                    if content.content_type != ContentType.NEWS.value:
-                        context.queue.enqueue(
-                            task_type=TaskType.GENERATE_IMAGE,
-                            content_id=content_id,
+                    if content.content_type == ContentType.NEWS.value:
+                        logger.info(
+                            "Skipping post-summary image generation for news content %s",
+                            content_id,
                         )
+                    elif (
+                        enqueue_visible_long_form_image_if_needed(
+                            db,
+                            content,
+                            queue_service=context.queue,
+                        )
+                        is not None
+                    ):
                         logger.info("Enqueued image generation for content %s", content_id)
                     else:
                         logger.info(
-                            "Skipping post-summary image generation for news content %s",
+                            "Skipping post-summary image generation for content %s; "
+                            "not visible or already covered",
                             content_id,
                         )
 

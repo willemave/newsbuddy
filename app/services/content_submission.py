@@ -15,6 +15,7 @@ from app.models.schema import Content, ProcessingTask
 from app.models.user import User
 from app.services import read_status
 from app.services.dig_deeper import enqueue_dig_deeper_task
+from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.queue import TaskQueue, TaskStatus, TaskType
 from app.services.scraper_configs import ensure_inbox_status
 
@@ -216,6 +217,8 @@ def submit_user_content(
             )
             if status_created or source_url_updated or metadata_updated:
                 db.commit()
+            if status_created:
+                enqueue_visible_long_form_image_if_needed(db, existing)
             if share_and_chat:
                 read_status.mark_content_as_read(db, existing.id, current_user.id)
                 if existing.status == ContentStatus.COMPLETED.value:
@@ -311,6 +314,7 @@ def submit_user_content(
         )
         if status_created:
             db.commit()
+            enqueue_visible_long_form_image_if_needed(db, new_content)
         if share_and_chat:
             read_status.mark_content_as_read(db, new_content.id, current_user.id)
     task_id = _ensure_analyze_url_task(

@@ -25,6 +25,7 @@ from app.services.feed_subscription import subscribe_to_detected_feed
 from app.services.gateways.http_gateway import get_http_gateway
 from app.services.gateways.llm_gateway import get_llm_gateway
 from app.services.instruction_links import create_contents_from_instruction_links
+from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.queue import TaskType
 from app.services.scraper_configs import ensure_inbox_status
 from app.services.twitter_share import (
@@ -352,13 +353,15 @@ class TwitterShareFlow:
             )
             if existing:
                 if submitter_id:
-                    ensure_inbox_status(
+                    status_created = ensure_inbox_status(
                         db,
                         submitter_id,
                         existing.id,
                         content_type=existing.content_type,
                     )
                     db.commit()
+                    if status_created:
+                        enqueue_visible_long_form_image_if_needed(db, existing)
                 continue
 
             fanout_metadata = dict(metadata)
@@ -388,13 +391,15 @@ class TwitterShareFlow:
             db.refresh(new_content)
 
             if submitter_id:
-                ensure_inbox_status(
+                status_created = ensure_inbox_status(
                     db,
                     submitter_id,
                     new_content.id,
                     content_type=new_content.content_type,
                 )
                 db.commit()
+                if status_created:
+                    enqueue_visible_long_form_image_if_needed(db, new_content)
 
             task_queue_gateway.enqueue(TaskType.ANALYZE_URL, content_id=new_content.id)
 

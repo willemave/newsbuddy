@@ -13,6 +13,7 @@ from app.models.schema import Content
 from app.services.content_analyzer import InstructionLink
 from app.services.content_submission import normalize_url
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
+from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
 from app.services.queue import TaskType
 from app.services.scraper_configs import ensure_inbox_status
 
@@ -92,6 +93,7 @@ def create_contents_from_instruction_links(
     existing_by_url = {content.url: content for content in existing_contents}
 
     created_ids: list[int] = []
+    existing_inbox_created_ids: list[int] = []
     has_updates = False
 
     for url in normalized_urls:
@@ -103,6 +105,7 @@ def create_contents_from_instruction_links(
                 existing.id,
                 content_type=existing.content_type,
             ):
+                existing_inbox_created_ids.append(existing.id)
                 has_updates = True
             continue
 
@@ -137,6 +140,10 @@ def create_contents_from_instruction_links(
 
     if created_ids or has_updates:
         db.commit()
+        enqueue_visible_long_form_images_for_content_ids(
+            db,
+            [*existing_inbox_created_ids, *created_ids],
+        )
 
     if not created_ids:
         return []

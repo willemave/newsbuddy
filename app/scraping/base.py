@@ -7,6 +7,7 @@ from app.core.logging import get_logger
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content
 from app.models.scraper_runs import ScraperStats
+from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.queue import TaskType, get_queue_service
 from app.services.scraper_configs import (
     ensure_inbox_status,
@@ -172,6 +173,7 @@ class BaseScraper(ABC):
                                         inbox_created = True
                         if inbox_created:
                             db.commit()
+                            enqueue_visible_long_form_image_if_needed(db, existing)
                         logger.debug(f"URL already exists: {item['url']}")
                         duplicate_count += 1
                         continue

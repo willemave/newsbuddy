@@ -319,13 +319,6 @@ def _should_skip_image_generation(content: ContentData) -> tuple[bool, str]:
     if content.content_type == ContentType.NEWS:
         return True, "News thumbnails are disabled"
 
-    if content.content_type == ContentType.PODCAST:
-        metadata = content.metadata or {}
-        if metadata.get("thumbnail_url"):
-            return True, "YouTube podcast already has thumbnail"
-        if metadata.get("video_id"):
-            return True, "YouTube video - uses existing thumbnail"
-
     if not content.metadata.get("summary"):
         return True, "No summary available for prompt generation"
 

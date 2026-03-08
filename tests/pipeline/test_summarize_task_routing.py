@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.constants import SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE, SUMMARY_VERSION_V1
 from app.models.metadata import EditorialNarrativeSummary, NewsSummary
-from app.models.schema import Content
+from app.models.schema import Content, ContentStatusEntry
 from app.pipeline.handlers.summarize import SummarizeHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
@@ -81,6 +81,17 @@ def _create_content(db_session, content_type: str) -> Content:
     return content
 
 
+def _add_inbox_status(db_session, user_id: int, content_id: int) -> None:
+    db_session.add(
+        ContentStatusEntry(
+            user_id=user_id,
+            content_id=content_id,
+            status="inbox",
+        )
+    )
+    db_session.commit()
+
+
 def _build_context(db_session, queue_service, llm_service) -> TaskContext:
     return TaskContext(
         queue_service=queue_service,
@@ -107,8 +118,9 @@ def test_summarize_news_does_not_enqueue_image_tasks(db_session) -> None:
     queue_service.enqueue.assert_not_called()
 
 
-def test_summarize_article_enqueues_image(db_session) -> None:
+def test_summarize_article_enqueues_image_when_visible_in_inbox(db_session, test_user) -> None:
     content = _create_content(db_session, "article")
+    _add_inbox_status(db_session, test_user.id, content.id)
     queue_service = Mock()
     handler = SummarizeHandler()
     context = _build_context(db_session, queue_service, DummySummarizer())
@@ -127,6 +139,22 @@ def test_summarize_article_enqueues_image(db_session) -> None:
     db_session.refresh(content)
     assert content.content_metadata["summary_kind"] == SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE
     assert content.content_metadata["summary_version"] == SUMMARY_VERSION_V1
+
+
+def test_summarize_article_does_not_enqueue_image_when_not_visible(db_session) -> None:
+    content = _create_content(db_session, "article")
+    queue_service = Mock()
+    handler = SummarizeHandler()
+    context = _build_context(db_session, queue_service, DummySummarizer())
+
+    task = TaskEnvelope(
+        id=21,
+        task_type=TaskType.SUMMARIZE,
+        content_id=content.id,
+    )
+
+    assert handler.handle(task, context).success is True
+    queue_service.enqueue.assert_not_called()
 
 
 def test_summarize_article_falls_back_to_content_to_summarize(db_session) -> None:

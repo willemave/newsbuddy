@@ -17,18 +17,25 @@ from app.utils.image_urls import (
 def resolve_image_urls(domain_content: ContentData) -> tuple[str | None, str | None]:
     """Resolve image URLs without filesystem checks."""
     metadata = domain_content.metadata or {}
+    provider_thumbnail = None
 
     if domain_content.content_type == ContentType.NEWS:
         return None, None
 
     if domain_content.content_type == ContentType.PODCAST:
-        thumbnail = metadata.get("thumbnail_url")
-        if thumbnail:
-            return thumbnail, None
+        raw_thumbnail = metadata.get("thumbnail_url")
+        if isinstance(raw_thumbnail, str) and raw_thumbnail.startswith("http"):
+            provider_thumbnail = raw_thumbnail
 
     image_url = metadata.get("image_url")
     thumbnail_url = metadata.get("thumbnail_url")
     has_generated_image = bool(metadata.get("image_generated_at"))
+
+    if domain_content.content_type == ContentType.PODCAST and has_generated_image:
+        if image_url == provider_thumbnail:
+            image_url = None
+        if thumbnail_url == provider_thumbnail:
+            thumbnail_url = None
 
     if not image_url and has_generated_image and domain_content.id:
         if domain_content.content_type == ContentType.NEWS:
@@ -38,6 +45,10 @@ def resolve_image_urls(domain_content: ContentData) -> tuple[str | None, str | N
 
     if not thumbnail_url and has_generated_image and domain_content.id:
         thumbnail_url = build_thumbnail_url(domain_content.id)
+
+    if domain_content.content_type == ContentType.PODCAST and not image_url:
+        image_url = provider_thumbnail
+        thumbnail_url = None
 
     return image_url, thumbnail_url
 
