@@ -1073,3 +1073,135 @@ class IntegrationDisconnectResponse(BaseModel):
 
     status: Literal["disconnected"] = "disconnected"
     provider: str = "x"
+
+
+class JobStatusResponse(BaseModel):
+    """Status payload for an async processing job."""
+
+    id: int
+    task_type: str
+    status: str
+    queue_name: str
+    content_id: int | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    retry_count: int = 0
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error_message: str | None = None
+
+
+class ApiKeySummaryResponse(BaseModel):
+    """Admin-facing summary for a user API key."""
+
+    id: int
+    user_id: int
+    key_prefix: str
+    created_at: datetime
+    revoked_at: datetime | None = None
+    last_used_at: datetime | None = None
+    created_by_admin_user_id: int | None = None
+
+
+class ApiKeyCreateRequest(BaseModel):
+    """Admin request to create an API key for a user."""
+
+    user_id: int = Field(..., gt=0)
+
+
+class ApiKeyCreateResponse(BaseModel):
+    """Admin response that reveals a newly created API key once."""
+
+    api_key: str
+    key: str
+    key_prefix: str
+    record: ApiKeySummaryResponse
+
+
+class UserLlmIntegrationResponse(BaseModel):
+    """User-managed LLM integration summary."""
+
+    provider: Literal["anthropic", "openai", "google"]
+    configured: bool
+    updated_at: datetime | None = None
+
+
+class UpsertUserLlmIntegrationRequest(BaseModel):
+    """Request to store a user-managed LLM provider key."""
+
+    api_key: str = Field(..., min_length=1, max_length=4096)
+
+
+class UserLlmIntegrationTestResponse(BaseModel):
+    """Response for validating presence of a user-managed LLM key."""
+
+    provider: Literal["anthropic", "openai", "google"]
+    ok: bool
+
+
+class AgentSearchRequest(BaseModel):
+    """Machine-oriented external search request."""
+
+    query: str = Field(..., min_length=2, max_length=200)
+    limit: int = Field(default=10, ge=1, le=25)
+    include_podcasts: bool = True
+
+
+class AgentSearchResultResponse(BaseModel):
+    """One agent search result."""
+
+    kind: Literal["web", "podcast"]
+    title: str
+    url: str
+    snippet: str | None = None
+    source: str | None = None
+    provider: str | None = None
+    feed_url: str | None = None
+    published_at: str | None = None
+    score: float | None = None
+
+
+class AgentSearchResponse(BaseModel):
+    """Machine-oriented external search response."""
+
+    results: list[AgentSearchResultResponse] = Field(default_factory=list)
+
+
+class AgentOnboardingStartRequest(BaseModel):
+    """Simplified async onboarding start request."""
+
+    brief: str = Field(..., min_length=1, max_length=4000)
+    preferences: dict[str, Any] | None = None
+    seed_urls: list[str] = Field(default_factory=list)
+    seed_feeds: list[str] = Field(default_factory=list)
+
+
+class AgentOnboardingStartResponse(BaseModel):
+    """Simplified async onboarding start response."""
+
+    run_id: int
+    status: str
+    job_id: int | None = None
+
+
+class AgentOnboardingCompleteRequest(BaseModel):
+    """Complete simplified agent onboarding."""
+
+    accept_all: bool = False
+    source_ids: list[int] = Field(default_factory=list)
+    selected_subreddits: list[str] = Field(default_factory=list)
+
+
+class AgentDigestRequest(BaseModel):
+    """Agent digest generation request for arbitrary windows."""
+
+    start_at: datetime
+    end_at: datetime
+    form: Literal["short", "long"] = "short"
+
+
+class AgentDigestResponse(BaseModel):
+    """Async agent digest generation response."""
+
+    job_id: int
+    status: str = "queued"

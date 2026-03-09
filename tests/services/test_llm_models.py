@@ -16,6 +16,7 @@ def _settings(**kwargs):
         google_api_key=kwargs.get("google_api_key"),
         google_cloud_project=kwargs.get("google_cloud_project"),
         google_cloud_location=kwargs.get("google_cloud_location", "global"),
+        cerebras_api_key=kwargs.get("cerebras_api_key"),
     )
 
 
@@ -23,6 +24,20 @@ def test_build_pydantic_model_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm_models, "get_settings", lambda: _settings(openai_api_key="test-key"))
 
     model, model_settings = llm_models.build_pydantic_model("gpt-5-mini")
+
+    assert isinstance(model, OpenAIChatModel)
+    assert model_settings is None
+
+
+def test_build_pydantic_model_openai_accepts_user_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llm_models, "get_settings", lambda: _settings(openai_api_key=None))
+
+    model, model_settings = llm_models.build_pydantic_model(
+        "gpt-5-mini",
+        api_key_override="user-openai-key",
+    )
 
     assert isinstance(model, OpenAIChatModel)
     assert model_settings is None
@@ -90,3 +105,45 @@ def test_build_pydantic_model_google_uses_project_when_available(
 
     assert isinstance(model, GoogleModel)
     assert model._provider.name == "google-vertex"
+
+
+def test_resolve_effective_api_key_prefers_user_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        llm_models,
+        "get_settings",
+        lambda: _settings(openai_api_key="platform-key"),
+    )
+    monkeypatch.setattr(
+        llm_models,
+        "get_user_llm_api_key",
+        lambda db, user_id, provider: "user-key",
+    )
+
+    resolved = llm_models.resolve_effective_api_key(
+        db=object(),
+        user_id=123,
+        model_spec="openai:gpt-5-mini",
+    )
+
+    assert resolved == "user-key"
+
+
+def test_resolve_effective_api_key_falls_back_to_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        llm_models,
+        "get_settings",
+        lambda: _settings(anthropic_api_key="platform-key"),
+    )
+    monkeypatch.setattr(
+        llm_models,
+        "get_user_llm_api_key",
+        lambda db, user_id, provider: None,
+    )
+
+    resolved = llm_models.resolve_effective_api_key(
+        db=object(),
+        user_id=123,
+        model_spec="anthropic:claude-haiku-4-5-20251001",
+    )
+
+    assert resolved == "platform-key"

@@ -1,5 +1,6 @@
 """Chat agent service using pydantic-ai for deep-dive conversations."""
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from app.services.llm_models import (  # noqa: F401 (re-export for API schemas)
 )
 from app.services.llm_models import (
     build_pydantic_model,
+    resolve_effective_api_key,
 )
 
 logger = get_logger(__name__)
@@ -198,8 +200,15 @@ class ChatDeps:
     context_label: str = "Article Context"
 
 
-# Agent cache - one per model spec
-_agents: dict[str, Agent[ChatDeps, str]] = {}
+# Agent cache keyed by model spec and effective credential identity.
+_agents: dict[tuple[str, str], Agent[ChatDeps, str]] = {}
+
+
+def _build_agent_cache_key(model_spec: str, api_key_override: str | None) -> tuple[str, str]:
+    """Build a stable cache key without persisting raw secrets in memory."""
+    if not api_key_override:
+        return model_spec, ""
+    return model_spec, hashlib.sha256(api_key_override.encode("utf-8")).hexdigest()
 
 
 def _build_article_header(content: Content | None, session: ChatSession) -> list[str]:
@@ -245,7 +254,11 @@ def _build_run_user_prompt(user_prompt: str, deps: ChatDeps) -> str:
     return user_prompt
 
 
-def get_chat_agent(model_spec: str) -> Agent[ChatDeps, str]:
+def get_chat_agent(
+    model_spec: str,
+    *,
+    api_key_override: str | None = None,
+) -> Agent[ChatDeps, str]:
     """Get or create a chat agent for the given model spec.
 
     Args:
@@ -254,11 +267,15 @@ def get_chat_agent(model_spec: str) -> Agent[ChatDeps, str]:
     Returns:
         Configured Agent instance.
     """
-    if model_spec in _agents:
-        return _agents[model_spec]
+    cache_key = _build_agent_cache_key(model_spec, api_key_override)
+    if cache_key in _agents:
+        return _agents[cache_key]
 
     # Build model with explicit API key if needed
-    model, model_settings = build_pydantic_model(model_spec)
+    model, model_settings = build_pydantic_model(
+        model_spec,
+        api_key_override=api_key_override,
+    )
 
     agent: Agent[ChatDeps, str] = Agent(
         model,
@@ -379,7 +396,7 @@ def get_chat_agent(model_spec: str) -> Agent[ChatDeps, str]:
 
         return "".join(output_parts)
 
-    _agents[model_spec] = agent
+    _agents[cache_key] = agent
     logger.info(f"Created chat agent for model: {model_spec}")
     return agent
 
@@ -729,9 +746,10 @@ def _run_agent_sync(
     source: str,
     task_id: int | None = None,
     message_id: int | None = None,
+    provider_api_key: str | None = None,
 ):
     """Run the chat agent synchronously in a worker thread."""
-    agent = get_chat_agent(model_spec)
+    agent = get_chat_agent(model_spec, api_key_override=provider_api_key)
     model_user_prompt = _build_run_user_prompt(user_prompt, deps)
     metadata = {
         "source": source,
@@ -787,6 +805,11 @@ async def run_chat_turn(
 
     deps_start = perf_counter()
     deps = _build_chat_deps(db, session, include_full_text=include_full_text)
+    provider_api_key = resolve_effective_api_key(
+        db=db,
+        user_id=session.user_id,
+        model_spec=session.llm_model,
+    )
     deps_ms = (perf_counter() - deps_start) * 1000
 
     try:
@@ -800,6 +823,7 @@ async def run_chat_turn(
             trace_name="chat.turn.sync",
             source=source,
             task_id=task_id,
+            provider_api_key=provider_api_key,
         )
         agent_ms = (perf_counter() - agent_start) * 1000
         _log_chat_usage(result, session.id, None, "sync")
@@ -923,6 +947,11 @@ async def process_message_async(
             history_ms,
             len(history),
         )
+        provider_api_key = resolve_effective_api_key(
+            db=db,
+            user_id=session.user_id,
+            model_spec=session.llm_model,
+        )
 
         # Run the agent
         logger.info(
@@ -942,6 +971,7 @@ async def process_message_async(
             source=source,
             task_id=task_id,
             message_id=message_id,
+            provider_api_key=provider_api_key,
         )
         agent_ms = (perf_counter() - agent_start) * 1000
         _log_chat_usage(result, session_id, message_id, "async")
@@ -1062,6 +1092,11 @@ async def generate_initial_suggestions(
 
     include_full_text = True
     deps = _build_chat_deps(db, session, include_full_text=include_full_text)
+    provider_api_key = resolve_effective_api_key(
+        db=db,
+        user_id=session.user_id,
+        model_spec=session.llm_model,
+    )
 
     try:
         agent_start = perf_counter()
@@ -1074,6 +1109,7 @@ async def generate_initial_suggestions(
             trace_name="chat.initial_suggestions",
             source=source,
             task_id=task_id,
+            provider_api_key=provider_api_key,
         )
         agent_ms = (perf_counter() - agent_start) * 1000
         _log_chat_usage(result, session.id, None, "initial_suggestions")

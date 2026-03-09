@@ -4,8 +4,8 @@
 
 **Last Updated:** 2026-03-08  
 **Runtime:** Python 3.13, FastAPI + SQLAlchemy 2, Pydantic v2, pydantic-ai  
-**Database:** PostgreSQL (prod) / SQLite (dev)  
-**Clients:** SwiftUI (iOS 17+), Jinja admin views
+**Database:** SQLite (first-class) / PostgreSQL-ready seams  
+**Clients:** SwiftUI (iOS 17+), Jinja admin views, remote `newsly-agent` CLI
 
 ## Documentation Layout
 - `docs/codebase/` is the folder-by-folder reference for `app/`, `client/`, and `config/`.
@@ -21,11 +21,13 @@
 - Deep-dive chat uses pydantic-ai agents with Exa web search; conversations are stored server-side.
 - Deep Research uses OpenAI's `o4-mini-deep-research-2025-06-26` model for comprehensive async research (up to ~10 minutes, with 2-second polling).
 - Admin/Jinja web UI shares the same services as the mobile API.
+- Agent CLI is a remote HTTP client of the FastAPI server. Mutating and long-running operations remain async and return task handles; client-side polling is optional convenience only.
 
 ```mermaid
 flowchart LR
   iOS[SwiftUI App] -->|JWT| API[FastAPI app\napp/main.py]
   Admin[Jinja Admin] --> API
+  CLI[newsly-agent CLI] -->|API key| API
   API --> DB[(Postgres/SQLite)]
   API --> Queue[(processing_tasks)]
   Scrapers -->|enqueue PROCESS_CONTENT| Queue
@@ -41,6 +43,60 @@ flowchart LR
   API <--> Chat[Chat Agent\nExa search]
   API <--> DeepResearch[Deep Research\nOpenAI o4-mini-deep-research]
 ```
+
+## Dependency Direction
+- Routers and API adapters call `app/application/commands` and `app/application/queries`, not repositories or low-level services directly.
+- Pipeline handlers stay thin: parse payload, call one workflow/use-case, map outcome to `TaskResult`.
+- Repositories own SQLAlchemy query composition only.
+- Presenters map prepared rows/domain objects to DTOs only.
+- Infrastructure owns DB capability seams, HTTP implementations, queue implementations, config authority, and auth/security implementations.
+- Domain stays small and stable. `content_item` is the internal canonical noun in new code, while public DTO names remain compatibility boundaries.
+
+## New Boundary Packages
+- `app/application/commands/` and `app/application/queries/` provide router-facing entrypoints for content cards/detail, read/favorite state, submission/ingest, jobs, onboarding, API keys, digests, and user LLM integrations.
+- `app/infrastructure/db/search/` isolates SQLite FTS branching behind search backends (`sqlite_search_backend.py`, `generic_search_backend.py`).
+- `app/infrastructure/db/capabilities.py` exposes the current DB feature seams used by repositories without introducing Postgres-specific behavior.
+- `app/infrastructure/security/` owns API-key generation/parsing and hashing.
+- `app/infrastructure/http/` and `app/infrastructure/queue/` contain implementation adapters behind application-facing gateways.
+
+## Auth Modes
+- Mobile app auth remains JWT-based and unchanged.
+- Remote CLI auth uses bearer API keys stored as hash + prefix in `user_api_keys`; raw keys are revealed only once at creation time.
+- Selected API routes accept either JWT bearer tokens or bearer API keys through `app/core/deps.py`.
+- Admin key management is server-rendered for simplicity:
+  - `GET /admin/api-keys`
+  - `POST /admin/api-keys/create`
+  - `POST /admin/api-keys/{id}/revoke`
+
+## Agent API Surface
+- The additive machine-facing routes live under the existing `/api` namespace, not `/api/v2`.
+- New endpoints:
+  - `GET /api/jobs/{id}`
+  - `POST /api/agent/search`
+  - `POST /api/agent/onboarding`
+  - `GET /api/agent/onboarding/{run_id}`
+  - `POST /api/agent/onboarding/{run_id}/complete`
+  - `POST /api/agent/digests`
+- Existing mobile-facing content, onboarding, digest, and submission routes stay intact.
+
+## Config Authority
+- User-editable subscriptions are DB-authoritative. File config is seed/default input only.
+- Reddit runtime subscriptions are DB-authoritative; file defaults are bootstrap-only and must be explicitly included if needed.
+- Techmeme remains file-authoritative until a DB-backed runtime/admin surface exists.
+- Twitter and YouTube file configs remain disabled/ad hoc inputs and are not silently treated as live scheduled runtime config.
+
+## User-Provided LLM Keys
+- User-managed provider keys live in `user_integration_connections` and reuse the existing token encryption helpers.
+- Supported BYO providers in this refactor: `anthropic`, `openai`, `google`.
+- Runtime credential resolution prefers a user-managed provider key when present, then falls back to platform credentials.
+- Current user-scoped chat and voice model construction already resolves effective provider credentials through `app/services/llm_models.py`.
+
+## Performance Note
+- The list/detail/stats refactor now has dedicated query entrypoints (`content_card_repository.py`, `content_detail_repository.py`, `stats_repository.py`) and additive regression coverage around the affected routes.
+- Local regression coverage in this refactor validated:
+  - boundary-cleanup slice: `51 passed`
+  - additive auth/agent/admin/integration slice: `18 passed`
+- The intended query-count guardrail remains: card endpoints share a narrow projection path, detail uses a dedicated detail path, and stats uses a dedicated repository/query layer.
 
 ## Codebase Map
 - `app/main.py` – FastAPI creation, middleware (CORS *), router mounting, lifespan bootstrap, request logging.

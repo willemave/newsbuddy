@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from app.core.deps import require_admin
 from app.main import app
-from app.models.schema import Content, EventLog, ProcessingTask
+from app.models.schema import Content, EventLog, ProcessingTask, UserApiKey
 
 
 def _override_admin_dependency(test_user):
@@ -94,5 +94,37 @@ def test_admin_dashboard_filters_event_logs_by_type(client, db_session, test_use
         assert "event_scraper_a" in response.text
         assert "event_scraper_b" in response.text
         assert "event_processor" not in response.text
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+
+
+def test_admin_api_keys_page_renders(client, db_session, test_user):
+    app.dependency_overrides[require_admin] = _override_admin_dependency(test_user)
+    try:
+        response = client.get("/admin/api-keys")
+        assert response.status_code == 200
+        assert "API Keys" in response.text
+        assert str(test_user.email) in response.text
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+
+
+def test_admin_can_create_and_revoke_api_key(client, db_session, test_user):
+    app.dependency_overrides[require_admin] = _override_admin_dependency(test_user)
+    try:
+        create_response = client.post("/admin/api-keys/create", data={"user_id": str(test_user.id)})
+        assert create_response.status_code == 200
+        assert "Copy this key now" in create_response.text
+        assert "newsly_ak_" in create_response.text
+
+        record = db_session.query(UserApiKey).filter(UserApiKey.user_id == test_user.id).first()
+        assert record is not None
+        assert record.revoked_at is None
+
+        revoke_response = client.post(f"/admin/api-keys/{record.id}/revoke", follow_redirects=False)
+        assert revoke_response.status_code == 303
+
+        db_session.refresh(record)
+        assert record.revoked_at is not None
     finally:
         app.dependency_overrides.pop(require_admin, None)

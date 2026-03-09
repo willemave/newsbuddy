@@ -1,69 +1,7 @@
-"""API content routers organized by responsibility.
+"""API router package.
 
-This module exports a combined router that includes all API content endpoints,
-organized into logical sub-routers:
-
-- content_list: List and search endpoints
-- content_detail: Individual content details and chat URLs
-- read_status: Read/unread status management
-- favorites: Favorites management
-- discovery: Feed/podcast discovery suggestions
-- content_actions: Content transformations (e.g., convert news to article)
-- scraper_configs: User scraper configuration management
-- submission: User content submissions
-- chat: Deep-dive chat sessions with articles
-- stats: User stats (unread and processing counts)
-- daily_news_digests: Daily roll-up digest cards
+Keep package initialization light so importing request/response models does not
+pull in the full router graph and create import cycles in worker code.
 """
 
-from fastapi import APIRouter
-
-from app.routers.api import (
-    chat,
-    content_actions,
-    content_detail,
-    content_list,
-    daily_news_digests,
-    favorites,
-    read_status,
-    scraper_configs,
-    stats,
-    submission,
-)
-
-# Create the main API router
-router = APIRouter(
-    tags=["content"],
-    responses={404: {"description": "Not found"}},
-)
-
-# Include all sub-routers
-# Content listing and discovery
-router.include_router(content_list.router)
-router.include_router(daily_news_digests.router)
-
-# User stats
-router.include_router(stats.router)
-
-# Content detail and actions on individual items
-router.include_router(content_detail.router)
-
-# Read status management
-router.include_router(read_status.router)
-
-# Favorites management
-router.include_router(favorites.router)
-
-# Content transformations and actions
-router.include_router(content_actions.router)
-
-# User scraper configurations
-router.include_router(scraper_configs.router)
-
-# User submissions
-router.include_router(submission.router)
-
-# Chat sessions
-router.include_router(chat.router)
-
-__all__ = ["router"]
+__all__ = []

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.core.settings import get_settings
 from app.models.schema import UserIntegrationConnection
+from app.services.token_crypto import decrypt_token
 from app.services.x_integration import XConnectionView
 
 
@@ -89,3 +91,66 @@ def test_disconnect_x_connection_clears_tokens(client, db_session, test_user):
     assert connection.is_active is False
     assert connection.access_token_encrypted is None
     assert connection.refresh_token_encrypted is None
+
+
+def test_llm_integrations_crud(client, monkeypatch):
+    monkeypatch.setenv("X_TOKEN_ENCRYPTION_KEY", "test-encryption-key")
+    get_settings.cache_clear()
+    try:
+        response = client.get("/api/integrations/llm")
+        assert response.status_code == 200
+        assert response.json() == []
+
+        put_response = client.put(
+            "/api/integrations/llm/openai",
+            json={"api_key": "sk-test-openai-key"},
+        )
+        assert put_response.status_code == 200
+        assert put_response.json()["provider"] == "openai"
+        assert put_response.json()["configured"] is True
+
+        list_response = client.get("/api/integrations/llm")
+        assert list_response.status_code == 200
+        assert list_response.json()[0]["provider"] == "openai"
+
+        test_response = client.post("/api/integrations/llm/openai/test")
+        assert test_response.status_code == 200
+        assert test_response.json() == {"provider": "openai", "ok": True}
+
+        delete_response = client.delete("/api/integrations/llm/openai")
+        assert delete_response.status_code == 200
+        assert delete_response.json() == {"status": "deleted", "provider": "openai"}
+    finally:
+        get_settings.cache_clear()
+
+
+def test_llm_integrations_encrypt_api_keys_at_rest(client, db_session, monkeypatch, test_user):
+    monkeypatch.setenv("X_TOKEN_ENCRYPTION_KEY", "test-encryption-key")
+    get_settings.cache_clear()
+    try:
+        raw_key = "anthropic-secret-key"
+        response = client.put(
+            "/api/integrations/llm/anthropic",
+            json={"api_key": raw_key},
+        )
+        assert response.status_code == 200
+
+        record = (
+            db_session.query(UserIntegrationConnection)
+            .filter(UserIntegrationConnection.user_id == test_user.id)
+            .filter(UserIntegrationConnection.provider == "anthropic")
+            .first()
+        )
+        assert record is not None
+        assert record.access_token_encrypted != raw_key
+        assert decrypt_token(record.access_token_encrypted) == raw_key
+    finally:
+        get_settings.cache_clear()
+
+
+def test_llm_integrations_reject_unsupported_provider(client):
+    response = client.put(
+        "/api/integrations/llm/not-a-provider",
+        json={"api_key": "secret"},
+    )
+    assert response.status_code == 404

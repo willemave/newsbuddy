@@ -14,6 +14,7 @@ from app.core.logging import setup_logging
 from app.core.settings import get_settings
 from app.routers import admin, api_content, auth, logs
 from app.routers.api import (
+    agent,
     discovery,
     integrations,
     interactions,
@@ -225,6 +226,8 @@ app.include_router(scraper_configs.router, prefix="/api")
 app.include_router(discovery.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
 app.include_router(integrations.router, prefix="/api")
+app.include_router(integrations.llm_router, prefix="/api")
+app.include_router(agent.router, prefix="/api")
 app.include_router(openai.router, prefix="/api")
 app.include_router(voice.router, prefix="/api")
 

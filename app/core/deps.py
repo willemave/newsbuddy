@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session as get_db
 from app.core.security import verify_token
+from app.infrastructure.security.api_keys import is_api_key_token
+from app.models.schema import UserApiKey
 from app.models.user import User
+from app.repositories.api_key_repository import find_active_api_key_by_token, touch_last_used
 
 # HTTP Bearer token scheme for JWT authentication
 security = HTTPBearer(auto_error=False)
@@ -46,18 +49,26 @@ def get_current_user(
 
     try:
         token = credentials.credentials
-        payload = verify_token(token)
-        user_id: str = payload.get("sub")
-        token_type: str = payload.get("type")
+        user: User | None = None
 
-        if user_id is None or token_type != "access":
-            raise credentials_exception
+        if is_api_key_token(token):
+            api_key: UserApiKey | None = find_active_api_key_by_token(db, raw_key=token)
+            if api_key is None:
+                raise credentials_exception
+            user = db.query(User).filter(User.id == int(api_key.user_id)).first()
+            if api_key.id is not None:
+                touch_last_used(db, api_key_id=int(api_key.id))
+        else:
+            payload = verify_token(token)
+            user_id: str = payload.get("sub")
+            token_type: str = payload.get("type")
+
+            if user_id is None or token_type != "access":
+                raise credentials_exception
+            user = db.query(User).filter(User.id == int(user_id)).first()
 
     except jwt.InvalidTokenError:
         raise credentials_exception from None
-
-    # Get user from database
-    user = db.query(User).filter(User.id == int(user_id)).first()
 
     if user is None:
         raise credentials_exception

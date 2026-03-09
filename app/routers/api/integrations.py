@@ -7,11 +7,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.application.commands import delete_user_llm_integration, upsert_user_llm_integration
+from app.application.queries import list_user_llm_integrations
 from app.core.db import get_db_session
 from app.core.deps import get_current_user
 from app.models.user import User
 from app.routers.api.models import (
     IntegrationDisconnectResponse,
+    UpsertUserLlmIntegrationRequest,
+    UserLlmIntegrationResponse,
+    UserLlmIntegrationTestResponse,
     XConnectionResponse,
     XOAuthExchangeRequest,
     XOAuthStartRequest,
@@ -26,6 +31,7 @@ from app.services.x_integration import (
 )
 
 router = APIRouter(prefix="/integrations/x", tags=["integrations"])
+llm_router = APIRouter(prefix="/integrations/llm", tags=["integrations"])
 
 
 def _to_connection_response(view: XConnectionView) -> XConnectionResponse:
@@ -104,3 +110,55 @@ def disconnect_x(
     """Disconnect the user's X integration."""
     disconnect_x_connection(db, user=current_user)
     return IntegrationDisconnectResponse()
+
+
+@llm_router.get("", response_model=list[UserLlmIntegrationResponse])
+def get_llm_integrations(
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[UserLlmIntegrationResponse]:
+    """List user-managed LLM provider keys."""
+    return list_user_llm_integrations.execute(db, user_id=current_user.id)
+
+
+@llm_router.put("/{provider}", response_model=UserLlmIntegrationResponse)
+def put_llm_integration(
+    provider: str,
+    payload: UpsertUserLlmIntegrationRequest,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserLlmIntegrationResponse:
+    """Store or update a user-managed LLM provider key."""
+    return upsert_user_llm_integration.execute(
+        db,
+        user_id=current_user.id,
+        provider=provider,
+        api_key=payload.api_key,
+    )
+
+
+@llm_router.delete("/{provider}", response_model=dict)
+def delete_llm_integration(
+    provider: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> dict[str, str]:
+    """Delete a user-managed LLM provider key."""
+    return delete_user_llm_integration.execute(db, user_id=current_user.id, provider=provider)
+
+
+@llm_router.post("/{provider}/test", response_model=UserLlmIntegrationTestResponse)
+def test_llm_integration(
+    provider: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserLlmIntegrationTestResponse:
+    """Validate presence of a user-managed LLM provider key."""
+    integrations = {
+        integration.provider: integration
+        for integration in list_user_llm_integrations.execute(db, user_id=current_user.id)
+    }
+    return UserLlmIntegrationTestResponse(
+        provider=provider,  # type: ignore[arg-type]
+        ok=provider in integrations and integrations[provider].configured,
+    )

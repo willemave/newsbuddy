@@ -12,8 +12,10 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.cerebras import CerebrasProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
+from app.repositories.user_integration_repository import get_user_llm_api_key
 
 
 class LLMProvider(StrEnum):
@@ -90,7 +92,52 @@ def resolve_model(
     return provider_name, PROVIDER_DEFAULTS.get(provider_name, DEFAULT_MODEL)
 
 
-def build_pydantic_model(model_spec: str) -> tuple[Model | str, GoogleModelSettings | None]:
+def resolve_model_provider(model_spec: str) -> str:
+    """Resolve the canonical provider name for a model spec."""
+    if ":" in model_spec:
+        prefix = model_spec.split(":", 1)[0]
+        return PREFIX_TO_PROVIDER.get(prefix, prefix)
+    if model_spec.startswith("gpt-"):
+        return LLMProvider.OPENAI.value
+    if model_spec.startswith("claude-"):
+        return LLMProvider.ANTHROPIC.value
+    if model_spec.startswith("gemini"):
+        return LLMProvider.GOOGLE.value
+    return DEFAULT_PROVIDER
+
+
+def resolve_effective_api_key(
+    *,
+    db: Session | None,
+    user_id: int | None,
+    provider: str | None = None,
+    model_spec: str | None = None,
+) -> str | None:
+    """Prefer a user-managed provider key, then fall back to platform credentials."""
+    provider_name = provider or (resolve_model_provider(model_spec) if model_spec else None)
+    if provider_name is None:
+        return None
+
+    if db is not None and user_id is not None:
+        user_api_key = get_user_llm_api_key(db, user_id=user_id, provider=provider_name)
+        if user_api_key:
+            return user_api_key
+
+    settings = get_settings()
+    platform_keys = {
+        LLMProvider.OPENAI.value: settings.openai_api_key,
+        LLMProvider.ANTHROPIC.value: settings.anthropic_api_key,
+        LLMProvider.GOOGLE.value: settings.google_api_key,
+        LLMProvider.CEREBRAS.value: settings.cerebras_api_key,
+    }
+    return platform_keys.get(provider_name)
+
+
+def build_pydantic_model(
+    model_spec: str,
+    *,
+    api_key_override: str | None = None,
+) -> tuple[Model | str, GoogleModelSettings | None]:
     """Construct a pydantic-ai Model with explicit providers where required.
 
     Args:
@@ -113,7 +160,8 @@ def build_pydantic_model(model_spec: str) -> tuple[Model | str, GoogleModelSetti
         or model_spec.startswith("google-gla:")
         or model_spec.startswith("gemini")
     ):
-        if not settings.google_api_key:
+        resolved_api_key = api_key_override or settings.google_api_key
+        if not resolved_api_key and not settings.google_cloud_project:
             raise ValueError("GOOGLE_API_KEY not configured in settings.")
         model_to_use = (
             model_name
@@ -121,11 +169,13 @@ def build_pydantic_model(model_spec: str) -> tuple[Model | str, GoogleModelSetti
             else (model_spec.split(":", 1)[1] if ":" in model_spec else model_spec)
         )
         provider_kwargs: dict[str, str | bool] = {"vertexai": True}
-        if settings.google_cloud_project:
+        if api_key_override:
+            provider_kwargs = {"api_key": api_key_override}
+        elif settings.google_cloud_project:
             provider_kwargs["project"] = settings.google_cloud_project
             provider_kwargs["location"] = settings.google_cloud_location
         else:
-            provider_kwargs["api_key"] = settings.google_api_key
+            provider_kwargs["api_key"] = resolved_api_key
 
         model = GoogleModel(model_to_use, provider=GoogleProvider(**provider_kwargs))
         # Configure thinking for Google models – suppress thought traces and
@@ -137,21 +187,23 @@ def build_pydantic_model(model_spec: str) -> tuple[Model | str, GoogleModelSetti
         return model, model_settings
 
     if provider_prefix == "anthropic" or model_spec.startswith("claude-"):
-        if not settings.anthropic_api_key:
+        resolved_api_key = api_key_override or settings.anthropic_api_key
+        if not resolved_api_key:
             raise ValueError("ANTHROPIC_API_KEY not configured in settings.")
-        provider = AnthropicProvider(api_key=settings.anthropic_api_key)
+        provider = AnthropicProvider(api_key=resolved_api_key)
         model_to_use = model_name if provider_prefix == "anthropic" else model_spec
         return AnthropicModel(model_to_use, provider=provider), None
 
     if provider_prefix == "cerebras" or model_spec.startswith("cerebras:"):
-        if not settings.cerebras_api_key:
+        resolved_api_key = api_key_override or settings.cerebras_api_key
+        if not resolved_api_key:
             raise ValueError("CEREBRAS_API_KEY not configured in settings.")
         model_to_use = (
             model_name
             if provider_prefix
             else (model_spec.split(":", 1)[1] if ":" in model_spec else model_spec)
         )
-        provider = CerebrasProvider(api_key=settings.cerebras_api_key)
+        provider = CerebrasProvider(api_key=resolved_api_key)
         return OpenAIChatModel(model_to_use, provider=provider), None
 
     if (
@@ -159,7 +211,8 @@ def build_pydantic_model(model_spec: str) -> tuple[Model | str, GoogleModelSetti
         or model_spec.startswith("openai:")
         or model_spec.startswith("gpt-")
     ):
-        if not settings.openai_api_key:
+        resolved_api_key = api_key_override or settings.openai_api_key
+        if not resolved_api_key:
             raise ValueError("OPENAI_API_KEY not configured in settings.")
         model_to_use = (
             model_name
@@ -167,7 +220,7 @@ def build_pydantic_model(model_spec: str) -> tuple[Model | str, GoogleModelSetti
             else (model_spec.split(":", 1)[1] if ":" in model_spec else model_spec)
         )
         return (
-            OpenAIChatModel(model_to_use, provider=OpenAIProvider(api_key=settings.openai_api_key)),
+            OpenAIChatModel(model_to_use, provider=OpenAIProvider(api_key=resolved_api_key)),
             None,
         )
 

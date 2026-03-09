@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from functools import lru_cache
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelMessage
@@ -14,7 +14,10 @@ from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.services.admin_conversational_agent import search_knowledge, search_web
 from app.services.langfuse_tracing import langfuse_trace_context
-from app.services.llm_models import build_pydantic_model
+from app.services.llm_models import (
+    build_pydantic_model,
+    resolve_effective_api_key,
+)
 
 logger = get_logger(__name__)
 
@@ -251,11 +254,28 @@ def _build_turn_instructions(user_text: str) -> str | None:
     )
 
 
-@lru_cache(maxsize=8)
-def get_voice_agent(model_spec: str) -> Agent[VoiceAgentDeps, str]:
-    """Build or fetch a cached voice agent for a specific model."""
+def _build_agent_cache_key(model_spec: str, api_key_override: str | None) -> tuple[str, str]:
+    """Build a stable cache key without keeping raw provider secrets."""
+    if not api_key_override:
+        return model_spec, ""
+    return model_spec, hashlib.sha256(api_key_override.encode("utf-8")).hexdigest()
 
-    model, model_settings = build_pydantic_model(model_spec)
+
+_VOICE_AGENTS: dict[tuple[str, str], Agent[VoiceAgentDeps, str]] = {}
+
+
+def get_voice_agent(
+    model_spec: str,
+    api_key_override: str | None = None,
+) -> Agent[VoiceAgentDeps, str]:
+    """Build or fetch a cached voice agent for a specific model."""
+    cache_key = _build_agent_cache_key(model_spec, api_key_override)
+    if cache_key in _VOICE_AGENTS:
+        return _VOICE_AGENTS[cache_key]
+    model, model_settings = build_pydantic_model(
+        model_spec,
+        api_key_override=api_key_override,
+    )
     agent: Agent[VoiceAgentDeps, str] = Agent(
         model,
         deps_type=VoiceAgentDeps,
@@ -346,6 +366,7 @@ def get_voice_agent(model_spec: str) -> Agent[VoiceAgentDeps, str]:
         )
         return _format_web_hits_for_tool(hits)
 
+    _VOICE_AGENTS[cache_key] = agent
     return agent
 
 
@@ -373,7 +394,13 @@ async def stream_voice_agent_turn(
 
     settings = get_settings()
     model_spec = settings.voice_haiku_model
-    agent = get_voice_agent(model_spec)
+    with get_db() as db:
+        provider_api_key = resolve_effective_api_key(
+            db=db,
+            user_id=user_id,
+            model_spec=model_spec,
+        )
+    agent = get_voice_agent(model_spec, api_key_override=provider_api_key)
     deps = VoiceAgentDeps(user_id=user_id)
     text_fragments: list[str] = []
     turn_instructions = _build_turn_instructions(user_text)
