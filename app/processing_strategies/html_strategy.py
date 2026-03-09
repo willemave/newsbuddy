@@ -332,6 +332,34 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         return any(token in message for token in fallback_tokens)
 
     @staticmethod
+    def _is_non_retryable_extraction_error(error: Exception) -> bool:
+        """Return True when the extraction error should stop retrying."""
+
+        message = str(error).lower()
+        non_retryable_patterns = [
+            r"\b401\b",
+            r"\b403\b",
+            r"\b404\b",
+        ]
+        non_retryable_tokens = [
+            "blocked",
+            "forbidden",
+            "access denied",
+            "not found",
+            "paywall",
+            "err_http_response_code_failure",
+            "err_http2_protocol_error",
+            "err_ssl_protocol_error",
+            "err_connection_refused",
+            "err_cert_",
+            "timeout",
+            "wait condition failed",
+        ]
+        if any(re.search(pattern, message) for pattern in non_retryable_patterns):
+            return True
+        return any(token in message for token in non_retryable_tokens)
+
+    @staticmethod
     def _extract_title_from_html(html_content: str) -> str | None:
         """Extract a page title from raw HTML."""
 
@@ -808,25 +836,7 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             )
 
             # Check if this is a non-retryable error
-            error_str = str(e).lower()
-            non_retryable_terms = [
-                "403",
-                "401",
-                "404",
-                "blocked",
-                "forbidden",
-                "access denied",
-                "not found",
-                "paywall",
-                "err_http_response_code_failure",
-                "err_http2_protocol_error",
-                "err_ssl_protocol_error",
-                "err_connection_refused",
-                "err_cert_",  # Catches various certificate errors
-                "timeout",  # Page load timeouts indicate site issues
-                "wait condition failed",  # Crawl4ai selector wait failures
-            ]
-            if any(term in error_str for term in non_retryable_terms):
+            if self._is_non_retryable_extraction_error(e):
                 # Raise NonRetryableError to prevent infinite retries
                 raise NonRetryableError(f"Non-retryable error: {error_msg}") from e
 
