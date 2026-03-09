@@ -80,7 +80,7 @@ from app.models.metadata import (
     StructuredSummary,
     SummaryTextBullet,
 )
-from app.models.schema import Content, ContentStatusEntry
+from app.models.schema import Content, ContentReadStatus, ContentStatusEntry
 from app.models.user import User
 
 # Sample data pools
@@ -952,10 +952,13 @@ def insert_test_data(
         inserted_ids.append(content.id)
 
         # SQLite can reuse primary keys for rows that were deleted earlier.
-        # If the local dev DB contains orphaned status rows for an old content ID,
+        # If the local dev DB contains orphaned per-user rows for an old content ID,
         # clear them before creating inbox entries for the new content row.
         session.query(ContentStatusEntry).filter(
             ContentStatusEntry.content_id == content.id
+        ).delete(synchronize_session=False)
+        session.query(ContentReadStatus).filter(
+            ContentReadStatus.content_id == content.id
         ).delete(synchronize_session=False)
 
         # Add longform content to users' inboxes so it is visible in list endpoints.

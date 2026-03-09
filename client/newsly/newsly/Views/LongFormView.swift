@@ -12,6 +12,7 @@ struct LongFormView: View {
     let onSelect: (ContentDetailRoute) -> Void
 
     @StateObject private var processingCountService = ProcessingCountService.shared
+    @StateObject private var longFormStatsService = LongFormStatsService.shared
     @State private var showMarkAllConfirmation = false
     @State private var isProcessingBulk = false
 
@@ -71,8 +72,7 @@ struct LongFormView: View {
                             .padding(.vertical, 20)
                         }
                         .refreshable {
-                            viewModel.refreshTrigger.send(())
-                            await processingCountService.refreshCount()
+                            await refreshUnreadFeed()
                         }
                         .simultaneousGesture(
                             LongPressGesture(minimumDuration: 0.8).onEnded { _ in
@@ -103,10 +103,8 @@ struct LongFormView: View {
                 }
             }
             .onAppear {
-                viewModel.setReadFilter(.unread)
-                viewModel.refreshTrigger.send(())
                 Task {
-                    await processingCountService.refreshCount()
+                    await refreshUnreadFeed()
                 }
             }
 
@@ -124,7 +122,9 @@ struct LongFormView: View {
 
     @ViewBuilder
     private var longFormEmptyState: some View {
-        if processingCountService.longFormProcessingCount > 0 {
+        if processingCountService.longFormProcessingCount > 0
+            && longFormStatsService.totalCount == 0
+        {
             VStack(spacing: 16) {
                 Spacer()
                 ProgressView()
@@ -134,12 +134,31 @@ struct LongFormView: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if longFormStatsService.unreadCount == 0 && longFormStatsService.totalCount > 0 {
+            EmptyStateView(
+                icon: "checkmark.circle",
+                title: "You're All Caught Up",
+                subtitle: "No unread long-form content right now"
+            )
         } else {
             EmptyStateView(
                 icon: "doc.richtext",
                 title: "No Long-Form Content",
                 subtitle: "Articles and podcasts will appear here once processed"
             )
+        }
+    }
+
+    @MainActor
+    private func refreshUnreadFeed() async {
+        async let statsRefresh: Void = longFormStatsService.refreshStats()
+        async let processingRefresh: Void = processingCountService.refreshCount()
+        _ = await (statsRefresh, processingRefresh)
+
+        let previousFilter = viewModel.currentReadFilter()
+        viewModel.setReadFilter(.unread)
+        if previousFilter == .unread {
+            viewModel.refreshTrigger.send(())
         }
     }
 }
