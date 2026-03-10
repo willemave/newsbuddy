@@ -31,6 +31,12 @@ logger = get_logger(__name__)
     "/submit",
     response_model=ContentSubmissionResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_200_OK: {
+            "model": ContentSubmissionResponse,
+            "description": "Existing content matched and reused",
+        }
+    },
     summary="Submit a one-off URL for processing",
     description="Submit article or podcast URLs for processing. Only http/https URLs are accepted.",
 )

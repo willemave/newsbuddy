@@ -1,0 +1,5327 @@
+{
+  "components": {
+    "schemas": {
+      "AccessTokenResponse": {
+        "description": "Response schema for token refresh.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token"
+        ],
+        "title": "AccessTokenResponse",
+        "type": "object"
+      },
+      "AdminConversationalHealthResponse": {
+        "description": "Readiness flags for admin conversational features.",
+        "properties": {
+          "agent_id": {
+            "description": "Configured ElevenLabs agent ID",
+            "nullable": true,
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_text_only": {
+            "description": "Whether text-only mode is requested",
+            "title": "Agent Text Only",
+            "type": "boolean"
+          },
+          "elevenlabs_api_configured": {
+            "description": "Whether ELEVENLABS_API_KEY is set",
+            "title": "Elevenlabs Api Configured",
+            "type": "boolean"
+          },
+          "elevenlabs_package_available": {
+            "description": "Whether the elevenlabs SDK can be imported",
+            "title": "Elevenlabs Package Available",
+            "type": "boolean"
+          },
+          "readiness_reasons": {
+            "description": "Reasons why readiness is false.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Readiness Reasons",
+            "type": "array"
+          },
+          "ready": {
+            "description": "Whether the conversational feature is ready",
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "elevenlabs_api_configured",
+          "elevenlabs_package_available",
+          "agent_text_only",
+          "ready"
+        ],
+        "title": "AdminConversationalHealthResponse",
+        "type": "object"
+      },
+      "AdminEvalRunRequest": {
+        "description": "Request payload for running an admin eval batch.",
+        "properties": {
+          "content_types": {
+            "items": {
+              "enum": [
+                "article",
+                "podcast",
+                "news"
+              ],
+              "type": "string"
+            },
+            "title": "Content Types",
+            "type": "array"
+          },
+          "longform_template": {
+            "default": "editorial_narrative_v1",
+            "enum": [
+              "long_bullets_v1",
+              "interleaved_v2",
+              "structured_v1",
+              "editorial_narrative_v1"
+            ],
+            "title": "Longform Template",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "pricing": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelPricing"
+            },
+            "title": "Pricing",
+            "type": "object"
+          },
+          "recent_pool_size": {
+            "default": 200,
+            "maximum": 2000.0,
+            "minimum": 10.0,
+            "title": "Recent Pool Size",
+            "type": "integer"
+          },
+          "sample_size": {
+            "default": 3,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Sample Size",
+            "type": "integer"
+          },
+          "seed": {
+            "nullable": true,
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "title": "AdminEvalRunRequest",
+        "type": "object"
+      },
+      "AdminLoginRequest": {
+        "description": "Request schema for admin login.",
+        "properties": {
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "AdminLoginRequest",
+        "type": "object"
+      },
+      "AdminLoginResponse": {
+        "description": "Response schema for admin login.",
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "AdminLoginResponse",
+        "type": "object"
+      },
+      "AgentDigestRequest": {
+        "description": "Agent digest generation request for arbitrary windows.",
+        "properties": {
+          "end_at": {
+            "format": "date-time",
+            "title": "End At",
+            "type": "string"
+          },
+          "form": {
+            "default": "short",
+            "enum": [
+              "short",
+              "long"
+            ],
+            "title": "Form",
+            "type": "string"
+          },
+          "start_at": {
+            "format": "date-time",
+            "title": "Start At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start_at",
+          "end_at"
+        ],
+        "title": "AgentDigestRequest",
+        "type": "object"
+      },
+      "AgentDigestResponse": {
+        "description": "Async agent digest generation response.",
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "status": {
+            "default": "queued",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "AgentDigestResponse",
+        "type": "object"
+      },
+      "AgentOnboardingCompleteRequest": {
+        "description": "Complete simplified agent onboarding.",
+        "properties": {
+          "accept_all": {
+            "default": false,
+            "title": "Accept All",
+            "type": "boolean"
+          },
+          "selected_subreddits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Subreddits",
+            "type": "array"
+          },
+          "source_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Source Ids",
+            "type": "array"
+          }
+        },
+        "title": "AgentOnboardingCompleteRequest",
+        "type": "object"
+      },
+      "AgentOnboardingStartRequest": {
+        "description": "Simplified async onboarding start request.",
+        "properties": {
+          "brief": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Brief",
+            "type": "string"
+          },
+          "preferences": {
+            "additionalProperties": true,
+            "nullable": true,
+            "title": "Preferences",
+            "type": "object"
+          },
+          "seed_feeds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Seed Feeds",
+            "type": "array"
+          },
+          "seed_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Seed Urls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "brief"
+        ],
+        "title": "AgentOnboardingStartRequest",
+        "type": "object"
+      },
+      "AgentOnboardingStartResponse": {
+        "description": "Simplified async onboarding start response.",
+        "properties": {
+          "job_id": {
+            "nullable": true,
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "AgentOnboardingStartResponse",
+        "type": "object"
+      },
+      "AgentSearchRequest": {
+        "description": "Machine-oriented external search request.",
+        "properties": {
+          "include_podcasts": {
+            "default": true,
+            "title": "Include Podcasts",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 10,
+            "maximum": 25.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "maxLength": 200,
+            "minLength": 2,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "AgentSearchRequest",
+        "type": "object"
+      },
+      "AgentSearchResponse": {
+        "description": "Machine-oriented external search response.",
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSearchResultResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "title": "AgentSearchResponse",
+        "type": "object"
+      },
+      "AgentSearchResultResponse": {
+        "description": "One agent search result.",
+        "properties": {
+          "feed_url": {
+            "nullable": true,
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "web",
+              "podcast"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "provider": {
+            "nullable": true,
+            "title": "Provider",
+            "type": "string"
+          },
+          "published_at": {
+            "nullable": true,
+            "title": "Published At",
+            "type": "string"
+          },
+          "score": {
+            "nullable": true,
+            "title": "Score",
+            "type": "number"
+          },
+          "snippet": {
+            "nullable": true,
+            "title": "Snippet",
+            "type": "string"
+          },
+          "source": {
+            "nullable": true,
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "url"
+        ],
+        "title": "AgentSearchResultResponse",
+        "type": "object"
+      },
+      "AppleSignInRequest": {
+        "description": "Request schema for Apple Sign In.",
+        "properties": {
+          "email": {
+            "nullable": true,
+            "title": "Email",
+            "type": "string"
+          },
+          "full_name": {
+            "nullable": true,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "id_token": {
+            "description": "Apple identity token",
+            "title": "Id Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id_token"
+        ],
+        "title": "AppleSignInRequest",
+        "type": "object"
+      },
+      "AudioTranscriptionResponse": {
+        "description": "Transcription payload returned for uploaded audio.",
+        "properties": {
+          "language": {
+            "nullable": true,
+            "title": "Language",
+            "type": "string"
+          },
+          "transcript": {
+            "title": "Transcript",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transcript"
+        ],
+        "title": "AudioTranscriptionResponse",
+        "type": "object"
+      },
+      "Body_admin_api_keys_create_admin_api_keys_create_post": {
+        "properties": {
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "Body_admin_api_keys_create_admin_api_keys_create_post",
+        "type": "object"
+      },
+      "Body_transcribe_audio_api_openai_transcriptions_post": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_transcribe_audio_api_openai_transcriptions_post",
+        "type": "object"
+      },
+      "BulkMarkReadRequest": {
+        "description": "Request to mark multiple content items as read.",
+        "example": {
+          "content_ids": [
+            123,
+            456,
+            789
+          ]
+        },
+        "properties": {
+          "content_ids": {
+            "description": "List of content IDs to mark as read",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Content Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "content_ids"
+        ],
+        "title": "BulkMarkReadRequest",
+        "type": "object"
+      },
+      "ChatGPTUrlResponse": {
+        "description": "Response containing the ChatGPT URL for chatting with content.",
+        "example": {
+          "chat_url": "https://chat.openai.com/?q=Chat+about+this+article...",
+          "truncated": false
+        },
+        "properties": {
+          "chat_url": {
+            "description": "URL to open ChatGPT with the content",
+            "title": "Chat Url",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "Whether the content was truncated to fit URL limits",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "chat_url",
+          "truncated"
+        ],
+        "title": "ChatGPTUrlResponse",
+        "type": "object"
+      },
+      "ChatMessageDisplayType": {
+        "description": "Display type for a chat message row.",
+        "enum": [
+          "message",
+          "process_summary"
+        ],
+        "title": "ChatMessageDisplayType",
+        "type": "string"
+      },
+      "ChatMessageDto": {
+        "description": "Flattened chat message returned to clients.",
+        "properties": {
+          "content": {
+            "description": "Message content",
+            "title": "Content",
+            "type": "string"
+          },
+          "display_type": {
+            "$ref": "#/components/schemas/ChatMessageDisplayType",
+            "default": "message",
+            "description": "Display treatment for this row in the chat transcript"
+          },
+          "error": {
+            "description": "Error message if processing failed",
+            "nullable": true,
+            "title": "Error",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique message identifier",
+            "title": "Id",
+            "type": "integer"
+          },
+          "process_label": {
+            "description": "Compact label for process-summary rows",
+            "nullable": true,
+            "title": "Process Label",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ChatMessageRole",
+            "description": "Message role"
+          },
+          "session_id": {
+            "description": "Chat session ID",
+            "title": "Session Id",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MessageProcessingStatus",
+            "default": "completed",
+            "description": "Processing status for async messages"
+          },
+          "timestamp": {
+            "description": "Timestamp when message was stored",
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "role",
+          "content",
+          "timestamp"
+        ],
+        "title": "ChatMessageDto",
+        "type": "object"
+      },
+      "ChatMessageRole": {
+        "description": "Role of a chat message.",
+        "enum": [
+          "user",
+          "assistant",
+          "system",
+          "tool"
+        ],
+        "title": "ChatMessageRole",
+        "type": "string"
+      },
+      "ChatSessionDetailDto": {
+        "description": "Chat session with message history.",
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageDto"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/ChatSessionSummaryDto"
+          }
+        },
+        "required": [
+          "session",
+          "messages"
+        ],
+        "title": "ChatSessionDetailDto",
+        "type": "object"
+      },
+      "ChatSessionSummaryDto": {
+        "description": "Summary of a chat session.",
+        "properties": {
+          "article_source": {
+            "description": "Source name of the article (for empty session display)",
+            "nullable": true,
+            "title": "Article Source",
+            "type": "string"
+          },
+          "article_summary": {
+            "description": "Short summary of the article (for empty session display)",
+            "nullable": true,
+            "title": "Article Summary",
+            "type": "string"
+          },
+          "article_title": {
+            "nullable": true,
+            "title": "Article Title",
+            "type": "string"
+          },
+          "article_url": {
+            "nullable": true,
+            "title": "Article Url",
+            "type": "string"
+          },
+          "content_id": {
+            "nullable": true,
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "has_messages": {
+            "default": true,
+            "description": "True if session has any messages (false for new favorites)",
+            "title": "Has Messages",
+            "type": "boolean"
+          },
+          "has_pending_message": {
+            "default": false,
+            "description": "True if session has a message currently being processed",
+            "title": "Has Pending Message",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_archived": {
+            "title": "Is Archived",
+            "type": "boolean"
+          },
+          "is_favorite": {
+            "default": false,
+            "description": "True if the linked content is favorited by the user",
+            "title": "Is Favorite",
+            "type": "boolean"
+          },
+          "last_message_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Message At",
+            "type": "string"
+          },
+          "last_message_preview": {
+            "description": "Truncated preview of the most recent message in the session",
+            "nullable": true,
+            "title": "Last Message Preview",
+            "type": "string"
+          },
+          "last_message_role": {
+            "description": "Role of the last message (user or assistant)",
+            "nullable": true,
+            "title": "Last Message Role",
+            "type": "string"
+          },
+          "llm_model": {
+            "title": "Llm Model",
+            "type": "string"
+          },
+          "llm_provider": {
+            "title": "Llm Provider",
+            "type": "string"
+          },
+          "session_type": {
+            "nullable": true,
+            "title": "Session Type",
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          },
+          "topic": {
+            "nullable": true,
+            "title": "Topic",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "content_id",
+          "session_type",
+          "topic",
+          "llm_model",
+          "llm_provider",
+          "created_at",
+          "updated_at",
+          "last_message_at",
+          "is_archived"
+        ],
+        "title": "ChatSessionSummaryDto",
+        "type": "object"
+      },
+      "ContentClassification": {
+        "description": "User-visible read prioritization classification.",
+        "enum": [
+          "to_read",
+          "skip"
+        ],
+        "title": "ContentClassification",
+        "type": "string"
+      },
+      "ContentDetailResponse": {
+        "description": "Detailed response for a single content item.",
+        "example": {
+          "bullet_points": [
+            {
+              "category": "key_finding",
+              "text": "AI is transforming industries"
+            }
+          ],
+          "can_subscribe": false,
+          "content_type": "article",
+          "created_at": "2025-06-19T10:30:00Z",
+          "display_title": "Understanding AI in 2025",
+          "full_markdown": "# Understanding AI in 2025\n\nFull article content...",
+          "id": 123,
+          "image_url": "/static/images/content/123.png",
+          "is_read": false,
+          "metadata": {
+            "author": "Jane Doe",
+            "content_type": "html",
+            "publication_date": "2025-06-19T00:00:00Z",
+            "source": "Tech Blog",
+            "summary": {
+              "bullet_points": [
+                {
+                  "category": "key_finding",
+                  "text": "AI is transforming industries"
+                }
+              ],
+              "classification": "to_read",
+              "overview": "This article explores the latest developments...",
+              "quotes": [
+                {
+                  "context": "Jane Doe",
+                  "text": "The future is now"
+                }
+              ],
+              "summarization_date": "2025-06-19T10:35:00Z",
+              "title": "Understanding AI in 2025",
+              "topics": [
+                "AI",
+                "Technology",
+                "Future"
+              ]
+            },
+            "word_count": 1500
+          },
+          "processed_at": "2025-06-19T10:35:00Z",
+          "publication_date": "2025-06-18T12:00:00Z",
+          "quotes": [
+            {
+              "context": "Jane Doe",
+              "text": "The future is now"
+            }
+          ],
+          "retry_count": 0,
+          "short_summary": "This article explores the latest developments...",
+          "source": "Tech Blog",
+          "status": "completed",
+          "structured_summary": {
+            "bullet_points": [
+              {
+                "category": "key_finding",
+                "text": "AI is transforming industries"
+              }
+            ],
+            "classification": "to_read",
+            "overview": "This article explores the latest developments...",
+            "quotes": [
+              {
+                "context": "Jane Doe",
+                "text": "The future is now"
+              }
+            ],
+            "summarization_date": "2025-06-19T10:35:00Z",
+            "title": "Understanding AI in 2025",
+            "topics": [
+              "AI",
+              "Technology",
+              "Future"
+            ]
+          },
+          "summary": "This article explores the latest developments...",
+          "thumbnail_url": "/static/images/thumbnails/123.png",
+          "title": "Understanding AI in 2025",
+          "topics": [
+            "AI",
+            "Technology",
+            "Future"
+          ],
+          "updated_at": "2025-06-19T10:35:00Z",
+          "url": "https://example.com/article"
+        },
+        "properties": {
+          "bullet_points": {
+            "description": "Bullet points from structured summary",
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Bullet Points",
+            "type": "array"
+          },
+          "can_subscribe": {
+            "default": false,
+            "description": "Whether the current user can subscribe to the detected feed",
+            "title": "Can Subscribe",
+            "type": "boolean"
+          },
+          "checked_out_at": {
+            "description": "ISO timestamp when content was checked out",
+            "nullable": true,
+            "title": "Checked Out At",
+            "type": "string"
+          },
+          "checked_out_by": {
+            "description": "Worker ID that checked out this content",
+            "nullable": true,
+            "title": "Checked Out By",
+            "type": "string"
+          },
+          "content_type": {
+            "$ref": "#/components/schemas/ContentType",
+            "description": "Type of content (article/podcast/news)"
+          },
+          "created_at": {
+            "description": "ISO timestamp when content was created",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detected_feed": {
+            "$ref": "#/components/schemas/DetectedFeed",
+            "description": "Detected RSS/Atom feed for this content",
+            "nullable": true
+          },
+          "discussion_url": {
+            "description": "Discussion URL (tweet, HN thread, etc.) when available",
+            "nullable": true,
+            "title": "Discussion Url",
+            "type": "string"
+          },
+          "display_title": {
+            "description": "Display title (prefers summary title over content title)",
+            "title": "Display Title",
+            "type": "string"
+          },
+          "error_message": {
+            "description": "Error message if processing failed",
+            "nullable": true,
+            "title": "Error Message",
+            "type": "string"
+          },
+          "full_markdown": {
+            "description": "Full article content formatted as markdown",
+            "nullable": true,
+            "title": "Full Markdown",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier",
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_url": {
+            "description": "URL of full-size AI-generated image for this content",
+            "nullable": true,
+            "title": "Image Url",
+            "type": "string"
+          },
+          "is_favorited": {
+            "default": false,
+            "description": "Whether the content has been favorited",
+            "title": "Is Favorited",
+            "type": "boolean"
+          },
+          "is_read": {
+            "default": false,
+            "description": "Whether the content has been marked as read",
+            "title": "Is Read",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Content-specific metadata",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "news_article_url": {
+            "description": "Canonical article link for news content",
+            "nullable": true,
+            "title": "News Article Url",
+            "type": "string"
+          },
+          "news_discussion_url": {
+            "description": "Aggregator discussion URL (HN thread, tweet, etc.)",
+            "nullable": true,
+            "title": "News Discussion Url",
+            "type": "string"
+          },
+          "news_key_points": {
+            "description": "Key points provided for news digests",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "title": "News Key Points",
+            "type": "array"
+          },
+          "news_summary": {
+            "description": "Short overview synthesized for news digests",
+            "nullable": true,
+            "title": "News Summary",
+            "type": "string"
+          },
+          "processed_at": {
+            "description": "ISO timestamp when content was processed",
+            "nullable": true,
+            "title": "Processed At",
+            "type": "string"
+          },
+          "publication_date": {
+            "description": "ISO timestamp of when content was published",
+            "nullable": true,
+            "title": "Publication Date",
+            "type": "string"
+          },
+          "quotes": {
+            "description": "Quotes from structured summary",
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Quotes",
+            "type": "array"
+          },
+          "retry_count": {
+            "description": "Number of retry attempts",
+            "title": "Retry Count",
+            "type": "integer"
+          },
+          "short_summary": {
+            "description": "Short version of summary for list view",
+            "nullable": true,
+            "title": "Short Summary",
+            "type": "string"
+          },
+          "source": {
+            "description": "Content source",
+            "nullable": true,
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "description": "Original scraped/submitted URL",
+            "nullable": true,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContentStatus",
+            "description": "Processing status"
+          },
+          "structured_summary": {
+            "additionalProperties": true,
+            "description": "Structured summary with bullet points and quotes",
+            "nullable": true,
+            "title": "Structured Summary",
+            "type": "object"
+          },
+          "summary": {
+            "description": "Summary text",
+            "nullable": true,
+            "title": "Summary",
+            "type": "string"
+          },
+          "summary_kind": {
+            "$ref": "#/components/schemas/SummaryKind",
+            "description": "Summary kind discriminator (e.g., long_interleaved)",
+            "nullable": true
+          },
+          "summary_version": {
+            "$ref": "#/components/schemas/SummaryVersion",
+            "description": "Summary schema version for the current summary kind",
+            "nullable": true
+          },
+          "thumbnail_url": {
+            "description": "URL of 200px thumbnail image for fast loading",
+            "nullable": true,
+            "title": "Thumbnail Url",
+            "type": "string"
+          },
+          "title": {
+            "description": "Content title",
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          },
+          "topics": {
+            "description": "Topics from structured summary",
+            "items": {
+              "type": "string"
+            },
+            "title": "Topics",
+            "type": "array"
+          },
+          "updated_at": {
+            "description": "ISO timestamp of last update",
+            "nullable": true,
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "description": "Canonical URL of the content",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "content_type",
+          "url",
+          "display_title",
+          "status",
+          "retry_count",
+          "metadata",
+          "created_at",
+          "bullet_points",
+          "quotes",
+          "topics"
+        ],
+        "title": "ContentDetailResponse",
+        "type": "object"
+      },
+      "ContentDiscussionResponse": {
+        "description": "Discussion payload for a content item.",
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/DiscussionCommentResponse"
+            },
+            "title": "Comments",
+            "type": "array"
+          },
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "discussion_groups": {
+            "items": {
+              "$ref": "#/components/schemas/DiscussionGroupResponse"
+            },
+            "title": "Discussion Groups",
+            "type": "array"
+          },
+          "discussion_url": {
+            "nullable": true,
+            "title": "Discussion Url",
+            "type": "string"
+          },
+          "error_message": {
+            "nullable": true,
+            "title": "Error Message",
+            "type": "string"
+          },
+          "fetched_at": {
+            "nullable": true,
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/DiscussionLinkResponse"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "mode": {
+            "default": "none",
+            "enum": [
+              "none",
+              "comments",
+              "discussion_list"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "platform": {
+            "nullable": true,
+            "title": "Platform",
+            "type": "string"
+          },
+          "source_url": {
+            "nullable": true,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "stats": {
+            "additionalProperties": true,
+            "title": "Stats",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_id",
+          "status"
+        ],
+        "title": "ContentDiscussionResponse",
+        "type": "object"
+      },
+      "ContentListResponse": {
+        "description": "Response for content list endpoint.",
+        "example": {
+          "available_dates": [
+            "2025-06-19",
+            "2025-06-18"
+          ],
+          "content_types": [
+            "article",
+            "podcast",
+            "news"
+          ],
+          "contents": [
+            {
+              "classification": "to_read",
+              "content_type": "article",
+              "created_at": "2025-06-19T10:30:00Z",
+              "id": 123,
+              "platform": "substack",
+              "processed_at": "2025-06-19T10:35:00Z",
+              "short_summary": "This article explores...",
+              "source": "Tech Blog",
+              "status": "completed",
+              "title": "Understanding AI in 2025",
+              "url": "https://example.com/article"
+            }
+          ],
+          "meta": {
+            "has_more": true,
+            "next_cursor": "eyJsYXN0X2lkIjoxMjN9",
+            "page_size": 25,
+            "total": 1
+          }
+        },
+        "properties": {
+          "available_dates": {
+            "description": "List of available dates (YYYY-MM-DD)",
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Dates",
+            "type": "array"
+          },
+          "content_types": {
+            "description": "Available content types for filtering",
+            "items": {
+              "$ref": "#/components/schemas/ContentType"
+            },
+            "title": "Content Types",
+            "type": "array"
+          },
+          "contents": {
+            "description": "List of content items",
+            "items": {
+              "$ref": "#/components/schemas/ContentSummaryResponse"
+            },
+            "title": "Contents",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PaginationMetadata",
+            "description": "Pagination metadata for the response"
+          }
+        },
+        "required": [
+          "contents",
+          "available_dates",
+          "content_types",
+          "meta"
+        ],
+        "title": "ContentListResponse",
+        "type": "object"
+      },
+      "ContentStatus": {
+        "description": "Lifecycle statuses for content processing.",
+        "enum": [
+          "new",
+          "pending",
+          "processing",
+          "completed",
+          "failed",
+          "skipped"
+        ],
+        "title": "ContentStatus",
+        "type": "string"
+      },
+      "ContentSubmissionResponse": {
+        "description": "Response describing the result of a user submission.",
+        "example": {
+          "already_exists": false,
+          "content_id": 42,
+          "content_type": "podcast",
+          "message": "Content queued for processing",
+          "platform": "spotify",
+          "source": "self submission",
+          "status": "new",
+          "task_id": 101
+        },
+        "properties": {
+          "already_exists": {
+            "default": false,
+            "description": "Whether the submission matched an existing record",
+            "title": "Already Exists",
+            "type": "boolean"
+          },
+          "content_id": {
+            "description": "ID of the created or existing content",
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "content_type": {
+            "$ref": "#/components/schemas/ContentType",
+            "description": "Content type that will be processed"
+          },
+          "message": {
+            "description": "Human-readable status message",
+            "title": "Message",
+            "type": "string"
+          },
+          "platform": {
+            "description": "Normalized platform name if available",
+            "nullable": true,
+            "title": "Platform",
+            "type": "string"
+          },
+          "source": {
+            "description": "Source attribution recorded for the content (self submission)",
+            "nullable": true,
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContentStatus",
+            "description": "Current processing status of the content"
+          },
+          "task_id": {
+            "description": "Processing task ID enqueued for this content",
+            "nullable": true,
+            "title": "Task Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_id",
+          "content_type",
+          "status",
+          "message"
+        ],
+        "title": "ContentSubmissionResponse",
+        "type": "object"
+      },
+      "ContentSummaryResponse": {
+        "description": "Summary information for a content item in list view.",
+        "example": {
+          "classification": "to_read",
+          "content_type": "article",
+          "created_at": "2025-06-19T10:30:00Z",
+          "id": 123,
+          "image_url": "/static/images/content/123.png",
+          "is_read": false,
+          "platform": "substack",
+          "primary_topic": "AI",
+          "processed_at": "2025-06-19T10:35:00Z",
+          "publication_date": "2025-06-18T12:00:00Z",
+          "short_summary": "This article explores the latest developments in AI...",
+          "source": "Tech Blog",
+          "status": "completed",
+          "thumbnail_url": "/static/images/thumbnails/123.png",
+          "title": "Understanding AI in 2025",
+          "top_comment": {
+            "author": "user123",
+            "text": "Great article!"
+          },
+          "url": "https://example.com/article"
+        },
+        "properties": {
+          "classification": {
+            "$ref": "#/components/schemas/ContentClassification",
+            "description": "Content classification (to_read/skip)",
+            "nullable": true
+          },
+          "comment_count": {
+            "description": "Discussion comment count from aggregator or discussion fetcher",
+            "nullable": true,
+            "title": "Comment Count",
+            "type": "integer"
+          },
+          "content_type": {
+            "$ref": "#/components/schemas/ContentType",
+            "description": "Type of content (article/podcast/news)"
+          },
+          "created_at": {
+            "description": "ISO timestamp when content was created",
+            "title": "Created At",
+            "type": "string"
+          },
+          "discussion_url": {
+            "description": "Discussion URL (tweet, HN thread, etc.) when available",
+            "nullable": true,
+            "title": "Discussion Url",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier",
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_url": {
+            "description": "URL of full-size AI-generated image for this content",
+            "nullable": true,
+            "title": "Image Url",
+            "type": "string"
+          },
+          "is_favorited": {
+            "default": false,
+            "description": "Whether the content has been favorited",
+            "title": "Is Favorited",
+            "type": "boolean"
+          },
+          "is_read": {
+            "default": false,
+            "description": "Whether the content has been marked as read",
+            "title": "Is Read",
+            "type": "boolean"
+          },
+          "news_article_url": {
+            "description": "Canonical article link for news content",
+            "nullable": true,
+            "title": "News Article Url",
+            "type": "string"
+          },
+          "news_discussion_url": {
+            "description": "Aggregator discussion URL (HN thread, tweet, etc.)",
+            "nullable": true,
+            "title": "News Discussion Url",
+            "type": "string"
+          },
+          "news_key_points": {
+            "description": "Key points provided for news digests",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "title": "News Key Points",
+            "type": "array"
+          },
+          "news_summary": {
+            "description": "Short overview synthesized for news digests",
+            "nullable": true,
+            "title": "News Summary",
+            "type": "string"
+          },
+          "platform": {
+            "description": "Content platform (e.g., twitter, substack, youtube)",
+            "nullable": true,
+            "title": "Platform",
+            "type": "string"
+          },
+          "primary_topic": {
+            "description": "Primary topic extracted from summary topics or platform name",
+            "nullable": true,
+            "title": "Primary Topic",
+            "type": "string"
+          },
+          "processed_at": {
+            "description": "ISO timestamp when content was processed",
+            "nullable": true,
+            "title": "Processed At",
+            "type": "string"
+          },
+          "publication_date": {
+            "description": "ISO timestamp of when content was published",
+            "nullable": true,
+            "title": "Publication Date",
+            "type": "string"
+          },
+          "short_summary": {
+            "description": "Short summary for display; for news items this returns the excerpt or first item text",
+            "nullable": true,
+            "title": "Short Summary",
+            "type": "string"
+          },
+          "source": {
+            "description": "Content source (e.g., substack name, podcast name)",
+            "nullable": true,
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "description": "Original scraped/submitted URL",
+            "nullable": true,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContentStatus",
+            "description": "Processing status"
+          },
+          "thumbnail_url": {
+            "description": "URL of 200px thumbnail image for fast loading in list views",
+            "nullable": true,
+            "title": "Thumbnail Url",
+            "type": "string"
+          },
+          "title": {
+            "description": "Content title",
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          },
+          "top_comment": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "First discussion comment {author, text} for preview",
+            "nullable": true,
+            "title": "Top Comment",
+            "type": "object"
+          },
+          "url": {
+            "description": "Canonical URL of the content",
+            "title": "Url",
+            "type": "string"
+          },
+          "user_status": {
+            "description": "Per-user content status (e.g., inbox, archived)",
+            "nullable": true,
+            "title": "User Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "content_type",
+          "url",
+          "status",
+          "created_at"
+        ],
+        "title": "ContentSummaryResponse",
+        "type": "object"
+      },
+      "ContentType": {
+        "description": "Supported content types in storage and API contracts.",
+        "enum": [
+          "article",
+          "podcast",
+          "news",
+          "unknown"
+        ],
+        "title": "ContentType",
+        "type": "string"
+      },
+      "ConvertNewsResponse": {
+        "description": "Response for converting news link to article.",
+        "example": {
+          "already_exists": false,
+          "message": "Article created and queued for processing",
+          "new_content_id": 123,
+          "original_content_id": 456,
+          "status": "success"
+        },
+        "properties": {
+          "already_exists": {
+            "description": "Whether article already existed",
+            "title": "Already Exists",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "Human-readable message",
+            "title": "Message",
+            "type": "string"
+          },
+          "new_content_id": {
+            "description": "ID of the article content",
+            "title": "New Content Id",
+            "type": "integer"
+          },
+          "original_content_id": {
+            "description": "ID of the original news content",
+            "title": "Original Content Id",
+            "type": "integer"
+          },
+          "status": {
+            "description": "Operation status",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "new_content_id",
+          "original_content_id",
+          "already_exists",
+          "message"
+        ],
+        "title": "ConvertNewsResponse",
+        "type": "object"
+      },
+      "CreateChatSessionRequest": {
+        "description": "Request to create a new chat session.",
+        "example": {
+          "content_id": 123,
+          "initial_message": "What are the key insights from this article?",
+          "llm_provider": "anthropic"
+        },
+        "properties": {
+          "content_id": {
+            "description": "Content ID to chat about",
+            "nullable": true,
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "initial_message": {
+            "description": "Optional initial user message",
+            "maxLength": 2000,
+            "nullable": true,
+            "title": "Initial Message",
+            "type": "string"
+          },
+          "llm_model_hint": {
+            "description": "Optional specific model to use",
+            "maxLength": 100,
+            "nullable": true,
+            "title": "Llm Model Hint",
+            "type": "string"
+          },
+          "llm_provider": {
+            "$ref": "#/components/schemas/LLMProvider",
+            "description": "LLM provider (defaults to anthropic)",
+            "nullable": true
+          },
+          "topic": {
+            "description": "Specific topic to discuss",
+            "maxLength": 500,
+            "nullable": true,
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "title": "CreateChatSessionRequest",
+        "type": "object"
+      },
+      "CreateChatSessionResponse": {
+        "description": "Response wrapper for session creation.",
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/ChatSessionSummaryDto"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "title": "CreateChatSessionResponse",
+        "type": "object"
+      },
+      "CreateUserScraperConfig": {
+        "description": "Payload for creating a scraper config.",
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "display_name": {
+            "maxLength": 255,
+            "nullable": true,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "scraper_type": {
+            "enum": [
+              "substack",
+              "atom",
+              "podcast_rss",
+              "youtube",
+              "reddit"
+            ],
+            "title": "Scraper Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scraper_type"
+        ],
+        "title": "CreateUserScraperConfig",
+        "type": "object"
+      },
+      "CreateVoiceSessionRequest": {
+        "description": "Request payload for creating or resuming a voice session.",
+        "properties": {
+          "chat_session_id": {
+            "description": "Optional existing chat session ID for live continuation.",
+            "minimum": 1.0,
+            "nullable": true,
+            "title": "Chat Session Id",
+            "type": "integer"
+          },
+          "content_id": {
+            "description": "Optional content item for contextual live voice.",
+            "minimum": 1.0,
+            "nullable": true,
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "launch_mode": {
+            "default": "general",
+            "description": "Voice entrypoint mode.",
+            "enum": [
+              "general",
+              "article_voice",
+              "dictate_summary"
+            ],
+            "title": "Launch Mode",
+            "type": "string"
+          },
+          "request_intro": {
+            "default": false,
+            "description": "Request first-use intro turn when user has not completed onboarding.",
+            "title": "Request Intro",
+            "type": "boolean"
+          },
+          "sample_rate_hz": {
+            "default": 16000,
+            "description": "Client microphone sample rate.",
+            "maximum": 48000.0,
+            "minimum": 8000.0,
+            "title": "Sample Rate Hz",
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "Optional existing session ID for reconnect/resume.",
+            "maxLength": 128,
+            "nullable": true,
+            "title": "Session Id",
+            "type": "string"
+          },
+          "source_surface": {
+            "default": "knowledge_live",
+            "description": "Client surface that launched live voice.",
+            "enum": [
+              "knowledge_live",
+              "chat_session",
+              "content_detail"
+            ],
+            "title": "Source Surface",
+            "type": "string"
+          }
+        },
+        "title": "CreateVoiceSessionRequest",
+        "type": "object"
+      },
+      "CreateVoiceSessionResponse": {
+        "description": "Session metadata required to open websocket streaming.",
+        "properties": {
+          "audio_format": {
+            "default": "pcm16",
+            "title": "Audio Format",
+            "type": "string"
+          },
+          "channels": {
+            "default": 1,
+            "title": "Channels",
+            "type": "integer"
+          },
+          "chat_session_id": {
+            "title": "Chat Session Id",
+            "type": "integer"
+          },
+          "content_context_attached": {
+            "title": "Content Context Attached",
+            "type": "boolean"
+          },
+          "launch_mode": {
+            "enum": [
+              "general",
+              "article_voice",
+              "dictate_summary"
+            ],
+            "title": "Launch Mode",
+            "type": "string"
+          },
+          "max_input_seconds": {
+            "title": "Max Input Seconds",
+            "type": "integer"
+          },
+          "sample_rate_hz": {
+            "title": "Sample Rate Hz",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "tts_output_format": {
+            "title": "Tts Output Format",
+            "type": "string"
+          },
+          "websocket_path": {
+            "title": "Websocket Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "websocket_path",
+          "sample_rate_hz",
+          "tts_output_format",
+          "max_input_seconds",
+          "chat_session_id",
+          "launch_mode",
+          "content_context_attached"
+        ],
+        "title": "CreateVoiceSessionResponse",
+        "type": "object"
+      },
+      "DailyNewsDigestListResponse": {
+        "description": "Paginated response for daily digest list.",
+        "properties": {
+          "digests": {
+            "items": {
+              "$ref": "#/components/schemas/DailyNewsDigestResponse"
+            },
+            "title": "Digests",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PaginationMetadata",
+            "description": "Pagination metadata for the response"
+          }
+        },
+        "required": [
+          "meta"
+        ],
+        "title": "DailyNewsDigestListResponse",
+        "type": "object"
+      },
+      "DailyNewsDigestResponse": {
+        "description": "Summary information for one daily news digest card.",
+        "properties": {
+          "generated_at": {
+            "description": "ISO timestamp when digest was generated",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique digest identifier",
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_read": {
+            "default": false,
+            "description": "Whether this digest card is marked read",
+            "title": "Is Read",
+            "type": "boolean"
+          },
+          "key_points": {
+            "description": "Optional digest bullet points",
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Points",
+            "type": "array"
+          },
+          "local_date": {
+            "description": "Digest local date (YYYY-MM-DD)",
+            "title": "Local Date",
+            "type": "string"
+          },
+          "read_at": {
+            "description": "ISO timestamp when digest was marked read",
+            "nullable": true,
+            "title": "Read At",
+            "type": "string"
+          },
+          "source_content_ids": {
+            "description": "Source news content IDs used for synthesis",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Source Content Ids",
+            "type": "array"
+          },
+          "source_count": {
+            "description": "Number of source news items included",
+            "minimum": 0.0,
+            "title": "Source Count",
+            "type": "integer"
+          },
+          "summary": {
+            "description": "Succinct daily roll-up summary",
+            "title": "Summary",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA timezone used for local-day grouping",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "title": {
+            "description": "Daily digest headline",
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "local_date",
+          "timezone",
+          "title",
+          "summary",
+          "source_count",
+          "generated_at"
+        ],
+        "title": "DailyNewsDigestResponse",
+        "type": "object"
+      },
+      "DailyNewsDigestVoiceSummaryResponse": {
+        "description": "Voice narration payload for one daily digest.",
+        "properties": {
+          "digest_id": {
+            "description": "Digest identifier",
+            "title": "Digest Id",
+            "type": "integer"
+          },
+          "narration_text": {
+            "description": "Plain-text narration script for voice playback",
+            "title": "Narration Text",
+            "type": "string"
+          },
+          "title": {
+            "description": "Digest title",
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest_id",
+          "title",
+          "narration_text"
+        ],
+        "title": "DailyNewsDigestVoiceSummaryResponse",
+        "type": "object"
+      },
+      "DetectedFeed": {
+        "description": "Detected RSS/Atom feed from content page.",
+        "example": {
+          "format": "rss",
+          "title": "Example Newsletter",
+          "type": "substack",
+          "url": "https://example.substack.com/feed"
+        },
+        "properties": {
+          "format": {
+            "default": "rss",
+            "description": "Feed format: rss or atom",
+            "title": "Format",
+            "type": "string"
+          },
+          "title": {
+            "description": "Feed title from link tag",
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "Feed type: substack, podcast_rss, or atom",
+            "title": "Type",
+            "type": "string"
+          },
+          "url": {
+            "description": "Feed URL",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "type"
+        ],
+        "title": "DetectedFeed",
+        "type": "object"
+      },
+      "DiscoveryAddItemRequest": {
+        "description": "Request to add single items from discovery suggestions.",
+        "properties": {
+          "suggestion_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Suggestion Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "suggestion_ids"
+        ],
+        "title": "DiscoveryAddItemRequest",
+        "type": "object"
+      },
+      "DiscoveryAddItemResponse": {
+        "description": "Response for adding items from discovery suggestions.",
+        "properties": {
+          "created": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Created",
+            "type": "array"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Skipped",
+            "type": "array"
+          }
+        },
+        "title": "DiscoveryAddItemResponse",
+        "type": "object"
+      },
+      "DiscoveryDismissRequest": {
+        "description": "Request to dismiss discovery suggestions.",
+        "properties": {
+          "suggestion_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Suggestion Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "suggestion_ids"
+        ],
+        "title": "DiscoveryDismissRequest",
+        "type": "object"
+      },
+      "DiscoveryDismissResponse": {
+        "description": "Response for discovery dismissal action.",
+        "properties": {
+          "dismissed": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Dismissed",
+            "type": "array"
+          }
+        },
+        "title": "DiscoveryDismissResponse",
+        "type": "object"
+      },
+      "DiscoveryHistoryResponse": {
+        "description": "Discovery suggestions across multiple runs.",
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoveryRunSuggestions"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "title": "DiscoveryHistoryResponse",
+        "type": "object"
+      },
+      "DiscoveryRefreshResponse": {
+        "description": "Response for manual discovery refresh.",
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "nullable": true,
+            "title": "Task Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DiscoveryRefreshResponse",
+        "type": "object"
+      },
+      "DiscoveryRunSuggestions": {
+        "description": "Discovery suggestions grouped by run.",
+        "properties": {
+          "direction_summary": {
+            "nullable": true,
+            "title": "Direction Summary",
+            "type": "string"
+          },
+          "feeds": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
+            },
+            "title": "Feeds",
+            "type": "array"
+          },
+          "podcasts": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
+            },
+            "title": "Podcasts",
+            "type": "array"
+          },
+          "run_created_at": {
+            "title": "Run Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "run_status": {
+            "title": "Run Status",
+            "type": "string"
+          },
+          "youtube": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
+            },
+            "title": "Youtube",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_status",
+          "run_created_at"
+        ],
+        "title": "DiscoveryRunSuggestions",
+        "type": "object"
+      },
+      "DiscoverySubscribeRequest": {
+        "description": "Request to subscribe to discovery suggestions.",
+        "properties": {
+          "suggestion_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Suggestion Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "suggestion_ids"
+        ],
+        "title": "DiscoverySubscribeRequest",
+        "type": "object"
+      },
+      "DiscoverySubscribeResponse": {
+        "description": "Response for discovery subscription action.",
+        "properties": {
+          "errors": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "subscribed": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Subscribed",
+            "type": "array"
+          }
+        },
+        "title": "DiscoverySubscribeResponse",
+        "type": "object"
+      },
+      "DiscoverySuggestionResponse": {
+        "description": "Suggested feed/podcast/YouTube subscription item.",
+        "properties": {
+          "channel_id": {
+            "nullable": true,
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "title": "Description",
+            "type": "string"
+          },
+          "feed_url": {
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "item_url": {
+            "nullable": true,
+            "title": "Item Url",
+            "type": "string"
+          },
+          "playlist_id": {
+            "nullable": true,
+            "title": "Playlist Id",
+            "type": "string"
+          },
+          "rationale": {
+            "nullable": true,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "score": {
+            "nullable": true,
+            "title": "Score",
+            "type": "number"
+          },
+          "site_url": {
+            "nullable": true,
+            "title": "Site Url",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "suggestion_type": {
+            "title": "Suggestion Type",
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "suggestion_type",
+          "feed_url",
+          "status",
+          "created_at"
+        ],
+        "title": "DiscoverySuggestionResponse",
+        "type": "object"
+      },
+      "DiscoverySuggestionsResponse": {
+        "description": "Grouped discovery suggestions for the latest run.",
+        "properties": {
+          "direction_summary": {
+            "nullable": true,
+            "title": "Direction Summary",
+            "type": "string"
+          },
+          "feeds": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
+            },
+            "title": "Feeds",
+            "type": "array"
+          },
+          "podcasts": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
+            },
+            "title": "Podcasts",
+            "type": "array"
+          },
+          "run_created_at": {
+            "nullable": true,
+            "title": "Run Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "nullable": true,
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "run_status": {
+            "nullable": true,
+            "title": "Run Status",
+            "type": "string"
+          },
+          "youtube": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
+            },
+            "title": "Youtube",
+            "type": "array"
+          }
+        },
+        "title": "DiscoverySuggestionsResponse",
+        "type": "object"
+      },
+      "DiscussionCommentResponse": {
+        "description": "Normalized discussion comment.",
+        "properties": {
+          "author": {
+            "nullable": true,
+            "title": "Author",
+            "type": "string"
+          },
+          "comment_id": {
+            "title": "Comment Id",
+            "type": "string"
+          },
+          "compact_text": {
+            "nullable": true,
+            "title": "Compact Text",
+            "type": "string"
+          },
+          "created_at": {
+            "nullable": true,
+            "title": "Created At",
+            "type": "string"
+          },
+          "depth": {
+            "default": 0,
+            "title": "Depth",
+            "type": "integer"
+          },
+          "parent_id": {
+            "nullable": true,
+            "title": "Parent Id",
+            "type": "string"
+          },
+          "source_url": {
+            "nullable": true,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "comment_id",
+          "text"
+        ],
+        "title": "DiscussionCommentResponse",
+        "type": "object"
+      },
+      "DiscussionGroupResponse": {
+        "description": "Grouped discussion destinations from Techmeme.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DiscussionItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "DiscussionGroupResponse",
+        "type": "object"
+      },
+      "DiscussionItemResponse": {
+        "description": "One discussion destination in a group (X, Forums, LinkedIn, etc.).",
+        "properties": {
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "DiscussionItemResponse",
+        "type": "object"
+      },
+      "DiscussionLinkResponse": {
+        "description": "Link extracted from comments or discussion lists.",
+        "properties": {
+          "comment_id": {
+            "nullable": true,
+            "title": "Comment Id",
+            "type": "string"
+          },
+          "group_label": {
+            "nullable": true,
+            "title": "Group Label",
+            "type": "string"
+          },
+          "source": {
+            "default": "unknown",
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "DiscussionLinkResponse",
+        "type": "object"
+      },
+      "DownloadMoreRequest": {
+        "description": "Request to download older items from the same feed series.",
+        "properties": {
+          "count": {
+            "description": "Number of additional older items to attempt to fetch",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "DownloadMoreRequest",
+        "type": "object"
+      },
+      "DownloadMoreResponse": {
+        "description": "Response for the download-more action.",
+        "properties": {
+          "base_limit": {
+            "minimum": 1.0,
+            "title": "Base Limit",
+            "type": "integer"
+          },
+          "duplicates": {
+            "minimum": 0.0,
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "errors": {
+            "minimum": 0.0,
+            "title": "Errors",
+            "type": "integer"
+          },
+          "requested_count": {
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Requested Count",
+            "type": "integer"
+          },
+          "saved": {
+            "minimum": 0.0,
+            "title": "Saved",
+            "type": "integer"
+          },
+          "scraped": {
+            "minimum": 0.0,
+            "title": "Scraped",
+            "type": "integer"
+          },
+          "status": {
+            "description": "Completion status",
+            "title": "Status",
+            "type": "string"
+          },
+          "target_limit": {
+            "minimum": 1.0,
+            "title": "Target Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "requested_count",
+          "base_limit",
+          "target_limit",
+          "scraped",
+          "saved",
+          "duplicates",
+          "errors"
+        ],
+        "title": "DownloadMoreResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IntegrationDisconnectResponse": {
+        "description": "Response for integration disconnect actions.",
+        "properties": {
+          "provider": {
+            "default": "x",
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "const": "disconnected",
+            "default": "disconnected",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "IntegrationDisconnectResponse",
+        "type": "object"
+      },
+      "JobStatusResponse": {
+        "description": "Status payload for an async processing job.",
+        "properties": {
+          "completed_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Completed At",
+            "type": "string"
+          },
+          "content_id": {
+            "nullable": true,
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_message": {
+            "nullable": true,
+            "title": "Error Message",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "queue_name": {
+            "title": "Queue Name",
+            "type": "string"
+          },
+          "retry_count": {
+            "default": 0,
+            "title": "Retry Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "task_type": {
+            "title": "Task Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "task_type",
+          "status",
+          "queue_name"
+        ],
+        "title": "JobStatusResponse",
+        "type": "object"
+      },
+      "LLMProvider": {
+        "description": "Supported LLM providers.",
+        "enum": [
+          "openai",
+          "anthropic",
+          "google",
+          "cerebras",
+          "deep_research"
+        ],
+        "title": "LLMProvider",
+        "type": "string"
+      },
+      "LongFormStatsResponse": {
+        "description": "Response containing long-form content stats for a user.",
+        "properties": {
+          "favorited_count": {
+            "description": "Favorited long-form items",
+            "title": "Favorited Count",
+            "type": "integer"
+          },
+          "processing_count": {
+            "description": "Long-form items pending or processing for the user",
+            "title": "Processing Count",
+            "type": "integer"
+          },
+          "read_count": {
+            "description": "Read long-form items",
+            "title": "Read Count",
+            "type": "integer"
+          },
+          "total_count": {
+            "description": "Total long-form items in the inbox",
+            "title": "Total Count",
+            "type": "integer"
+          },
+          "unread_count": {
+            "description": "Unread long-form items",
+            "title": "Unread Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_count",
+          "unread_count",
+          "read_count",
+          "favorited_count",
+          "processing_count"
+        ],
+        "title": "LongFormStatsResponse",
+        "type": "object"
+      },
+      "MessageProcessingStatus": {
+        "description": "Processing status for async chat messages.",
+        "enum": [
+          "processing",
+          "completed",
+          "failed"
+        ],
+        "title": "MessageProcessingStatus",
+        "type": "string"
+      },
+      "MessageStatusResponse": {
+        "description": "Response when polling for message completion status.",
+        "properties": {
+          "assistant_message": {
+            "$ref": "#/components/schemas/ChatMessageDto",
+            "description": "Assistant response (present when status=completed)",
+            "nullable": true
+          },
+          "error": {
+            "description": "Error message if status=failed",
+            "nullable": true,
+            "title": "Error",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MessageProcessingStatus"
+          }
+        },
+        "required": [
+          "message_id",
+          "status"
+        ],
+        "title": "MessageStatusResponse",
+        "type": "object"
+      },
+      "ModelPricing": {
+        "description": "Optional pricing inputs for estimated cost calculations.",
+        "properties": {
+          "input_per_million_usd": {
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Input Per Million Usd",
+            "type": "number"
+          },
+          "output_per_million_usd": {
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Output Per Million Usd",
+            "type": "number"
+          }
+        },
+        "title": "ModelPricing",
+        "type": "object"
+      },
+      "OnboardingAudioDiscoverRequest": {
+        "description": "Request to start onboarding audio discovery.",
+        "properties": {
+          "locale": {
+            "maxLength": 20,
+            "nullable": true,
+            "title": "Locale",
+            "type": "string"
+          },
+          "transcript": {
+            "maxLength": 8000,
+            "minLength": 3,
+            "title": "Transcript",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transcript"
+        ],
+        "title": "OnboardingAudioDiscoverRequest",
+        "type": "object"
+      },
+      "OnboardingAudioDiscoverResponse": {
+        "description": "Response for onboarding audio discovery start.",
+        "properties": {
+          "inferred_topics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inferred Topics",
+            "type": "array"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingDiscoveryLaneStatus"
+            },
+            "title": "Lanes",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "run_status": {
+            "title": "Run Status",
+            "type": "string"
+          },
+          "topic_summary": {
+            "nullable": true,
+            "title": "Topic Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_status"
+        ],
+        "title": "OnboardingAudioDiscoverResponse",
+        "type": "object"
+      },
+      "OnboardingAudioLanePreview": {
+        "description": "Preview payload for a generated onboarding discovery lane.",
+        "properties": {
+          "exa_results_per_query": {
+            "default": 0,
+            "title": "Exa Results Per Query",
+            "type": "integer"
+          },
+          "goal": {
+            "title": "Goal",
+            "type": "string"
+          },
+          "include_social": {
+            "default": false,
+            "title": "Include Social",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "target": {
+            "enum": [
+              "feeds",
+              "podcasts",
+              "reddit"
+            ],
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "goal",
+          "target"
+        ],
+        "title": "OnboardingAudioLanePreview",
+        "type": "object"
+      },
+      "OnboardingAudioLanePreviewResponse": {
+        "description": "Preview response for onboarding audio lane generation.",
+        "properties": {
+          "fallback_reason": {
+            "nullable": true,
+            "title": "Fallback Reason",
+            "type": "string"
+          },
+          "inferred_topics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inferred Topics",
+            "type": "array"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingAudioLanePreview"
+            },
+            "title": "Lanes",
+            "type": "array"
+          },
+          "topic_summary": {
+            "title": "Topic Summary",
+            "type": "string"
+          },
+          "used_fallback": {
+            "default": false,
+            "title": "Used Fallback",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "topic_summary"
+        ],
+        "title": "OnboardingAudioLanePreviewResponse",
+        "type": "object"
+      },
+      "OnboardingCompleteRequest": {
+        "description": "Request to finalize onboarding selections.",
+        "properties": {
+          "inferred_topics": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "title": "Inferred Topics",
+            "type": "array"
+          },
+          "profile_summary": {
+            "nullable": true,
+            "title": "Profile Summary",
+            "type": "string"
+          },
+          "selected_sources": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingSelectedSource"
+            },
+            "title": "Selected Sources",
+            "type": "array"
+          },
+          "selected_subreddits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Subreddits",
+            "type": "array"
+          },
+          "twitter_username": {
+            "maxLength": 50,
+            "nullable": true,
+            "title": "Twitter Username",
+            "type": "string"
+          }
+        },
+        "title": "OnboardingCompleteRequest",
+        "type": "object"
+      },
+      "OnboardingCompleteResponse": {
+        "description": "Response for onboarding completion.",
+        "properties": {
+          "has_completed_new_user_tutorial": {
+            "title": "Has Completed New User Tutorial",
+            "type": "boolean"
+          },
+          "has_completed_onboarding": {
+            "title": "Has Completed Onboarding",
+            "type": "boolean"
+          },
+          "inbox_count_estimate": {
+            "title": "Inbox Count Estimate",
+            "type": "integer"
+          },
+          "longform_status": {
+            "title": "Longform Status",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "nullable": true,
+            "title": "Task Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "inbox_count_estimate",
+          "longform_status",
+          "has_completed_onboarding",
+          "has_completed_new_user_tutorial"
+        ],
+        "title": "OnboardingCompleteResponse",
+        "type": "object"
+      },
+      "OnboardingDiscoveryLaneStatus": {
+        "description": "Status for a single onboarding discovery lane.",
+        "properties": {
+          "completed_queries": {
+            "default": 0,
+            "title": "Completed Queries",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "query_count": {
+            "default": 0,
+            "title": "Query Count",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "title": "OnboardingDiscoveryLaneStatus",
+        "type": "object"
+      },
+      "OnboardingDiscoveryStatusResponse": {
+        "description": "Status response for onboarding audio discovery polling.",
+        "properties": {
+          "error_message": {
+            "nullable": true,
+            "title": "Error Message",
+            "type": "string"
+          },
+          "inferred_topics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inferred Topics",
+            "type": "array"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingDiscoveryLaneStatus"
+            },
+            "title": "Lanes",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          },
+          "run_status": {
+            "title": "Run Status",
+            "type": "string"
+          },
+          "suggestions": {
+            "$ref": "#/components/schemas/OnboardingFastDiscoverResponse",
+            "nullable": true
+          },
+          "topic_summary": {
+            "nullable": true,
+            "title": "Topic Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_status"
+        ],
+        "title": "OnboardingDiscoveryStatusResponse",
+        "type": "object"
+      },
+      "OnboardingFastDiscoverRequest": {
+        "description": "Request for fast onboarding discovery.",
+        "properties": {
+          "inferred_topics": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "title": "Inferred Topics",
+            "type": "array"
+          },
+          "profile_summary": {
+            "minLength": 3,
+            "title": "Profile Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_summary"
+        ],
+        "title": "OnboardingFastDiscoverRequest",
+        "type": "object"
+      },
+      "OnboardingFastDiscoverResponse": {
+        "description": "Response for fast onboarding discovery.",
+        "properties": {
+          "recommended_pods": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingSuggestion"
+            },
+            "title": "Recommended Pods",
+            "type": "array"
+          },
+          "recommended_subreddits": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingSuggestion"
+            },
+            "title": "Recommended Subreddits",
+            "type": "array"
+          },
+          "recommended_substacks": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingSuggestion"
+            },
+            "title": "Recommended Substacks",
+            "type": "array"
+          }
+        },
+        "title": "OnboardingFastDiscoverResponse",
+        "type": "object"
+      },
+      "OnboardingProfileRequest": {
+        "description": "Request to build a profile for onboarding personalization.",
+        "properties": {
+          "first_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "First Name",
+            "type": "string"
+          },
+          "interest_topics": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "title": "Interest Topics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "first_name"
+        ],
+        "title": "OnboardingProfileRequest",
+        "type": "object"
+      },
+      "OnboardingProfileResponse": {
+        "description": "Profile summary for onboarding personalization.",
+        "properties": {
+          "candidate_sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Candidate Sources",
+            "type": "array"
+          },
+          "inferred_topics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inferred Topics",
+            "type": "array"
+          },
+          "profile_summary": {
+            "title": "Profile Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_summary"
+        ],
+        "title": "OnboardingProfileResponse",
+        "type": "object"
+      },
+      "OnboardingSelectedSource": {
+        "description": "Selected source for onboarding completion.",
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "nullable": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "feed_url": {
+            "maxLength": 2048,
+            "minLength": 5,
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "suggestion_type": {
+            "enum": [
+              "substack",
+              "atom",
+              "podcast_rss"
+            ],
+            "title": "Suggestion Type",
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suggestion_type",
+          "feed_url"
+        ],
+        "title": "OnboardingSelectedSource",
+        "type": "object"
+      },
+      "OnboardingSuggestion": {
+        "description": "Single onboarding recommendation item.",
+        "properties": {
+          "feed_url": {
+            "nullable": true,
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "is_default": {
+            "default": false,
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "rationale": {
+            "nullable": true,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "score": {
+            "nullable": true,
+            "title": "Score",
+            "type": "number"
+          },
+          "site_url": {
+            "nullable": true,
+            "title": "Site Url",
+            "type": "string"
+          },
+          "subreddit": {
+            "nullable": true,
+            "title": "Subreddit",
+            "type": "string"
+          },
+          "suggestion_type": {
+            "enum": [
+              "substack",
+              "atom",
+              "podcast_rss",
+              "reddit"
+            ],
+            "title": "Suggestion Type",
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "suggestion_type"
+        ],
+        "title": "OnboardingSuggestion",
+        "type": "object"
+      },
+      "OnboardingTutorialResponse": {
+        "description": "Response for tutorial completion.",
+        "properties": {
+          "has_completed_new_user_tutorial": {
+            "title": "Has Completed New User Tutorial",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "has_completed_new_user_tutorial"
+        ],
+        "title": "OnboardingTutorialResponse",
+        "type": "object"
+      },
+      "OnboardingVoiceParseRequest": {
+        "description": "Request to parse onboarding voice transcript into fields.",
+        "properties": {
+          "locale": {
+            "maxLength": 20,
+            "nullable": true,
+            "title": "Locale",
+            "type": "string"
+          },
+          "transcript": {
+            "maxLength": 6000,
+            "minLength": 3,
+            "title": "Transcript",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transcript"
+        ],
+        "title": "OnboardingVoiceParseRequest",
+        "type": "object"
+      },
+      "OnboardingVoiceParseResponse": {
+        "description": "Parsed onboarding voice fields.",
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "first_name": {
+            "nullable": true,
+            "title": "First Name",
+            "type": "string"
+          },
+          "interest_topics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Interest Topics",
+            "type": "array"
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Fields",
+            "type": "array"
+          }
+        },
+        "title": "OnboardingVoiceParseResponse",
+        "type": "object"
+      },
+      "PaginationMetadata": {
+        "description": "Pagination metadata for responses.",
+        "properties": {
+          "has_more": {
+            "default": false,
+            "description": "Whether more results are available",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "description": "Opaque cursor token for next page (null if no more results)",
+            "nullable": true,
+            "title": "Next Cursor",
+            "type": "string"
+          },
+          "page_size": {
+            "description": "Number of items in current response",
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Total number of items (expensive to compute, may be omitted)",
+            "nullable": true,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page_size"
+        ],
+        "title": "PaginationMetadata",
+        "type": "object"
+      },
+      "PodcastEpisodeSearchResponse": {
+        "description": "Response payload for podcast episode search.",
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/PodcastEpisodeSearchResultResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "title": "PodcastEpisodeSearchResponse",
+        "type": "object"
+      },
+      "PodcastEpisodeSearchResultResponse": {
+        "description": "Single podcast episode search result.",
+        "properties": {
+          "episode_url": {
+            "title": "Episode Url",
+            "type": "string"
+          },
+          "feed_url": {
+            "nullable": true,
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "podcast_title": {
+            "nullable": true,
+            "title": "Podcast Title",
+            "type": "string"
+          },
+          "provider": {
+            "nullable": true,
+            "title": "Provider",
+            "type": "string"
+          },
+          "published_at": {
+            "nullable": true,
+            "title": "Published At",
+            "type": "string"
+          },
+          "score": {
+            "nullable": true,
+            "title": "Score",
+            "type": "number"
+          },
+          "snippet": {
+            "nullable": true,
+            "title": "Snippet",
+            "type": "string"
+          },
+          "source": {
+            "nullable": true,
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "episode_url"
+        ],
+        "title": "PodcastEpisodeSearchResultResponse",
+        "type": "object"
+      },
+      "ProcessingCountResponse": {
+        "description": "Response containing processing counts grouped by lane.",
+        "properties": {
+          "long_form_count": {
+            "description": "Number of long-form inbox items queued, pending, or processing",
+            "title": "Long Form Count",
+            "type": "integer"
+          },
+          "news_count": {
+            "description": "Number of short-form news inbox items queued, pending, or processing",
+            "title": "News Count",
+            "type": "integer"
+          },
+          "processing_count": {
+            "description": "Total number of inbox items queued, pending, or processing for the user",
+            "title": "Processing Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "processing_count",
+          "long_form_count",
+          "news_count"
+        ],
+        "title": "ProcessingCountResponse",
+        "type": "object"
+      },
+      "RealtimeTokenResponse": {
+        "description": "Ephemeral token for OpenAI Realtime sessions.",
+        "properties": {
+          "expires_at": {
+            "nullable": true,
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "model": {
+            "nullable": true,
+            "title": "Model",
+            "type": "string"
+          },
+          "session_type": {
+            "enum": [
+              "realtime",
+              "transcription"
+            ],
+            "nullable": true,
+            "title": "Session Type",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "RealtimeTokenResponse",
+        "type": "object"
+      },
+      "RecordContentInteractionRequest": {
+        "description": "Request to record a user interaction with content.",
+        "example": {
+          "content_id": 123,
+          "context_data": {
+            "content_type": "article",
+            "was_read_when_loaded": false
+          },
+          "interaction_id": "c5d968d3-5608-48b4-9838-cb9e5f63f8ae",
+          "interaction_type": "opened",
+          "occurred_at": "2026-02-15T09:30:00Z",
+          "surface": "ios_content_detail"
+        },
+        "properties": {
+          "content_id": {
+            "description": "Content ID to associate with the interaction",
+            "exclusiveMinimum": true,
+            "minimum": 0.0,
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "context_data": {
+            "additionalProperties": true,
+            "description": "Optional structured metadata for analytics",
+            "title": "Context Data",
+            "type": "object"
+          },
+          "interaction_id": {
+            "description": "Client-generated interaction UUID for idempotency",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Interaction Id",
+            "type": "string"
+          },
+          "interaction_type": {
+            "const": "opened",
+            "description": "Interaction type. V1 supports opened.",
+            "title": "Interaction Type",
+            "type": "string"
+          },
+          "occurred_at": {
+            "description": "Optional ISO timestamp of when interaction occurred",
+            "format": "date-time",
+            "nullable": true,
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "surface": {
+            "description": "Surface identifier (e.g., ios_content_detail)",
+            "maxLength": 64,
+            "nullable": true,
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "interaction_id",
+          "content_id",
+          "interaction_type"
+        ],
+        "title": "RecordContentInteractionRequest",
+        "type": "object"
+      },
+      "RecordContentInteractionResponse": {
+        "description": "Response after recording a user interaction.",
+        "example": {
+          "analytics_interaction_id": 456,
+          "interaction_id": "c5d968d3-5608-48b4-9838-cb9e5f63f8ae",
+          "recorded": true,
+          "status": "success"
+        },
+        "properties": {
+          "analytics_interaction_id": {
+            "description": "Primary key of recorded analytics row",
+            "nullable": true,
+            "title": "Analytics Interaction Id",
+            "type": "integer"
+          },
+          "interaction_id": {
+            "description": "Echoed client interaction ID",
+            "title": "Interaction Id",
+            "type": "string"
+          },
+          "recorded": {
+            "description": "True when a new row was inserted; false when idempotent duplicate",
+            "title": "Recorded",
+            "type": "boolean"
+          },
+          "status": {
+            "const": "success",
+            "description": "Operation status",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "recorded",
+          "interaction_id"
+        ],
+        "title": "RecordContentInteractionResponse",
+        "type": "object"
+      },
+      "RefreshTokenRequest": {
+        "description": "Request schema for token refresh.",
+        "properties": {
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshTokenRequest",
+        "type": "object"
+      },
+      "ScraperConfigResponse": {
+        "description": "Response model for scraper configs.",
+        "example": {
+          "config": {
+            "feed_url": "https://example.substack.com/feed"
+          },
+          "created_at": "2025-06-24T12:00:00Z",
+          "display_name": "Import AI",
+          "feed_url": "https://example.substack.com/feed",
+          "id": 1,
+          "is_active": true,
+          "limit": 10,
+          "scraper_type": "substack"
+        },
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "nullable": true,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "feed_url": {
+            "nullable": true,
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "limit": {
+            "nullable": true,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "scraper_type": {
+            "title": "Scraper Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scraper_type",
+          "config",
+          "is_active",
+          "created_at"
+        ],
+        "title": "ScraperConfigResponse",
+        "type": "object"
+      },
+      "SendChatMessageRequest": {
+        "description": "Request to send a message in a chat session.",
+        "example": {
+          "message": "Can you explain that in more detail?"
+        },
+        "properties": {
+          "message": {
+            "description": "Message to send",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "SendChatMessageRequest",
+        "type": "object"
+      },
+      "SendMessageResponse": {
+        "description": "Response after sending a chat message (async).\n\nReturns immediately with the user message and a message_id to poll for completion.",
+        "properties": {
+          "message_id": {
+            "description": "ID to poll for assistant response",
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MessageProcessingStatus",
+            "default": "processing",
+            "description": "Current processing status"
+          },
+          "user_message": {
+            "$ref": "#/components/schemas/ChatMessageDto",
+            "description": "The user's message"
+          }
+        },
+        "required": [
+          "session_id",
+          "user_message",
+          "message_id"
+        ],
+        "title": "SendMessageResponse",
+        "type": "object"
+      },
+      "StartDailyDigestChatResponse": {
+        "description": "Response returned after starting a daily-digest dig-deeper chat.",
+        "properties": {
+          "message_id": {
+            "description": "Pending message identifier",
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "session": {
+            "$ref": "#/components/schemas/ChatSessionSummaryDto"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MessageProcessingStatus",
+            "default": "processing",
+            "description": "Current processing status for the seeded message"
+          },
+          "user_message": {
+            "$ref": "#/components/schemas/ChatMessageDto",
+            "description": "Seeded processing user message"
+          }
+        },
+        "required": [
+          "session",
+          "user_message",
+          "message_id"
+        ],
+        "title": "StartDailyDigestChatResponse",
+        "type": "object"
+      },
+      "SubmissionStatusListResponse": {
+        "description": "Response for user submission status list.",
+        "properties": {
+          "meta": {
+            "$ref": "#/components/schemas/PaginationMetadata",
+            "description": "Pagination metadata for the response"
+          },
+          "submissions": {
+            "description": "List of user-submitted items still processing or failed",
+            "items": {
+              "$ref": "#/components/schemas/SubmissionStatusResponse"
+            },
+            "title": "Submissions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "submissions",
+          "meta"
+        ],
+        "title": "SubmissionStatusListResponse",
+        "type": "object"
+      },
+      "SubmissionStatusResponse": {
+        "description": "Status information for a user-submitted content item.",
+        "properties": {
+          "content_type": {
+            "$ref": "#/components/schemas/ContentType",
+            "description": "Type of content (article/podcast/news/unknown)"
+          },
+          "created_at": {
+            "description": "ISO timestamp when content was created",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_message": {
+            "description": "Failure reason when status=failed/skipped",
+            "nullable": true,
+            "title": "Error Message",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier",
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_self_submission": {
+            "default": true,
+            "description": "Whether this content was submitted by the current user",
+            "title": "Is Self Submission",
+            "type": "boolean"
+          },
+          "processed_at": {
+            "description": "ISO timestamp when content was processed",
+            "nullable": true,
+            "title": "Processed At",
+            "type": "string"
+          },
+          "source_url": {
+            "description": "Original submitted URL",
+            "nullable": true,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContentStatus",
+            "description": "Processing status"
+          },
+          "submitted_via": {
+            "description": "Submission channel (share_sheet, etc.)",
+            "nullable": true,
+            "title": "Submitted Via",
+            "type": "string"
+          },
+          "title": {
+            "description": "Content title (if detected)",
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "description": "Canonical URL of the content",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "content_type",
+          "url",
+          "status",
+          "created_at"
+        ],
+        "title": "SubmissionStatusResponse",
+        "type": "object"
+      },
+      "SubmitContentRequest": {
+        "description": "Request to submit a user-provided URL for processing.",
+        "example": {
+          "content_type": "podcast",
+          "crawl_links": true,
+          "instruction": "Add all links mentioned in the episode page",
+          "platform": "spotify",
+          "share_and_chat": false,
+          "subscribe_to_feed": false,
+          "title": "Great interview about AI",
+          "url": "https://open.spotify.com/episode/abc123"
+        },
+        "properties": {
+          "content_type": {
+            "$ref": "#/components/schemas/ContentType",
+            "description": "Content type hint. If omitted, the server will infer based on the URL.",
+            "nullable": true
+          },
+          "crawl_links": {
+            "default": false,
+            "description": "Whether to create additional content items from relevant links discovered on the submitted page.",
+            "title": "Crawl Links",
+            "type": "boolean"
+          },
+          "instruction": {
+            "description": "Optional instruction for analyzing the submitted URL",
+            "maxLength": 4000,
+            "nullable": true,
+            "title": "Instruction",
+            "type": "string"
+          },
+          "platform": {
+            "description": "Optional platform hint (e.g., spotify, substack)",
+            "maxLength": 50,
+            "nullable": true,
+            "title": "Platform",
+            "type": "string"
+          },
+          "share_and_chat": {
+            "default": false,
+            "description": "When true, mark the submitted content as read and start a dig-deeper chat after processing completes.",
+            "title": "Share And Chat",
+            "type": "boolean"
+          },
+          "subscribe_to_feed": {
+            "default": false,
+            "description": "When true, detect an RSS/Atom feed from the URL and subscribe to it instead of processing the URL as content.",
+            "title": "Subscribe To Feed",
+            "type": "boolean"
+          },
+          "title": {
+            "description": "Optional title supplied by the client/share sheet",
+            "maxLength": 500,
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "description": "URL to submit (http/https only)",
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "SubmitContentRequest",
+        "type": "object"
+      },
+      "SubscribeToFeedRequest": {
+        "description": "Request to subscribe to a detected feed.",
+        "example": {
+          "display_name": "Example Newsletter",
+          "feed_type": "substack",
+          "feed_url": "https://example.substack.com/feed"
+        },
+        "properties": {
+          "display_name": {
+            "nullable": true,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "feed_type": {
+            "title": "Feed Type",
+            "type": "string"
+          },
+          "feed_url": {
+            "title": "Feed Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feed_url",
+          "feed_type"
+        ],
+        "title": "SubscribeToFeedRequest",
+        "type": "object"
+      },
+      "SummaryKind": {
+        "description": "Canonical summary kind discriminators.",
+        "enum": [
+          "long_structured",
+          "long_interleaved",
+          "long_bullets",
+          "long_editorial_narrative",
+          "short_news_digest"
+        ],
+        "title": "SummaryKind",
+        "type": "string"
+      },
+      "SummaryVersion": {
+        "description": "Supported summary schema versions.",
+        "enum": [
+          1,
+          2
+        ],
+        "title": "SummaryVersion",
+        "type": "integer"
+      },
+      "TokenResponse": {
+        "description": "Response schema for authentication tokens.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "is_new_user": {
+            "default": false,
+            "title": "Is New User",
+            "type": "boolean"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserResponse"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token",
+          "user"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      },
+      "TweetLength": {
+        "description": "Tweet length preference.",
+        "enum": [
+          "short",
+          "medium",
+          "long"
+        ],
+        "title": "TweetLength",
+        "type": "string"
+      },
+      "TweetSuggestion": {
+        "description": "A single tweet suggestion generated by the LLM.",
+        "example": {
+          "id": 1,
+          "style_label": "insightful",
+          "text": "Great read on AI agents. Key insight: the best agents don't try to be human, they try to be useful. https://example.com/article"
+        },
+        "properties": {
+          "id": {
+            "description": "Suggestion ID (1-3)",
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Id",
+            "type": "integer"
+          },
+          "style_label": {
+            "description": "Style descriptor (e.g., 'insightful', 'provocative')",
+            "nullable": true,
+            "title": "Style Label",
+            "type": "string"
+          },
+          "text": {
+            "description": "Tweet text",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "title": "TweetSuggestion",
+        "type": "object"
+      },
+      "TweetSuggestionsRequest": {
+        "description": "Request body for generating tweet suggestions.",
+        "example": {
+          "creativity": 7,
+          "length": "medium",
+          "llm_provider": "google",
+          "message": "emphasize the startup angle"
+        },
+        "properties": {
+          "creativity": {
+            "default": 5,
+            "description": "Creativity level 1-10 (1=factual, 10=bold/playful)",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Creativity",
+            "type": "integer"
+          },
+          "length": {
+            "$ref": "#/components/schemas/TweetLength",
+            "default": "medium",
+            "description": "Tweet length preference (short=100-180, medium=180-280, long=280-400 chars)"
+          },
+          "llm_provider": {
+            "description": "LLM provider to use (openai, anthropic, google). Defaults to google.",
+            "nullable": true,
+            "title": "Llm Provider",
+            "type": "string"
+          },
+          "message": {
+            "description": "Optional user guidance for tweet generation",
+            "maxLength": 500,
+            "nullable": true,
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "TweetSuggestionsRequest",
+        "type": "object"
+      },
+      "TweetSuggestionsResponse": {
+        "description": "Response containing generated tweet suggestions.",
+        "example": {
+          "content_id": 123,
+          "creativity": 7,
+          "model": "google-gla:gemini-3-pro-preview",
+          "suggestions": [
+            {
+              "id": 1,
+              "style_label": "insightful",
+              "text": "Great read on AI agents. The best agents don't try to be human, they try to be useful. https://example.com"
+            },
+            {
+              "id": 2,
+              "style_label": "provocative",
+              "text": "This piece nails it. We're not building artificial humans, we're building artificial usefulness. https://example.com"
+            },
+            {
+              "id": 3,
+              "style_label": "reflective",
+              "text": "Reading this made me rethink how we frame AI. Stop asking 'can it think?' Start asking 'can it help?' https://example.com"
+            }
+          ]
+        },
+        "properties": {
+          "content_id": {
+            "description": "ID of the content these tweets are about",
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "creativity": {
+            "description": "Creativity level used for generation",
+            "title": "Creativity",
+            "type": "integer"
+          },
+          "length": {
+            "$ref": "#/components/schemas/TweetLength",
+            "description": "Length preference used for generation"
+          },
+          "model": {
+            "default": "google-gla:gemini-3-pro-preview",
+            "description": "LLM model used for generation",
+            "title": "Model",
+            "type": "string"
+          },
+          "suggestions": {
+            "description": "Exactly 3 tweet suggestions",
+            "items": {
+              "$ref": "#/components/schemas/TweetSuggestion"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Suggestions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "content_id",
+          "creativity",
+          "length",
+          "suggestions"
+        ],
+        "title": "TweetSuggestionsResponse",
+        "type": "object"
+      },
+      "UnreadCountsResponse": {
+        "description": "Response containing unread counts by content type.",
+        "properties": {
+          "article": {
+            "description": "Number of unread articles",
+            "title": "Article",
+            "type": "integer"
+          },
+          "daily_news_digest": {
+            "default": 0,
+            "description": "Number of unread daily news digest cards",
+            "title": "Daily News Digest",
+            "type": "integer"
+          },
+          "news": {
+            "description": "Number of unread news items",
+            "title": "News",
+            "type": "integer"
+          },
+          "podcast": {
+            "description": "Number of unread podcasts",
+            "title": "Podcast",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "article",
+          "podcast",
+          "news"
+        ],
+        "title": "UnreadCountsResponse",
+        "type": "object"
+      },
+      "UpdateChatSessionRequest": {
+        "description": "Request to update a chat session.",
+        "example": {
+          "llm_provider": "anthropic"
+        },
+        "properties": {
+          "llm_model_hint": {
+            "description": "Optional specific model to use",
+            "maxLength": 100,
+            "nullable": true,
+            "title": "Llm Model Hint",
+            "type": "string"
+          },
+          "llm_provider": {
+            "$ref": "#/components/schemas/LLMProvider",
+            "description": "New LLM provider to use for this session",
+            "nullable": true
+          }
+        },
+        "title": "UpdateChatSessionRequest",
+        "type": "object"
+      },
+      "UpdateUserProfileRequest": {
+        "description": "Request schema for updating the authenticated user's profile.",
+        "properties": {
+          "full_name": {
+            "maxLength": 255,
+            "nullable": true,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "news_digest_timezone": {
+            "maxLength": 100,
+            "nullable": true,
+            "title": "News Digest Timezone",
+            "type": "string"
+          },
+          "twitter_username": {
+            "maxLength": 50,
+            "nullable": true,
+            "title": "Twitter Username",
+            "type": "string"
+          }
+        },
+        "title": "UpdateUserProfileRequest",
+        "type": "object"
+      },
+      "UpdateUserScraperConfig": {
+        "description": "Payload for updating a scraper config.",
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "nullable": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "display_name": {
+            "maxLength": 255,
+            "nullable": true,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "is_active": {
+            "nullable": true,
+            "title": "Is Active",
+            "type": "boolean"
+          }
+        },
+        "title": "UpdateUserScraperConfig",
+        "type": "object"
+      },
+      "UpsertUserLlmIntegrationRequest": {
+        "description": "Request to store a user-managed LLM provider key.",
+        "properties": {
+          "api_key": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "UpsertUserLlmIntegrationRequest",
+        "type": "object"
+      },
+      "UserLlmIntegrationResponse": {
+        "description": "User-managed LLM integration summary.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "provider": {
+            "enum": [
+              "anthropic",
+              "openai",
+              "google"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "configured"
+        ],
+        "title": "UserLlmIntegrationResponse",
+        "type": "object"
+      },
+      "UserLlmIntegrationTestResponse": {
+        "description": "Response for validating presence of a user-managed LLM key.",
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "provider": {
+            "enum": [
+              "anthropic",
+              "openai",
+              "google"
+            ],
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "ok"
+        ],
+        "title": "UserLlmIntegrationTestResponse",
+        "type": "object"
+      },
+      "UserResponse": {
+        "description": "Schema for user API responses.",
+        "properties": {
+          "apple_id": {
+            "title": "Apple Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          },
+          "full_name": {
+            "nullable": true,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "has_completed_live_voice_onboarding": {
+            "title": "Has Completed Live Voice Onboarding",
+            "type": "boolean"
+          },
+          "has_completed_new_user_tutorial": {
+            "title": "Has Completed New User Tutorial",
+            "type": "boolean"
+          },
+          "has_completed_onboarding": {
+            "title": "Has Completed Onboarding",
+            "type": "boolean"
+          },
+          "has_x_bookmark_sync": {
+            "default": false,
+            "title": "Has X Bookmark Sync",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_admin": {
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "news_digest_timezone": {
+            "default": "UTC",
+            "title": "News Digest Timezone",
+            "type": "string"
+          },
+          "twitter_username": {
+            "nullable": true,
+            "title": "Twitter Username",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "id",
+          "apple_id",
+          "is_admin",
+          "is_active",
+          "has_completed_onboarding",
+          "has_completed_new_user_tutorial",
+          "has_completed_live_voice_onboarding",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "UserResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VoiceHealthResponse": {
+        "description": "Capabilities and readiness for voice pipeline dependencies.",
+        "properties": {
+          "anthropic_api_configured": {
+            "title": "Anthropic Api Configured",
+            "type": "boolean"
+          },
+          "elevenlabs_api_configured": {
+            "title": "Elevenlabs Api Configured",
+            "type": "boolean"
+          },
+          "elevenlabs_package_available": {
+            "title": "Elevenlabs Package Available",
+            "type": "boolean"
+          },
+          "exa_api_configured": {
+            "title": "Exa Api Configured",
+            "type": "boolean"
+          },
+          "readiness_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Readiness Reasons",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "stt_model_id": {
+            "title": "Stt Model Id",
+            "type": "string"
+          },
+          "tts_model_id": {
+            "nullable": true,
+            "title": "Tts Model Id",
+            "type": "string"
+          },
+          "tts_output_format": {
+            "nullable": true,
+            "title": "Tts Output Format",
+            "type": "string"
+          },
+          "tts_voice_id": {
+            "nullable": true,
+            "title": "Tts Voice Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ready",
+          "elevenlabs_api_configured",
+          "elevenlabs_package_available",
+          "anthropic_api_configured",
+          "exa_api_configured",
+          "stt_model_id",
+          "tts_voice_id",
+          "tts_model_id",
+          "tts_output_format",
+          "readiness_reasons"
+        ],
+        "title": "VoiceHealthResponse",
+        "type": "object"
+      },
+      "XConnectionResponse": {
+        "description": "Current X integration connection state for a user.",
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "last_error": {
+            "nullable": true,
+            "title": "Last Error",
+            "type": "string"
+          },
+          "last_status": {
+            "nullable": true,
+            "title": "Last Status",
+            "type": "string"
+          },
+          "last_synced_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Synced At",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_user_id": {
+            "nullable": true,
+            "title": "Provider User Id",
+            "type": "string"
+          },
+          "provider_username": {
+            "nullable": true,
+            "title": "Provider Username",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "twitter_username": {
+            "nullable": true,
+            "title": "Twitter Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "connected",
+          "is_active"
+        ],
+        "title": "XConnectionResponse",
+        "type": "object"
+      },
+      "XOAuthExchangeRequest": {
+        "description": "Request to exchange an X OAuth authorization code.",
+        "properties": {
+          "code": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ],
+        "title": "XOAuthExchangeRequest",
+        "type": "object"
+      },
+      "XOAuthStartRequest": {
+        "description": "Request to begin X OAuth flow.",
+        "properties": {
+          "twitter_username": {
+            "maxLength": 50,
+            "nullable": true,
+            "title": "Twitter Username",
+            "type": "string"
+          }
+        },
+        "title": "XOAuthStartRequest",
+        "type": "object"
+      },
+      "XOAuthStartResponse": {
+        "description": "Response payload for X OAuth start.",
+        "properties": {
+          "authorize_url": {
+            "title": "Authorize Url",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorize_url",
+          "state"
+        ],
+        "title": "XOAuthStartResponse",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Filtered machine-oriented API contract for the standalone newsly-agent CLI.",
+    "title": "Newsly Agent CLI API",
+    "version": "2.0.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/agent/digests": {
+      "post": {
+        "description": "Queue arbitrary-window digest generation for agent clients.",
+        "operationId": "generateDigest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentDigestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDigestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Generate Digest",
+        "tags": [
+          "digests"
+        ]
+      }
+    },
+    "/api/agent/onboarding": {
+      "post": {
+        "description": "Start simplified async onboarding.",
+        "operationId": "startOnboarding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentOnboardingStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentOnboardingStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Onboarding",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/api/agent/onboarding/{run_id}": {
+      "get": {
+        "description": "Return onboarding run status.",
+        "operationId": "getOnboarding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingDiscoveryStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Onboarding",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/api/agent/onboarding/{run_id}/complete": {
+      "post": {
+        "description": "Complete onboarding from simplified selections.",
+        "operationId": "completeOnboarding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentOnboardingCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Complete Onboarding Api Agent Onboarding  Run Id  Complete Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Complete Onboarding",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/api/agent/search": {
+      "post": {
+        "description": "Search external/provider-backed sources for the agent CLI.",
+        "operationId": "searchAgent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Search Agent",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/content/": {
+      "get": {
+        "description": "Retrieve a list of content items with optional filtering by content type and date. Supports multiple content types via repeated query parameters (e.g., ?content_type=article&content_type=podcast). Supports cursor-based pagination for efficient loading.",
+        "operationId": "listContent",
+        "parameters": [
+          {
+            "description": "Filter by content type(s). Can be specified multiple times for multiple types (article/podcast/news)",
+            "in": "query",
+            "name": "content_type",
+            "required": false,
+            "schema": {
+              "description": "Filter by content type(s). Can be specified multiple times for multiple types (article/podcast/news)",
+              "items": {
+                "type": "string"
+              },
+              "nullable": true,
+              "title": "Content Type",
+              "type": "array"
+            }
+          },
+          {
+            "description": "Filter by date (YYYY-MM-DD format)",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "description": "Filter by date (YYYY-MM-DD format)",
+              "nullable": true,
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by read status (all/read/unread)",
+            "in": "query",
+            "name": "read_filter",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "Filter by read status (all/read/unread)",
+              "pattern": "^(all|read|unread)$",
+              "title": "Read Filter",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Pagination cursor for next page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Pagination cursor for next page",
+              "nullable": true,
+              "title": "Cursor",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of items per page (max 100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "description": "Number of items per page (max 100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List content items",
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/api/content/daily-digests": {
+      "get": {
+        "description": "List per-user daily digest rows.",
+        "operationId": "listDigests",
+        "parameters": [
+          {
+            "description": "Filter by read status (all/read/unread)",
+            "in": "query",
+            "name": "read_filter",
+            "required": false,
+            "schema": {
+              "default": "unread",
+              "description": "Filter by read status (all/read/unread)",
+              "pattern": "^(all|read|unread)$",
+              "title": "Read Filter",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Pagination cursor for next page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Pagination cursor for next page",
+              "nullable": true,
+              "title": "Cursor",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyNewsDigestListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List daily news digest cards",
+        "tags": [
+          "digests"
+        ]
+      }
+    },
+    "/api/content/submit": {
+      "post": {
+        "description": "Submit article or podcast URLs for processing. Only http/https URLs are accepted.",
+        "operationId": "submitContent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitContentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentSubmissionResponse"
+                }
+              }
+            },
+            "description": "Existing content matched and reused"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentSubmissionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit a one-off URL for processing",
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/api/content/{content_id}": {
+      "get": {
+        "description": "Retrieve detailed information about a specific content item.",
+        "operationId": "getContent",
+        "parameters": [
+          {
+            "description": "Content ID",
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "description": "Content ID",
+              "exclusiveMinimum": true,
+              "minimum": 0,
+              "title": "Content Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Content not found"
+                }
+              }
+            },
+            "description": "Content not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get content details",
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "get": {
+        "description": "Return async job status.",
+        "operationId": "getJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/scrapers/": {
+      "get": {
+        "description": "List scraper configurations for the current user.",
+        "operationId": "listSources",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Types",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScraperConfigResponse"
+                  },
+                  "title": "Response List Scraper Configs Api Scrapers  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Scraper Configs",
+        "tags": [
+          "sources"
+        ]
+      }
+    },
+    "/api/scrapers/subscribe": {
+      "post": {
+        "description": "Subscribe to a feed detected from content.\n\nConvenience endpoint that creates a scraper config from a detected feed.",
+        "operationId": "subscribeSource",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscribeToFeedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScraperConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Subscribe To Feed",
+        "tags": [
+          "sources"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Async job status routes.",
+      "name": "jobs"
+    },
+    {
+      "description": "Provider-backed discovery search.",
+      "name": "search"
+    },
+    {
+      "description": "Simplified onboarding routes.",
+      "name": "onboarding"
+    },
+    {
+      "description": "Daily digest generation and listing.",
+      "name": "digests"
+    },
+    {
+      "description": "Content listing, detail, and submission.",
+      "name": "content"
+    },
+    {
+      "description": "Runtime source subscription routes.",
+      "name": "sources"
+    }
+  ]
+}
