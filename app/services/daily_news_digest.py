@@ -9,7 +9,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session
 
-from app.constants import DAILY_NEWS_DIGEST_MODEL
+from app.constants import (
+    ALLOWED_NEWS_DIGEST_INTERVAL_HOURS,
+    DAILY_NEWS_DIGEST_MODEL,
+    DEFAULT_DAILY_DIGEST_SCHEDULER_LOOKBACK_HOURS,
+    DEFAULT_NEWS_DIGEST_INTERVAL_HOURS,
+)
 from app.core.logging import get_logger
 from app.models.metadata import DailyNewsRollupSummary
 from app.models.schema import Content, DailyNewsDigest, ProcessingTask
@@ -43,10 +48,19 @@ class DailyDigestSourceItem:
 class DailyDigestUpsertResult:
     """Result payload for daily digest generation."""
 
-    digest_id: int
+    digest_id: int | None
     local_date: date
     source_count: int
     created: bool
+    skipped: bool = False
+
+
+@dataclass(frozen=True)
+class DailyDigestGenerationTarget:
+    """Resolved checkpoint target for one digest generation run."""
+
+    local_date: date
+    coverage_end_at: datetime
 
 
 
@@ -69,6 +83,31 @@ def normalize_timezone(timezone_name: str | None) -> str:
         logger.warning("Invalid timezone '%s'; falling back to UTC", candidate)
         return "UTC"
     return candidate
+
+
+def normalize_news_digest_interval_hours(interval_hours: int | None) -> int:
+    """Validate and normalize a digest checkpoint interval."""
+    if interval_hours is None:
+        return DEFAULT_NEWS_DIGEST_INTERVAL_HOURS
+    if interval_hours not in ALLOWED_NEWS_DIGEST_INTERVAL_HOURS:
+        allowed_values = ", ".join(str(value) for value in ALLOWED_NEWS_DIGEST_INTERVAL_HOURS)
+        raise ValueError(
+            f"Invalid digest interval hours: {interval_hours}. Allowed: {allowed_values}"
+        )
+    return interval_hours
+
+
+def _normalize_utc_datetime(value: datetime) -> datetime:
+    """Convert aware or naive datetimes to naive UTC."""
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
+
+
+def _checkpoint_hours_for_interval(interval_hours: int) -> tuple[int, ...]:
+    """Return local checkpoint hours for a digest interval."""
+    normalized_interval = normalize_news_digest_interval_hours(interval_hours)
+    return tuple(range(0, 24, normalized_interval))
 
 
 
@@ -146,6 +185,64 @@ def get_local_day_utc_bounds(local_date: date, timezone_name: str) -> tuple[date
     return start_utc, end_utc
 
 
+def get_local_digest_window_utc_bounds(
+    local_date: date,
+    timezone_name: str,
+    *,
+    coverage_end_at: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    """Convert a local digest window into naive UTC bounds."""
+    start_utc, end_utc = get_local_day_utc_bounds(local_date, timezone_name)
+    if coverage_end_at is None:
+        return start_utc, end_utc
+
+    normalized_end = _normalize_utc_datetime(coverage_end_at)
+    if normalized_end <= start_utc:
+        return start_utc, start_utc
+    if normalized_end >= end_utc:
+        return start_utc, end_utc
+    return start_utc, normalized_end
+
+
+def resolve_daily_digest_generation_target(
+    timezone_name: str,
+    *,
+    now_utc: datetime | None = None,
+    interval_hours: int | None = None,
+    lookback_hours: int = DEFAULT_DAILY_DIGEST_SCHEDULER_LOOKBACK_HOURS,
+) -> DailyDigestGenerationTarget | None:
+    """Return the latest checkpoint that should be generated for one user."""
+    now_utc = now_utc or datetime.now(UTC)
+    now_utc = now_utc.replace(tzinfo=UTC) if now_utc.tzinfo is None else now_utc.astimezone(UTC)
+
+    timezone = ZoneInfo(normalize_timezone(timezone_name))
+    local_now = now_utc.astimezone(timezone)
+    local_window_start = local_now - timedelta(hours=lookback_hours)
+    checkpoint_hours = _checkpoint_hours_for_interval(
+        interval_hours or DEFAULT_NEWS_DIGEST_INTERVAL_HOURS
+    )
+
+    scheduled_candidates: list[tuple[datetime, date]] = []
+    for candidate_date in (local_now.date(), (local_now - timedelta(days=1)).date()):
+        for checkpoint_hour in checkpoint_hours:
+            scheduled_local = datetime.combine(
+                candidate_date,
+                time(hour=checkpoint_hour),
+                tzinfo=timezone,
+            )
+            if local_window_start < scheduled_local <= local_now:
+                scheduled_candidates.append((scheduled_local, candidate_date))
+
+    if not scheduled_candidates:
+        return None
+
+    scheduled_local, local_date = max(scheduled_candidates, key=lambda item: item[0])
+    return DailyDigestGenerationTarget(
+        local_date=local_date,
+        coverage_end_at=scheduled_local.astimezone(UTC).replace(tzinfo=None),
+    )
+
+
 
 def resolve_target_local_date_for_generation(
     timezone_name: str,
@@ -154,37 +251,16 @@ def resolve_target_local_date_for_generation(
     generation_hour: int = DAILY_DIGEST_GENERATION_HOUR,
     window_hours: int = 1,
 ) -> date | None:
-    """Return the digest local date to generate within a recent lookback window.
-
-    Args:
-        timezone_name: User timezone.
-        now_utc: Current UTC timestamp (for tests).
-        generation_hour: Hour-of-day in local time to generate digests.
-        window_hours: Lookback window used to decide whether the local generation
-            time occurred recently enough to enqueue this run.
-
-    Returns:
-        The digest date scheduled within the lookback window, otherwise ``None``.
-    """
-    now_utc = now_utc or datetime.now(UTC)
-    timezone = ZoneInfo(normalize_timezone(timezone_name))
-    local_now = now_utc.astimezone(timezone)
-    local_window_start = local_now - timedelta(hours=window_hours)
-
-    candidate_dates = [
-        local_now.date(),
-        (local_now - timedelta(days=1)).date(),
-    ]
-    for candidate_date in candidate_dates:
-        scheduled_local = datetime.combine(
-            candidate_date,
-            time(hour=generation_hour),
-            tzinfo=timezone,
-        )
-        if local_window_start < scheduled_local <= local_now:
-            return candidate_date - timedelta(days=1)
-
-    return None
+    """Backward-compatible wrapper for older date-only scheduling callers."""
+    target = resolve_daily_digest_generation_target(
+        timezone_name,
+        now_utc=now_utc,
+        interval_hours=(
+            generation_hour if generation_hour in ALLOWED_NEWS_DIGEST_INTERVAL_HOURS else None
+        ),
+        lookback_hours=window_hours,
+    )
+    return target.local_date if target is not None else None
 
 
 
@@ -194,6 +270,7 @@ def collect_daily_news_sources(
     user_id: int,
     local_date: date,
     timezone_name: str,
+    coverage_end_at: datetime | None = None,
     max_items: int | None = None,
 ) -> list[DailyDigestSourceItem]:
     """Collect digest source rows for one user and local day.
@@ -208,7 +285,11 @@ def collect_daily_news_sources(
     Returns:
         List of digest source items.
     """
-    start_utc, end_utc = get_local_day_utc_bounds(local_date, timezone_name)
+    start_utc, end_utc = get_local_digest_window_utc_bounds(
+        local_date,
+        timezone_name,
+        coverage_end_at=coverage_end_at,
+    )
 
     query = (
         build_user_feed_query(db, user_id, mode="inbox")
@@ -465,6 +546,50 @@ def _fallback_rollup(local_date: date) -> DailyNewsRollupSummary:
     )
 
 
+def _digest_has_same_sources(
+    digest: DailyNewsDigest,
+    source_content_ids: list[int],
+) -> bool:
+    """Return True when the stored digest already reflects the same sources."""
+    existing_source_ids = (
+        [int(content_id) for content_id in digest.source_content_ids]
+        if isinstance(digest.source_content_ids, list)
+        else []
+    )
+    return existing_source_ids == source_content_ids
+
+
+def _digest_payload_changed(
+    digest: DailyNewsDigest,
+    *,
+    title: str,
+    summary_text: str,
+    key_points: list[str],
+    source_content_ids: list[int],
+    source_count: int,
+) -> bool:
+    """Return True when persisted digest content differs from new synthesis."""
+    existing_key_points = (
+        [point for point in digest.key_points if isinstance(point, str)]
+        if isinstance(digest.key_points, list)
+        else []
+    )
+    existing_source_ids = (
+        [int(content_id) for content_id in digest.source_content_ids]
+        if isinstance(digest.source_content_ids, list)
+        else []
+    )
+    return any(
+        [
+            digest.title != title,
+            digest.summary != summary_text,
+            existing_key_points != key_points,
+            existing_source_ids != source_content_ids,
+            int(digest.source_count or 0) != source_count,
+        ]
+    )
+
+
 
 def upsert_daily_news_digest_for_user_day(
     db: Session,
@@ -474,6 +599,8 @@ def upsert_daily_news_digest_for_user_day(
     timezone_name: str,
     summarizer: ContentSummarizer | None = None,
     force_regenerate: bool = False,
+    coverage_end_at: datetime | None = None,
+    skip_if_empty: bool = False,
 ) -> DailyDigestUpsertResult:
     """Generate or update one per-user daily digest row.
 
@@ -484,18 +611,28 @@ def upsert_daily_news_digest_for_user_day(
         timezone_name: User timezone.
         summarizer: Optional shared summarizer for test injection.
         force_regenerate: Recompute even when digest row already exists.
+        coverage_end_at: Optional UTC checkpoint end time for same-day digest updates.
+        skip_if_empty: Skip persistence entirely when no stories exist yet.
 
     Returns:
         Upsert result with digest identifier.
     """
     timezone_name = normalize_timezone(timezone_name)
+    target_coverage_end_at = _normalize_utc_datetime(coverage_end_at) if coverage_end_at else None
+    if target_coverage_end_at is None:
+        _, target_coverage_end_at = get_local_day_utc_bounds(local_date, timezone_name)
     existing = (
         db.query(DailyNewsDigest)
         .filter(DailyNewsDigest.user_id == user_id, DailyNewsDigest.local_date == local_date)
         .first()
     )
 
-    if existing and not force_regenerate:
+    if (
+        existing
+        and not force_regenerate
+        and existing.coverage_end_at is not None
+        and existing.coverage_end_at >= target_coverage_end_at
+    ):
         return DailyDigestUpsertResult(
             digest_id=existing.id,
             local_date=local_date,
@@ -508,7 +645,35 @@ def upsert_daily_news_digest_for_user_day(
         user_id=user_id,
         local_date=local_date,
         timezone_name=timezone_name,
+        coverage_end_at=target_coverage_end_at,
     )
+    source_content_ids = [source.content_id for source in sources]
+
+    if skip_if_empty and not sources and existing is None:
+        return DailyDigestUpsertResult(
+            digest_id=None,
+            local_date=local_date,
+            source_count=0,
+            created=False,
+            skipped=True,
+        )
+
+    if (
+        existing is not None
+        and not force_regenerate
+        and _digest_has_same_sources(existing, source_content_ids)
+    ):
+        existing.timezone = timezone_name
+        existing.generated_at = datetime.now(UTC).replace(tzinfo=None)
+        existing.coverage_end_at = target_coverage_end_at
+        db.commit()
+        db.refresh(existing)
+        return DailyDigestUpsertResult(
+            digest_id=existing.id,
+            local_date=local_date,
+            source_count=len(sources),
+            created=False,
+        )
 
     effective_summarizer = summarizer or get_content_summarizer()
     if sources:
@@ -568,14 +733,25 @@ def upsert_daily_news_digest_for_user_day(
         title = _daily_digest_title(local_date, summary.title)
 
     digest = existing or DailyNewsDigest(user_id=user_id, local_date=local_date)
+    content_changed = existing is None or _digest_payload_changed(
+        digest,
+        title=title[:240],
+        summary_text=summary_text,
+        key_points=key_points,
+        source_content_ids=source_content_ids,
+        source_count=len(sources),
+    )
     digest.timezone = timezone_name
     digest.title = title[:240]
     digest.summary = summary_text
     digest.key_points = key_points
-    digest.source_content_ids = [source.content_id for source in sources]
+    digest.source_content_ids = source_content_ids
     digest.source_count = len(sources)
     digest.llm_model = resolved_model
     digest.generated_at = datetime.now(UTC).replace(tzinfo=None)
+    digest.coverage_end_at = target_coverage_end_at
+    if existing is not None and content_changed:
+        digest.read_at = None
 
     if existing is None:
         db.add(digest)
@@ -591,8 +767,13 @@ def upsert_daily_news_digest_for_user_day(
     )
 
 
-
-def _pending_digest_task_exists(db: Session, *, user_id: int, local_date: date) -> int | None:
+def _pending_digest_task_exists(
+    db: Session,
+    *,
+    user_id: int,
+    local_date: date,
+    coverage_end_at: datetime | None = None,
+) -> int | None:
     """Return existing pending/processing task id when one already matches payload.
 
     Args:
@@ -615,9 +796,18 @@ def _pending_digest_task_exists(db: Session, *, user_id: int, local_date: date) 
     )
 
     target_date = local_date.isoformat()
+    target_coverage_end_at = (
+        _normalize_utc_datetime(coverage_end_at).isoformat()
+        if coverage_end_at is not None
+        else None
+    )
     for task in candidate_tasks:
         payload = task.payload if isinstance(task.payload, dict) else {}
-        if payload.get("user_id") == user_id and payload.get("local_date") == target_date:
+        if (
+            payload.get("user_id") == user_id
+            and payload.get("local_date") == target_date
+            and payload.get("coverage_end_at") == target_coverage_end_at
+        ):
             return task.id
 
     return None
@@ -632,6 +822,8 @@ def enqueue_daily_news_digest_task(
     timezone_name: str,
     trigger: str = "cron",
     force_regenerate: bool = False,
+    coverage_end_at: datetime | None = None,
+    skip_if_empty: bool = False,
 ) -> int | None:
     """Enqueue one daily digest task when no matching task is already pending.
 
@@ -642,20 +834,38 @@ def enqueue_daily_news_digest_task(
         timezone_name: User timezone.
         trigger: Trigger label for observability.
         force_regenerate: When ``True``, enqueue even when a digest row already exists.
+        coverage_end_at: Optional UTC checkpoint end time for same-day digests.
+        skip_if_empty: Skip persistence when the checkpoint window has no stories.
 
     Returns:
         Enqueued task id, existing task id, or ``None`` when digest already exists.
     """
+    normalized_coverage_end_at = (
+        _normalize_utc_datetime(coverage_end_at) if coverage_end_at is not None else None
+    )
+
     if not force_regenerate:
         existing_digest = (
             db.query(DailyNewsDigest)
             .filter(DailyNewsDigest.user_id == user_id, DailyNewsDigest.local_date == local_date)
             .first()
         )
-        if existing_digest is not None:
+        if existing_digest is not None and normalized_coverage_end_at is None:
+            return None
+        if (
+            existing_digest is not None
+            and normalized_coverage_end_at is not None
+            and existing_digest.coverage_end_at is not None
+            and existing_digest.coverage_end_at >= normalized_coverage_end_at
+        ):
             return None
 
-    existing_task_id = _pending_digest_task_exists(db, user_id=user_id, local_date=local_date)
+    existing_task_id = _pending_digest_task_exists(
+        db,
+        user_id=user_id,
+        local_date=local_date,
+        coverage_end_at=normalized_coverage_end_at,
+    )
     if existing_task_id is not None:
         return existing_task_id
 
@@ -666,8 +876,14 @@ def enqueue_daily_news_digest_task(
             "user_id": user_id,
             "local_date": local_date.isoformat(),
             "timezone": normalize_timezone(timezone_name),
+            "coverage_end_at": (
+                normalized_coverage_end_at.isoformat()
+                if normalized_coverage_end_at is not None
+                else None
+            ),
             "trigger": trigger,
             "force_regenerate": force_regenerate,
+            "skip_if_empty": skip_if_empty,
         },
         dedupe=False,
     )

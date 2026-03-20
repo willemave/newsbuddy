@@ -2,7 +2,7 @@
 
 > Technical reference for the FastAPI backend, content pipeline, chat system, and SwiftUI client contracts.
 
-**Last Updated:** 2026-03-08  
+**Last Updated:** 2026-03-19  
 **Runtime:** Python 3.13, FastAPI + SQLAlchemy 2, Pydantic v2, pydantic-ai  
 **Database:** SQLite (first-class) / PostgreSQL-ready seams  
 **Clients:** SwiftUI (iOS 17+), Jinja admin views, remote `newsly-agent` CLI
@@ -149,7 +149,7 @@ flowchart LR
 ## Database Schema (ORM in `app/models/schema.py`)
 | Table | Purpose | Key Columns/Constraints |
 |---|---|---|
-| `users` | Accounts from Apple Sign In + admin | `id`, `apple_id` UQ, `email` UQ, `full_name`, `is_admin`, `is_active`, timestamps |
+| `users` | Accounts from Apple Sign In + admin | `id`, `apple_id` UQ, `email` UQ, `full_name`, `is_admin`, `is_active`, `news_digest_timezone`, `news_digest_interval_hours` (3/6/12, default 6), timestamps |
 | `contents` | Core content records | `id`, `content_type` (`article/podcast/news/unknown`), `url` (canonical, UQ per type), `source_url` (original scraped/submitted URL), `title`, `source`, `platform`, `is_aggregate` (legacy, always false), `status`, `classification`, `error_message`, `retry_count`, checkout fields, `content_metadata` JSON (summary/interleaved, detected_feed, image_generated_at, thumbnail_url), timestamps, indexes on type/status/created_at |
 | `processing_tasks` | Task queue | `task_type` (`scrape`/`analyze_url`/`process_content`/`download_audio`/`transcribe`/`summarize`/`generate_image`/`discover_feeds`/`onboarding_discover`/`dig_deeper`), `content_id`, `payload` JSON, `status`, retry counters, timestamps, idx on status+created_at |
 | `content_read_status` | User read marks | UQ `(user_id, content_id)`, `read_at` |
@@ -160,6 +160,7 @@ flowchart LR
 | `event_logs` | Structured event telemetry | `event_type`, `event_name`, `status`, `data` JSON, `created_at` |
 | `chat_sessions` | Stored chat threads | `user_id`, `content_id` (optional), `title`, `session_type` (`article_brain/topic/ad_hoc/deep_research`), `topic`, `llm_model`, `llm_provider`, `last_message_at`, `is_archived` |
 | `chat_messages` | Persisted pydantic-ai messages | `session_id`, `message_list` JSON (ModelMessagesTypeAdapter), `created_at` |
+| `daily_news_digests` | Per-user daily digest cards | UQ `(user_id, local_date)`, rendered digest content, `read_at`, `generated_at`, `coverage_end_at` (UTC checkpoint end for the latest same-day refresh) |
 
 ## Domain & Pydantic Types
 - **Enums (app/models/metadata.py)**: `ContentType` (`ARTICLE/PODCAST/NEWS/UNKNOWN`), `ContentStatus` (`new/pending/processing/completed/failed/skipped`), `ContentClassification` (`to_read/skip`).
@@ -173,6 +174,7 @@ flowchart LR
 - **Content list/search (`/api/content`, app/routers/api/content_list.py)**: `GET /` (filters type/date/read, cursor pagination, only summarized/visible items), `GET /search`, `GET /unread-counts` (per type). Responses include `image_url` + `thumbnail_url` when available.
 - **Content detail/actions**: `GET /{id}` (detail with validated metadata, `detected_feed`, `image_url`, `thumbnail_url`), `GET /{id}/chat-url` (ChatGPT deeplink), `POST /{id}/convert-to-article`, `POST /{id}/tweet-suggestions` (Gemini model defined in `TWEET_SUGGESTION_MODEL`).
 - **State**: `POST /{id}/mark-read`, `POST /bulk-mark-read` (read_status), `POST /{id}/favorites/toggle` + `GET /favorites` (favorites).
+- **Daily digests**: `GET /api/daily-news-digests` returns one digest card per local day. The current-day card may be refreshed at user-selected 3/6/12-hour checkpoints and now includes `coverage_end_at` so clients can show how current it is.
 - **User submissions**: `POST /submit` creates or reuses content with `content_type=unknown`, enqueues `ANALYZE_URL` (then `PROCESS_CONTENT`); returns `task_id` and `already_exists` flag.
 - **User scraper configs (`/api/scrapers`)**: CRUD for per-user feed configs; validates `feed_url` and allowed types. Supports type filtering (`?type=podcast_rss` or `?types=substack,atom`) and returns derived `feed_url`/`limit` fields (limit optional 1–100, default 10).
 - **Chat (`/api/chat`)**: list/create sessions, get session detail, send message (runs agent and persists), initial suggestions for article sessions. Session list includes `is_favorite`, `has_pending_message`, and `has_messages`.
@@ -191,7 +193,7 @@ flowchart LR
   5) Prepare LLM payload; enqueue `SUMMARIZE` task (pydantic-ai prompts in `app/services/llm_prompts.py`).
   6) Persist extraction metadata, set `status=processing`, set `processed_at`; summarization task later writes summary + final status and enqueues image generation.
 - **Podcasts**: `PodcastDownloadWorker` saves audio under `settings.podcast_media_dir`, skips YouTube audio, enqueues transcribe; `PodcastTranscribeWorker` runs Whisper (`app/services/whisper_local.py`), updates metadata, sets status to `completed`.
-- **Summarization defaults**: per-type default models (news → `anthropic:claude-haiku-4-5-20251001`; article/podcast/editorial_narrative → `openai:gpt-5.2`; interleaved/long_bullets fallback hint `google-gla:gemini-3-pro-preview`; fallback model `google-gla:gemini-2.5-flash-preview-09-2025`), fallback Gemini Flash for failures; truncates content above 220k chars and prunes empty quotes.
+- **Summarization defaults**: per-type default models (news/news digests/daily rollups → `google:gemini-3.1-flash-lite-preview`; article/podcast/editorial_narrative → `openai:gpt-5.2`), fallback Gemini Flash for failures; truncates content above 220k chars and prunes empty quotes.
 - **Image generation**: post-summary tasks call Gemini for article/podcast infographics (`GENERATE_IMAGE`); news currently skips post-summary image generation. Generated images are stored under `IMAGES_BASE_DIR` (default `/data/images`) and served at `/static/images/...`.
 
 ## Processing Strategies (`app/processing_strategies/`)

@@ -54,7 +54,10 @@ final class KeychainManager {
 
         if status != errSecSuccess {
             print("Keychain save error: \(status)")
+            return
         }
+
+        mirrorTokenToSharedDefaults(token, key: key)
     }
 
     /// Retrieve a token from the keychain
@@ -77,7 +80,7 @@ final class KeychainManager {
         guard status == errSecSuccess,
               let data = result as? Data,
               let token = String(data: data, encoding: .utf8) else {
-            return nil
+            return mirroredTokenFromSharedDefaults(key: key)
         }
 
         return token
@@ -105,6 +108,32 @@ final class KeychainManager {
         }
 
         SecItemDelete(query as CFDictionary)
+        clearMirroredTokenFromSharedDefaults(account: account)
+    }
+
+    private func mirrorTokenToSharedDefaults(_ token: String, key: KeychainKey) {
+        guard shouldMirrorToSharedDefaults(key: key) else { return }
+        SharedContainer.userDefaults.set(token, forKey: key.rawValue)
+        SharedContainer.userDefaults.synchronize()
+    }
+
+    private func mirroredTokenFromSharedDefaults(key: KeychainKey) -> String? {
+        guard shouldMirrorToSharedDefaults(key: key) else { return nil }
+        return SharedContainer.userDefaults.string(forKey: key.rawValue)
+    }
+
+    private func clearMirroredTokenFromSharedDefaults(account: String) {
+        guard shouldMirrorToSharedDefaults(account: account) else { return }
+        SharedContainer.userDefaults.removeObject(forKey: account)
+        SharedContainer.userDefaults.synchronize()
+    }
+
+    private func shouldMirrorToSharedDefaults(key: KeychainKey) -> Bool {
+        shouldMirrorToSharedDefaults(account: key.rawValue)
+    }
+
+    private func shouldMirrorToSharedDefaults(account: String) -> Bool {
+        account == KeychainKey.accessToken.rawValue || account == KeychainKey.refreshToken.rawValue
     }
 
     /// Clear all authentication data from the keychain

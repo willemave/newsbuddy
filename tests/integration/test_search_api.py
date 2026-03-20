@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.db import get_readonly_db_session
 from app.core.deps import get_current_user
+from app.models.chat_message_metadata import AssistantFeedOption, AssistantFeedOptionsResult
 from app.models.schema import Base, Content, ContentStatusEntry
 from app.models.user import User
 
@@ -91,9 +92,18 @@ def seed_content(db: Session, user: User):
                         "research, product, and policy landscapes in 2025."
                     ),
                     "bullet_points": [
-                        {"text": "AI systems are improving across multi-modal tasks.", "category": "key_finding"},
-                        {"text": "Deployment practices emphasize safety and monitoring.", "category": "methodology"},
-                        {"text": "Regulators are aligning on AI risk frameworks.", "category": "context"},
+                        {
+                            "text": "AI systems are improving across multi-modal tasks.",
+                            "category": "key_finding",
+                        },
+                        {
+                            "text": "Deployment practices emphasize safety and monitoring.",
+                            "category": "methodology",
+                        },
+                        {
+                            "text": "Regulators are aligning on AI risk frameworks.",
+                            "category": "context",
+                        },
                     ],
                     "topics": ["AI", "Policy", "Product"],
                 },
@@ -172,3 +182,53 @@ class TestSearchAPI:
         # Invalid type
         r = client.get("/api/content/search", params={"q": "ai", "type": "video"})
         assert r.status_code == 422
+
+    def test_mixed_search_returns_sectioned_results(self, client: TestClient, monkeypatch):
+        monkeypatch.setattr(
+            "app.routers.api.content_list.find_feed_options",
+            lambda query, limit: AssistantFeedOptionsResult(
+                query=query,
+                options=[
+                    AssistantFeedOption(
+                        id="feed-option-0001",
+                        title="AI Weekly",
+                        site_url="https://ai.example.com",
+                        feed_url="https://ai.example.com/feed.xml",
+                        feed_type="atom",
+                        feed_format="rss",
+                        description="AI coverage",
+                        rationale="Validated feed",
+                        evidence_url="https://ai.example.com",
+                    )
+                ],
+            ),
+        )
+        monkeypatch.setattr(
+            "app.routers.api.content_list.search_podcast_episodes",
+            lambda query, limit: [
+                type(
+                    "PodcastHit",
+                    (),
+                    {
+                        "title": "AI Weekly Episode",
+                        "episode_url": "https://podcasts.example.com/episodes/1",
+                        "podcast_title": "AI Weekly",
+                        "source": "example.fm",
+                        "snippet": "Episode summary",
+                        "feed_url": "https://podcasts.example.com/feed.xml",
+                        "published_at": "2026-02-19T00:00:00Z",
+                        "provider": "listen_notes",
+                        "score": 1.0,
+                    },
+                )()
+            ],
+        )
+
+        response = client.get("/api/content/search/mixed", params={"q": "AI", "limit": 5})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["query"] == "AI"
+        assert payload["content"]
+        assert payload["feeds"][0]["feed_url"] == "https://ai.example.com/feed.xml"
+        assert payload["podcasts"][0]["episode_url"] == "https://podcasts.example.com/episodes/1"

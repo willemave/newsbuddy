@@ -7,8 +7,8 @@ PATH=/opt/news_app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/
 # Run scrapers every 15 minutes
 */15 * * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_scrapers.py --show-stats >> /var/log/news_app/scrapers-cron.log 2>&1
 
-# Run daily news digest enqueue every 6 hours (users trigger at local 03:00 within a 6h lookback)
-0 */6 * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_daily_news_digest.py --hours 6 >> /var/log/news_app/daily-news-digest.log 2>&1
+# Run daily news digest checkpoint enqueue every 3 hours (users catch local checkpoints within a 6h lookback)
+0 */3 * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_daily_news_digest.py --lookback-hours 6 >> /var/log/news_app/daily-news-digest.log 2>&1
 
 # Run feed discovery weekly (Mondays at 03:00 UTC)
 0 3 * * 1 cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_feed_discovery.py >> /var/log/news_app/feed-discovery-cron.log 2>&1

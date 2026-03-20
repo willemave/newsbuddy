@@ -13,6 +13,7 @@ from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
+from app.models.chat_message_metadata import ChatMessageRenderMetadata
 from app.models.schema import ChatMessage, ChatSession, Content, MessageProcessingStatus
 from app.services.exa_client import exa_search, get_exa_client
 from app.services.langfuse_tracing import langfuse_trace_context
@@ -46,6 +47,9 @@ SYSTEM_PROMPT_TEXT = (
     "\n\n"
     "**Response Format:**\n"
     "- Use markdown: **bold** for emphasis, bullet points for lists\n"
+    "- Do not use markdown tables in chat responses. "
+    "On mobile, format comparisons as headings, bullets, "
+    "or one-item-per-line entries instead\n"
     "- Always cite sources with markdown links when referencing search results\n"
     "- Structure responses: brief intro → key findings → sources section\n"
     "- Keep responses focused and scannable"
@@ -536,6 +540,7 @@ def save_messages(
     status: MessageProcessingStatus = MessageProcessingStatus.COMPLETED,
     *,
     display_user_prompt: str | None = None,
+    render_metadata: ChatMessageRenderMetadata | dict[str, object] | None = None,
 ) -> ChatMessage:
     """Save new messages to the database.
 
@@ -561,6 +566,7 @@ def save_messages(
         db_message = ChatMessage(
             session_id=session_id,
             message_list=message_json,
+            render_metadata=_serialize_render_metadata(render_metadata),
             created_at=datetime.now(UTC),
             status=status.value,
         )
@@ -606,6 +612,7 @@ def update_message_completed(
     messages: list[ModelMessage],
     *,
     display_user_prompt: str | None = None,
+    render_metadata: ChatMessageRenderMetadata | dict[str, object] | None = None,
 ) -> ChatMessage:
     """Update a processing message with the completed result.
 
@@ -628,6 +635,7 @@ def update_message_completed(
         display_user_prompt=display_user_prompt,
     )
     db_message.message_list = message_json
+    db_message.render_metadata = _serialize_render_metadata(render_metadata)
     db_message.status = MessageProcessingStatus.COMPLETED.value
     db.commit()
     db.refresh(db_message)
@@ -655,6 +663,7 @@ def update_message_failed(
         raise ValueError(f"Message {message_id} not found")
 
     db_message.status = MessageProcessingStatus.FAILED.value
+    db_message.render_metadata = None
     db_message.error = error
     db.commit()
     db.refresh(db_message)
@@ -670,6 +679,18 @@ class ChatRunResult:
     new_messages: list[ModelMessage]
     all_messages: list[ModelMessage]
     tool_calls: list[object]
+
+
+def _serialize_render_metadata(
+    render_metadata: ChatMessageRenderMetadata | dict[str, object] | None,
+) -> dict[str, object] | None:
+    """Normalize optional render metadata for DB storage."""
+
+    if render_metadata is None:
+        return None
+    if isinstance(render_metadata, ChatMessageRenderMetadata):
+        return render_metadata.model_dump(mode="json")
+    return render_metadata
 
 
 def _build_chat_deps(

@@ -96,6 +96,7 @@ def _build_digest_response(digest: DailyNewsDigest) -> DailyNewsDigestResponse:
         is_read=digest.read_at is not None,
         read_at=_isoformat_utc(digest.read_at),
         generated_at=_isoformat_utc(digest.generated_at) or "",
+        coverage_end_at=_isoformat_utc(digest.coverage_end_at),
     )
 
 

@@ -10,182 +10,93 @@ import SwiftUI
 struct KnowledgeView: View {
     let onSelectSession: ((ChatSessionRoute) -> Void)?
     let onSelectContent: ((ContentDetailRoute) -> Void)?
+    @Binding private var prefersHistoryView: Bool
 
     @StateObject private var viewModel = ChatSessionsViewModel()
-    @StateObject private var discoveryViewModel = DiscoveryViewModel()
     @ObservedObject private var settings = AppSettings.shared
     @State private var showingNewChat = false
     @State private var selectedProvider: ChatModelProvider = .anthropic
-    @State private var pendingNavigationRoute: ChatSessionRoute?
-    @State private var selectedTab: KnowledgeTab = .chats
+    @State private var activeSessionId: Int?
     @State private var chatSearchText = ""
+    @State private var isBootstrappingChat = false
 
-    /// Tracks the last time this tab was opened for badge calculation
     @AppStorage("knowledgeTabLastOpenedAt") private var lastOpenedTimestamp: Double = 0
-    @AppStorage("discoveryTabLastOpenedAt") private var discoveryLastOpenedTimestamp: Double = 0
-
-    /// Captured threshold for showing "new" items (frozen on appear)
-    @State private var newItemThreshold: Date = .distantPast
-    @State private var discoveryNewThreshold: Date = .distantPast
-
-    private var contentTextSize: DynamicTypeSize {
-        ContentTextSize(index: settings.contentTextSizeIndex).dynamicTypeSize
-    }
 
     private var appTextSize: DynamicTypeSize {
         AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize
     }
 
     init(
+        prefersHistoryView: Binding<Bool> = .constant(false),
         onSelectSession: ((ChatSessionRoute) -> Void)? = nil,
         onSelectContent: ((ContentDetailRoute) -> Void)? = nil
     ) {
+        self._prefersHistoryView = prefersHistoryView
         self.onSelectSession = onSelectSession
         self.onSelectContent = onSelectContent
     }
 
-    /// Number of new items since last tab open
-    var newItemCount: Int {
-        guard lastOpenedTimestamp > 0 else { return 0 }
-        let threshold = Date(timeIntervalSince1970: lastOpenedTimestamp)
-        return viewModel.sessions.filter { session in
-            parseDate(session.createdAt) > threshold
-        }.count
-    }
-
-    /// Check if a session is new (created after last visit)
-    private func isNewSession(_ session: ChatSessionSummary) -> Bool {
-        guard newItemThreshold != .distantPast else { return false }
-        return parseDate(session.createdAt) > newItemThreshold
-    }
-
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                tabPicker
-                contentBody
-            }
-        }
-        .background(Color.surfacePrimary.ignoresSafeArea())
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            // Capture previous threshold before updating (for "New" indicators)
-            if lastOpenedTimestamp > 0 {
-                newItemThreshold = Date(timeIntervalSince1970: lastOpenedTimestamp)
-            }
-            if discoveryLastOpenedTimestamp > 0 {
-                discoveryNewThreshold = Date(timeIntervalSince1970: discoveryLastOpenedTimestamp)
-            }
-            // Mark tab as opened (for badge tracking)
-            lastOpenedTimestamp = Date().timeIntervalSince1970
-            Task { await loadForSelectedTab() }
-            Task { await discoveryViewModel.loadSuggestions() }
-        }
-        .onChange(of: selectedTab) { _, _ in
-            if selectedTab == .discover {
-                markDiscoverySeen()
-            }
-            Task { await loadForSelectedTab() }
-        }
-        .sheet(isPresented: $showingNewChat, onDismiss: {
-            // Navigate after sheet dismisses to avoid conflicts
-            if let route = pendingNavigationRoute {
-                pendingNavigationRoute = nil
-                onSelectSession?(route)
-            }
-        }) {
-            NewChatSheet(
-                provider: selectedProvider,
-                isPresented: $showingNewChat,
-                onCreateSession: { session in
-                    viewModel.sessions.insert(session, at: 0)
-                    // Queue navigation for after sheet dismisses
-                    pendingNavigationRoute = ChatSessionRoute(sessionId: session.id)
-                }
-            )
+        contentView
             .dynamicTypeSize(appTextSize)
-            .presentationDetents([.height(380)])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(24)
-        }
-    }
-
-    @ViewBuilder
-    private var contentBody: some View {
-        switch selectedTab {
-        case .chats:
-            chatSessionsBody
-                .dynamicTypeSize(appTextSize)
-        case .discover:
-            KnowledgeDiscoveryView(
-                viewModel: discoveryViewModel,
-                hasNewSuggestions: hasNewDiscoverySuggestions
-            )
-            .dynamicTypeSize(contentTextSize)
-        case .live:
-            KnowledgeLiveView(
-                initialRoute: LiveVoiceRoute(
-                    sourceSurface: .knowledgeLive,
-                    autoConnect: false
-                ),
-                onOpenChatSession: { chatSessionId in
-                    onSelectSession?(
-                        ChatSessionRoute(
-                            sessionId: chatSessionId,
-                            mode: .live
-                        )
-                    )
+            .background(Color.surfacePrimary.ignoresSafeArea())
+            .navigationTitle(prefersHistoryView ? "Knowledge" : "")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if prefersHistoryView {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            showingNewChat = true
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .accessibilityIdentifier("knowledge.new_chat")
+                    }
                 }
-            )
-            .accessibilityIdentifier("knowledge.live")
-        case .favorites:
-            FavoritesView(showNavigationTitle: false)
+            }
+            .task {
+                lastOpenedTimestamp = Date().timeIntervalSince1970
+                await prepareDefaultChatIfNeeded()
+            }
+            .onChange(of: prefersHistoryView) { _, showingHistory in
+                guard !showingHistory else {
+                    Task { await viewModel.loadSessions() }
+                    return
+                }
+                Task { await prepareDefaultChatIfNeeded() }
+            }
+            .sheet(isPresented: $showingNewChat) {
+                NewChatSheet(
+                    provider: selectedProvider,
+                    isPresented: $showingNewChat,
+                    onCreateSession: { session in
+                        viewModel.sessions.removeAll { $0.id == session.id }
+                        viewModel.sessions.insert(session, at: 0)
+                        activeSessionId = session.id
+                        prefersHistoryView = false
+                    }
+                )
                 .dynamicTypeSize(appTextSize)
-        }
-    }
-
-    private var chatSessions: [ChatSessionSummary] {
-        viewModel.sessions.filter { $0.sessionType != "voice_live" }
+                .presentationDetents([.height(380)])
+                .presentationDragIndicator(.hidden)
+                .presentationCornerRadius(24)
+            }
     }
 
     @ViewBuilder
-    private var chatSessionsBody: some View {
-        if viewModel.isLoading && viewModel.sessions.isEmpty {
-            LoadingView()
-        } else if let error = viewModel.errorMessage, viewModel.sessions.isEmpty {
-            ErrorView(message: error) {
-                Task { await viewModel.loadSessions() }
-            }
-        } else if chatSessions.isEmpty {
-            emptyStateView
-        } else {
+    private var contentView: some View {
+        if prefersHistoryView {
             sessionListView
+        } else {
+            defaultChatView
         }
     }
 
-    private var tabPicker: some View {
-        Picker("Knowledge Tabs", selection: $selectedTab) {
-            ForEach(KnowledgeTab.allCases, id: \.self) { tab in
-                Text(tabTitle(for: tab))
-                    .accessibilityIdentifier("knowledge.segment.\(tab.rawValue)")
-                    .tag(tab)
-            }
+    private var knowledgeSessions: [ChatSessionSummary] {
+        viewModel.sessions.filter {
+            $0.sessionType != "voice_live"
+                && !$0.isLiveVoiceSession
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, Spacing.screenHorizontal)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
-        .accessibilityIdentifier("knowledge.tab_picker")
-    }
-
-    private var hasNewDiscoverySuggestions: Bool {
-        if !discoveryViewModel.runs.isEmpty {
-            return discoveryViewModel.runs.contains { run in
-                parseDate(run.runCreatedAt) > discoveryNewThreshold
-            }
-        }
-        guard let runCreatedAt = discoveryViewModel.runCreatedAt else { return false }
-        return parseDate(runCreatedAt) > discoveryNewThreshold
     }
 
     private var emptyStateView: some View {
@@ -199,15 +110,7 @@ struct KnowledgeView: View {
                     .font(.listTitle.weight(.semibold))
                     .foregroundStyle(Color.textPrimary)
 
-                Text("Open any article and tap the")
-                    .font(.listSubtitle)
-                    .foregroundStyle(Color.textSecondary)
-                +
-                Text(" \(Image(systemName: "brain.head.profile")) ")
-                    .font(.listSubtitle)
-                    .foregroundStyle(Color.accentColor)
-                +
-                Text("icon to start a conversation about it.")
+                Text("Start a new chat here or open an article to jump into a contextual session.")
                     .font(.listSubtitle)
                     .foregroundStyle(Color.textSecondary)
             }
@@ -218,73 +121,77 @@ struct KnowledgeView: View {
         .background(Color.surfacePrimary)
     }
 
-    /// Parse a date string to Date
-    private func parseDate(_ dateString: String) -> Date {
-        // Try ISO8601 with fractional seconds
-        let iso8601WithFractional = ISO8601DateFormatter()
-        iso8601WithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso8601WithFractional.date(from: dateString) {
-            return date
+    @ViewBuilder
+    private var defaultChatView: some View {
+        if let activeSessionId {
+            ChatSessionView(
+                sessionId: activeSessionId,
+                onShowHistory: {
+                    prefersHistoryView = true
+                }
+            )
+        } else if isBootstrappingChat || viewModel.isLoading {
+            LoadingView()
+        } else if let error = viewModel.errorMessage {
+            ErrorView(message: error) {
+                Task { await prepareDefaultChat(forceRefresh: true) }
+            }
+        } else {
+            LoadingView()
         }
-
-        // Try ISO8601 without fractional seconds
-        let iso8601 = ISO8601DateFormatter()
-        iso8601.formatOptions = [.withInternetDateTime]
-        if let date = iso8601.date(from: dateString) {
-            return date
-        }
-
-        return Date.distantPast
     }
 
     private var sessionListView: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                chatSearchBarRow
-                    .padding(.horizontal, 16)
-
-                ForEach(filteredSessions) { session in
-                    Button {
-                        if session.sessionType == "voice_live" {
-                            onSelectSession?(
-                                ChatSessionRoute(
-                                    sessionId: session.id,
-                                    mode: .live,
-                                    contentId: session.contentId
-                                )
-                            )
-                        } else {
-                            onSelectSession?(ChatSessionRoute(sessionId: session.id))
-                        }
-                    } label: {
-                        ChatSessionCard(session: session)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 16)
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            Task { await viewModel.deleteSessions(ids: [session.id]) }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
+        Group {
+            if viewModel.isLoading && knowledgeSessions.isEmpty {
+                LoadingView()
+            } else if let error = viewModel.errorMessage, knowledgeSessions.isEmpty {
+                ErrorView(message: error) {
+                    Task { await viewModel.loadSessions() }
                 }
+            } else if knowledgeSessions.isEmpty {
+                emptyStateView
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        chatSearchBarRow
+                            .padding(.horizontal, 16)
 
-                if shouldShowNoResults {
-                    noResultsRow
+                        ForEach(filteredSessions) { session in
+                            Button {
+                                activeSessionId = session.id
+                                prefersHistoryView = false
+                            } label: {
+                                ChatSessionCard(session: session)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 16)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    Task { await viewModel.deleteSessions(ids: [session.id]) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+
+                        if shouldShowNoResults {
+                            noResultsRow
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                .refreshable {
+                    await viewModel.loadSessions()
                 }
             }
-            .padding(.vertical, 8)
-        }
-        .refreshable {
-            await viewModel.loadSessions()
         }
     }
 
     private var filteredSessions: [ChatSessionSummary] {
         let trimmedQuery = chatSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else { return chatSessions }
-        return chatSessions.filter { session in
+        guard !trimmedQuery.isEmpty else { return knowledgeSessions }
+        return knowledgeSessions.filter { session in
             sessionMatchesSearch(session, query: trimmedQuery)
         }
     }
@@ -328,48 +235,29 @@ struct KnowledgeView: View {
         .padding(.vertical, Spacing.sectionTop)
     }
 
-    private func loadForSelectedTab() async {
-        switch selectedTab {
-        case .chats:
+    private func prepareDefaultChatIfNeeded() async {
+        guard !prefersHistoryView else { return }
+        guard activeSessionId == nil else { return }
+        await prepareDefaultChat(forceRefresh: true)
+    }
+
+    private func prepareDefaultChat(forceRefresh: Bool) async {
+        guard !isBootstrappingChat else { return }
+        isBootstrappingChat = true
+        defer { isBootstrappingChat = false }
+
+        if forceRefresh || viewModel.sessions.isEmpty {
             await viewModel.loadSessions()
-        case .discover:
-            await discoveryViewModel.loadSuggestions()
-        case .live, .favorites:
+        }
+
+        if let existingSession = knowledgeSessions.first {
+            activeSessionId = existingSession.id
             return
         }
-    }
 
-    private func markDiscoverySeen() {
-        if discoveryLastOpenedTimestamp > 0 {
-            discoveryNewThreshold = Date(timeIntervalSince1970: discoveryLastOpenedTimestamp)
-        }
-        discoveryLastOpenedTimestamp = Date().timeIntervalSince1970
-    }
-
-    private func tabTitle(for tab: KnowledgeTab) -> String {
-        if tab == .discover && hasNewDiscoverySuggestions {
-            return "Discover •"
-        }
-        return tab.title
-    }
-}
-
-private enum KnowledgeTab: String, CaseIterable {
-    case discover
-    case chats
-    case live
-    case favorites
-
-    var title: String {
-        switch self {
-        case .discover:
-            return "Discover"
-        case .chats:
-            return "Chats"
-        case .live:
-            return "Live"
-        case .favorites:
-            return "Favorites"
+        if let newSession = await viewModel.createSession(provider: selectedProvider) {
+            activeSessionId = newSession.id
+            prefersHistoryView = false
         }
     }
 }

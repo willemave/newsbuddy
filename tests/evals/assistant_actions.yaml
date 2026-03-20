@@ -1,0 +1,70 @@
+suite: assistant_actions_v1
+defaults:
+  model_spec: anthropic:claude-opus-4-5-20251101
+  judge_model_spec: openai:gpt-5.4
+  screen_context:
+    screen_type: assistant_quick
+    screen_title: Quick Assistant
+
+cases:
+  - id: armin_ronacher_blog_subscribe
+    query: "please find a blog by Armin Ronacher and subscribe to it"
+    expected_feed_options: true
+    expected_outcome: >
+      The assistant identifies Armin Ronacher's blog at lucumr.pocoo.org,
+      returns a validated subscribable feed option for that site, and does not
+      auto-subscribe in the same turn.
+  - id: hot_politics_blogs
+    query: "what are the hot new blogs for politics?"
+    expected_outcome: >
+      The assistant recommends current politics blogs or publications and includes
+      at least one of POLITICO, Axios, or Vox in the answer.
+  - id: favorite_matches_search_term
+    query: "Search my favorites for the term policy."
+    seed_data:
+      favorites:
+        - url: https://example.com/ai-policy
+          title: AI policy landscape
+          source: Example
+          summary: Policy and regulation updates from Washington and major labs.
+        - url: https://example.com/sports
+          title: Sports recap
+          source: Example
+          summary: Weekly sports roundup and standings.
+    expected_outcome: >
+      The assistant uses the user's favorited content to identify "AI policy landscape"
+      at https://example.com/ai-policy as the matching favorite for the term
+      "policy" and does not answer with the unrelated sports favorite.
+  - id: recent_daily_news_digests_summary
+    query: "can you summarize my recent daily news digests?"
+    screen_context:
+      screen_type: daily_digest_list
+      screen_title: Daily News Digests
+    seed_data:
+      daily_digests:
+        - local_date: 2026-03-16
+          title: Washington and AI policy moved quickly
+          summary: >
+            The day centered on AI regulation, semiconductor policy, and a new
+            round of campaign messaging ahead of key votes.
+          key_points:
+            - Congress debated a fresh AI transparency framework.
+            - Semiconductor export controls remained a major flashpoint.
+            - Campaigns sharpened messaging around the economy and immigration.
+          source_count: 3
+          source_content_ids: [101, 102, 103]
+        - local_date: 2026-03-15
+          title: Markets, media, and election strategy shaped the news
+          summary: >
+            Coverage focused on market volatility, coalition politics, and how
+            major media outlets framed the next election cycle.
+          key_points:
+            - Investors reacted to a mix of rate expectations and political uncertainty.
+            - Party strategists argued over turnout and coalition building.
+            - Media narratives diverged on the most important campaign issues.
+          source_count: 3
+          source_content_ids: [104, 105, 106]
+    expected_outcome: >
+      The assistant summarizes the user's recent daily news digests using the
+      digest titles, summaries, or bullet points from the app context rather
+      than switching to unrelated web results.

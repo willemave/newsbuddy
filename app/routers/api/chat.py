@@ -20,6 +20,7 @@ from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user
 from app.core.logging import get_logger
 from app.domain.converters import content_to_domain
+from app.models.chat_message_metadata import ChatMessageRenderMetadata
 from app.models.schema import (
     ChatMessage,
     ChatSession,
@@ -29,6 +30,8 @@ from app.models.schema import (
 )
 from app.models.user import User
 from app.routers.api.chat_models import (
+    AssistantTurnRequest,
+    AssistantTurnResponse,
     ChatMessageDisplayType,
     ChatMessageDto,
     ChatMessageRole,
@@ -43,6 +46,14 @@ from app.routers.api.chat_models import (
 )
 from app.routers.api.chat_models import (
     MessageProcessingStatus as MessageProcessingStatusDto,
+)
+from app.services.assistant_router import (
+    ASSISTANT_SESSION_TYPES,
+    KNOWLEDGE_SESSION_TYPE,
+    AssistantScreenContext,
+    build_screen_context_snapshot,
+    create_assistant_session,
+    process_assistant_turn_async,
 )
 from app.services.chat_agent import (
     create_processing_message,
@@ -81,6 +92,22 @@ def _format_process_summary_label(
     return None
 
 
+def _load_render_metadata(db_message: ChatMessage) -> ChatMessageRenderMetadata | None:
+    """Load validated render metadata from a stored chat message."""
+
+    if not isinstance(db_message.render_metadata, dict):
+        return None
+    try:
+        return ChatMessageRenderMetadata.model_validate(db_message.render_metadata)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to parse render metadata for chat message %s: %s",
+            db_message.id,
+            exc,
+        )
+        return None
+
+
 def _session_to_summary(
     session: ChatSession,
     article_title: str | None = None,
@@ -116,6 +143,61 @@ def _session_to_summary(
         last_message_preview=last_message_preview,
         last_message_role=last_message_role,
     )
+
+
+def _build_processing_user_message(
+    *,
+    db_message: ChatMessage,
+    session_id: int,
+    content: str,
+) -> ChatMessageDto:
+    return ChatMessageDto(
+        id=db_message.id,
+        session_id=session_id,
+        role=ChatMessageRole.USER,
+        content=content,
+        timestamp=db_message.created_at,
+        status=MessageProcessingStatusDto.PROCESSING,
+    )
+
+
+def _build_async_assistant_display_id(message_id: int) -> int:
+    """Build a stable display ID for an async assistant reply.
+
+    The pending user message and the completed assistant reply share the same
+    backing `chat_messages` row. UI surfaces render them as distinct rows, so
+    they need distinct display IDs to avoid SwiftUI identity collisions.
+    """
+
+    return 1_000_000_000 + message_id
+
+
+def _refresh_assistant_session_context(
+    *,
+    db: Session,
+    session: ChatSession,
+    user_id: int,
+    screen_context: AssistantScreenContext,
+) -> None:
+    """Refresh persisted assistant session context for the current screen."""
+
+    session.context_snapshot = build_screen_context_snapshot(
+        db,
+        user_id=user_id,
+        screen_context=screen_context,
+    )
+    session.content_id = screen_context.content_id
+    session.topic = screen_context.selected_topic
+
+    title = screen_context.screen_title or session.title or "Knowledge Chat"
+    if screen_context.content_id is not None:
+        content = db.query(Content).filter(Content.id == screen_context.content_id).first()
+        if content is not None and content.title:
+            title = content.title
+    session.title = title[:500]
+    session.updated_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(session)
 
 
 def _resolve_article_title(content: Content) -> str | None:
@@ -207,6 +289,7 @@ def _extract_messages_for_display(
             # Deserialize JSON to list of ModelMessage
             msg_list = ModelMessagesTypeAdapter.validate_json(db_msg.message_list)
             status = MessageProcessingStatusDto(db_msg.status)
+            render_metadata = _load_render_metadata(db_msg)
             assistant_responses: list[str] = []
             tool_names: list[str] = []
             user_text_emitted = False
@@ -277,6 +360,7 @@ def _extract_messages_for_display(
                         display_type=ChatMessageDisplayType.MESSAGE,
                         status=status,
                         error=db_msg.error,
+                        feed_options=render_metadata.feed_options if render_metadata else [],
                     )
                 )
         except Exception as e:
@@ -448,22 +532,45 @@ async def create_session(
     # Determine session type
     if is_deep_research_provider(request.llm_provider):
         session_type = "deep_research"
-    elif request.topic:
-        session_type = "topic"
-    elif request.content_id:
-        session_type = "article_brain"
     else:
-        session_type = "ad_hoc"
+        session_type = KNOWLEDGE_SESSION_TYPE
 
     # Get article title and URL if content_id provided
     article_title = None
     article_url = None
+    article_summary = None
+    article_source = None
+    context_snapshot: str | None = None
     if request.content_id:
         content = db.query(Content).filter(Content.id == request.content_id).first()
         if not content:
             raise HTTPException(status_code=404, detail="Content not found")
         article_title = _resolve_article_title(content)
         article_url = content.url
+        article_summary = _extract_short_summary(content)
+        article_source = content.source
+        context_snapshot = build_screen_context_snapshot(
+            db,
+            user_id=current_user.id,
+            screen_context=AssistantScreenContext(
+                screen_type=KNOWLEDGE_SESSION_TYPE,
+                screen_title="Knowledge",
+                content_id=request.content_id,
+                selected_topic=request.topic,
+                note=request.initial_message[:500] if request.initial_message else None,
+            ),
+        )
+    elif session_type == KNOWLEDGE_SESSION_TYPE:
+        context_snapshot = build_screen_context_snapshot(
+            db,
+            user_id=current_user.id,
+            screen_context=AssistantScreenContext(
+                screen_type=KNOWLEDGE_SESSION_TYPE,
+                screen_title="Knowledge",
+                selected_topic=request.topic,
+                note=request.initial_message[:500] if request.initial_message else None,
+            ),
+        )
 
     # Build session title
     if request.topic and article_title:
@@ -484,6 +591,7 @@ async def create_session(
         title=title,
         session_type=session_type,
         topic=request.topic,
+        context_snapshot=context_snapshot,
         llm_model=model_spec,
         llm_provider=provider,
         created_at=datetime.now(UTC),
@@ -504,7 +612,13 @@ async def create_session(
         model=model_spec,
     )
 
-    session_summary = _session_to_summary(session, article_title, article_url)
+    session_summary = _session_to_summary(
+        session,
+        article_title,
+        article_url,
+        article_summary,
+        article_source,
+    )
     return CreateChatSessionResponse(session=session_summary)
 
 
@@ -554,13 +668,23 @@ async def update_session(
     # Get article title and URL if content_id exists
     article_title = None
     article_url = None
+    article_summary = None
+    article_source = None
     if session.content_id:
         content = db.query(Content).filter(Content.id == session.content_id).first()
         if content:
             article_title = _resolve_article_title(content)
             article_url = content.url
+            article_summary = _extract_short_summary(content)
+            article_source = content.source
 
-    return _session_to_summary(session, article_title, article_url)
+    return _session_to_summary(
+        session,
+        article_title,
+        article_url,
+        article_summary,
+        article_source,
+    )
 
 
 @router.get(
@@ -586,16 +710,26 @@ async def get_session(
     # Get article title and URL
     article_title = None
     article_url = None
+    article_summary = None
+    article_source = None
     if session.content_id:
         content = db.query(Content).filter(Content.id == session.content_id).first()
         if content:
-            article_title = content.title
+            article_title = _resolve_article_title(content)
             article_url = content.url
+            article_summary = _extract_short_summary(content)
+            article_source = content.source
 
     # Load messages
     messages = _extract_messages_for_display(db, session_id)
 
-    session_summary = _session_to_summary(session, article_title, article_url)
+    session_summary = _session_to_summary(
+        session,
+        article_title,
+        article_url,
+        article_summary,
+        article_source,
+    )
     return ChatSessionDetailDto(session=session_summary, messages=messages)
 
 
@@ -688,29 +822,125 @@ async def send_message(
     )
 
     # Start async processing using BackgroundTasks (not asyncio.create_task which can be GC'd)
-    # Route to deep research service for deep_research sessions
     if session.session_type == "deep_research":
         from app.services.deep_research import process_deep_research_message
 
         background_tasks.add_task(
             process_deep_research_message, session_id, db_message.id, request.message
         )
+    elif session.session_type in ASSISTANT_SESSION_TYPES:
+        background_tasks.add_task(
+            process_assistant_turn_async,
+            session_id,
+            db_message.id,
+            request.message,
+            screen_context=AssistantScreenContext(
+                screen_type=session.session_type,
+                screen_title=session.title,
+                content_id=session.content_id,
+            ),
+        )
     else:
         background_tasks.add_task(process_message_async, session_id, db_message.id, request.message)
 
-    # Build user message DTO for immediate response
-    user_message = ChatMessageDto(
-        id=db_message.id,
+    user_message = _build_processing_user_message(
+        db_message=db_message,
         session_id=session_id,
-        role=ChatMessageRole.USER,
         content=request.message,
-        timestamp=db_message.created_at,
-        status=MessageProcessingStatusDto.PROCESSING,
     )
 
     return SendMessageResponse(
         session_id=session.id,
         user_message=user_message,
+        message_id=db_message.id,
+        status=MessageProcessingStatusDto.PROCESSING,
+    )
+
+
+@router.post(
+    "/assistant/turns",
+    response_model=AssistantTurnResponse,
+    summary="Create or continue a contextual assistant turn",
+)
+async def create_assistant_turn(
+    request: AssistantTurnRequest,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AssistantTurnResponse:
+    """Create or continue an assistant-driven chat turn with screen context."""
+    screen_context = AssistantScreenContext.model_validate(request.screen_context.model_dump())
+    session: ChatSession
+
+    if request.session_id is not None:
+        session = db.query(ChatSession).filter(ChatSession.id == request.session_id).first()
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this session")
+        _refresh_assistant_session_context(
+            db=db,
+            session=session,
+            user_id=current_user.id,
+            screen_context=screen_context,
+        )
+    else:
+        context_snapshot = build_screen_context_snapshot(
+            db,
+            user_id=current_user.id,
+            screen_context=screen_context,
+        )
+        session = create_assistant_session(
+            db,
+            user_id=current_user.id,
+            context_snapshot=context_snapshot,
+            screen_context=screen_context,
+        )
+
+    log_event(
+        event_type="chat",
+        event_name="assistant_turn_started",
+        status="started",
+        user_id=current_user.id,
+        session_id=session.id,
+        content_id=screen_context.content_id,
+        model=session.llm_model,
+    )
+
+    db_message = create_processing_message(db, session.id, request.message)
+    background_tasks.add_task(
+        process_assistant_turn_async,
+        session.id,
+        db_message.id,
+        request.message,
+        screen_context=screen_context,
+    )
+
+    article_title = None
+    article_url = None
+    article_summary = None
+    article_source = None
+    if session.content_id:
+        content = db.query(Content).filter(Content.id == session.content_id).first()
+        if content:
+            article_title = _resolve_article_title(content)
+            article_url = content.url
+            article_summary = _extract_short_summary(content)
+            article_source = content.source
+
+    return AssistantTurnResponse(
+        session=_session_to_summary(
+            session,
+            article_title,
+            article_url,
+            article_summary,
+            article_source,
+        ),
+        user_message=_build_processing_user_message(
+            db_message=db_message,
+            session_id=session.id,
+            content=request.message,
+        ),
         message_id=db_message.id,
         status=MessageProcessingStatusDto.PROCESSING,
     )
@@ -774,6 +1004,7 @@ async def get_message_status(
     # If completed, extract assistant message
     try:
         msg_list = ModelMessagesTypeAdapter.validate_json(db_message.message_list)
+        render_metadata = _load_render_metadata(db_message)
 
         # Find the last assistant text response
         assistant_content = None
@@ -790,12 +1021,13 @@ async def get_message_status(
             raise HTTPException(status_code=500, detail="Assistant response missing")
 
         assistant_message = ChatMessageDto(
-            id=message_id,
+            id=_build_async_assistant_display_id(message_id),
             session_id=db_message.session_id,
             role=ChatMessageRole.ASSISTANT,
             content=assistant_content,
             timestamp=db_message.created_at,
             status=MessageProcessingStatusDto.COMPLETED,
+            feed_options=render_metadata.feed_options if render_metadata else [],
         )
 
         return MessageStatusResponse(

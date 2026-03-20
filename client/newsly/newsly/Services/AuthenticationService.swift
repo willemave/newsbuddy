@@ -214,7 +214,8 @@ final class AuthenticationService: NSObject {
     func updateCurrentUserProfile(
         fullName: String? = nil,
         twitterUsername: String? = nil,
-        newsDigestTimezone: String? = nil
+        newsDigestTimezone: String? = nil,
+        newsDigestIntervalHours: Int? = nil
     ) async throws -> User {
         guard let token = KeychainManager.shared.getToken(key: .accessToken) else {
             throw AuthError.notAuthenticated
@@ -229,7 +230,8 @@ final class AuthenticationService: NSObject {
         let body = UpdateUserProfileRequest(
             fullName: fullName,
             twitterUsername: twitterUsername,
-            newsDigestTimezone: newsDigestTimezone
+            newsDigestTimezone: newsDigestTimezone,
+            newsDigestIntervalHours: newsDigestIntervalHours
         )
         request.httpBody = try JSONEncoder().encode(body)
 

@@ -55,25 +55,46 @@ a framework. Write in plain text, not JSON.
 Output exactly this structure:
 
 Paul Graham:
-<one comprehensive paragraph>
+<two shorter paragraphs>
 
 Andy Grove:
-<one comprehensive paragraph>
+<two shorter paragraphs>
 
 Charlie Munger:
-<one comprehensive paragraph>
+<two shorter paragraphs>
+
+Each section should be exactly two compact paragraphs, not one long block, with a
+blank line between them.
 
 Paul Graham:
 Focus on founders, product taste, leverage, market pull, what small teams could
-build, and where incumbents are missing something.
+build, and where incumbents are missing something. Start with what specific
+users want badly enough to change behavior, not with abstract market narratives.
+Ask what the founders are noticing firsthand, what looks trivial but compounds,
+what idea seems unfashionable or underestimated, and what scrappy unscalable
+action would reveal the truth fastest. Favor bottom-up observations, user pull,
+earned insight from direct contact with reality, and the difference between
+plausible-sounding ideas and things people actually want.
 
 Andy Grove:
 Focus on strategic inflection points, chokepoints, competition, execution risk,
-industry structure, and what leaders should monitor.
+industry structure, and what leaders should monitor. Treat the item as an
+operating problem under pressure, not just an interesting story. Ask what 10x
+force may be rewriting the rules, what substitute, complementor, bottleneck, or
+structural shift changes competitive position, where complacency or denial might
+hide, and what leaders should track weekly. Emphasize consequences for
+organization design, strategic posture, painful pivots, and whether management
+is facing reality fast enough.
 
 Charlie Munger:
 Focus on incentives, second-order effects, multidisciplinary mental models,
-moats, and what the market or public is likely misunderstanding.
+moats, and what the market or public is likely misunderstanding. Think like a
+diagnostician of misjudgment rather than a pundit. Ask who is being rewarded to
+believe what, which biases or psychological tendencies are distorting judgment,
+what hidden consequences will emerge after the first-order story, and whether
+multiple forces are interacting in a lollapalooza effect. Use a latticework of
+models across psychology, economics, competition, engineering, and history
+instead of staying inside one domain.
 """.strip()
 
 

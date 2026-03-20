@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from html import unescape
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -17,6 +17,7 @@ from pydantic import (
     HttpUrl,
     TypeAdapter,
     field_validator,
+    model_validator,
 )
 
 from app.constants import (
@@ -289,6 +290,18 @@ class EditorialKeyPoint(BaseModel):
     point: str = Field(..., min_length=10, max_length=500)
 
 
+class EditorialArchetypeReaction(BaseModel):
+    """Persona-style reaction block for long-form summaries."""
+
+    archetype: Literal["Paul Graham", "Andy Grove", "Charlie Munger"]
+    paragraphs: list[str] = Field(
+        ...,
+        min_length=2,
+        max_length=2,
+        description="Exactly two compact paragraphs for the archetype reaction.",
+    )
+
+
 class EditorialNarrativeSummary(BaseModel):
     """Narrative-first summary format with explicit key points and quotes."""
 
@@ -314,6 +327,53 @@ class EditorialNarrativeSummary(BaseModel):
                         "attribution": "Platform engineering manager",
                     },
                 ],
+                "archetype_reactions": [
+                    {
+                        "archetype": "Paul Graham",
+                        "paragraphs": [
+                            (
+                                "The interesting part is not the AI itself but the way "
+                                "small teams can exploit workflow pain that incumbents "
+                                "still treat as a procurement problem."
+                            ),
+                            (
+                                "This kind of shift usually creates startup room around "
+                                "better defaults, tighter UX, and direct contact with "
+                                "users who feel the operational pain first."
+                            ),
+                        ],
+                    },
+                    {
+                        "archetype": "Andy Grove",
+                        "paragraphs": [
+                            (
+                                "The real story is a strategic inflection point where "
+                                "governance and operating discipline become part of the "
+                                "product, not an afterthought."
+                            ),
+                            (
+                                "Leaders should watch the chokepoints: approval latency, "
+                                "vendor sprawl, and the cost of running weak controls at "
+                                "enterprise scale."
+                            ),
+                        ],
+                    },
+                    {
+                        "archetype": "Charlie Munger",
+                        "paragraphs": [
+                            (
+                                "What matters most is incentives: budget owners, security "
+                                "teams, and workflow operators are now rewarded for "
+                                "reliability over novelty."
+                            ),
+                            (
+                                "Once those incentives lock in, the durable winners will "
+                                "be the vendors that fit the new control structure rather "
+                                "than the ones with the flashiest demo."
+                            ),
+                        ],
+                    },
+                ],
                 "key_points": [
                     {"point": "Budget owners are pushing for usage transparency by workflow."},
                     {"point": "Security reviews now happen before broad internal rollouts."},
@@ -337,6 +397,11 @@ class EditorialNarrativeSummary(BaseModel):
     quotes: list[EditorialQuote] = Field(
         ..., min_length=2, max_length=6, description="2-6 notable direct quotes"
     )
+    archetype_reactions: list[EditorialArchetypeReaction] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Optional set of three archetype reaction blocks for article/podcast detail.",
+    )
     key_points: list[EditorialKeyPoint] = Field(
         ..., min_length=4, max_length=12, description="4-12 concrete key points"
     )
@@ -346,6 +411,20 @@ class EditorialNarrativeSummary(BaseModel):
         description="Content classification: 'to_read' or 'skip'",
     )
     summarization_date: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @model_validator(mode="after")
+    def validate_archetype_reactions(self) -> EditorialNarrativeSummary:
+        """Allow older payloads while enforcing complete archetype sets when present."""
+        if not self.archetype_reactions:
+            return self
+
+        required = {"Paul Graham", "Andy Grove", "Charlie Munger"}
+        actual = {reaction.archetype for reaction in self.archetype_reactions}
+        if actual != required:
+            raise ValueError(
+                "archetype_reactions must include Paul Graham, Andy Grove, and Charlie Munger"
+            )
+        return self
 
 
 class StructuredSummary(BaseModel):

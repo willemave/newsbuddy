@@ -105,6 +105,19 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         isFavorited && !hasAnyMessages
     }
 
+    var isKnowledgeSession: Bool {
+        switch sessionType {
+        case "knowledge_chat", "assistant_quick", "article_brain", "topic":
+            return true
+        default:
+            return false
+        }
+    }
+
+    var isLiveVoiceSession: Bool {
+        sessionType == "voice_live"
+    }
+
     var displayTitle: String {
         title ?? articleTitle ?? "Chat"
     }
@@ -119,6 +132,9 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         // For empty favorites, show the source
         if isEmptyFavorite, let source = articleSource {
             return source
+        }
+        if sessionType == "knowledge_chat", let articleTitle = articleTitle {
+            return "About: \(articleTitle)"
         }
         if sessionType == "article_brain", let articleTitle = articleTitle {
             return "About: \(articleTitle)"
@@ -190,10 +206,16 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     /// Icon name for the session type (used in chat list)
     var sessionTypeIconName: String {
         switch sessionType {
+        case "knowledge_chat":
+            return "bubble.left.and.bubble.right.fill"
+        case "assistant_quick":
+            return "sparkle.magnifyingglass"
         case "voice_live":
             return "waveform.and.mic"
         case "deep_research":
             return "magnifyingglass.circle.fill"
+        case "weekly_discovery":
+            return "calendar.badge.plus"
         case "topic":
             return "text.magnifyingglass"
         case "daily_digest_brain":
@@ -210,10 +232,16 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     /// Human-readable label for the session type
     var sessionTypeLabel: String {
         switch sessionType {
+        case "knowledge_chat":
+            return "Knowledge"
+        case "assistant_quick":
+            return "Assistant"
         case "voice_live":
             return "Live Voice"
         case "deep_research":
             return "Deep Research"
+        case "weekly_discovery":
+            return "Weekly Discovery"
         case "topic":
             return "Search"
         case "daily_digest_brain":

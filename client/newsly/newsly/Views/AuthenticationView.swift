@@ -24,13 +24,14 @@ struct AuthenticationView: View {
                 Image(systemName: "newspaper.fill")
                     .font(.system(size: 60))
                     .foregroundColor(.blue)
-                    .onTapGesture {
-                        handleLogoTap()
-                    }
 
                 Text("WillemNews")
                     .font(.largeTitle)
                     .fontWeight(.bold)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                handleLogoTap()
             }
 
             Spacer()

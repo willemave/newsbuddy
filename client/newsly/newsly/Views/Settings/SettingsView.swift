@@ -20,6 +20,8 @@ struct SettingsView: View {
     @State private var hasUnsavedTwitterUsernameEdits = false
     @State private var xConnection: XConnectionResponse?
     @State private var hasLoadedAccountState = false
+    @State private var selectedDigestIntervalHours = NewsDigestIntervalOption.every6Hours.rawValue
+    @State private var isSavingDigestInterval = false
     @FocusState private var isTwitterUsernameFieldFocused: Bool
 
     var body: some View {
@@ -32,6 +34,9 @@ struct SettingsView: View {
                 SectionDivider()
 
                 displayPreferencesSection
+                SectionDivider()
+
+                digestPreferencesSection
                 SectionDivider()
 
                 sourcesSection
@@ -215,6 +220,52 @@ struct SettingsView: View {
             RowDivider()
 
             fastNewsModeRow
+        }
+    }
+
+    private var digestPreferencesSection: some View {
+        VStack(spacing: 0) {
+            SectionHeader(title: "Daily Digest")
+
+            if let user = authenticatedUser {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "clock.badge")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(.indigo)
+                            .frame(width: Spacing.iconSize, height: Spacing.iconSize)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Digest Frequency")
+                                .font(.listTitle)
+                                .foregroundStyle(Color.textPrimary)
+                            Text(
+                                isSavingDigestInterval
+                                    ? "Saving..."
+                                    : NewsDigestIntervalOption(rawValue: user.newsDigestIntervalHours)?.detail
+                                        ?? "Every 6 hours"
+                            )
+                            .font(.listCaption)
+                            .foregroundStyle(Color.textTertiary)
+                        }
+                        Spacer(minLength: 8)
+                    }
+
+                    Picker("Digest Frequency", selection: $selectedDigestIntervalHours) {
+                        ForEach(NewsDigestIntervalOption.allCases, id: \.rawValue) { option in
+                            Text(option.title).tag(option.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(isSavingDigestInterval)
+                    .onChange(of: selectedDigestIntervalHours) { _, newValue in
+                        guard newValue != user.newsDigestIntervalHours else { return }
+                        Task { await saveDigestIntervalHours(newValue) }
+                    }
+                }
+                .padding(.horizontal, Spacing.rowHorizontal)
+                .padding(.vertical, Spacing.rowVertical)
+            }
         }
     }
 
@@ -468,11 +519,15 @@ struct SettingsView: View {
             serverTwitterUsername = userUsername
             twitterUsernameDraft = userUsername
             hasUnsavedTwitterUsernameEdits = false
+            selectedDigestIntervalHours = user.newsDigestIntervalHours
             hasLoadedAccountState = true
         } else if force {
             serverTwitterUsername = userUsername
             if !isTwitterUsernameFieldFocused && !hasUnsavedTwitterUsernameEdits {
                 twitterUsernameDraft = userUsername
+            }
+            if !isSavingDigestInterval {
+                selectedDigestIntervalHours = user.newsDigestIntervalHours
             }
         }
 
@@ -519,6 +574,29 @@ struct SettingsView: View {
             await loadAccountState(force: true)
         } catch {
             alertMessage = "Failed to save username: \(error.localizedDescription)"
+            showingAlert = true
+        }
+    }
+
+    @MainActor
+    private func saveDigestIntervalHours(_ intervalHours: Int) async {
+        guard !isSavingDigestInterval, authenticatedUser != nil else { return }
+        isSavingDigestInterval = true
+        defer { isSavingDigestInterval = false }
+
+        do {
+            let user = try await AuthenticationService.shared.updateCurrentUserProfile(
+                newsDigestIntervalHours: intervalHours
+            )
+            authViewModel.updateUser(user)
+            selectedDigestIntervalHours = user.newsDigestIntervalHours
+            alertMessage = "Digest frequency saved."
+            showingAlert = true
+        } catch {
+            if let user = authenticatedUser {
+                selectedDigestIntervalHours = user.newsDigestIntervalHours
+            }
+            alertMessage = "Failed to save digest frequency: \(error.localizedDescription)"
             showingAlert = true
         }
     }

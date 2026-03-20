@@ -48,7 +48,10 @@ SUMMARY_VERSION_V1 = 1
 SUMMARY_VERSION_V2 = 2
 
 # Daily digest synthesis model
-DAILY_NEWS_DIGEST_MODEL = "google:gemini-3-flash-preview"
+DAILY_NEWS_DIGEST_MODEL = "google:gemini-3.1-flash-lite-preview"
+ALLOWED_NEWS_DIGEST_INTERVAL_HOURS = (3, 6, 12)
+DEFAULT_NEWS_DIGEST_INTERVAL_HOURS = 6
+DEFAULT_DAILY_DIGEST_SCHEDULER_LOOKBACK_HOURS = 6
 
 
 # Worker ID format: {worker_type}_{instance_id}_{pid}

@@ -115,6 +115,26 @@ struct SelectableText: UIViewRepresentable {
 class DigDeeperTextView: UITextView {
     var onDigDeeper: ((String) -> Void)?
 
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        guard let previousTraitCollection else {
+            super.traitCollectionDidChange(previousTraitCollection)
+            return
+        }
+
+        let colorAppearanceChanged =
+            traitCollection.userInterfaceStyle != previousTraitCollection.userInterfaceStyle
+        let sizeCategoryChanged =
+            traitCollection.preferredContentSizeCategory != previousTraitCollection.preferredContentSizeCategory
+        let layoutDirectionChanged =
+            traitCollection.layoutDirection != previousTraitCollection.layoutDirection
+
+        guard colorAppearanceChanged || sizeCategoryChanged || layoutDirectionChanged else {
+            return
+        }
+
+        super.traitCollectionDidChange(previousTraitCollection)
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(digDeeperAction(_:)) {
             return selectedRange.length > 0
@@ -221,7 +241,7 @@ struct SelectableAttributedText: UIViewRepresentable {
 struct ChatSessionView: View {
     private static let thinkingIndicatorScrollId = -1
     @StateObject private var viewModel: ChatSessionViewModel
-    let onStartLiveVoice: ((LiveVoiceRoute) -> Void)?
+    let onShowHistory: (() -> Void)?
     @FocusState private var isInputFocused: Bool
     @State private var showingModelPicker = false
     @State private var navigateToNewSessionId: Int?
@@ -230,25 +250,26 @@ struct ChatSessionView: View {
     @State private var storedScrollState: ChatScrollState?
     @State private var hasRestoredScroll = false
     @State private var isAtBottom = false
+    @Namespace private var holdToTalkNamespace
 
     init(
         session: ChatSessionSummary,
-        onStartLiveVoice: ((LiveVoiceRoute) -> Void)? = nil
+        onShowHistory: (() -> Void)? = nil
     ) {
         _viewModel = StateObject(
             wrappedValue: ChatSessionViewModel(session: session)
         )
-        self.onStartLiveVoice = onStartLiveVoice
+        self.onShowHistory = onShowHistory
     }
 
     init(
         sessionId: Int,
-        onStartLiveVoice: ((LiveVoiceRoute) -> Void)? = nil
+        onShowHistory: (() -> Void)? = nil
     ) {
         _viewModel = StateObject(
             wrappedValue: ChatSessionViewModel(sessionId: sessionId)
         )
-        self.onStartLiveVoice = onStartLiveVoice
+        self.onShowHistory = onShowHistory
     }
 
     private var titleMaxWidth: CGFloat {
@@ -312,22 +333,14 @@ struct ChatSessionView: View {
                     }
                 }
 
-                if let onStartLiveVoice {
+                if let onShowHistory {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
-                            let launchMode: LiveLaunchMode =
-                                session.contentId == nil ? .general : .articleVoice
-                            onStartLiveVoice(
-                                LiveVoiceRoute(
-                                    chatSessionId: session.id,
-                                    contentId: session.contentId,
-                                    launchMode: launchMode,
-                                    sourceSurface: .chatSession
-                                )
-                            )
+                            onShowHistory()
                         } label: {
-                            Image(systemName: "waveform.and.mic")
+                            Image(systemName: "clock.arrow.circlepath")
                         }
+                        .accessibilityIdentifier("knowledge.chat_history")
                     }
                 }
 
@@ -372,7 +385,7 @@ struct ChatSessionView: View {
             }
         }
         .navigationDestination(item: $navigateToNewSessionId) { sessionId in
-            ChatSessionView(sessionId: sessionId, onStartLiveVoice: onStartLiveVoice)
+            ChatSessionView(sessionId: sessionId)
         }
         .sheet(item: $shareContent) { content in
             ShareSheet(content: content)
@@ -644,43 +657,42 @@ struct ChatSessionView: View {
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 10) {
-                // Clean input field with subtle border
                 HStack(spacing: 8) {
                     TextField("Message", text: $viewModel.inputText, axis: .vertical)
                         .textFieldStyle(.plain)
                         .lineLimit(1...5)
                         .focused($isInputFocused)
-
-                    // Microphone inside input field
-                    if viewModel.voiceDictationAvailable {
-                        Button {
-                            Task {
-                                if viewModel.isRecording {
-                                    await viewModel.stopVoiceRecording()
-                                } else {
-                                    await viewModel.startVoiceRecording()
-                                }
-                            }
-                        } label: {
-                            Image(systemName: viewModel.isRecording ? "stop.fill" : "mic")
-                                .font(.system(size: 16, weight: .regular))
-                                .foregroundColor(viewModel.isRecording ? .red : .secondary)
-                                .symbolEffect(.pulse, isActive: viewModel.isRecording)
-                        }
-                        .disabled(viewModel.isTranscribing || viewModel.isSending)
-                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(Color.surfaceSecondary)
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .stroke(viewModel.isRecording ? Color.red.opacity(0.6) : Color(.separator), lineWidth: 1)
+                        .stroke(
+                            viewModel.isRecording ? Color.red.opacity(0.6) : Color(.separator),
+                            lineWidth: 1
+                        )
                 )
                 .cornerRadius(20)
                 .frame(maxWidth: .infinity)
 
-                // Clean send button
+                HoldToTalkMicButton(
+                    isEnabled: !viewModel.isSending,
+                    isRecording: viewModel.isRecording,
+                    size: 38,
+                    namespace: holdToTalkNamespace,
+                    matchedId: "chat-session-mic",
+                    onPressStart: {
+                        Task { await viewModel.startVoiceRecording() }
+                    },
+                    onPressEnd: {
+                        Task { await viewModel.stopVoiceRecording() }
+                    }
+                )
+                .opacity(viewModel.voiceDictationAvailable || viewModel.isRecording ? 1 : 0.72)
+                .accessibilityLabel("Hold to talk")
+                .accessibilityHint("Press and hold to dictate into this chat")
+
                 Button {
                     Task { await viewModel.sendMessage() }
                 } label: {
@@ -701,7 +713,7 @@ struct ChatSessionView: View {
                 .disabled(sendButtonDisabled)
             }
 
-            if viewModel.isTranscribing || viewModel.isRecording {
+            if viewModel.isTranscribing || viewModel.isRecording || !viewModel.activeTranscript.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     if viewModel.isTranscribing {
                         HStack(spacing: 4) {
@@ -718,10 +730,17 @@ struct ChatSessionView: View {
                             Image(systemName: "waveform")
                                 .font(.caption)
                                 .foregroundColor(.red)
-                            Text("Listening — text will appear in the message box")
+                            Text("Listening...")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
+                    }
+
+                    if !viewModel.activeTranscript.isEmpty {
+                        Text(viewModel.activeTranscript)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
                     }
                 }
                 .transition(.opacity)
@@ -729,7 +748,7 @@ struct ChatSessionView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 10)
+        .padding(.bottom, 92)
         .background(Color.surfaceSecondary)
         .overlay(
             Rectangle()
@@ -755,6 +774,8 @@ struct MessageBubble: View {
     let articleUrl: String?
     var onDigDeeper: ((String) -> Void)?
     var onShare: ((String) -> Void)?
+    @Environment(\.openURL) private var openURL
+    @StateObject private var feedOptionActionModel = AssistantFeedOptionActionModel()
 
     var body: some View {
         Group {
@@ -816,18 +837,30 @@ struct MessageBubble: View {
     }
 
     private var messageContent: some View {
-        Group {
-            if message.isUser {
-                Text(message.content)
-                    .font(.callout)
-                    .foregroundColor(Color(textColor))
-                    .textSelection(.enabled)
-            } else {
-                SelectableMarkdownView(
-                    markdown: message.content,
-                    textColor: textColor,
-                    baseFont: .preferredFont(forTextStyle: .callout),
-                    onDigDeeper: onDigDeeper
+        VStack(alignment: .leading, spacing: 12) {
+            Group {
+                if message.isUser {
+                    Text(message.content)
+                        .font(.callout)
+                        .foregroundColor(Color(textColor))
+                        .textSelection(.enabled)
+                } else {
+                    SelectableMarkdownView(
+                        markdown: message.content,
+                        textColor: textColor,
+                        baseFont: .preferredFont(forTextStyle: .callout),
+                        onDigDeeper: onDigDeeper
+                    )
+                }
+            }
+            if message.isAssistant && message.hasFeedOptions {
+                AssistantFeedOptionsSection(
+                    options: message.feedOptions,
+                    actionModel: feedOptionActionModel,
+                    onPreview: { option in
+                        guard let url = URL(string: option.previewURLString) else { return }
+                        openURL(url)
+                    }
                 )
             }
         }
@@ -859,6 +892,140 @@ struct ProcessSummaryRow: View {
         }
         .frame(maxWidth: .infinity)
         .accessibilityLabel(message.processSummaryText)
+    }
+}
+
+@MainActor
+protocol AssistantFeedSubscribing: AnyObject {
+    func subscribeFeed(
+        feedURL: String,
+        feedType: String,
+        displayName: String?
+    ) async throws -> ScraperConfig
+}
+
+extension ScraperConfigService: AssistantFeedSubscribing {}
+
+@MainActor
+final class AssistantFeedOptionActionModel: ObservableObject {
+    @Published private(set) var subscribedOptionIds: Set<String> = []
+    @Published private(set) var subscribingOptionIds: Set<String> = []
+
+    private let service: any AssistantFeedSubscribing
+
+    init(service: any AssistantFeedSubscribing = ScraperConfigService.shared) {
+        self.service = service
+    }
+
+    func isSubscribed(_ option: AssistantFeedOption) -> Bool {
+        subscribedOptionIds.contains(option.id)
+    }
+
+    func isSubscribing(_ option: AssistantFeedOption) -> Bool {
+        subscribingOptionIds.contains(option.id)
+    }
+
+    func subscribe(_ option: AssistantFeedOption) async {
+        guard !isSubscribed(option), !isSubscribing(option) else { return }
+
+        subscribingOptionIds.insert(option.id)
+        defer { subscribingOptionIds.remove(option.id) }
+
+        do {
+            _ = try await service.subscribeFeed(
+                feedURL: option.feedURL,
+                feedType: option.feedType,
+                displayName: option.title
+            )
+            subscribedOptionIds.insert(option.id)
+            ToastService.shared.showSuccess("Subscribed to \(option.title)")
+        } catch let apiError as APIError {
+            if case .httpError(let statusCode) = apiError, statusCode == 400 {
+                subscribedOptionIds.insert(option.id)
+                ToastService.shared.show("Already subscribed", type: .info)
+                return
+            }
+            ToastService.shared.showError("Failed to subscribe: \(apiError.localizedDescription)")
+        } catch {
+            ToastService.shared.showError("Failed to subscribe: \(error.localizedDescription)")
+        }
+    }
+}
+
+struct AssistantFeedOptionsSection: View {
+    let options: [AssistantFeedOption]
+    @ObservedObject var actionModel: AssistantFeedOptionActionModel
+    let onPreview: (AssistantFeedOption) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(options) { option in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: option.systemIcon)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                        Text(option.feedTypeLabel.uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text("·")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text(option.hostLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Text(option.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let subtitle = option.subtitleText {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    HStack(spacing: 8) {
+                        Button {
+                            Task { await actionModel.subscribe(option) }
+                        } label: {
+                            if actionModel.isSubscribing(option) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Label(
+                                    actionModel.isSubscribed(option) ? "Subscribed" : "Subscribe",
+                                    systemImage: actionModel.isSubscribed(option) ? "checkmark.circle.fill" : "plus"
+                                )
+                                .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(actionModel.isSubscribed(option) || actionModel.isSubscribing(option))
+
+                        Button {
+                            onPreview(option)
+                        } label: {
+                            Label("Preview", systemImage: "safari")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(12)
+                .background(Color.black.opacity(0.03))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color(.separator).opacity(0.5), lineWidth: 0.5)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
     }
 }
 

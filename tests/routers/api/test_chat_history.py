@@ -125,6 +125,21 @@ def test_extract_messages_for_display_hides_intermediate_agent_scaffolding(db_se
     db_message = ChatMessage(
         session_id=session.id,
         message_list=_multi_step_message_list(),
+        render_metadata={
+            "feed_options": [
+                {
+                    "id": "8f7d2c42b0c1de90",
+                    "title": "lucumr",
+                    "site_url": "https://lucumr.pocoo.org/",
+                    "feed_url": "https://lucumr.pocoo.org/feed.atom",
+                    "feed_type": "atom",
+                    "feed_format": "atom",
+                    "description": "Armin Ronacher's weblog.",
+                    "rationale": "Validated Atom feed.",
+                    "evidence_url": "https://lucumr.pocoo.org/",
+                }
+            ]
+        },
         status="completed",
     )
     db_session.add(db_message)
@@ -137,6 +152,7 @@ def test_extract_messages_for_display_hides_intermediate_agent_scaffolding(db_se
     assert display_messages[1].display_type.value == "process_summary"
     assert display_messages[1].content == "Thinking • Searched the web and reviewed sources"
     assert display_messages[2].content == "Final deep-dive answer."
+    assert display_messages[2].feed_options[0].feed_url == "https://lucumr.pocoo.org/feed.atom"
 
 
 def test_extract_messages_for_display_omits_process_summary_for_simple_turn(db_session) -> None:

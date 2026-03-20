@@ -172,6 +172,31 @@ def is_content_read(db: Session, content_id: int, user_id: int) -> bool:
     )
 
 
+def mark_content_as_unread(db: Session, content_id: int, user_id: int) -> bool:
+    """Remove read status for a single content item."""
+    try:
+        result = db.execute(
+            delete(ContentReadStatus).where(
+                ContentReadStatus.content_id == content_id,
+                ContentReadStatus.user_id == user_id,
+            )
+        )
+        db.commit()
+        return bool(result.rowcount)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "[READ_STATUS] Unexpected error while marking unread",
+            extra=_read_status_extra(
+                "mark_content_as_unread",
+                content_id=content_id,
+                user_id=user_id,
+                error=str(exc),
+            ),
+        )
+        db.rollback()
+        return False
+
+
 def clear_read_status(db: Session, user_id: int) -> int:
     """Clear all read status rows for a user."""
     result = db.execute(delete(ContentReadStatus).where(ContentReadStatus.user_id == user_id))

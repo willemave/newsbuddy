@@ -11,6 +11,7 @@ Supervisor manages:
 - `news_app_workers_onboarding`
 - `news_app_workers_chat`
 - optional `news_app_queue_watchdog`
+- optional `news_app_bgutil_provider`
 
 Cron manages:
 - `scripts/run_scrapers.py`
@@ -61,7 +62,7 @@ Ensure `/opt/news_app/.env` exists. In production the deploy copies `.env.rackne
 ## 4) Supervisor programs
 
 Create `/etc/supervisor/conf.d/news_app.conf` using the repo sample in
-[`supervisor.conf`](../../../supervisor.conf).
+[`supervisor.conf`](../../../supervisor.conf). The deploy scripts now install this file from the repo before `supervisorctl reread`.
 
 Key programs:
 
@@ -83,6 +84,9 @@ command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_
 
 [program:news_app_workers_chat]
 command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue chat --worker-slot 1 --stats-interval 60"
+
+[program:news_app_bgutil_provider]
+command=/bin/bash -lc "/opt/news_app/scripts/start_bgutil_provider.sh"
 ```
 
 Enable and load Supervisor:
@@ -132,11 +136,12 @@ sudo -u newsapp -H crontab -l
 Current production cadence:
 
 ```cron
-0 */6 * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_daily_news_digest.py --hours 6 >> /var/log/news_app/daily-news-digest.log 2>&1
+0 */3 * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_daily_news_digest.py --lookback-hours 6 >> /var/log/news_app/daily-news-digest.log 2>&1
 ```
 
-The script now accepts `--hours {6,12,24}` and enqueues users whose local
-03:00 digest run fell within that recent lookback window.
+The scheduler polls every 3 hours and enqueues users whose latest local digest
+checkpoint fell within the recent lookback window. Per-user checkpoint cadence
+comes from `news_digest_interval_hours` with supported values `3`, `6`, or `12`.
 
 ## 6) GitHub Actions deploy behavior
 
@@ -155,7 +160,7 @@ image worker after this queue split. Minimum value:
 news_app_server news_app_workers_content news_app_workers_image news_app_workers_transcribe news_app_workers_onboarding news_app_workers_chat
 ```
 
-If the watchdog is enabled on the host, append `news_app_queue_watchdog`.
+If the watchdog is enabled on the host, append `news_app_queue_watchdog`. If YouTube PO token support is enabled, also append `news_app_bgutil_provider`.
 
 ## 7) Post-deploy image-queue recovery
 

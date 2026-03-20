@@ -235,6 +235,7 @@ class DailyNewsDigest(Base):
     source_count = Column(Integer, nullable=False, default=0)
     llm_model = Column(String(120), nullable=False)
     generated_at = Column(DateTime, nullable=False, default=_utcnow)
+    coverage_end_at = Column(DateTime, nullable=True)
     read_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
@@ -594,6 +595,7 @@ class ChatMessage(Base):
     id = Column(Integer, primary_key=True)
     session_id = Column(Integer, nullable=False, index=True)  # soft ref to chat_sessions.id
     message_list = Column(Text, nullable=False)  # JSON from ModelMessagesTypeAdapter
+    render_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     # Async processing fields
     status = Column(

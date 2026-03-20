@@ -156,6 +156,14 @@ class ContentService {
         return try await client.request(APIEndpoints.searchContent, queryItems: queryItems)
     }
 
+    func searchMixed(query: String, limit: Int = 10) async throws -> MixedSearchResponse {
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        return try await client.request(APIEndpoints.searchMixedContent, queryItems: queryItems)
+    }
+
     func fetchContentList(contentTypes: [String]? = nil,
                          date: String? = nil,
                          readFilter: String = "all",

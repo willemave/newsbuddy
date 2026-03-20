@@ -37,7 +37,7 @@ establish_ssh_connection() {
 #       --force-env                 Force deletion/recreation of the remote .venv
 #       --debug                     Verbose output; enable local and remote tracing
 #       --restart-supervisor        Reread/update and restart programs
-#       --programs "a b c"          Supervisor program names (default: news_app_server news_app_workers_content news_app_workers_transcribe news_app_workers_onboarding news_app_workers_chat news_app_scrapers news_app_queue_watchdog)
+#       --programs "a b c"          Supervisor program names (default: news_app_server news_app_workers_content news_app_workers_image news_app_workers_transcribe news_app_workers_onboarding news_app_workers_chat news_app_queue_watchdog news_app_bgutil_provider)
 #       --promote-user USER         Run remote promote step as this user (default: root)
 #       --extra-exclude PATTERN     Additional rsync exclude (can repeat)
 #       --source-env FILE           Source env file for --env-only (default: .env.racknerd)
@@ -61,11 +61,12 @@ RESTART_SUP=false
 PROGRAMS=(
   news_app_server
   news_app_workers_content
+  news_app_workers_image
   news_app_workers_transcribe
   news_app_workers_onboarding
   news_app_workers_chat
-  news_app_scrapers
   news_app_queue_watchdog
+  news_app_bgutil_provider
 )
 REQUIRED_PROGRAMS=(
   news_app_server
@@ -397,6 +398,19 @@ else
   echo "[remote] remote delete disabled (sync may leave old files)"
 fi
 
+PROTECTED_PATHS=(
+  ".venv/"
+  ".env"
+  ".env.racknerd"
+  "archive/"
+  "data/"
+  "logs/"
+  "secrets/"
+)
+for protected_path in "${PROTECTED_PATHS[@]}"; do
+  RSYNC_OPTS+=(--filter="P $protected_path")
+done
+
 if [[ $(id -u) -eq 0 ]]; then
   RSYNC_OPTS+=(--chown="$OWNER_GROUP")
 else
@@ -466,6 +480,12 @@ else
 fi
 
 if "$RESTART_SUP"; then
+  echo "→ Installing Supervisor config from repo sample"
+  printf -v REMOTE_SUP_INSTALL_CMD 'set -euo pipefail; SOURCE_CONF=%q; TARGET_CONF=%q; if [[ ! -f "$SOURCE_CONF" ]]; then echo "Supervisor config missing: $SOURCE_CONF" >&2; exit 1; fi; sudo cp "$SOURCE_CONF" "$TARGET_CONF"; sudo chown root:root "$TARGET_CONF"; sudo chmod 644 "$TARGET_CONF"' \
+    "$REMOTE_DIR/supervisor.conf" \
+    "/etc/supervisor/conf.d/news_app.conf"
+  ssh -S "$SSH_CONTROL_PATH" -tt "$REMOTE_HOST" "$(printf "bash -lc %q" "$REMOTE_SUP_INSTALL_CMD")"
+
   echo "→ Reloading Supervisor configuration"
   printf -v REMOTE_SUP_CMD 'set -euo pipefail; sudo supervisorctl reread && sudo supervisorctl update'
   ssh -S "$SSH_CONTROL_PATH" -tt "$REMOTE_HOST" "$(printf "bash -lc %q" "$REMOTE_SUP_CMD")"

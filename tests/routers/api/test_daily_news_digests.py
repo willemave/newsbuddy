@@ -14,6 +14,7 @@ def _create_digest(
     local_date: str,
     read_at: datetime | None = None,
     title: str = "Digest title",
+    coverage_end_at: datetime | None = None,
 ) -> DailyNewsDigest:
     return DailyNewsDigest(
         user_id=user_id,
@@ -24,8 +25,9 @@ def _create_digest(
         key_points=["Point 1", "Point 2"],
         source_content_ids=[1, 2],
         source_count=2,
-        llm_model="google:gemini-3-flash-preview",
+        llm_model="google:gemini-3.1-flash-lite-preview",
         generated_at=datetime(2026, 3, 1, 3, 0, 0),
+        coverage_end_at=coverage_end_at,
         read_at=read_at,
     )
 
@@ -52,6 +54,7 @@ def test_list_daily_digests_defaults_to_unread(client, db_session, test_user) ->
     assert payload["digests"][0]["local_date"] == "2026-02-28"
     assert payload["digests"][1]["local_date"] == "2026-02-27"
     assert all(digest["is_read"] is False for digest in payload["digests"])
+    assert payload["digests"][0]["coverage_end_at"] is None
 
 
 def test_list_daily_digests_all_filter_includes_read(client, db_session, test_user) -> None:
@@ -71,6 +74,21 @@ def test_list_daily_digests_all_filter_includes_read(client, db_session, test_us
     assert response.status_code == 200
     payload = response.json()
     assert len(payload["digests"]) == 2
+
+
+def test_list_daily_digests_includes_checkpoint_coverage(client, db_session, test_user) -> None:
+    digest = _create_digest(
+        user_id=test_user.id,
+        local_date="2026-02-28",
+        coverage_end_at=datetime(2026, 2, 28, 6, 0, 0),
+    )
+    db_session.add(digest)
+    db_session.commit()
+
+    response = client.get("/api/content/daily-digests")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["digests"][0]["coverage_end_at"] == "2026-02-28T06:00:00Z"
 
 
 def test_mark_daily_digest_read_and_unread(client, db_session, test_user) -> None:

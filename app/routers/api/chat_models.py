@@ -5,9 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.models.chat_message_metadata import AssistantFeedOption
 from app.services.llm_models import LLMProvider as ChatModelProvider
+
+MAX_VISIBLE_CONTENT_IDS = 12
 
 
 class ChatMessageRole(StrEnum):
@@ -92,6 +95,38 @@ class SendChatMessageRequest(BaseModel):
     )
 
 
+class AssistantScreenContextDto(BaseModel):
+    """Compact screen context passed to the assistant router."""
+
+    screen_type: str = Field(default="unknown", max_length=64)
+    screen_title: str | None = Field(default=None, max_length=200)
+    content_id: int | None = Field(default=None, ge=1)
+    visible_content_ids: list[int] = Field(
+        default_factory=list,
+        max_length=MAX_VISIBLE_CONTENT_IDS,
+    )
+    selected_topic: str | None = Field(default=None, max_length=200)
+    query: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("visible_content_ids", mode="before")
+    @classmethod
+    def truncate_visible_content_ids(cls, value: object) -> object:
+        """Bound client-provided visible content IDs to the supported limit."""
+
+        if isinstance(value, list):
+            return value[:MAX_VISIBLE_CONTENT_IDS]
+        return value
+
+
+class AssistantTurnRequest(BaseModel):
+    """Request to create or continue a screen-aware assistant conversation."""
+
+    message: str = Field(..., min_length=1, max_length=10000)
+    session_id: int | None = Field(default=None, ge=1)
+    screen_context: AssistantScreenContextDto = Field(default_factory=AssistantScreenContextDto)
+
+
 class ChatMessageDto(BaseModel):
     """Flattened chat message returned to clients."""
 
@@ -113,6 +148,10 @@ class ChatMessageDto(BaseModel):
         description="Processing status for async messages",
     )
     error: str | None = Field(default=None, description="Error message if processing failed")
+    feed_options: list[AssistantFeedOption] = Field(
+        default_factory=list,
+        description="Optional validated feed options attached to the assistant message",
+    )
 
 
 class ChatSessionSummaryDto(BaseModel):
@@ -177,6 +216,18 @@ class SendMessageResponse(BaseModel):
     session_id: int
     user_message: ChatMessageDto = Field(..., description="The user's message")
     message_id: int = Field(..., description="ID to poll for assistant response")
+    status: MessageProcessingStatus = Field(
+        default=MessageProcessingStatus.PROCESSING,
+        description="Current processing status",
+    )
+
+
+class AssistantTurnResponse(BaseModel):
+    """Response returned after creating or continuing an assistant turn."""
+
+    session: ChatSessionSummaryDto
+    user_message: ChatMessageDto
+    message_id: int = Field(..., description="Pending assistant message identifier")
     status: MessageProcessingStatus = Field(
         default=MessageProcessingStatus.PROCESSING,
         description="Current processing status",

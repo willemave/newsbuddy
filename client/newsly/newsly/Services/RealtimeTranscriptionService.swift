@@ -65,9 +65,12 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
     private var connectionState: RealtimeConnectionState = .idle
     private var pendingEvents: [[String: Any]] = []
     private var connectionContinuation: CheckedContinuation<Void, Error>?
+    private var finalTranscriptContinuation: CheckedContinuation<String, Error>?
     private var totalSamplesSent: Int64 = 0
     private var activeSessionType: String?
     private var hasFinalTranscript = false
+    private let finalTranscriptTimeoutSeconds: TimeInterval = 1.2
+    private var isClosingConnection = false
 
     func requestMicrophonePermission() async -> Bool {
         realtimeLogger.info("Requesting microphone permission")
@@ -82,6 +85,8 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
     func start() async throws {
         guard !isRecording else { return }
         realtimeLogger.info("Starting realtime transcription")
+        currentTranscript = ""
+        isClosingConnection = false
 
         let hasPermission = await requestMicrophonePermission()
         guard hasPermission else {
@@ -103,12 +108,17 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
 
         realtimeLogger.info("Connecting to realtime websocket")
         try await connect(token: token, model: resolvedModel)
-        try await waitForConnection()
         startAudioEngine()
         isRecording = true
         isTranscribing = true
         totalSamplesSent = 0
         hasFinalTranscript = false
+        do {
+            try await waitForConnection()
+        } catch {
+            reset()
+            throw error
+        }
         realtimeLogger.info("Realtime transcription started")
     }
 
@@ -118,21 +128,35 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
         stopAudioEngine()
         let audioDurationMs = (Double(totalSamplesSent) / targetSampleRate) * 1000
         let shouldCommit = audioDurationMs >= 100
+        let shouldAwaitFinal = shouldCommit && !hasFinalTranscript
         if activeSessionType == "transcription" {
-            if shouldCommit && !hasFinalTranscript {
+            if shouldAwaitFinal {
                 realtimeLogger.info("Sending commit for transcription session")
                 sendEvent(["type": "input_audio_buffer.commit"])
             } else {
-                realtimeLogger.info("Skipping commit; transcription session already finalized or buffer too small")
+                realtimeLogger.info(
+                    "Skipping commit; transcription session already finalized or buffer too small"
+                )
             }
+        } else if shouldCommit {
+            sendEvent(["type": "input_audio_buffer.commit"])
         } else {
-            if shouldCommit {
-                sendEvent(["type": "input_audio_buffer.commit"])
-            } else {
-                realtimeLogger.info("Skipping commit; audio buffer too small (\(audioDurationMs, privacy: .public)ms)")
+            realtimeLogger.info(
+                "Skipping commit; audio buffer too small (\(audioDurationMs, privacy: .public)ms)"
+            )
+        }
+
+        if shouldAwaitFinal {
+            do {
+                _ = try await waitForFinalTranscript()
+            } catch {
+                realtimeLogger.error(
+                    "Timed out waiting for final realtime transcript: \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
-        try? await Task.sleep(nanoseconds: 400_000_000)
+
+        isClosingConnection = true
         webSocket?.cancel(with: .normalClosure, reason: nil)
         isRecording = false
         isTranscribing = false
@@ -151,11 +175,13 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
         stopAudioEngine()
         webSocket?.cancel(with: .goingAway, reason: nil)
         currentTranscript = ""
+        isClosingConnection = true
         isRecording = false
         isTranscribing = false
         connectionState = .idle
         pendingEvents.removeAll()
         connectionContinuation = nil
+        finalTranscriptContinuation = nil
         totalSamplesSent = 0
         activeSessionType = nil
         hasFinalTranscript = false
@@ -256,6 +282,12 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
                 guard let self else { return }
                 switch result {
                 case .failure(let error):
+                    if self.isClosingConnection || self.connectionState == .idle {
+                        realtimeLogger.debug(
+                            "Ignoring websocket receive error during shutdown: \(error.localizedDescription, privacy: .public)"
+                        )
+                        return
+                    }
                     realtimeLogger.error(
                         "WebSocket receive error: \(error.localizedDescription, privacy: .public)"
                     )
@@ -320,6 +352,7 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
            let text = json["text"] as? String {
             currentTranscript = text
             hasFinalTranscript = true
+            resumeFinalTranscript(with: text)
             onTranscriptFinal?(text)
             return
         }
@@ -335,6 +368,7 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
            let transcript = json["transcript"] as? String {
             currentTranscript = transcript
             hasFinalTranscript = true
+            resumeFinalTranscript(with: transcript)
             onTranscriptFinal?(transcript)
             return
         }
@@ -347,12 +381,14 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
 
         if let text = json["text"] as? String {
             currentTranscript = text
+            resumeFinalTranscript(with: text)
             onTranscriptFinal?(text)
             return
         }
 
         if let transcript = json["transcript"] as? String {
             currentTranscript = transcript
+            resumeFinalTranscript(with: transcript)
             onTranscriptFinal?(transcript)
         }
     }
@@ -451,6 +487,12 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
             guard let error else { return }
             Task { @MainActor in
                 guard let self else { return }
+                if self.isClosingConnection || self.connectionState == .idle {
+                    realtimeLogger.debug(
+                        "Ignoring websocket send error during shutdown: \(error.localizedDescription, privacy: .public)"
+                    )
+                    return
+                }
                 realtimeLogger.error(
                     "WebSocket send error: \(error.localizedDescription, privacy: .public)"
                 )
@@ -478,6 +520,29 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
     private func resumeConnectionFailure(_ error: Error) {
         connectionContinuation?.resume(throwing: error)
         connectionContinuation = nil
+    }
+
+    private func waitForFinalTranscript() async throws -> String {
+        if hasFinalTranscript {
+            return currentTranscript
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            finalTranscriptContinuation = continuation
+            Task { @MainActor [weak self] in
+                let timeoutSeconds = self?.finalTranscriptTimeoutSeconds ?? 1.2
+                try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                guard let self else { return }
+                guard self.finalTranscriptContinuation != nil else { return }
+                self.finalTranscriptContinuation?.resume(returning: self.currentTranscript)
+                self.finalTranscriptContinuation = nil
+            }
+        }
+    }
+
+    private func resumeFinalTranscript(with transcript: String) {
+        finalTranscriptContinuation?.resume(returning: transcript)
+        finalTranscriptContinuation = nil
     }
 
     private func notifyStateChange() {

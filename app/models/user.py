@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_serializer
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.sql import func
 
+from app.constants import DEFAULT_NEWS_DIGEST_INTERVAL_HOURS
 from app.core.db import Base
 
 
@@ -20,6 +21,11 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     twitter_username = Column(String(50), nullable=True, index=True)
     news_digest_timezone = Column(String(100), nullable=False, default="UTC")
+    news_digest_interval_hours = Column(
+        Integer,
+        nullable=False,
+        default=DEFAULT_NEWS_DIGEST_INTERVAL_HOURS,
+    )
     is_admin = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     has_completed_new_user_tutorial = Column(Boolean, default=False, nullable=False)
@@ -54,6 +60,7 @@ class UserResponse(UserBase):
     is_active: bool
     twitter_username: str | None = None
     news_digest_timezone: str = "UTC"
+    news_digest_interval_hours: int = DEFAULT_NEWS_DIGEST_INTERVAL_HOURS
     has_x_bookmark_sync: bool = False
     has_completed_onboarding: bool
     has_completed_new_user_tutorial: bool
@@ -130,6 +137,9 @@ class AdminLoginResponse(BaseModel):
 class UpdateUserProfileRequest(BaseModel):
     """Request schema for updating the authenticated user's profile."""
 
+    model_config = ConfigDict(extra="forbid")
+
     full_name: str | None = Field(default=None, max_length=255)
     twitter_username: str | None = Field(default=None, max_length=50)
     news_digest_timezone: str | None = Field(default=None, max_length=100)
+    news_digest_interval_hours: int | None = Field(default=None)

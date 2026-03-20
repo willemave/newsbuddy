@@ -290,6 +290,13 @@ private struct DayDelimiter: View {
     let item: ContentSummary
     let isFirst: Bool
 
+    private static let monthDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        formatter.timeZone = TimeZone.current
+        return formatter
+    }()
+
     private var dayLabel: String {
         guard let date = item.itemDate else { return "" }
         let calendar = Calendar.current
@@ -299,10 +306,7 @@ private struct DayDelimiter: View {
         } else if calendar.isDateInYesterday(date) {
             return "YESTERDAY"
         } else {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMM d"
-            formatter.timeZone = TimeZone.current
-            return formatter.string(from: date).uppercased()
+            return Self.monthDayFormatter.string(from: date).uppercased()
         }
     }
 

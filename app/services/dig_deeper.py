@@ -17,6 +17,7 @@ from app.services.queue import TaskQueue, TaskStatus, TaskType
 
 logger = get_logger(__name__)
 
+KNOWLEDGE_SESSION_TYPE = "knowledge_chat"
 DIG_DEEPER_PROMPT_TEMPLATE = (
     "Dig deeper into the key points of {title}. For each main point, explain reasoning, "
     "supporting evidence, and include a bit more detail explaining the point. "
@@ -27,6 +28,24 @@ DIG_DEEPER_PROMPT_TEMPLATE = (
 MAX_DISCUSSION_COMMENT_SNIPPETS = 8
 MAX_DISCUSSION_GROUP_SNIPPETS = 4
 MAX_DISCUSSION_SNIPPET_CHARS = 220
+
+
+def _build_content_context_snapshot(content: Content, user_id: int) -> str:
+    """Build a compact content-grounding snapshot without importing assistant_router."""
+
+    lines = [
+        f"Screen Type: {KNOWLEDGE_SESSION_TYPE}",
+        "Screen Title: Knowledge",
+        "Visible Content:",
+        (
+            f"- [{content.id}] {(content.title or 'Untitled').strip()} "
+            f"({content.source or 'unknown'}) — {content.url}"
+        ),
+    ]
+    if content.short_summary:
+        lines.append(f"  Short Summary: {content.short_summary}")
+    lines.append(f"User ID: {user_id}")
+    return "\n".join(lines)
 
 
 def _truncate_snippet(text: str, max_chars: int = MAX_DISCUSSION_SNIPPET_CHARS) -> str:
@@ -217,7 +236,8 @@ def get_or_create_dig_deeper_session(
         user_id=user_id,
         content_id=content.id,
         title=title,
-        session_type="article_brain",
+        session_type=KNOWLEDGE_SESSION_TYPE,
+        context_snapshot=_build_content_context_snapshot(content, user_id),
         llm_provider=DEFAULT_PROVIDER,
         llm_model=DEFAULT_MODEL,
         created_at=datetime.now(UTC),

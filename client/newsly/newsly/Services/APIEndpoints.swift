@@ -14,6 +14,7 @@ enum APIEndpoints {
     static let submitContent = "/api/content/submit"
     static let submissionStatusList = "/api/content/submissions/list"
     static let searchContent = "/api/content/search"
+    static let searchMixedContent = "/api/content/search/mixed"
     static func contentDetail(id: Int) -> String {
         return "/api/content/\(id)"
     }
@@ -122,4 +123,5 @@ enum APIEndpoints {
     static func chatMessageStatus(messageId: Int) -> String {
         return "/api/content/chat/messages/\(messageId)/status"
     }
+    static let assistantTurns = "/api/content/chat/assistant/turns"
 }

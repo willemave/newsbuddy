@@ -5,119 +5,191 @@
 //  Created by Assistant on 9/15/25.
 //
 
-import Foundation
 import Combine
+import Foundation
 
 @MainActor
-class SearchViewModel: ObservableObject {
+final class SearchViewModel: ObservableObject {
     @Published var searchText: String = ""
-    @Published var selectedContentType: String = "all"
-    @Published var results: [ContentSummary] = []
-    @Published var isLoading: Bool = false
+    @Published var contentResults: [ContentSummary] = []
+    @Published var feedResults: [MixedSearchFeedResult] = []
+    @Published var podcastResults: [PodcastSearchResult] = []
+    @Published var isLoadingLocal: Bool = false
+    @Published var isLoadingMixed: Bool = false
+    @Published var actionInFlightIds: Set<String> = []
+    @Published var completedActionIds: Set<String> = []
     @Published var errorMessage: String?
-    @Published var hasSearched: Bool = false
+    @Published var hasLocalSearch: Bool = false
+    @Published var hasSubmittedSearch: Bool = false
 
-    private let service = ContentService.shared
+    private let contentService = ContentService.shared
+    private let scraperConfigService = ScraperConfigService.shared
     private var cancellables = Set<AnyCancellable>()
-    private var searchTask: Task<Void, Never>?
-
-    let contentTypeOptions: [(String, String)] = [
-        ("all", "All"),
-        ("article", "Articles"),
-        ("podcast", "Podcasts")
-    ]
+    private var localSearchTask: Task<Void, Never>?
+    private var mixedSearchTask: Task<Void, Never>?
+    private var lastSubmittedQuery: String?
 
     init() {
         $searchText
-            .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
+            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
             .removeDuplicates()
             .sink { [weak self] text in
-                self?.performSearch(text)
+                self?.handleQueryChanged(text)
             }
             .store(in: &cancellables)
+    }
 
-        $selectedContentType
-            .dropFirst()
-            .sink { [weak self] _ in
-                guard let self else { return }
-                if self.hasSearched, self.searchText.count >= 2 {
-                    self.performSearch(self.searchText)
-                }
-            }
-            .store(in: &cancellables)
+    var trimmedQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var hasQuery: Bool {
+        trimmedQuery.count >= 2
     }
 
     func retrySearch() {
-        performSearch(searchText)
+        if hasSubmittedSearch {
+            submitSearch()
+            return
+        }
+        let query = trimmedQuery
+        guard query.count >= 2 else { return }
+        localSearchTask?.cancel()
+        localSearchTask = Task { [weak self] in
+            await self?.runLocalSearchTask(for: query)
+        }
     }
 
-    private func performSearch(_ query: String) {
-        searchTask?.cancel()
-        guard query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 else {
-            results = []
-            hasSearched = false
+    func submitSearch() {
+        let query = trimmedQuery
+        guard query.count >= 2 else {
+            errorMessage = "Type at least 2 characters to search."
+            return
+        }
+
+        mixedSearchTask?.cancel()
+        mixedSearchTask = Task { [weak self] in
+            await self?.runMixedSearch(for: query)
+        }
+    }
+
+    func subscribeToFeed(_ result: MixedSearchFeedResult) async {
+        let actionId = "feed:\(result.id)"
+        await runAction(id: actionId) {
+            _ = try await self.scraperConfigService.subscribeFeed(
+                feedURL: result.feedURL,
+                feedType: result.feedType,
+                displayName: result.title
+            )
+        }
+    }
+
+    func addPodcastEpisode(_ result: PodcastSearchResult) async {
+        let actionId = "episode:\(result.id)"
+        guard let url = URL(string: result.episodeURL) else {
+            errorMessage = "Invalid episode URL"
+            return
+        }
+        await runAction(id: actionId) {
+            _ = try await self.contentService.submitContent(url: url, title: result.title)
+        }
+    }
+
+    func subscribeToPodcast(_ result: PodcastSearchResult) async {
+        guard let feedURL = result.feedURL else { return }
+        let actionId = "podcast-feed:\(feedURL)"
+        await runAction(id: actionId) {
+            _ = try await self.scraperConfigService.subscribeFeed(
+                feedURL: feedURL,
+                feedType: "podcast_rss",
+                displayName: result.podcastTitle ?? result.title
+            )
+        }
+    }
+
+    private func handleQueryChanged(_ query: String) {
+        localSearchTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if lastSubmittedQuery != trimmed {
+            hasSubmittedSearch = false
+            feedResults = []
+            podcastResults = []
+            completedActionIds = []
+        }
+
+        guard trimmed.count >= 2 else {
+            contentResults = []
+            hasLocalSearch = false
             errorMessage = nil
             return
         }
-        searchTask = Task { [weak self] in
-            await self?.runSearch(query: query)
+
+        localSearchTask = Task { [weak self] in
+            await self?.runLocalSearchTask(for: trimmed)
         }
     }
 
-    private func runSearch(query: String) async {
-        isLoading = true
+    private func runLocalSearchTask(for query: String) async {
+        isLoadingLocal = true
         errorMessage = nil
+
         do {
-            let response = try await service.searchContent(
+            let response = try await contentService.searchContent(
                 query: query,
-                contentType: selectedContentType,
+                contentType: "all",
                 limit: 25,
                 cursor: nil
             )
-            if !Task.isCancelled {
-                results = response.contents
-                hasSearched = true
-            }
+            guard !Task.isCancelled else { return }
+            contentResults = response.contents
+            hasLocalSearch = true
         } catch {
-            if !Task.isCancelled {
-                errorMessage = error.localizedDescription
-                results = []
-                hasSearched = true
-            }
+            guard !Task.isCancelled else { return }
+            errorMessage = error.localizedDescription
+            contentResults = []
+            hasLocalSearch = true
         }
-        isLoading = false
+
+        isLoadingLocal = false
     }
 
-    // Optional actions to keep cards interactive
-    func markAsRead(_ id: Int) async {
+    private func runMixedSearch(for query: String) async {
+        isLoadingMixed = true
+        errorMessage = nil
+
         do {
-            try await service.markContentAsRead(id: id)
-            if let i = results.firstIndex(where: { $0.id == id }) {
-                let c = results[i]
-                results[i] = ContentSummary(
-                    id: c.id, contentType: c.contentType, url: c.url, title: c.title,
-                    source: c.source, platform: c.platform, status: c.status,
-                    shortSummary: c.shortSummary, createdAt: c.createdAt, processedAt: c.processedAt,
-                    classification: c.classification, publicationDate: c.publicationDate,
-                    isRead: true, isFavorited: c.isFavorited
-                )
-            }
+            let response = try await contentService.searchMixed(query: query, limit: 10)
+            guard !Task.isCancelled else { return }
+            lastSubmittedQuery = query
+            contentResults = response.content
+            feedResults = response.feeds
+            podcastResults = response.podcasts
+            hasLocalSearch = true
+            hasSubmittedSearch = true
         } catch {
-            errorMessage = "Failed to mark as read"
+            guard !Task.isCancelled else { return }
+            errorMessage = error.localizedDescription
+            feedResults = []
+            podcastResults = []
+            hasSubmittedSearch = true
         }
+
+        isLoadingMixed = false
     }
 
-    func toggleFavorite(_ id: Int) async {
+    private func runAction(
+        id: String,
+        action: @escaping () async throws -> Void
+    ) async {
+        actionInFlightIds.insert(id)
+        defer { actionInFlightIds.remove(id) }
+
         do {
-            let response = try await service.toggleFavorite(id: id)
-            if let isFav = response["is_favorited"] as? Bool,
-               let i = results.firstIndex(where: { $0.id == id }) {
-                var c = results[i]
-                c.isFavorited = isFav
-                results[i] = c
-            }
+            try await action()
+            completedActionIds.insert(id)
         } catch {
-            errorMessage = "Failed to update favorite"
+            errorMessage = error.localizedDescription
         }
     }
 }

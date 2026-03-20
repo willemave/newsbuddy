@@ -423,6 +423,184 @@
         "title": "AppleSignInRequest",
         "type": "object"
       },
+      "AssistantFeedOption": {
+        "description": "Validated feed option surfaced on an assistant message.",
+        "properties": {
+          "description": {
+            "maxLength": 600,
+            "nullable": true,
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence_url": {
+            "maxLength": 2048,
+            "nullable": true,
+            "title": "Evidence Url",
+            "type": "string"
+          },
+          "feed_format": {
+            "default": "rss",
+            "enum": [
+              "rss",
+              "atom"
+            ],
+            "title": "Feed Format",
+            "type": "string"
+          },
+          "feed_type": {
+            "enum": [
+              "atom",
+              "substack",
+              "podcast_rss"
+            ],
+            "title": "Feed Type",
+            "type": "string"
+          },
+          "feed_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 40,
+            "minLength": 8,
+            "title": "Id",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 600,
+            "nullable": true,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "site_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Site Url",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "site_url",
+          "feed_url",
+          "feed_type"
+        ],
+        "title": "AssistantFeedOption",
+        "type": "object"
+      },
+      "AssistantScreenContextDto": {
+        "description": "Compact screen context passed to the assistant router.",
+        "properties": {
+          "content_id": {
+            "minimum": 1.0,
+            "nullable": true,
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "note": {
+            "maxLength": 500,
+            "nullable": true,
+            "title": "Note",
+            "type": "string"
+          },
+          "query": {
+            "maxLength": 200,
+            "nullable": true,
+            "title": "Query",
+            "type": "string"
+          },
+          "screen_title": {
+            "maxLength": 200,
+            "nullable": true,
+            "title": "Screen Title",
+            "type": "string"
+          },
+          "screen_type": {
+            "default": "unknown",
+            "maxLength": 64,
+            "title": "Screen Type",
+            "type": "string"
+          },
+          "selected_topic": {
+            "maxLength": 200,
+            "nullable": true,
+            "title": "Selected Topic",
+            "type": "string"
+          },
+          "visible_content_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 12,
+            "title": "Visible Content Ids",
+            "type": "array"
+          }
+        },
+        "title": "AssistantScreenContextDto",
+        "type": "object"
+      },
+      "AssistantTurnRequest": {
+        "description": "Request to create or continue a screen-aware assistant conversation.",
+        "properties": {
+          "message": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "screen_context": {
+            "$ref": "#/components/schemas/AssistantScreenContextDto"
+          },
+          "session_id": {
+            "minimum": 1.0,
+            "nullable": true,
+            "title": "Session Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "AssistantTurnRequest",
+        "type": "object"
+      },
+      "AssistantTurnResponse": {
+        "description": "Response returned after creating or continuing an assistant turn.",
+        "properties": {
+          "message_id": {
+            "description": "Pending assistant message identifier",
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "session": {
+            "$ref": "#/components/schemas/ChatSessionSummaryDto"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MessageProcessingStatus",
+            "default": "processing",
+            "description": "Current processing status"
+          },
+          "user_message": {
+            "$ref": "#/components/schemas/ChatMessageDto"
+          }
+        },
+        "required": [
+          "session",
+          "user_message",
+          "message_id"
+        ],
+        "title": "AssistantTurnResponse",
+        "type": "object"
+      },
       "AudioTranscriptionResponse": {
         "description": "Transcription payload returned for uploaded audio.",
         "properties": {
@@ -547,6 +725,14 @@
             "nullable": true,
             "title": "Error",
             "type": "string"
+          },
+          "feed_options": {
+            "description": "Optional validated feed options attached to the assistant message",
+            "items": {
+              "$ref": "#/components/schemas/AssistantFeedOption"
+            },
+            "title": "Feed Options",
+            "type": "array"
           },
           "id": {
             "description": "Unique message identifier",
@@ -1817,6 +2003,12 @@
       "DailyNewsDigestResponse": {
         "description": "Summary information for one daily news digest card.",
         "properties": {
+          "coverage_end_at": {
+            "description": "ISO timestamp for the latest checkpoint covered by this digest",
+            "nullable": true,
+            "title": "Coverage End At",
+            "type": "string"
+          },
           "generated_at": {
             "description": "ISO timestamp when digest was generated",
             "title": "Generated At",
@@ -2679,6 +2871,95 @@
           "status"
         ],
         "title": "MessageStatusResponse",
+        "type": "object"
+      },
+      "MixedSearchFeedResultResponse": {
+        "description": "Validated feed/source result for mixed search.",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence_url": {
+            "nullable": true,
+            "title": "Evidence Url",
+            "type": "string"
+          },
+          "feed_format": {
+            "title": "Feed Format",
+            "type": "string"
+          },
+          "feed_type": {
+            "title": "Feed Type",
+            "type": "string"
+          },
+          "feed_url": {
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "rationale": {
+            "nullable": true,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "site_url": {
+            "title": "Site Url",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "site_url",
+          "feed_url",
+          "feed_type",
+          "feed_format"
+        ],
+        "title": "MixedSearchFeedResultResponse",
+        "type": "object"
+      },
+      "MixedSearchResponse": {
+        "description": "Sectioned mixed search results for the More > Search screen.",
+        "properties": {
+          "content": {
+            "items": {
+              "$ref": "#/components/schemas/ContentSummaryResponse"
+            },
+            "title": "Content",
+            "type": "array"
+          },
+          "feeds": {
+            "items": {
+              "$ref": "#/components/schemas/MixedSearchFeedResultResponse"
+            },
+            "title": "Feeds",
+            "type": "array"
+          },
+          "podcasts": {
+            "items": {
+              "$ref": "#/components/schemas/PodcastEpisodeSearchResultResponse"
+            },
+            "title": "Podcasts",
+            "type": "array"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "MixedSearchResponse",
         "type": "object"
       },
       "ModelPricing": {
@@ -4138,6 +4419,7 @@
         "type": "object"
       },
       "UpdateUserProfileRequest": {
+        "additionalProperties": false,
         "description": "Request schema for updating the authenticated user's profile.",
         "properties": {
           "full_name": {
@@ -4145,6 +4427,11 @@
             "nullable": true,
             "title": "Full Name",
             "type": "string"
+          },
+          "news_digest_interval_hours": {
+            "nullable": true,
+            "title": "News Digest Interval Hours",
+            "type": "integer"
           },
           "news_digest_timezone": {
             "maxLength": 100,
@@ -4305,6 +4592,11 @@
           "is_admin": {
             "title": "Is Admin",
             "type": "boolean"
+          },
+          "news_digest_interval_hours": {
+            "default": 6,
+            "title": "News Digest Interval Hours",
+            "type": "integer"
           },
           "news_digest_timezone": {
             "default": "UTC",

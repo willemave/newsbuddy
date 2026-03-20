@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models.schema import Content, ContentFavorites, User
+from app.models.schema import ChatSession, Content, User
 from app.services import favorites
 
 
@@ -56,24 +56,40 @@ def test_content_2(db_session: Session) -> Content:
 class TestToggleFavorite:
     """Tests for toggle_favorite function."""
 
-    def test_toggle_favorite_adds_new(self, db_session: Session, test_user: User, test_content: Content):
+    def test_toggle_favorite_adds_new(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
         """Test toggling favorite adds new favorite."""
-        # Act
-        is_favorited, favorite = favorites.toggle_favorite(db_session, test_content.id, test_user.id)
+        is_favorited, favorite = favorites.toggle_favorite(
+            db_session,
+            test_content.id,
+            test_user.id,
+        )
 
         # Assert
         assert is_favorited is True
         assert favorite is not None
         assert favorite.content_id == test_content.id
         assert favorite.user_id == test_user.id
+        assert db_session.query(ChatSession).count() == 0
 
-    def test_toggle_favorite_removes_existing(self, db_session: Session, test_user: User, test_content: Content):
+    def test_toggle_favorite_removes_existing(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
         """Test toggling favorite removes existing favorite."""
-        # Arrange - add favorite first
         favorites.add_favorite(db_session, test_content.id, test_user.id)
 
-        # Act
-        is_favorited, favorite = favorites.toggle_favorite(db_session, test_content.id, test_user.id)
+        is_favorited, favorite = favorites.toggle_favorite(
+            db_session,
+            test_content.id,
+            test_user.id,
+        )
 
         # Assert
         assert is_favorited is False
@@ -81,6 +97,40 @@ class TestToggleFavorite:
 
         # Verify it's actually gone
         assert not favorites.is_content_favorited(db_session, test_content.id, test_user.id)
+
+    def test_toggle_favorite_does_not_delete_existing_chat_sessions(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
+        """Removing a favorite should not delete a pre-existing chat session."""
+        favorites.add_favorite(db_session, test_content.id, test_user.id)
+        session = ChatSession(
+            user_id=test_user.id,
+            content_id=test_content.id,
+            title="Existing Knowledge Chat",
+            session_type="knowledge_chat",
+            llm_model="openai:gpt-5.4",
+            llm_provider="openai",
+        )
+        db_session.add(session)
+        db_session.commit()
+
+        is_favorited, favorite = favorites.toggle_favorite(
+            db_session,
+            test_content.id,
+            test_user.id,
+        )
+
+        assert is_favorited is False
+        assert favorite is None
+        assert (
+            db_session.query(ChatSession)
+            .filter(ChatSession.id == session.id)
+            .one_or_none()
+            is not None
+        )
 
     def test_toggle_favorite_user_isolation(self, db_session: Session, test_content: Content):
         """Test that favorites are isolated per user."""
@@ -101,9 +151,13 @@ class TestToggleFavorite:
 class TestAddFavorite:
     """Tests for add_favorite function."""
 
-    def test_add_favorite_success(self, db_session: Session, test_user: User, test_content: Content):
+    def test_add_favorite_success(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
         """Test adding a favorite successfully."""
-        # Act
         favorite = favorites.add_favorite(db_session, test_content.id, test_user.id)
 
         # Assert
@@ -112,9 +166,13 @@ class TestAddFavorite:
         assert favorite.user_id == test_user.id
         assert favorite.favorited_at is not None
 
-    def test_add_favorite_already_exists(self, db_session: Session, test_user: User, test_content: Content):
+    def test_add_favorite_already_exists(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
         """Test adding favorite that already exists returns existing record."""
-        # Arrange - add favorite first
         first = favorites.add_favorite(db_session, test_content.id, test_user.id)
 
         # Act - try to add again
@@ -128,9 +186,13 @@ class TestAddFavorite:
 class TestRemoveFavorite:
     """Tests for remove_favorite function."""
 
-    def test_remove_favorite_success(self, db_session: Session, test_user: User, test_content: Content):
+    def test_remove_favorite_success(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
         """Test removing a favorite successfully."""
-        # Arrange - add favorite first
         favorites.add_favorite(db_session, test_content.id, test_user.id)
 
         # Act
@@ -140,9 +202,13 @@ class TestRemoveFavorite:
         assert removed is True
         assert not favorites.is_content_favorited(db_session, test_content.id, test_user.id)
 
-    def test_remove_favorite_not_found(self, db_session: Session, test_user: User, test_content: Content):
+    def test_remove_favorite_not_found(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
         """Test removing non-existent favorite returns False."""
-        # Act
         removed = favorites.remove_favorite(db_session, test_content.id, test_user.id)
 
         # Assert
@@ -219,20 +285,27 @@ class TestGetFavoriteContentIds:
 class TestIsContentFavorited:
     """Tests for is_content_favorited function."""
 
-    def test_is_content_favorited_true(self, db_session: Session, test_user: User, test_content: Content):
+    def test_is_content_favorited_true(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
         """Test checking if content is favorited returns True when it is."""
-        # Arrange
         favorites.add_favorite(db_session, test_content.id, test_user.id)
 
-        # Act
         is_favorited = favorites.is_content_favorited(db_session, test_content.id, test_user.id)
 
         # Assert
         assert is_favorited is True
 
-    def test_is_content_favorited_false(self, db_session: Session, test_user: User, test_content: Content):
+    def test_is_content_favorited_false(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
         """Test checking if content is favorited returns False when it isn't."""
-        # Act
         is_favorited = favorites.is_content_favorited(db_session, test_content.id, test_user.id)
 
         # Assert

@@ -63,12 +63,21 @@ class ContentProcessingWorkflow:
 
     def should_enqueue_summarize(self, content: ContentData) -> bool:
         """Return True when content should enqueue `SUMMARIZE` next step."""
-        if content.content_type not in {ContentType.ARTICLE, ContentType.NEWS}:
-            return False
         if content.status != ContentStatus.PROCESSING:
             return False
-        summary_payload = content.metadata.get("content_to_summarize")
-        return isinstance(summary_payload, str) and bool(summary_payload.strip())
+
+        if content.content_type in {ContentType.ARTICLE, ContentType.NEWS}:
+            summary_payload = content.metadata.get("content_to_summarize")
+            return isinstance(summary_payload, str) and bool(summary_payload.strip())
+
+        if content.content_type == ContentType.PODCAST:
+            transcript = content.metadata.get("transcript")
+            if isinstance(transcript, str) and transcript.strip():
+                return True
+            summary_payload = content.metadata.get("content_to_summarize")
+            return isinstance(summary_payload, str) and bool(summary_payload.strip())
+
+        return False
 
     @staticmethod
     def next_task_type(content: ContentData) -> TaskType | None:
@@ -78,4 +87,3 @@ class ContentProcessingWorkflow:
         if content.content_type == ContentType.PODCAST:
             return TaskType.DOWNLOAD_AUDIO
         return None
-

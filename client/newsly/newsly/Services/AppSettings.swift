@@ -23,6 +23,34 @@ enum FastNewsMode: String, CaseIterable {
     }
 }
 
+enum NewsDigestIntervalOption: Int, CaseIterable {
+    case every3Hours = 3
+    case every6Hours = 6
+    case every12Hours = 12
+
+    var title: String {
+        switch self {
+        case .every3Hours:
+            return "3h"
+        case .every6Hours:
+            return "6h"
+        case .every12Hours:
+            return "12h"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .every3Hours:
+            return "Every 3 hours"
+        case .every6Hours:
+            return "Every 6 hours"
+        case .every12Hours:
+            return "Every 12 hours"
+        }
+    }
+}
+
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
     
@@ -47,6 +75,10 @@ class AppSettings: ObservableObject {
     var baseURL: String {
         let scheme = useHTTPS ? "https" : "http"
         return "\(scheme)://\(normalizedHost):\(serverPort)"
+    }
+
+    func setBackendTranscriptionAvailable(_ isAvailable: Bool) {
+        backendTranscriptionAvailable = isAvailable
     }
     
     private init() {}

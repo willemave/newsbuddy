@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.constants import ALLOWED_NEWS_DIGEST_INTERVAL_HOURS
 from app.core.db import get_db_session
 from app.core.deps import ADMIN_SESSION_COOKIE, get_current_user
 from app.core.logging import get_logger
@@ -96,6 +97,18 @@ def _normalize_news_digest_timezone(timezone_name: str | None) -> str | None:
         raise ValueError(f"Invalid timezone: {candidate}") from exc
 
     return candidate
+
+
+def _normalize_news_digest_interval_hours(interval_hours: int | None) -> int | None:
+    """Validate digest interval checkpoint hours."""
+    if interval_hours is None:
+        return None
+    if interval_hours not in ALLOWED_NEWS_DIGEST_INTERVAL_HOURS:
+        allowed_values = ", ".join(str(option) for option in ALLOWED_NEWS_DIGEST_INTERVAL_HOURS)
+        raise ValueError(
+            f"Invalid digest interval hours: {interval_hours}. Allowed: {allowed_values}"
+        )
+    return interval_hours
 
 
 @router.post("/apple", response_model=TokenResponse)
@@ -350,6 +363,14 @@ def update_current_user_info(
         try:
             current_user.news_digest_timezone = _normalize_news_digest_timezone(
                 payload.news_digest_timezone
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if payload.news_digest_interval_hours is not None:
+        try:
+            current_user.news_digest_interval_hours = _normalize_news_digest_interval_hours(
+                payload.news_digest_interval_hours
             )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

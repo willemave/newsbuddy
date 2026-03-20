@@ -95,8 +95,8 @@ def test_content_summarizer_resolves_default_models(monkeypatch: pytest.MonkeyPa
 
     model_used = summarizer.summarize("body", content_type=ContentType.NEWS)
 
-    assert model_used == "openai:gpt-5.2"
-    assert captured == [("openai", "gpt-5.2")]
+    assert model_used == "google:gemini-3.1-flash-lite-preview"
+    assert captured == [("google", "gemini-3.1-flash-lite-preview")]
 
 
 def test_content_summarizer_respects_overrides(monkeypatch: pytest.MonkeyPatch) -> None:

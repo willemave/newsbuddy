@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -35,7 +35,9 @@ def test_handler_generates_digest_from_valid_payload() -> None:
             "user_id": 7,
             "local_date": "2026-02-28",
             "timezone": "America/New_York",
+            "coverage_end_at": "2026-02-28T06:00:00",
             "force_regenerate": True,
+            "skip_if_empty": True,
         },
     )
 
@@ -53,6 +55,8 @@ def test_handler_generates_digest_from_valid_payload() -> None:
     assert result.success is True
     assert result.error_message is None
     mock_upsert.assert_called_once()
+    assert mock_upsert.call_args.kwargs["coverage_end_at"] == datetime(2026, 2, 28, 6, 0, 0)
+    assert mock_upsert.call_args.kwargs["skip_if_empty"] is True
 
 
 def test_handler_rejects_invalid_user_id() -> None:

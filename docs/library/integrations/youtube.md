@@ -146,25 +146,27 @@ YouTube URLs are automatically detected and processed when:
 ### Proof-of-Origin (PO) token provider
 
 1. Install the yt-dlp plugin `bgutil-ytdlp-pot-provider` via `uv pip install bgutil-ytdlp-pot-provider` (already listed in `pyproject.toml`).
-2. Run the provider HTTP service locally. The quickest path is Docker:
+2. Run the provider HTTP service locally. In production we manage it via Supervisor with [`scripts/start_bgutil_provider.sh`](../../../scripts/start_bgutil_provider.sh), which launches the pinned Docker image `brainicism/bgutil-ytdlp-pot-provider:1.3.1` bound to `127.0.0.1:4416`.
+
+   Manual equivalent:
 
    ```bash
-   docker run --name bgutil-provider -d -p 4416:4416 --init brainicism/bgutil-ytdlp-pot-provider
+   docker run --rm --name news_app_bgutil_provider --init -p 127.0.0.1:4416:4416 brainicism/bgutil-ytdlp-pot-provider:1.3.1
    ```
 
    The service exposes `http://127.0.0.1:4416` by default; adjust `po_token_base_url` if you map a custom port.
 
-3. Alternatively, run the Node.js server natively (requires Node 18+):
+3. Alternatively, run the Node.js server natively (requires Node 20+):
 
    ```bash
-   git clone --single-branch --branch 1.2.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
+   git clone --single-branch --branch 1.3.1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
    cd bgutil-ytdlp-pot-provider/server/
-   yarn install --frozen-lockfile
+   npm ci
    npx tsc
    node build/main.js --port 4416
    ```
 
-4. Verify integration with `yt-dlp -v https://www.youtube.com/watch?v=...` and ensure the debug log shows `PO Token Providers: bgutil:http-…`.
+4. Verify integration with `yt-dlp -v https://www.youtube.com/watch?v=...` and ensure the debug log shows `PO Token Providers: bgutil:http-…`. On the server, `sudo supervisorctl status news_app_bgutil_provider` and `ss -ltnp | rg 4416` should confirm the service is up.
 
 ### Debug Commands
 

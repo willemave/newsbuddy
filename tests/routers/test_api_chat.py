@@ -1,10 +1,12 @@
 """Tests for chat session API endpoints."""
 
+import json
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import ChatSession, Content
+from app.models.schema import ChatMessage, ChatSession, Content
 
 
 def test_create_chat_session_with_content(
@@ -54,8 +56,10 @@ def test_create_chat_session_with_content(
     assert session["content_id"] == content.id
     assert session["llm_provider"] == "openai"
     assert session["llm_model"] == "openai:gpt-5.4"
-    assert session["session_type"] == "article_brain"
+    assert session["session_type"] == "knowledge_chat"
     assert session["article_title"] == "Test Article About AI"
+    assert session["article_summary"] is not None
+    assert session["article_source"] == "Test Source"
 
     # Verify session in database
     db_session_record = (
@@ -63,6 +67,8 @@ def test_create_chat_session_with_content(
     )
     assert db_session_record is not None
     assert db_session_record.user_id == test_user.id
+    assert db_session_record.context_snapshot is not None
+    assert "Short Summary:" in db_session_record.context_snapshot
 
 
 def test_create_chat_session_with_topic(
@@ -92,7 +98,7 @@ def test_create_chat_session_with_topic(
     data = response.json()
     session = data["session"]
     assert session["topic"] == "AI safety implications"
-    assert session["session_type"] == "topic"
+    assert session["session_type"] == "knowledge_chat"
     assert "AI safety implications" in session["title"]
 
 
@@ -111,7 +117,7 @@ def test_create_chat_session_without_content(
     data = response.json()
     session = data["session"]
     assert session["content_id"] is None
-    assert session["session_type"] == "ad_hoc"
+    assert session["session_type"] == "knowledge_chat"
     assert session["title"] == "What is the meaning of life?"
 
 
@@ -146,7 +152,7 @@ def test_list_chat_sessions(
             user_id=test_user.id,
             content_id=content.id if i == 0 else None,
             title=f"Session {i}",
-            session_type="article_brain" if i == 0 else "ad_hoc",
+            session_type="knowledge_chat",
             llm_model="openai:gpt-5.4",
             llm_provider="openai",
         )
@@ -232,6 +238,95 @@ def test_get_chat_session_detail(
     assert "messages" in data
     assert data["session"]["id"] == session.id
     assert data["messages"] == []  # No messages yet
+
+
+def test_get_chat_session_detail_includes_assistant_feed_options(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+) -> None:
+    """Assistant messages should expose structured feed options in session detail."""
+
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Quick Assistant",
+        session_type="assistant_quick",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    payload = json.dumps(
+        [
+            {
+                "parts": [
+                    {
+                        "content": "Find me Armin Ronacher's blog.",
+                        "timestamp": "2026-03-17T20:05:02.295881Z",
+                        "part_kind": "user-prompt",
+                    }
+                ],
+                "timestamp": "2026-03-17T20:05:02.296029Z",
+                "instructions": None,
+                "kind": "request",
+                "run_id": "run-1",
+                "metadata": None,
+            },
+            {
+                "parts": [
+                    {
+                        "content": "I found a validated feed option below.",
+                        "id": None,
+                        "provider_name": None,
+                        "provider_details": None,
+                        "part_kind": "text",
+                    }
+                ],
+                "usage": {},
+                "model_name": "gpt-5.4",
+                "timestamp": "2026-03-17T20:05:04.689805Z",
+                "kind": "response",
+                "provider_name": "openai",
+                "provider_url": "https://api.openai.com",
+                "provider_details": None,
+                "finish_reason": "stop",
+                "run_id": "run-1",
+                "metadata": None,
+            },
+        ]
+    )
+    db_session.add(
+        ChatMessage(
+            session_id=session.id,
+            message_list=payload,
+            render_metadata={
+                "feed_options": [
+                    {
+                        "id": "8f7d2c42b0c1de90",
+                        "title": "lucumr",
+                        "site_url": "https://lucumr.pocoo.org/",
+                        "feed_url": "https://lucumr.pocoo.org/feed.atom",
+                        "feed_type": "atom",
+                        "feed_format": "atom",
+                        "description": "Armin Ronacher's weblog.",
+                        "rationale": "Validated Atom feed.",
+                        "evidence_url": "https://lucumr.pocoo.org/",
+                    }
+                ]
+            },
+            status="completed",
+        )
+    )
+    db_session.commit()
+
+    response = client.get(f"/api/content/chat/sessions/{session.id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["messages"][-1]["role"] == "assistant"
+    assert data["messages"][-1]["feed_options"][0]["feed_url"] == "https://lucumr.pocoo.org/feed.atom"
 
 
 def test_get_chat_session_not_found(client: TestClient) -> None:
@@ -330,3 +425,381 @@ def test_different_llm_providers(
         session = data["session"]
         assert session["llm_provider"] == provider
         assert session["llm_model"] == expected_model
+
+
+def test_create_assistant_turn_creates_session_with_screen_context(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Test creating a contextual assistant turn seeds a knowledge chat session."""
+    content = Content(
+        url="https://example.com/ai-news",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="AI Infrastructure Update",
+        source="Example",
+        content_metadata={
+            "summary": {
+                "title": "AI Infrastructure Update",
+                "overview": (
+                    "A grounded summary of recent AI infrastructure moves across chips, "
+                    "cloud capacity, and developer tooling."
+                ),
+                "bullet_points": [
+                    {"text": "Cloud providers are expanding AI capacity.", "category": "context"},
+                    {"text": "Inference demand is increasing.", "category": "key_finding"},
+                ],
+                "quotes": [],
+                "topics": ["AI infrastructure"],
+            }
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    captured: list[tuple[int, int, str, str]] = []
+
+    async def _fake_process_assistant_turn_async(
+        session_id: int,
+        message_id: int,
+        prompt: str,
+        *,
+        screen_context,
+        source: str = "assistant",
+    ) -> None:
+        captured.append((session_id, message_id, prompt, screen_context.screen_type))
+
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+    monkeypatch.setattr("app.routers.api.chat.log_event", lambda *args, **kwargs: 0)
+
+    response = client.post(
+        "/api/content/chat/assistant/turns",
+        json={
+            "message": "Find me more coverage like this.",
+            "screen_context": {
+                "screen_type": "content_detail",
+                "screen_title": "Article Detail",
+                "content_id": content.id,
+                "visible_content_ids": [content.id],
+                "selected_topic": "ai",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "processing"
+    assert payload["session"]["session_type"] == "knowledge_chat"
+    assert payload["session"]["content_id"] == content.id
+    assert payload["session"]["title"] == "AI Infrastructure Update"
+    assert payload["user_message"]["content"] == "Find me more coverage like this."
+    assert captured == [
+        (
+            payload["session"]["id"],
+            payload["message_id"],
+            "Find me more coverage like this.",
+            "content_detail",
+        )
+    ]
+
+    session = (
+        db_session.query(ChatSession).filter(ChatSession.id == payload["session"]["id"]).first()
+    )
+    assert session is not None
+    assert session.session_type == "knowledge_chat"
+    assert session.context_snapshot is not None
+    assert "Screen Type: content_detail" in session.context_snapshot
+    assert f"[{content.id}] AI Infrastructure Update" in session.context_snapshot
+    assert (
+        "Short Summary:" in session.context_snapshot
+        or "Transcript Excerpt:" in session.context_snapshot
+    )
+
+
+def test_create_assistant_turn_truncates_visible_content_ids(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Test oversized visible-content context is truncated instead of rejected."""
+    captured: list[list[int]] = []
+
+    async def _fake_process_assistant_turn_async(
+        session_id: int,
+        message_id: int,
+        prompt: str,
+        *,
+        screen_context,
+        source: str = "assistant",
+    ) -> None:
+        del session_id, message_id, prompt, source
+        captured.append(screen_context.visible_content_ids)
+
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+    monkeypatch.setattr("app.routers.api.chat.log_event", lambda *args, **kwargs: 0)
+
+    response = client.post(
+        "/api/content/chat/assistant/turns",
+        json={
+            "message": "What's the weather tomorrow?",
+            "screen_context": {
+                "screen_type": "long_form",
+                "screen_title": "Long Form",
+                "visible_content_ids": list(range(1, 20)),
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == [list(range(1, 13))]
+
+
+def test_create_assistant_turn_refreshes_existing_session_context(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Continuing an assistant session should use the latest screen context."""
+
+    old_content = Content(
+        url="https://example.com/old-context",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Old Context",
+    )
+    new_content = Content(
+        url="https://example.com/new-context",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="New Context",
+    )
+    db_session.add_all([old_content, new_content])
+    db_session.commit()
+    db_session.refresh(old_content)
+    db_session.refresh(new_content)
+
+    session = ChatSession(
+        user_id=test_user.id,
+        content_id=old_content.id,
+        title="Old Context",
+        session_type="knowledge_chat",
+        context_snapshot="Screen Type: content_detail\nVisible Content:\n- [1] Old Context",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    captured: list[tuple[int, str]] = []
+
+    async def _fake_process_assistant_turn_async(
+        session_id: int,
+        message_id: int,
+        prompt: str,
+        *,
+        screen_context,
+        source: str = "assistant",
+    ) -> None:
+        del message_id, prompt, source
+        captured.append((session_id, screen_context.screen_type))
+
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+    monkeypatch.setattr("app.routers.api.chat.log_event", lambda *args, **kwargs: 0)
+
+    response = client.post(
+        "/api/content/chat/assistant/turns",
+        json={
+            "session_id": session.id,
+            "message": "Use what I'm looking at now.",
+            "screen_context": {
+                "screen_type": "content_detail",
+                "screen_title": "Article Detail",
+                "content_id": new_content.id,
+                "visible_content_ids": [new_content.id],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session"]["id"] == session.id
+    assert payload["session"]["content_id"] == new_content.id
+    assert payload["session"]["title"] == "New Context"
+    assert captured == [(session.id, "content_detail")]
+
+    db_session.refresh(session)
+    assert session.content_id == new_content.id
+    assert session.title == "New Context"
+    assert session.context_snapshot is not None
+    assert f"[{new_content.id}] New Context" in session.context_snapshot
+
+
+def test_send_message_routes_assistant_sessions_to_assistant_processor(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Test assistant sessions keep using the assistant router on follow-up turns."""
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Quick Assistant",
+        session_type="assistant_quick",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    assistant_calls: list[tuple[int, int, str, str]] = []
+    standard_calls: list[tuple[int, int, str]] = []
+
+    async def _fake_process_assistant_turn_async(
+        session_id: int,
+        message_id: int,
+        prompt: str,
+        *,
+        screen_context,
+        source: str = "assistant",
+    ) -> None:
+        assistant_calls.append((session_id, message_id, prompt, screen_context.screen_type))
+
+    async def _fake_process_message_async(session_id: int, message_id: int, prompt: str) -> None:
+        standard_calls.append((session_id, message_id, prompt))
+
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
+    monkeypatch.setattr("app.routers.api.chat.log_event", lambda *args, **kwargs: 0)
+
+    response = client.post(
+        f"/api/content/chat/sessions/{session.id}/messages",
+        json={"message": "Add a few related feeds."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "processing"
+    assert assistant_calls == [
+        (
+            session.id,
+            payload["message_id"],
+            "Add a few related feeds.",
+            "assistant_quick",
+        )
+    ]
+    assert standard_calls == []
+
+
+def test_message_status_returns_distinct_assistant_display_id(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+) -> None:
+    """Completed async status should not reuse the pending user message ID."""
+
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Quick Assistant",
+        session_type="assistant_quick",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    payload = json.dumps(
+        [
+            {
+                "parts": [
+                    {
+                        "content": "What is my favorite article?",
+                        "timestamp": "2026-03-17T20:05:02.295881Z",
+                        "part_kind": "user-prompt",
+                    }
+                ],
+                "timestamp": "2026-03-17T20:05:02.296029Z",
+                "instructions": None,
+                "kind": "request",
+                "run_id": "run-1",
+                "metadata": None,
+            },
+            {
+                "parts": [
+                    {
+                        "content": (
+                            "Your most recently favorited article is "
+                            "AI Infrastructure Update."
+                        ),
+                        "id": None,
+                        "provider_name": None,
+                        "provider_details": None,
+                        "part_kind": "text",
+                    }
+                ],
+                "usage": {},
+                "model_name": "gpt-5.4",
+                "timestamp": "2026-03-17T20:05:04.689805Z",
+                "kind": "response",
+                "provider_name": "openai",
+                "provider_url": "https://api.openai.com",
+                "provider_details": None,
+                "finish_reason": "stop",
+                "run_id": "run-1",
+                "metadata": None,
+            },
+        ]
+    )
+
+    db_message = ChatMessage(
+        session_id=session.id,
+        message_list=payload,
+        render_metadata={
+            "feed_options": [
+                {
+                    "id": "8f7d2c42b0c1de90",
+                    "title": "lucumr",
+                    "site_url": "https://lucumr.pocoo.org/",
+                    "feed_url": "https://lucumr.pocoo.org/feed.atom",
+                    "feed_type": "atom",
+                    "feed_format": "atom",
+                    "description": "Armin Ronacher's weblog.",
+                    "rationale": "Validated Atom feed.",
+                    "evidence_url": "https://lucumr.pocoo.org/",
+                }
+            ]
+        },
+        status="completed",
+    )
+    db_session.add(db_message)
+    db_session.commit()
+    db_session.refresh(db_message)
+
+    response = client.get(f"/api/content/chat/messages/{db_message.id}/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["message_id"] == db_message.id
+    assert payload["assistant_message"]["id"] != db_message.id
+    assert payload["assistant_message"]["role"] == "assistant"
+    assert "AI Infrastructure Update" in payload["assistant_message"]["content"]
+    assert payload["assistant_message"]["feed_options"][0]["title"] == "lucumr"

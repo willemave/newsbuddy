@@ -108,8 +108,8 @@ class ChatService {
 
     /// Check if a session exists for the given content
     func getSessionForContent(contentId: Int) async throws -> ChatSessionSummary? {
-        let sessions = try await listSessions(contentId: contentId, limit: 1)
-        return sessions.first
+        let sessions = try await listSessions(contentId: contentId, limit: 20)
+        return sessions.first(where: { $0.isKnowledgeSession }) ?? sessions.first
     }
 
     /// Update a session's provider (allows switching models mid-conversation)
@@ -159,11 +159,54 @@ class ChatService {
         )
     }
 
+    /// Create or continue a contextual assistant turn.
+    func createAssistantTurn(
+        message: String,
+        sessionId: Int? = nil,
+        screenContext: AssistantScreenContext
+    ) async throws -> AssistantTurnResponse {
+        let request = AssistantTurnRequest(
+            message: message,
+            sessionId: sessionId,
+            screenContext: screenContext
+        )
+        let body = try JSONEncoder().encode(request)
+        return try await client.request(
+            APIEndpoints.assistantTurns,
+            method: "POST",
+            body: body
+        )
+    }
+
     /// Poll for message status
     func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse {
         return try await client.request(
             APIEndpoints.chatMessageStatus(messageId: messageId)
         )
+    }
+
+    /// Poll until a pending assistant message completes.
+    func waitForMessageCompletion(messageId: Int) async throws -> ChatMessage {
+        var attempts = 0
+        while attempts < maxPollingAttempts {
+            try Task.checkCancellation()
+
+            let status = try await getMessageStatus(messageId: messageId)
+            switch status.status {
+            case .completed:
+                guard let assistantMessage = status.assistantMessage else {
+                    throw ChatServiceError.missingAssistantMessage
+                }
+                return assistantMessage
+            case .failed:
+                throw ChatServiceError.processingFailed(status.error ?? "Unknown error")
+            case .processing:
+                attempts += 1
+                try await Task.sleep(nanoseconds: pollingInterval)
+            }
+        }
+
+        throw ChatServiceError.timeout
     }
 
     /// Send a message and wait for the assistant response (polls for completion)
@@ -182,29 +225,7 @@ class ChatService {
         }
 
         // Poll for completion
-        var attempts = 0
-        while attempts < maxPollingAttempts {
-            try Task.checkCancellation()
-
-            let status = try await getMessageStatus(messageId: response.messageId)
-
-            switch status.status {
-            case .completed:
-                guard let assistantMessage = status.assistantMessage else {
-                    throw ChatServiceError.missingAssistantMessage
-                }
-                return assistantMessage
-
-            case .failed:
-                throw ChatServiceError.processingFailed(status.error ?? "Unknown error")
-
-            case .processing:
-                attempts += 1
-                try await Task.sleep(nanoseconds: pollingInterval)
-            }
-        }
-
-        throw ChatServiceError.timeout
+        return try await waitForMessageCompletion(messageId: response.messageId)
     }
 
     /// Get initial follow-up question suggestions for an article-based session (non-streaming)

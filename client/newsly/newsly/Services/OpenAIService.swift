@@ -27,10 +27,14 @@ final class OpenAIService {
     func refreshTranscriptionAvailability() async -> Bool {
         do {
             _ = try await fetchRealtimeToken()
-            AppSettings.shared.backendTranscriptionAvailable = true
+            await MainActor.run {
+                AppSettings.shared.setBackendTranscriptionAvailable(true)
+            }
             return true
         } catch {
-            AppSettings.shared.backendTranscriptionAvailable = false
+            await MainActor.run {
+                AppSettings.shared.setBackendTranscriptionAvailable(false)
+            }
             return false
         }
     }

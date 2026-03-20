@@ -27,6 +27,75 @@ enum MessageProcessingStatus: String, Codable {
     case failed
 }
 
+struct AssistantFeedOption: Codable, Identifiable, Equatable {
+    let id: String
+    let title: String
+    let siteURL: String
+    let feedURL: String
+    let feedType: String
+    let feedFormat: String
+    let description: String?
+    let rationale: String?
+    let evidenceURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case siteURL = "site_url"
+        case feedURL = "feed_url"
+        case feedType = "feed_type"
+        case feedFormat = "feed_format"
+        case description
+        case rationale
+        case evidenceURL = "evidence_url"
+    }
+
+    var previewURLString: String {
+        evidenceURL ?? siteURL
+    }
+
+    var subtitleText: String? {
+        if let rationale, !rationale.isEmpty {
+            return rationale
+        }
+        if let description, !description.isEmpty {
+            return description
+        }
+        return nil
+    }
+
+    var hostLabel: String {
+        guard let url = URL(string: siteURL), let host = url.host else {
+            return siteURL
+        }
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+
+    var feedTypeLabel: String {
+        switch feedType {
+        case "substack":
+            return "Substack"
+        case "podcast_rss":
+            return "Podcast"
+        case "atom":
+            return feedFormat == "atom" ? "Atom" : "RSS"
+        default:
+            return "Feed"
+        }
+    }
+
+    var systemIcon: String {
+        switch feedType {
+        case "substack":
+            return "newspaper"
+        case "podcast_rss":
+            return "waveform"
+        default:
+            return "dot.radiowaves.left.and.right"
+        }
+    }
+}
+
 /// Individual message in a chat session
 struct ChatMessage: Codable, Identifiable {
     let id: Int
@@ -37,6 +106,7 @@ struct ChatMessage: Codable, Identifiable {
     let processLabel: String?
     let status: MessageProcessingStatus?
     let error: String?
+    let feedOptions: [AssistantFeedOption]
 
     // Allow status to be optional (default to completed for backward compatibility)
     init(from decoder: Decoder) throws {
@@ -51,6 +121,7 @@ struct ChatMessage: Codable, Identifiable {
         processLabel = try container.decodeIfPresent(String.self, forKey: .processLabel)
         status = try container.decodeIfPresent(MessageProcessingStatus.self, forKey: .status)
         error = try container.decodeIfPresent(String.self, forKey: .error)
+        feedOptions = try container.decodeIfPresent([AssistantFeedOption].self, forKey: .feedOptions) ?? []
     }
 
     init(
@@ -61,7 +132,8 @@ struct ChatMessage: Codable, Identifiable {
         displayType: ChatMessageDisplayType = .message,
         processLabel: String? = nil,
         status: MessageProcessingStatus? = nil,
-        error: String? = nil
+        error: String? = nil,
+        feedOptions: [AssistantFeedOption] = []
     ) {
         self.id = id
         self.role = role
@@ -71,12 +143,14 @@ struct ChatMessage: Codable, Identifiable {
         self.processLabel = processLabel
         self.status = status
         self.error = error
+        self.feedOptions = feedOptions
     }
 
     enum CodingKeys: String, CodingKey {
         case id, role, timestamp, content, status, error
         case displayType = "display_type"
         case processLabel = "process_label"
+        case feedOptions = "feed_options"
     }
 
     var isProcessing: Bool {
@@ -132,5 +206,9 @@ struct ChatMessage: Codable, Identifiable {
 
     var processSummaryText: String {
         processLabel ?? content
+    }
+
+    var hasFeedOptions: Bool {
+        !feedOptions.isEmpty
     }
 }

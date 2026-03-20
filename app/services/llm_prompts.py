@@ -137,6 +137,15 @@ Return a JSON object with exactly these fields:
       "attribution": "Who said it (optional)"
     }}
   ],
+  "archetype_reactions": [
+    {{
+      "archetype": "Paul Graham" | "Andy Grove" | "Charlie Munger",
+      "paragraphs": [
+        "Compact paragraph one",
+        "Compact paragraph two"
+      ]
+    }}
+  ],
   "key_points": [
     {{
       "point": "Concrete key point"
@@ -152,6 +161,12 @@ Guidelines:
 - Keep it slightly shorter: target roughly 180-260 words across the full narrative.
 - Avoid filler, repetition, and generic framing.
 - Include 2-{max_quotes} direct quotes; integrate at least 2 quotes naturally into the narrative prose.
+- archetype_reactions: include exactly three entries, one each for Paul Graham, Andy Grove, and Charlie Munger.
+- Each archetype reaction must contain exactly two short paragraphs.
+- For each archetype, inhabit that person's mindset rather than describing a framework.
+- Paul Graham: start from user demand, founder taste, leverage, underappreciated opportunities, and what a small team could build that incumbents miss.
+- Andy Grove: focus on strategic inflection points, chokepoints, competition, execution risk, organizational implications, and what leaders should monitor.
+- Charlie Munger: focus on incentives, misjudgment, second-order effects, multidisciplinary mental models, moats, and what others are misunderstanding.
 - key_points: include 4-{max_bullet_points} non-overlapping points.
 - Each key point must be specific and evidence-oriented, not vague advice.
 - There may be technical terms in the content; preserve exact spelling.

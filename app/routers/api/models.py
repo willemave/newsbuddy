@@ -169,6 +169,10 @@ class DailyNewsDigestResponse(BaseModel):
     is_read: bool = Field(False, description="Whether this digest card is marked read")
     read_at: str | None = Field(None, description="ISO timestamp when digest was marked read")
     generated_at: str = Field(..., description="ISO timestamp when digest was generated")
+    coverage_end_at: str | None = Field(
+        None,
+        description="ISO timestamp for the latest checkpoint covered by this digest",
+    )
 
 
 class DailyNewsDigestListResponse(BaseModel):
@@ -352,6 +356,29 @@ class PodcastEpisodeSearchResponse(BaseModel):
     """Response payload for podcast episode search."""
 
     results: list[PodcastEpisodeSearchResultResponse] = Field(default_factory=list)
+
+
+class MixedSearchFeedResultResponse(BaseModel):
+    """Validated feed/source result for mixed search."""
+
+    id: str
+    title: str
+    site_url: str
+    feed_url: str
+    feed_type: str
+    feed_format: str
+    description: str | None = None
+    rationale: str | None = None
+    evidence_url: str | None = None
+
+
+class MixedSearchResponse(BaseModel):
+    """Sectioned mixed search results for the More > Search screen."""
+
+    query: str
+    content: list[ContentSummaryResponse] = Field(default_factory=list)
+    feeds: list[MixedSearchFeedResultResponse] = Field(default_factory=list)
+    podcasts: list[PodcastEpisodeSearchResultResponse] = Field(default_factory=list)
 
 
 class DetectedFeed(BaseModel):

@@ -24,6 +24,7 @@ class ChatSessionViewModel: ObservableObject {
     // Voice dictation state
     @Published var isRecording = false
     @Published var isTranscribing = false
+    @Published var activeTranscript: String = ""
     @Published private(set) var voiceDictationAvailable = false
 
     private let chatService = ChatService.shared
@@ -33,7 +34,7 @@ class ChatSessionViewModel: ObservableObject {
 
     init(sessionId: Int, transcriptionService: (any SpeechTranscribing)? = nil) {
         self.sessionId = sessionId
-        let resolvedService = transcriptionService ?? VoiceDictationService.shared
+        let resolvedService = transcriptionService ?? RealtimeTranscriptionService()
         self.transcriptionService = resolvedService
         configureTranscriptionCallbacks()
     }
@@ -41,7 +42,7 @@ class ChatSessionViewModel: ObservableObject {
     init(session: ChatSessionSummary, transcriptionService: (any SpeechTranscribing)? = nil) {
         self.sessionId = session.id
         self.session = session
-        let resolvedService = transcriptionService ?? VoiceDictationService.shared
+        let resolvedService = transcriptionService ?? RealtimeTranscriptionService()
         self.transcriptionService = resolvedService
         configureTranscriptionCallbacks()
     }
@@ -275,7 +276,15 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
 
     /// Start voice recording for chat message.
     func startVoiceRecording() async {
+        if !voiceDictationAvailable {
+            await checkAndRefreshVoiceDictation()
+        }
+        guard voiceDictationAvailable else {
+            errorMessage = "Microphone is unavailable right now. Try again in a moment."
+            return
+        }
         configureTranscriptionCallbacks()
+        activeTranscript = ""
         do {
             try await transcriptionService.start()
             isRecording = true
@@ -287,18 +296,29 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     /// Stop recording and transcribe into the input box.
     func stopVoiceRecording() async {
         guard isRecording else { return }
-
-        isRecording = false
-        isTranscribing = true
         logger.info("[ViewModel] Stopping voice recording")
 
         do {
             let transcription = try await transcriptionService.stop()
-            logger.info("[ViewModel] Transcription complete | length=\(transcription.count)")
+            let trimmedTranscription = transcription.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            logger.info("[ViewModel] Transcription complete | length=\(trimmedTranscription.count)")
+            isRecording = false
             isTranscribing = false
+            guard !trimmedTranscription.isEmpty else {
+                errorMessage = "I didn't catch that. Try again."
+                activeTranscript = ""
+                return
+            }
+            activeTranscript = trimmedTranscription
+            await sendMessage(text: trimmedTranscription)
+            activeTranscript = ""
         } catch {
             logger.error("[ViewModel] Voice transcription error: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
+            activeTranscript = ""
+            isRecording = false
             isTranscribing = false
         }
     }
@@ -307,6 +327,8 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     func cancelVoiceRecording() {
         transcriptionService.cancel()
         isRecording = false
+        isTranscribing = false
+        activeTranscript = ""
     }
 
     /// Check if voice dictation is available.
@@ -329,7 +351,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         transcriptionService.onTranscriptFinal = { [weak self] transcript in
             Task { @MainActor in
                 guard let self else { return }
-                self.appendLiveChunk(transcript)
+                self.updateTranscriptPreview(transcript)
             }
         }
         transcriptionService.onStopReason = { [weak self] reason in
@@ -341,6 +363,9 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
                 case .silenceAutoStop, .cancel, .failure:
                     self.isRecording = false
                     self.isTranscribing = false
+                    if reason != .silenceAutoStop {
+                        self.activeTranscript = ""
+                    }
                 }
             }
         }
@@ -349,6 +374,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
                 self?.errorMessage = message
                 self?.isRecording = false
                 self?.isTranscribing = false
+                self?.activeTranscript = ""
             }
         }
         transcriptionService.onStateChange = { [weak self] state in
@@ -367,23 +393,19 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
                 }
             }
         }
+        transcriptionService.onTranscriptDelta = { [weak self] delta in
+            Task { @MainActor in
+                self?.updateTranscriptPreview(delta)
+            }
+        }
     }
 
-    private func appendLiveChunk(_ text: String) {
+    private func updateTranscriptPreview(_ text: String) {
         let cleaned = text
             .replacingOccurrences(of: "...", with: "")
             .replacingOccurrences(of: "\u{2026}", with: "")
         let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-
-        if inputText.isEmpty {
-            inputText = trimmed
-            return
-        }
-
-        let needsSpace =
-            inputText.last?.isWhitespace == false
-            && trimmed.first?.isWhitespace == false
-        inputText += (needsSpace ? " " : "") + trimmed
+        activeTranscript = trimmed
     }
 }

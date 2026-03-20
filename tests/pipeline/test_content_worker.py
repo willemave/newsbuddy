@@ -11,6 +11,7 @@ from app.models.metadata import (
     ContentType,
 )
 from app.pipeline.worker import ContentWorker
+from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
 from app.services.http import NonRetryableError
 from app.services.queue import TaskType
 
@@ -453,6 +454,79 @@ class TestContentWorker:
         # Should have created download task (since file_path is not in metadata)
         assert worker.queue_gateway.enqueue.call_count == 1
         worker.queue_gateway.enqueue.assert_called_with(TaskType.DOWNLOAD_AUDIO, content_id=456)
+
+    def test_process_youtube_podcast_enqueues_summarize_without_download(
+        self,
+        mock_dependencies,
+    ):
+        """YouTube podcast links should summarize from extracted metadata before download."""
+        worker = ContentWorker()
+
+        mock_content = Mock()
+        mock_content.id = 789
+        mock_content.url = "https://www.youtube.com/watch?v=abc123xyz"
+        mock_content.content_type = ContentType.PODCAST.value
+        mock_content.content_metadata = {
+            "audio_url": "https://www.youtube.com/watch?v=abc123xyz",
+            "youtube_video": True,
+            "platform": "youtube",
+        }
+
+        content_data = ContentData(
+            id=789,
+            url="https://www.youtube.com/watch?v=abc123xyz",
+            content_type=ContentType.PODCAST,
+            status=ContentStatus.NEW,
+            metadata={
+                "audio_url": "https://www.youtube.com/watch?v=abc123xyz",
+                "youtube_video": True,
+                "platform": "youtube",
+            },
+            title=None,
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+
+        mock_db = Mock()
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_content
+        mock_dependencies["get_db"].return_value.__enter__.return_value = mock_db
+
+        mock_strategy = Mock(spec=YouTubeProcessorStrategy)
+        mock_strategy.preprocess_url.return_value = "https://www.youtube.com/watch?v=abc123xyz"
+        mock_strategy.download_content.return_value = b""
+        mock_strategy.extract_data.return_value = {
+            "title": "Sample YouTube Video",
+            "author": "Channel Name",
+            "publication_date": "2026-03-10T00:00:00+00:00",
+            "final_url_after_redirects": "https://www.youtube.com/watch?v=abc123xyz",
+            "video_id": "abc123xyz",
+            "thumbnail_url": "https://img.youtube.com/vi/abc123xyz/maxresdefault.jpg",
+            "metadata": {
+                "platform": "youtube",
+                "video_id": "abc123xyz",
+                "channel": "Channel Name",
+                "transcript": "Transcript text",
+                "youtube_video": True,
+            },
+        }
+        mock_strategy.prepare_for_llm.return_value = {
+            "content_to_filter": "Prepared summary input",
+            "content_to_summarize": "Prepared summary input",
+        }
+        worker.strategy_registry.get_strategy.return_value = mock_strategy
+
+        with patch("app.pipeline.worker.content_to_domain") as mock_converter:
+            mock_converter.return_value = content_data
+
+            result = worker.process_content(789, "test-worker")
+
+        assert result is True
+        worker.queue_gateway.enqueue.assert_called_once_with(TaskType.SUMMARIZE, content_id=789)
+        assert content_data.metadata["content_to_summarize"] == "Prepared summary input"
+        assert content_data.metadata["transcript"] == "Transcript text"
+        assert content_data.metadata["youtube_video"] is True
+        assert content_data.status == ContentStatus.PROCESSING
 
     def test_process_unknown_content_type(self, mock_dependencies):
         """Test processing with unknown content type."""

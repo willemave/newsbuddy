@@ -34,10 +34,17 @@ final class DailyNewsDigestTests: XCTestCase {
         XCTAssertFalse(digest.showsDigDeeperAction)
     }
 
+    func testDisplayCoverageLabelIsNilForOlderDigests() {
+        let digest = makeDigest(summary: "Summary text.", keyPoints: [], coverageEndAt: "2026-03-08T18:00:00Z")
+
+        XCTAssertNil(digest.displayCoverageLabel)
+    }
+
     private func makeDigest(
         summary: String,
         keyPoints: [String],
-        sourceCount: Int = 2
+        sourceCount: Int = 2,
+        coverageEndAt: String? = nil
     ) -> DailyNewsDigest {
         DailyNewsDigest(
             id: 7,
@@ -50,7 +57,8 @@ final class DailyNewsDigestTests: XCTestCase {
             sourceContentIds: [11, 12],
             isRead: false,
             readAt: nil,
-            generatedAt: "2026-03-08T18:00:00Z"
+            generatedAt: "2026-03-08T18:00:00Z",
+            coverageEndAt: coverageEndAt
         )
     }
 }

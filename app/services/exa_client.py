@@ -43,6 +43,17 @@ class ExaSearchResult:
     published_date: str | None = None
 
 
+@dataclass
+class ExaContentResult:
+    """Fetched Exa page content for a URL."""
+
+    title: str
+    url: str
+    text: str | None = None
+    summary: str | None = None
+    published_date: str | None = None
+
+
 def _extract_clean_snippet(text: str, max_chars: int) -> str:
     """Extract a clean snippet from text, skipping navigation cruft.
 
@@ -254,6 +265,57 @@ def exa_search(
 
     except Exception as e:
         logger.error(f"[Exa] Search failed | query='{query[:50]}' error={e}", exc_info=True)
+        return []
+
+
+def exa_get_contents(
+    urls: list[str],
+    *,
+    max_characters: int = 4000,
+) -> list[ExaContentResult]:
+    """Fetch content for already-selected URLs via Exa's contents API."""
+
+    client = get_exa_client()
+    if client is None:
+        logger.warning("Exa client not available, returning empty content results")
+        return []
+
+    clean_urls = [url.strip() for url in urls if isinstance(url, str) and url.strip()]
+    if not clean_urls:
+        return []
+
+    try:
+        logger.info("[Exa] Fetching contents for %d URLs", len(clean_urls))
+        response = client.get_contents(
+            clean_urls,
+            text={"max_characters": max_characters},
+        )
+
+        results: list[ExaContentResult] = []
+        for result in response.results:
+            results.append(
+                ExaContentResult(
+                    title=result.title or "Untitled",
+                    url=result.url,
+                    text=getattr(result, "text", None),
+                    summary=getattr(result, "summary", None),
+                    published_date=getattr(result, "published_date", None),
+                )
+            )
+
+        logger.info(
+            "[Exa] Content fetch completed | urls=%d results=%d",
+            len(clean_urls),
+            len(results),
+        )
+        return results
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[Exa] Content fetch failed | urls=%d error=%s",
+            len(clean_urls),
+            exc,
+            exc_info=True,
+        )
         return []
 
 

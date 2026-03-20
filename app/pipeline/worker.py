@@ -20,6 +20,7 @@ from app.pipeline.checkout import get_checkout_manager
 from app.pipeline.podcast_workers import PodcastDownloadWorker, PodcastTranscribeWorker
 from app.pipeline.workflows.content_processing_workflow import ContentProcessingWorkflow
 from app.processing_strategies.registry import get_strategy_registry
+from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.http import NonRetryableError, get_http_service
@@ -742,6 +743,15 @@ class ContentWorker:
             content.status = ContentStatus.PROCESSING
             content.processed_at = datetime.now(UTC)
 
+            youtube_strategy = self._resolve_youtube_podcast_strategy(content)
+            if youtube_strategy is not None:
+                prepared_for_summary = self._prepare_youtube_podcast_for_summary(
+                    content=content,
+                    strategy=youtube_strategy,
+                )
+                if prepared_for_summary or content.status == ContentStatus.SKIPPED:
+                    return True
+
             # Save initial state to DB
             with get_db() as db:
                 db_content = db.query(Content).filter(Content.id == content.id).first()
@@ -777,3 +787,126 @@ class ContentWorker:
         """Compatibility shim used by legacy tests."""
 
         return self._process_podcast(content)
+
+    def _resolve_youtube_podcast_strategy(
+        self,
+        content: ContentData,
+    ) -> YouTubeProcessorStrategy | None:
+        """Return the YouTube strategy for podcast-style YouTube content."""
+        candidates: list[str] = []
+        audio_url = content.metadata.get("audio_url")
+        if isinstance(audio_url, str) and audio_url.strip():
+            candidates.append(audio_url)
+        candidates.append(str(content.url))
+
+        for candidate in candidates:
+            strategy = self.strategy_registry.get_strategy(candidate)
+            if isinstance(strategy, YouTubeProcessorStrategy):
+                return strategy
+        return None
+
+    def _prepare_youtube_podcast_for_summary(
+        self,
+        *,
+        content: ContentData,
+        strategy: YouTubeProcessorStrategy,
+    ) -> bool:
+        """Populate YouTube podcast metadata so podcasts can summarize before download."""
+        target_url = str(
+            content.metadata.get("video_url") or content.metadata.get("audio_url") or content.url
+        )
+        processed_url = strategy.preprocess_url(target_url)
+
+        try:
+            if asyncio.iscoroutinefunction(strategy.download_content):
+                raw_content = asyncio.run(strategy.download_content(processed_url))
+            else:
+                raw_content = strategy.download_content(processed_url)
+
+            if asyncio.iscoroutinefunction(strategy.extract_data):
+                extracted_data = asyncio.run(strategy.extract_data(raw_content, processed_url))
+            else:
+                extracted_data = strategy.extract_data(raw_content, processed_url)
+
+            if asyncio.iscoroutinefunction(strategy.prepare_for_llm):
+                llm_data = asyncio.run(strategy.prepare_for_llm(extracted_data)) or {}
+            else:
+                llm_data = strategy.prepare_for_llm(extracted_data) or {}
+        except NonRetryableError as exc:
+            logger.warning("Non-retryable YouTube extraction error for %s: %s", processed_url, exc)
+            self._mark_non_retryable_failure(content, str(exc))
+            return False
+
+        if extracted_data.get("skip_processing") or llm_data.get("skip_processing"):
+            skip_reason = (
+                extracted_data.get("skip_reason")
+                or llm_data.get("skip_reason")
+                or "marked by strategy"
+            )
+            content.metadata["youtube_video"] = True
+            content.metadata["skip_reason"] = skip_reason
+            content.status = ContentStatus.SKIPPED
+            content.error_message = skip_reason
+            content.processed_at = datetime.now(UTC)
+            logger.info("Skipping YouTube podcast %s: %s", content.id, skip_reason)
+            return True
+
+        if content.source_url is None:
+            content.source_url = str(content.url)
+
+        final_url = str(extracted_data.get("final_url_after_redirects") or processed_url)
+        canonical_url = normalize_http_url(final_url) or str(content.url)
+        self._update_canonical_url(content, canonical_url)
+
+        if extracted_data.get("title"):
+            content.title = extracted_data["title"]
+
+        publication_date = extracted_data.get("publication_date")
+        if publication_date:
+            parsed_publication_date = parse_date_with_tz(publication_date)
+            if parsed_publication_date:
+                content.publication_date = parsed_publication_date
+
+        extracted_metadata = extracted_data.get("metadata")
+        if isinstance(extracted_metadata, dict):
+            metadata_update = dict(extracted_metadata)
+            if content.metadata.get("source"):
+                metadata_update.pop("source", None)
+            content.metadata.update(metadata_update)
+
+        llm_content = llm_data.get("content_to_summarize")
+        if isinstance(llm_content, str) and llm_content.strip():
+            content.metadata["content_to_summarize"] = llm_content
+
+        llm_filter = llm_data.get("content_to_filter")
+        if isinstance(llm_filter, str) and llm_filter.strip():
+            content.metadata["content_to_filter"] = llm_filter
+
+        for key, value in {
+            "author": extracted_data.get("author"),
+            "publication_date": publication_date,
+            "thumbnail_url": extracted_data.get("thumbnail_url"),
+            "video_id": extracted_data.get("video_id"),
+            "platform": "youtube",
+            "youtube_video": True,
+            "audio_url": content.metadata.get("audio_url") or target_url,
+            "video_url": content.metadata.get("video_url") or target_url,
+        }.items():
+            if value not in (None, "", {}):
+                content.metadata[key] = value
+
+        summary_text = content.metadata.get("transcript") or content.metadata.get(
+            "content_to_summarize"
+        )
+        if isinstance(summary_text, str) and summary_text.strip():
+            logger.info(
+                "Prepared YouTube podcast %s for summarization without audio download",
+                content.id,
+            )
+            return True
+
+        logger.info(
+            "YouTube podcast %s still needs audio download after metadata extraction",
+            content.id,
+        )
+        return False

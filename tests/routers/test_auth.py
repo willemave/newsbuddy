@@ -359,6 +359,7 @@ def test_get_current_user_info(db: Session, monkeypatch):
         assert data["full_name"] == "Test Me User"
         assert data["twitter_username"] is None
         assert data["news_digest_timezone"] == "UTC"
+        assert data["news_digest_interval_hours"] == 6
         assert data["has_x_bookmark_sync"] is False
     finally:
         app.dependency_overrides.clear()
@@ -445,6 +446,7 @@ def test_update_current_user_info(db: Session, monkeypatch):
                 "full_name": "Updated Name",
                 "twitter_username": "@Willem_AW",
                 "news_digest_timezone": "America/New_York",
+                "news_digest_interval_hours": 3,
             },
         )
         assert response.status_code == 200
@@ -452,11 +454,13 @@ def test_update_current_user_info(db: Session, monkeypatch):
         assert data["full_name"] == "Updated Name"
         assert data["twitter_username"] == "willem_aw"
         assert data["news_digest_timezone"] == "America/New_York"
+        assert data["news_digest_interval_hours"] == 3
 
         db.refresh(test_user)
         assert test_user.full_name == "Updated Name"
         assert test_user.twitter_username == "willem_aw"
         assert test_user.news_digest_timezone == "America/New_York"
+        assert test_user.news_digest_interval_hours == 3
     finally:
         app.dependency_overrides.clear()
 
@@ -533,6 +537,44 @@ def test_update_current_user_info_rejects_invalid_timezone(db: Session, monkeypa
         )
         assert response.status_code == 400
         assert "timezone" in response.json()["detail"].lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_update_current_user_info_rejects_invalid_digest_interval(db: Session, monkeypatch):
+    """Test PATCH /auth/me validates digest interval formatting."""
+    from app.core.db import get_db_session, get_readonly_db_session
+    from app.core.settings import get_settings
+
+    monkeypatch.setattr(get_settings(), "debug", False)
+
+    def override_get_db_session():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    app.dependency_overrides[get_readonly_db_session] = override_get_db_session
+
+    test_user = User(
+        apple_id="001234.test.invaliddigestinterval",
+        email="invaliddigestinterval@icloud.com",
+        full_name="Invalid Digest Interval",
+    )
+    db.add(test_user)
+    db.commit()
+    db.refresh(test_user)
+    access_token = create_access_token(test_user.id)
+
+    try:
+        response = client.patch(
+            "/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"news_digest_interval_hours": 5},
+        )
+        assert response.status_code == 400
+        assert "digest interval" in response.json()["detail"].lower()
     finally:
         app.dependency_overrides.clear()
 

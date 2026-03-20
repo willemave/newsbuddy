@@ -7,13 +7,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.schema import ChatMessage, ChatSession, Content, ContentFavorites
-from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
+from app.models.schema import ContentFavorites
 
 logger = get_logger(__name__)
-
-DEFAULT_LLM_PROVIDER = DEFAULT_PROVIDER
-DEFAULT_LLM_MODEL = DEFAULT_MODEL
 
 
 def toggle_favorite(
@@ -31,7 +27,6 @@ def toggle_favorite(
 
         if existing:
             db.delete(existing)
-            _delete_empty_chat_session(db, content_id, user_id)
             db.commit()
             return (False, None)
 
@@ -41,7 +36,6 @@ def toggle_favorite(
             favorited_at=datetime.now(UTC),
         )
         db.add(favorite)
-        _create_chat_session_for_favorite(db, content_id, user_id)
         db.commit()
         db.refresh(favorite)
         return (True, favorite)
@@ -61,51 +55,6 @@ def toggle_favorite(
         )
         db.rollback()
         return (False, None)
-
-
-def _create_chat_session_for_favorite(db: Session, content_id: int, user_id: int) -> None:
-    existing_session = db.execute(
-        select(ChatSession).where(
-            ChatSession.content_id == content_id,
-            ChatSession.user_id == user_id,
-            ChatSession.is_archived == False,  # noqa: E712
-        )
-    ).scalar_one_or_none()
-    if existing_session:
-        return
-
-    content = db.execute(select(Content).where(Content.id == content_id)).scalar_one_or_none()
-    title = content.title or content.source or "Saved Article" if content else "Saved Article"
-    session = ChatSession(
-        user_id=user_id,
-        content_id=content_id,
-        title=title,
-        session_type="article_brain",
-        llm_provider=DEFAULT_LLM_PROVIDER,
-        llm_model=DEFAULT_LLM_MODEL,
-        created_at=datetime.now(UTC),
-    )
-    db.add(session)
-
-
-def _delete_empty_chat_session(db: Session, content_id: int, user_id: int) -> None:
-    session = db.execute(
-        select(ChatSession).where(
-            ChatSession.content_id == content_id,
-            ChatSession.user_id == user_id,
-            ChatSession.is_archived == False,  # noqa: E712
-        )
-    ).scalar_one_or_none()
-    if not session:
-        return
-
-    has_messages = db.execute(
-        select(ChatMessage.id).where(ChatMessage.session_id == session.id).limit(1)
-    ).scalar_one_or_none()
-    if has_messages:
-        return
-
-    db.delete(session)
 
 
 def add_favorite(db: Session, content_id: int, user_id: int) -> ContentFavorites | None:

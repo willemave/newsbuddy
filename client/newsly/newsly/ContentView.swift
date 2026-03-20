@@ -21,10 +21,13 @@ struct ContentView: View {
     @State private var longFormPath = NavigationPath()
     @State private var shortFormPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
+    @State private var knowledgePrefersHistory = false
     @State private var isRestoringPath = false
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        UITabBar.appearance().isHidden = true
+
         let contentRepository = ContentRepository()
         let readRepository = ReadStatusRepository()
         let unreadService = UnreadCountService.shared
@@ -90,16 +93,12 @@ struct ContentView: View {
                     }
                 )
                 .withContentRoutes(
+                    tab: .longContent,
                     path: $longFormPath,
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize
                 )
             }
-            .tabItem {
-                Label("Long Form", systemImage: "doc.richtext")
-                    .accessibilityIdentifier("tab.long")
-            }
-            .badge(longBadge)
             .tag(RootTab.longContent)
 
             NavigationStack(path: $shortFormPath) {
@@ -111,6 +110,7 @@ struct ContentView: View {
                         }
                     )
                     .withContentRoutes(
+                        tab: .shortNews,
                         path: $shortFormPath,
                         readingStateStore: readingStateStore,
                         contentTextSize: contentTextSize
@@ -123,21 +123,18 @@ struct ContentView: View {
                         }
                     )
                     .withContentRoutes(
+                        tab: .shortNews,
                         path: $shortFormPath,
                         readingStateStore: readingStateStore,
                         contentTextSize: contentTextSize
                     )
                 }
             }
-            .tabItem {
-                Label("Fast News", systemImage: "bolt.fill")
-                    .accessibilityIdentifier("tab.short")
-            }
-            .badge(shortBadge)
             .tag(RootTab.shortNews)
 
             NavigationStack(path: $knowledgePath) {
                 KnowledgeView(
+                    prefersHistoryView: $knowledgePrefersHistory,
                     onSelectSession: { route in
                         knowledgePath.append(route)
                     },
@@ -146,27 +143,25 @@ struct ContentView: View {
                     }
                 )
                 .withContentRoutes(
+                    tab: .knowledge,
                     path: $knowledgePath,
+                    onShowKnowledgeHistory: {
+                        knowledgePrefersHistory = true
+                    },
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize
                 )
             }
-            .tabItem {
-                Label("Knowledge", systemImage: "books.vertical.fill")
-                    .accessibilityIdentifier("tab.knowledge")
-            }
-            .badge(knowledgeBadge)
             .tag(RootTab.knowledge)
 
             NavigationStack {
                 MoreView(submissionsViewModel: submissionStatusViewModel)
             }
-            .tabItem {
-                Label("More", systemImage: "ellipsis.circle.fill")
-                    .accessibilityIdentifier("tab.more")
-            }
-            .badge(moreBadge)
             .tag(RootTab.more)
+        }
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom) {
+            customTabBar
         }
         .dynamicTypeSize(AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize)
         .environmentObject(readingStateStore)
@@ -176,6 +171,9 @@ struct ContentView: View {
         }
         .onChange(of: tabCoordinator.selectedTab) { _, newValue in
             logger.info("[TabChange] selectedTab=\(String(describing: newValue), privacy: .public)")
+            if newValue == .knowledge {
+                knowledgePrefersHistory = false
+            }
             tabCoordinator.handleTabChange(to: newValue)
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -260,8 +258,118 @@ struct ContentView: View {
         }
 
         logger.info("[Notification] openChatSession sessionId=\(sessionId, privacy: .public)")
+        openChatSession(sessionId: sessionId)
+    }
+
+    private func openChatSession(sessionId: Int) {
         tabCoordinator.selectedTab = .knowledge
+        knowledgePrefersHistory = false
+        knowledgePath = NavigationPath()
         knowledgePath.append(ChatSessionRoute(sessionId: sessionId))
+    }
+
+    private var customTabBar: some View {
+        CustomBottomNavigationBar(
+            selectedTab: $tabCoordinator.selectedTab,
+            longBadge: longBadge,
+            shortBadge: shortBadge,
+            knowledgeBadge: knowledgeBadge,
+            moreBadge: moreBadge
+        )
+    }
+}
+
+private struct CustomBottomNavigationBar: View {
+    @Binding var selectedTab: RootTab
+    let longBadge: String?
+    let shortBadge: String?
+    let knowledgeBadge: String?
+    let moreBadge: String?
+    private let barHeight: CGFloat = 72
+
+    var body: some View {
+        HStack(spacing: 4) {
+            tabButton(
+                tab: .longContent,
+                title: "Long Form",
+                systemImage: "doc.richtext",
+                badge: longBadge,
+                accessibilityId: "tab.long"
+            )
+            tabButton(
+                tab: .shortNews,
+                title: "Fast News",
+                systemImage: "bolt.fill",
+                badge: shortBadge,
+                accessibilityId: "tab.short"
+            )
+            tabButton(
+                tab: .knowledge,
+                title: "Knowledge",
+                systemImage: "books.vertical.fill",
+                badge: knowledgeBadge,
+                accessibilityId: "tab.knowledge"
+            )
+            tabButton(
+                tab: .more,
+                title: "More",
+                systemImage: "ellipsis.circle.fill",
+                badge: moreBadge,
+                accessibilityId: "tab.more"
+            )
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: barHeight)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.white.opacity(0.72), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+    }
+
+    private func tabButton(
+        tab: RootTab,
+        title: String,
+        systemImage: String,
+        badge: String?,
+        accessibilityId: String
+    ) -> some View {
+        Button {
+            selectedTab = tab
+        } label: {
+            VStack(spacing: 5) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(selectedTab == tab ? Color.accentColor : Color.primary)
+
+                    if let badge, !badge.isEmpty {
+                        Text(badge)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, badge == "●" ? 4 : 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.red))
+                            .offset(x: 10, y: -8)
+                    }
+                }
+
+                Text(title)
+                    .font(.caption.weight(selectedTab == tab ? .semibold : .regular))
+                    .foregroundStyle(selectedTab == tab ? Color.accentColor : Color.primary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityId)
     }
 }
 
@@ -269,7 +377,9 @@ struct ContentView: View {
 
 private extension View {
     func withContentRoutes(
+        tab: RootTab,
         path: Binding<NavigationPath>,
+        onShowKnowledgeHistory: (() -> Void)? = nil,
         readingStateStore: ReadingStateStore,
         contentTextSize: DynamicTypeSize
     ) -> some View {
@@ -277,35 +387,21 @@ private extension View {
             .navigationDestination(for: ContentDetailRoute.self) { route in
                 ContentDetailView(
                     contentId: route.contentId,
-                    allContentIds: route.allContentIds,
-                    onStartLiveVoice: { liveRoute in
-                        path.wrappedValue.append(liveRoute)
-                    }
+                    allContentIds: route.allContentIds
                 )
                 .dynamicTypeSize(contentTextSize)
                 .environmentObject(readingStateStore)
             }
             .navigationDestination(for: ChatSessionRoute.self) { route in
-                if route.mode == .live {
-                    KnowledgeLiveView(
-                        initialRoute: LiveVoiceRoute(
-                            chatSessionId: route.sessionId,
-                            contentId: route.contentId,
-                            launchMode: route.contentId == nil ? .general : .articleVoice,
-                            sourceSurface: .chatSession
-                        )
-                    )
-                } else {
-                    ChatSessionView(
-                        sessionId: route.sessionId,
-                        onStartLiveVoice: { liveRoute in
-                            path.wrappedValue.append(liveRoute)
+                ChatSessionView(
+                    sessionId: route.sessionId,
+                    onShowHistory: tab == .knowledge
+                        ? {
+                            onShowKnowledgeHistory?()
+                            path.wrappedValue = NavigationPath()
                         }
-                    )
-                }
-            }
-            .navigationDestination(for: LiveVoiceRoute.self) { route in
-                KnowledgeLiveView(initialRoute: route)
+                        : nil
+                )
             }
     }
 }

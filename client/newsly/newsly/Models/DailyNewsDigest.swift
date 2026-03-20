@@ -17,6 +17,7 @@ struct DailyNewsDigest: Codable, Identifiable {
     var isRead: Bool
     var readAt: String?
     let generatedAt: String
+    let coverageEndAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -30,6 +31,7 @@ struct DailyNewsDigest: Codable, Identifiable {
         case isRead = "is_read"
         case readAt = "read_at"
         case generatedAt = "generated_at"
+        case coverageEndAt = "coverage_end_at"
     }
 
     private static let localDateParser: DateFormatter = {
@@ -42,6 +44,15 @@ struct DailyNewsDigest: Codable, Identifiable {
     private static let dayLabelFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, MMM d"
+        formatter.timeZone = TimeZone.current
+        return formatter
+    }()
+
+    private static let coverageParser = ISO8601DateFormatter()
+
+    private static let coverageLabelFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
         formatter.timeZone = TimeZone.current
         return formatter
     }()
@@ -60,6 +71,16 @@ struct DailyNewsDigest: Codable, Identifiable {
             return "Yesterday"
         }
         return Self.dayLabelFormatter.string(from: date)
+    }
+
+    var displayCoverageLabel: String? {
+        guard let date = localDateValue, Calendar.current.isDateInToday(date) else {
+            return nil
+        }
+        guard let coverageEndAt, let parsed = Self.coverageParser.date(from: coverageEndAt) else {
+            return nil
+        }
+        return "Updated through \(Self.coverageLabelFormatter.string(from: parsed))"
     }
 
     var cleanedSummary: String {

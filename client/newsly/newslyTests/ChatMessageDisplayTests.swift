@@ -100,4 +100,83 @@ final class ChatMessageDisplayTests: XCTestCase {
         XCTAssertTrue(detail.messages[1].isProcessSummary)
         XCTAssertEqual(detail.messages[2].content, "Final deep-dive answer.")
     }
+
+    func testChatMessageDecodesAssistantFeedOptions() throws {
+        let data = Data(
+            """
+            {
+              "id": 8,
+              "session_id": 21,
+              "role": "assistant",
+              "content": "I found a few good matches below.",
+              "timestamp": "2026-03-17T18:00:00Z",
+              "status": "completed",
+              "error": null,
+              "feed_options": [
+                {
+                  "id": "8f7d2c42b0c1de90",
+                  "title": "lucumr",
+                  "site_url": "https://lucumr.pocoo.org/",
+                  "feed_url": "https://lucumr.pocoo.org/feed.atom",
+                  "feed_type": "atom",
+                  "feed_format": "atom",
+                  "description": "Armin Ronacher's weblog.",
+                  "rationale": "Validated Atom feed for Armin Ronacher's blog.",
+                  "evidence_url": "https://lucumr.pocoo.org/"
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let message = try JSONDecoder().decode(ChatMessage.self, from: data)
+
+        XCTAssertTrue(message.hasFeedOptions)
+        XCTAssertEqual(message.feedOptions.count, 1)
+        XCTAssertEqual(message.feedOptions[0].title, "lucumr")
+        XCTAssertEqual(message.feedOptions[0].feedTypeLabel, "Atom")
+    }
+
+    @MainActor
+    func testAssistantFeedOptionActionModelMarksHttp400AsSubscribed() async {
+        let option = AssistantFeedOption(
+            id: "8f7d2c42b0c1de90",
+            title: "lucumr",
+            siteURL: "https://lucumr.pocoo.org/",
+            feedURL: "https://lucumr.pocoo.org/feed.atom",
+            feedType: "atom",
+            feedFormat: "atom",
+            description: nil,
+            rationale: nil,
+            evidenceURL: nil
+        )
+        let model = AssistantFeedOptionActionModel(
+            service: MockAssistantFeedSubscriptionService(
+                result: .failure(APIError.httpError(statusCode: 400))
+            )
+        )
+
+        await model.subscribe(option)
+
+        XCTAssertTrue(model.isSubscribed(option))
+        XCTAssertFalse(model.isSubscribing(option))
+    }
+}
+
+@MainActor
+private final class MockAssistantFeedSubscriptionService: AssistantFeedSubscribing {
+    let result: Result<ScraperConfig, Error>
+
+    init(result: Result<ScraperConfig, Error>) {
+        self.result = result
+    }
+
+    func subscribeFeed(
+        feedURL: String,
+        feedType: String,
+        displayName: String?
+    ) async throws -> ScraperConfig {
+        _ = (feedURL, feedType, displayName)
+        return try result.get()
+    }
 }

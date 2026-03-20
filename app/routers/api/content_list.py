@@ -11,9 +11,12 @@ from app.core.deps import get_current_user
 from app.models.user import User
 from app.routers.api.models import (
     ContentListResponse,
+    MixedSearchFeedResultResponse,
+    MixedSearchResponse,
     PodcastEpisodeSearchResponse,
     PodcastEpisodeSearchResultResponse,
 )
+from app.services.assistant_feed_finder import find_feed_options
 from app.services.podcast_search import search_podcast_episodes
 
 router = APIRouter()
@@ -124,6 +127,70 @@ def search_contents(
         limit=limit,
         cursor=cursor,
         offset=offset,
+    )
+
+
+@router.get(
+    "/search/mixed",
+    response_model=MixedSearchResponse,
+    summary="Search content, feeds, and podcasts in sectioned form",
+    description=(
+        "Explicit-submit mixed search used by the app Search screen. "
+        "Returns local content matches plus external feed/source and podcast sections."
+    ),
+)
+def search_mixed_contents(
+    db: Annotated[Session, Depends(get_readonly_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    q: str = Query(
+        ..., min_length=2, max_length=200, description="Search query (min 2 characters)"
+    ),
+    limit: int = Query(10, ge=1, le=25, description="Max results per section"),
+) -> MixedSearchResponse:
+    """Search local content plus external feed/source and podcast sections."""
+    local_results = search_content_cards.execute(
+        db,
+        user_id=current_user.id,
+        q=q,
+        content_type="all",
+        limit=limit,
+        cursor=None,
+        offset=0,
+    )
+    feed_results = find_feed_options(query=q, limit=min(limit, 5))
+    podcast_results = search_podcast_episodes(query=q, limit=limit)
+
+    return MixedSearchResponse(
+        query=q,
+        content=local_results.contents,
+        feeds=[
+            MixedSearchFeedResultResponse(
+                id=option.id,
+                title=option.title,
+                site_url=option.site_url,
+                feed_url=option.feed_url,
+                feed_type=option.feed_type,
+                feed_format=option.feed_format,
+                description=option.description,
+                rationale=option.rationale,
+                evidence_url=option.evidence_url,
+            )
+            for option in feed_results.options
+        ],
+        podcasts=[
+            PodcastEpisodeSearchResultResponse(
+                title=result.title,
+                episode_url=result.episode_url,
+                podcast_title=result.podcast_title,
+                source=result.source,
+                snippet=result.snippet,
+                feed_url=result.feed_url,
+                published_at=result.published_at,
+                provider=result.provider,
+                score=result.score,
+            )
+            for result in podcast_results
+        ],
     )
 
 

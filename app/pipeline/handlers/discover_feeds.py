@@ -7,6 +7,7 @@ from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.feed_discovery import run_feed_discovery
 from app.services.queue import TaskType
+from app.services.weekly_discovery_chat import ensure_weekly_discovery_session
 
 logger = get_logger(__name__)
 
@@ -33,6 +34,8 @@ class DiscoverFeedsHandler:
 
         try:
             run_feed_discovery(user_id=user_id, trigger=payload.get("trigger", "cron"))
+            with context.db_factory() as db:
+                ensure_weekly_discovery_session(db, user_id=user_id)
             return TaskResult.ok()
         except Exception as exc:  # noqa: BLE001
             logger.exception(

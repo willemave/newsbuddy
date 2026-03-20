@@ -3,12 +3,28 @@
 from __future__ import annotations
 
 from app.core.logging import get_logger
+from app.models.schema import Content
 from app.pipeline.podcast_workers import PodcastDownloadWorker
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.queue import TaskType
 
 logger = get_logger(__name__)
+
+
+def _is_non_retryable_download_error(error_message: str | None) -> bool:
+    """Return True for terminal download failures that should not be retried."""
+    if not error_message:
+        return False
+    lowered = error_message.lower()
+    markers = (
+        "sign in to confirm",
+        "requires authentication",
+        "cookies not found",
+        "private video",
+        "video unavailable",
+    )
+    return any(marker in lowered for marker in markers)
 
 
 class DownloadAudioHandler:
@@ -26,7 +42,21 @@ class DownloadAudioHandler:
 
             worker = PodcastDownloadWorker()
             success = worker.process_download_task(int(content_id))
-            return TaskResult.ok() if success else TaskResult.fail()
+            if success:
+                return TaskResult.ok()
+
+            persisted_error: str | None = None
+            with context.db_factory() as db:
+                content_row = (
+                    db.query(Content.error_message).filter(Content.id == int(content_id)).first()
+                )
+                if content_row:
+                    persisted_error = content_row[0]
+
+            if _is_non_retryable_download_error(persisted_error):
+                return TaskResult.fail(persisted_error, retryable=False)
+
+            return TaskResult.fail(persisted_error)
         except Exception as exc:  # noqa: BLE001
             logger.error("Download error: %s", exc, exc_info=True)
             return TaskResult.fail(str(exc))

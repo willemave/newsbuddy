@@ -16,6 +16,7 @@ private enum EditorialNarrativeDesign {
 struct EditorialNarrativeSummaryView: View {
     let summary: EditorialNarrativeSummary
     var contentId: Int?
+    @State private var expandedArchetypes: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: EditorialNarrativeDesign.sectionSpacing) {
@@ -26,6 +27,15 @@ struct EditorialNarrativeSummaryView: View {
                         .foregroundColor(.primary.opacity(0.92))
                         .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if let archetypeReactions = summary.archetypeReactions, !archetypeReactions.isEmpty {
+                sectionHeader("Perspectives", icon: "person.3.sequence", tint: .orange)
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(archetypeReactions) { reaction in
+                        collapsibleArchetypeReaction(reaction)
+                    }
                 }
             }
 
@@ -45,6 +55,54 @@ struct EditorialNarrativeSummaryView: View {
                         quoteCard(quote)
                     }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func collapsibleArchetypeReaction(_ reaction: EditorialArchetypeReaction) -> some View {
+        let isExpanded = expandedArchetypes.contains(reaction.id)
+
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if isExpanded {
+                        expandedArchetypes.remove(reaction.id)
+                    } else {
+                        expandedArchetypes.insert(reaction.id)
+                    }
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+
+                    Text(reaction.archetype)
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(reaction.displayParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                        Text(paragraph)
+                            .font(.callout)
+                            .foregroundColor(.primary.opacity(0.9))
+                            .lineSpacing(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.top, 12)
+                .padding(.leading, 22)
             }
         }
     }
@@ -147,6 +205,29 @@ struct EditorialNarrativeSummaryView: View {
                         context: nil,
                         attribution: "Engineering manager"
                     ),
+                ],
+                archetypeReactions: [
+                    EditorialArchetypeReaction(
+                        archetype: "Paul Graham",
+                        paragraphs: [
+                            "The interesting opportunity is not generic enterprise AI but the specific workflow friction teams feel before they have the language to describe it. Small teams can win here by turning governance pain into product taste.",
+                            "What matters is whether users are pulled hard enough to change behavior. If they are, there is room to build tighter workflow software around the pain incumbents still treat as a feature request."
+                        ]
+                    ),
+                    EditorialArchetypeReaction(
+                        archetype: "Andy Grove",
+                        paragraphs: [
+                            "This looks like an operating shift more than a tooling shift. Governance moving upstream means the company is hitting a strategic inflection point where controls become part of product delivery.",
+                            "The chokepoints are approval latency, vendor sprawl, and weak observability. Leaders should track those closely because they determine whether the organization scales or stalls."
+                        ]
+                    ),
+                    EditorialArchetypeReaction(
+                        archetype: "Charlie Munger",
+                        paragraphs: [
+                            "The deeper force is incentives: budget owners and security teams are now rewarded for reliability and transparency instead of demo quality. Once those incentives change, behavior follows.",
+                            "That creates second-order effects in vendor selection, process discipline, and durable moats. The market usually notices the model upgrade before it notices the control structure around it."
+                        ]
+                    )
                 ],
                 keyPoints: [
                     EditorialKeyPoint(point: "Budget planning now includes model spend at workflow granularity."),

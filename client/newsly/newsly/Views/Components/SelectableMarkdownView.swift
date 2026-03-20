@@ -37,23 +37,47 @@ struct SelectableMarkdownView: UIViewRepresentable {
         textView.isEditable = false
         textView.isSelectable = true
         textView.isScrollEnabled = false
+        textView.adjustsFontForContentSizeCategory = false
         textView.backgroundColor = .clear
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textView.dataDetectorTypes = [.link]
-        textView.linkTextAttributes = [
-            .foregroundColor: UIColor.link,
-            .underlineStyle: NSUnderlineStyle.single.rawValue
-        ]
+        textView.tintColor = UIColor.link.resolvedColor(with: textView.traitCollection)
+        textView.linkTextAttributes = [.underlineStyle: NSUnderlineStyle.single.rawValue]
         textView.onDigDeeper = context.coordinator.onDigDeeper
         return textView
     }
 
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
         uiView.onDigDeeper = context.coordinator.onDigDeeper
-        let rendered = MarkdownNSRenderer(baseFont: baseFont, textColor: textColor).render(markdown)
+        let resolvedTextColor = textColor.resolvedColor(with: uiView.traitCollection)
+        let resolvedLinkColor = UIColor.link.resolvedColor(with: uiView.traitCollection)
+        let linkAppearanceSignature = context.coordinator.colorSignature(for: resolvedLinkColor)
+        let renderSignature = context.coordinator.renderSignature(
+            markdown: markdown,
+            baseFont: baseFont,
+            textColor: resolvedTextColor,
+            linkColorSignature: linkAppearanceSignature
+        )
+
+        guard context.coordinator.lastRenderSignature != renderSignature else {
+            return
+        }
+
+        if context.coordinator.lastLinkAppearanceSignature != linkAppearanceSignature {
+            context.coordinator.lastLinkAppearanceSignature = linkAppearanceSignature
+            uiView.tintColor = resolvedLinkColor
+            uiView.linkTextAttributes = [.underlineStyle: NSUnderlineStyle.single.rawValue]
+        }
+
+        context.coordinator.lastRenderSignature = renderSignature
+        let rendered = MarkdownNSRenderer(
+            baseFont: baseFont,
+            textColor: resolvedTextColor,
+            traitCollection: uiView.traitCollection
+        ).render(markdown)
         uiView.attributedText = rendered
         uiView.invalidateIntrinsicContentSize()
     }
@@ -66,8 +90,43 @@ struct SelectableMarkdownView: UIViewRepresentable {
 
     class Coordinator {
         var onDigDeeper: ((String) -> Void)?
+        var lastRenderSignature: String?
+        var lastLinkAppearanceSignature: String?
+
         init(onDigDeeper: ((String) -> Void)?) {
             self.onDigDeeper = onDigDeeper
+        }
+
+        func colorSignature(for color: UIColor) -> String {
+            var red: CGFloat = 0
+            var green: CGFloat = 0
+            var blue: CGFloat = 0
+            var alpha: CGFloat = 0
+            if color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+                return String(
+                    format: "%.4f-%.4f-%.4f-%.4f",
+                    red,
+                    green,
+                    blue,
+                    alpha
+                )
+            }
+            return color.description
+        }
+
+        func renderSignature(
+            markdown: String,
+            baseFont: UIFont,
+            textColor: UIColor,
+            linkColorSignature: String
+        ) -> String {
+            return [
+                markdown,
+                baseFont.fontDescriptor.postscriptName,
+                String(describing: baseFont.pointSize),
+                colorSignature(for: textColor),
+                linkColorSignature
+            ].joined(separator: "|")
         }
     }
 }
@@ -77,6 +136,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
 struct MarkdownNSRenderer {
     let baseFont: UIFont
     let textColor: UIColor
+    let traitCollection: UITraitCollection
 
     private enum TableColumnAlignment {
         case leading
@@ -234,11 +294,10 @@ struct MarkdownNSRenderer {
 
     private func appendCodeBlock(_ code: String, to result: NSMutableAttributedString) {
         let codeFont = UIFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.85, weight: .regular)
-        let bgColor = UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.14, green: 0.15, blue: 0.17, alpha: 1)
-                : UIColor(red: 0.95, green: 0.96, blue: 0.97, alpha: 1)
-        }
+        let bgColor: UIColor =
+            traitCollection.userInterfaceStyle == .dark
+            ? UIColor(red: 0.14, green: 0.15, blue: 0.17, alpha: 1)
+            : UIColor(red: 0.95, green: 0.96, blue: 0.97, alpha: 1)
 
         if result.length > 0 {
             result.append(NSAttributedString(string: "\n"))
@@ -521,11 +580,10 @@ struct MarkdownNSRenderer {
                 }
                 if inlineIntent.contains(.code) {
                     font = UIFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.88, weight: .regular)
-                    let bgColor = UIColor { traits in
-                        traits.userInterfaceStyle == .dark
-                            ? UIColor(red: 0.2, green: 0.21, blue: 0.23, alpha: 1)
-                            : UIColor(red: 0.95, green: 0.96, blue: 0.97, alpha: 1)
-                    }
+                    let bgColor: UIColor =
+                        traitCollection.userInterfaceStyle == .dark
+                        ? UIColor(red: 0.2, green: 0.21, blue: 0.23, alpha: 1)
+                        : UIColor(red: 0.95, green: 0.96, blue: 0.97, alpha: 1)
                     attrs[.backgroundColor] = bgColor
                 }
                 if inlineIntent.contains(.strikethrough) {

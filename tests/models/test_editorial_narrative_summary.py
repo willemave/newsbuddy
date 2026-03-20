@@ -1,4 +1,9 @@
-from app.models.metadata import ContentData, ContentStatus, ContentType
+from app.models.metadata import (
+    ContentData,
+    ContentStatus,
+    ContentType,
+    EditorialNarrativeSummary,
+)
 
 
 def test_editorial_narrative_summary_maps_to_common_detail_fields():
@@ -21,6 +26,44 @@ def test_editorial_narrative_summary_maps_to_common_detail_fields():
                 {
                     "text": "A second quote with enough detail to pass schema validation.",
                     "attribution": "Industry Analyst",
+                },
+            ],
+            "archetype_reactions": [
+                {
+                    "archetype": "Paul Graham",
+                    "paragraphs": [
+                        (
+                            "Paragraph one about user pull, founder taste, and "
+                            "underappreciated opportunity."
+                        ),
+                        (
+                            "Paragraph two about what a small team could build that "
+                            "incumbents miss."
+                        ),
+                    ],
+                },
+                {
+                    "archetype": "Andy Grove",
+                    "paragraphs": [
+                        (
+                            "Paragraph one about the strategic inflection point and the "
+                            "main chokepoint."
+                        ),
+                        (
+                            "Paragraph two about operating posture, competition, and what "
+                            "leaders should monitor."
+                        ),
+                    ],
+                },
+                {
+                    "archetype": "Charlie Munger",
+                    "paragraphs": [
+                        "Paragraph one about incentives, misjudgment, and hidden distortions.",
+                        (
+                            "Paragraph two about second-order effects, moats, and what "
+                            "others misunderstand."
+                        ),
+                    ],
                 },
             ],
             "key_points": [
@@ -50,3 +93,54 @@ def test_editorial_narrative_summary_maps_to_common_detail_fields():
     assert content.summary is not None
     assert content.short_summary is not None
     assert content.topics == []
+
+
+def test_editorial_narrative_summary_accepts_complete_archetype_set() -> None:
+    summary = EditorialNarrativeSummary(
+        title="Editorial Title",
+        editorial_narrative=(
+            "Paragraph one with concrete detail and context, including named entities, "
+            "timeline anchors, and measurable outcomes that show what changed.\n\n"
+            "Paragraph two with implications and evidence, describing constraints, "
+            "countervailing signals, and what the source says teams should do next."
+        ),
+        quotes=[
+            {"text": "A direct quote that should be surfaced.", "attribution": "Source Person"},
+            {
+                "text": "A second quote with enough detail to pass schema validation.",
+                "attribution": "Industry Analyst",
+            },
+        ],
+        archetype_reactions=[
+            {
+                "archetype": "Paul Graham",
+                "paragraphs": [
+                    "Paragraph one about demand and founder insight.",
+                    "Paragraph two about leverage and startup opportunity.",
+                ],
+            },
+            {
+                "archetype": "Andy Grove",
+                "paragraphs": [
+                    "Paragraph one about strategic inflection and chokepoints.",
+                    "Paragraph two about execution risk and leader response.",
+                ],
+            },
+            {
+                "archetype": "Charlie Munger",
+                "paragraphs": [
+                    "Paragraph one about incentives and distortion.",
+                    "Paragraph two about second-order effects and misunderstanding.",
+                ],
+            },
+        ],
+        key_points=[
+            {"point": "Point one with concrete detail."},
+            {"point": "Point two with concrete detail."},
+            {"point": "Point three with concrete detail."},
+            {"point": "Point four with concrete detail."},
+        ],
+    )
+
+    assert len(summary.archetype_reactions) == 3
+    assert summary.archetype_reactions[0].archetype == "Paul Graham"

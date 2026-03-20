@@ -34,6 +34,9 @@ struct ContentSummary: Codable, Identifiable {
     let commentCount: Int?
     let newsSummary: String?
     let newsKeyPoints: [String]?
+    private let cachedDisplayDate: Date?
+    private let cachedProcessedDate: Date?
+    private let cachedItemDate: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -114,6 +117,26 @@ struct ContentSummary: Codable, Identifiable {
         return formatter
     }()
 
+    private static func parseDate(_ dateString: String) -> Date? {
+        if let date = iso8601WithFractionalFormatter.date(from: dateString) {
+            return date
+        }
+
+        if let date = iso8601Formatter.date(from: dateString) {
+            return date
+        }
+
+        if let date = utcMicrosecondsFormatter.date(from: dateString) {
+            return date
+        }
+
+        if let date = utcSecondsFormatter.date(from: dateString) {
+            return date
+        }
+
+        return nil
+    }
+
     init(
         id: Int,
         contentType: String,
@@ -158,6 +181,9 @@ struct ContentSummary: Codable, Identifiable {
         self.commentCount = commentCount
         self.newsSummary = newsSummary
         self.newsKeyPoints = newsKeyPoints
+        self.cachedDisplayDate = Self.parseDate(processedAt ?? createdAt)
+        self.cachedProcessedDate = processedAt.flatMap(Self.parseDate)
+        self.cachedItemDate = Self.parseDate(publicationDate ?? processedAt ?? createdAt)
     }
 
     init(from decoder: Decoder) throws {
@@ -253,8 +279,7 @@ struct ContentSummary: Codable, Identifiable {
     }
 
     var formattedDate: String {
-        let dateString = processedAt ?? createdAt
-        guard let date = parseDate(from: dateString) else {
+        guard let date = cachedDisplayDate else {
             return "Date unknown"
         }
 
@@ -262,7 +287,7 @@ struct ContentSummary: Codable, Identifiable {
     }
 
     var processedDateDisplay: String? {
-        guard let processedAt, let date = parseDate(from: processedAt) else {
+        guard let date = cachedProcessedDate else {
             return nil
         }
 
@@ -271,8 +296,7 @@ struct ContentSummary: Codable, Identifiable {
 
     /// Relative time display for news items (e.g., "2h ago", "3d ago")
     var relativeTimeDisplay: String? {
-        let dateString = publicationDate ?? processedAt ?? createdAt
-        guard let date = parseDate(from: dateString) else {
+        guard let date = cachedItemDate else {
             return nil
         }
 
@@ -326,33 +350,12 @@ struct ContentSummary: Codable, Identifiable {
 
     /// The underlying Date parsed from the best available date field.
     var itemDate: Date? {
-        let dateString = publicationDate ?? processedAt ?? createdAt
-        return parseDate(from: dateString)
+        cachedItemDate
     }
 
     /// Calendar day key for grouping (e.g. "2026-02-19").
     var calendarDayKey: String {
         guard let date = itemDate else { return "" }
         return Self.calendarDayFormatter.string(from: date)
-    }
-
-    private func parseDate(from dateString: String) -> Date? {
-        if let date = Self.iso8601WithFractionalFormatter.date(from: dateString) {
-            return date
-        }
-
-        if let date = Self.iso8601Formatter.date(from: dateString) {
-            return date
-        }
-
-        if let date = Self.utcMicrosecondsFormatter.date(from: dateString) {
-            return date
-        }
-
-        if let date = Self.utcSecondsFormatter.date(from: dateString) {
-            return date
-        }
-
-        return nil
     }
 }

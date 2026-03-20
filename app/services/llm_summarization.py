@@ -153,9 +153,9 @@ def _clip_payload(payload: str, max_chars: int) -> tuple[str, bool]:
 
 
 DEFAULT_SUMMARIZATION_MODELS: dict[str, str] = {
-    "news": "openai:gpt-5.2",
-    "news_digest": "openai:gpt-5.2",
-    "daily_news_rollup": "google:gemini-3-flash-preview",
+    "news": "google:gemini-3.1-flash-lite-preview",
+    "news_digest": "google:gemini-3.1-flash-lite-preview",
+    "daily_news_rollup": "google:gemini-3.1-flash-lite-preview",
     "article": "openai:gpt-5.2",
     "podcast": "openai:gpt-5.2",
     "interleaved": "openai:gpt-5.2",

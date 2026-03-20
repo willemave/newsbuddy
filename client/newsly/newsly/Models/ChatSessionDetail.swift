@@ -114,3 +114,69 @@ struct CreateChatSessionRequest: Codable {
 struct SendChatMessageRequest: Codable {
     let message: String
 }
+
+struct AssistantScreenContext: Codable, Equatable {
+    private static let maxVisibleContentIds = 12
+
+    let screenType: String
+    let screenTitle: String?
+    let contentId: Int?
+    let visibleContentIds: [Int]
+    let selectedTopic: String?
+    let query: String?
+    let note: String?
+
+    init(
+        screenType: String,
+        screenTitle: String? = nil,
+        contentId: Int? = nil,
+        visibleContentIds: [Int] = [],
+        selectedTopic: String? = nil,
+        query: String? = nil,
+        note: String? = nil
+    ) {
+        self.screenType = screenType
+        self.screenTitle = screenTitle
+        self.contentId = contentId
+        self.visibleContentIds = Array(visibleContentIds.prefix(Self.maxVisibleContentIds))
+        self.selectedTopic = selectedTopic
+        self.query = query
+        self.note = note
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case screenType = "screen_type"
+        case screenTitle = "screen_title"
+        case contentId = "content_id"
+        case visibleContentIds = "visible_content_ids"
+        case selectedTopic = "selected_topic"
+        case query
+        case note
+    }
+}
+
+struct AssistantTurnRequest: Codable {
+    let message: String
+    let sessionId: Int?
+    let screenContext: AssistantScreenContext
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case sessionId = "session_id"
+        case screenContext = "screen_context"
+    }
+}
+
+struct AssistantTurnResponse: Codable {
+    let session: ChatSessionSummary
+    let userMessage: ChatMessage
+    let messageId: Int
+    let status: MessageProcessingStatus
+
+    enum CodingKeys: String, CodingKey {
+        case session
+        case userMessage = "user_message"
+        case messageId = "message_id"
+        case status
+    }
+}

@@ -54,6 +54,35 @@ class DummySummarizer:
                 {"text": "Quote one with enough detail for validation.", "attribution": "Source A"},
                 {"text": "Quote two with enough detail for validation.", "attribution": "Source B"},
             ],
+            archetype_reactions=[
+                {
+                    "archetype": "Paul Graham",
+                    "paragraphs": [
+                        (
+                            "Paragraph one about user pull, founder leverage, and "
+                            "overlooked opportunity."
+                        ),
+                        (
+                            "Paragraph two about what a small team could build faster "
+                            "than incumbents."
+                        ),
+                    ],
+                },
+                {
+                    "archetype": "Andy Grove",
+                    "paragraphs": [
+                        "Paragraph one about strategic inflection points and chokepoints.",
+                        "Paragraph two about execution risk and what leaders should monitor next.",
+                    ],
+                },
+                {
+                    "archetype": "Charlie Munger",
+                    "paragraphs": [
+                        "Paragraph one about incentives and misjudgment shaping behavior.",
+                        "Paragraph two about second-order effects, moats, and misunderstanding.",
+                    ],
+                },
+            ],
             key_points=[
                 {"point": "Key point one with concrete detail and consequence."},
                 {"point": "Key point two with concrete detail and consequence."},

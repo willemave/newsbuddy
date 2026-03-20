@@ -179,6 +179,13 @@ private struct DailyDigestCard: View {
             }
             .padding(.bottom, 14)
 
+            if let coverageLabel = digest.displayCoverageLabel {
+                Text(coverageLabel)
+                    .font(.caption)
+                    .foregroundStyle(Color.textSecondary)
+                    .padding(.bottom, 14)
+            }
+
             // Key points
             VStack(alignment: .leading, spacing: 12) {
                 if digest.cleanedKeyPoints.isEmpty {

@@ -38,7 +38,6 @@ struct ContentDetailView: View {
     let initialContentId: Int
     let allContentIds: [Int]
     let onConvert: ((Int) async -> Void)?
-    let onStartLiveVoice: ((LiveVoiceRoute) -> Void)?
     @StateObject private var viewModel = ContentDetailViewModel()
     @StateObject private var chatSessionManager = ActiveChatSessionManager.shared
     @EnvironmentObject var readingStateStore: ReadingStateStore
@@ -54,15 +53,10 @@ struct ContentDetailView: View {
     // Tweet suggestions sheet state
     @State private var showTweetSheet: Bool = false
     // Chat sheet state
-    @State private var showDeepDiveSheet: Bool = false
-    @State private var deepDiveSession: ChatSessionSummary?
-    @State private var deepDiveSessionId: Int?
     @State private var showChatOptionsSheet: Bool = false
     @State private var isCheckingChatSession: Bool = false
     @State private var isStartingChat: Bool = false
     @State private var chatError: String?
-    @State private var audioTranscript: String = ""
-    @StateObject private var dictationService = VoiceDictationService.shared
     @StateObject private var inlineNarrationViewModel = LiveVoiceViewModel()
     @State private var inlineNarrationContentId: Int?
     @State private var inlineNarrationAutoStopTask: Task<Void, Never>?
@@ -86,13 +80,11 @@ struct ContentDetailView: View {
     init(
         contentId: Int,
         allContentIds: [Int] = [],
-        onConvert: ((Int) async -> Void)? = nil,
-        onStartLiveVoice: ((LiveVoiceRoute) -> Void)? = nil
+        onConvert: ((Int) async -> Void)? = nil
     ) {
         self.initialContentId = contentId
         self.allContentIds = allContentIds.isEmpty ? [contentId] : allContentIds
         self.onConvert = onConvert
-        self.onStartLiveVoice = onStartLiveVoice
         if let index = allContentIds.firstIndex(of: contentId) {
             self._currentIndex = State(initialValue: index)
         } else {
@@ -469,8 +461,6 @@ struct ContentDetailView: View {
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showChatOptionsSheet, onDismiss: {
-            dictationService.cancel()
-            audioTranscript = ""
             chatError = nil
         }) {
             if let content = viewModel.content {
@@ -478,17 +468,6 @@ struct ContentDetailView: View {
                     .presentationDetents([.height(380)])
                     .presentationDragIndicator(.hidden)
                     .presentationCornerRadius(24)
-            }
-        }
-        .sheet(isPresented: $showDeepDiveSheet) {
-            if let session = deepDiveSession {
-                NavigationStack {
-                    ChatSessionView(session: session)
-                }
-            } else if let sessionId = deepDiveSessionId {
-                NavigationStack {
-                    ChatSessionView(sessionId: sessionId)
-                }
             }
         }
     }
@@ -505,28 +484,15 @@ struct ContentDetailView: View {
 
     private func startChatWithPrompt(_ prompt: String, contentId: Int) async {
         guard !isStartingChat else { return }
-        guard let content = viewModel.content else { return }
 
         isStartingChat = true
         chatError = nil
 
         do {
             let session = try await ChatService.shared.startArticleChat(contentId: contentId)
-            // Send message async (don't wait for completion)
-            let response = try await ChatService.shared.sendMessageAsync(sessionId: session.id, message: prompt)
-
-            // Register with manager for background polling - don't show sheet
-            chatSessionManager.startTracking(
-                session: session,
-                contentId: contentId,
-                contentTitle: content.displayTitle,
-                messageId: response.messageId
-            )
-
-            deepDiveSession = session
-            deepDiveSessionId = nil
+            _ = try await ChatService.shared.sendMessageAsync(sessionId: session.id, message: prompt)
             showChatOptionsSheet = false
-            // Don't show sheet immediately - show banner instead
+            openChatSession(sessionId: session.id, contentId: contentId)
         } catch {
             chatError = error.localizedDescription
         }
@@ -542,38 +508,25 @@ struct ContentDetailView: View {
         "Corroborate the main claims in \(content.displayTitle) using recent, reputable sources. For each claim, list 2-3 supporting or conflicting sources with URLs, note disagreements, and flag gaps or weak evidence."
     }
 
-    private func audioPrompt(_ transcript: String, content: ContentDetail) -> String {
-        "User voice question about \(content.displayTitle): \(transcript)\nUse the article context first; if the answer is not in the source, say so and suggest where to look next."
-    }
-
     private func deepResearchPrompt(for content: ContentDetail) -> String {
         "Conduct comprehensive research on \(content.displayTitle). Find additional sources, verify claims, identify related developments, and provide a thorough analysis with citations."
     }
 
     private func startDeepResearchWithPrompt(_ prompt: String, contentId: Int) async {
         guard !isStartingChat else { return }
-        guard let content = viewModel.content else { return }
 
         isStartingChat = true
         chatError = nil
 
         do {
             let session = try await ChatService.shared.startDeepResearch(contentId: contentId)
-            let response = try await ChatService.shared.sendMessageAsync(
+            _ = try await ChatService.shared.sendMessageAsync(
                 sessionId: session.id,
                 message: prompt
             )
 
-            chatSessionManager.startTracking(
-                session: session,
-                contentId: contentId,
-                contentTitle: content.displayTitle,
-                messageId: response.messageId
-            )
-
-            deepDiveSession = session
-            deepDiveSessionId = nil
             showChatOptionsSheet = false
+            openChatSession(sessionId: session.id, contentId: contentId)
         } catch {
             chatError = error.localizedDescription
         }
@@ -583,45 +536,17 @@ struct ContentDetailView: View {
 
     @MainActor
     private func openChatSession(sessionId: Int, contentId: Int) {
-        deepDiveSession = nil
-        deepDiveSessionId = sessionId
-        showDeepDiveSheet = true
         chatSessionManager.stopTracking(contentId: contentId)
+        NotificationCenter.default.post(
+            name: .openChatSession,
+            object: nil,
+            userInfo: ["session_id": sessionId]
+        )
     }
 
     @ViewBuilder
     private func audioPromptCard(for content: ContentDetail) -> some View {
         VStack(spacing: 10) {
-            Button {
-                launchLiveVoice(for: content, mode: .articleVoice)
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "waveform.and.mic")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.blue)
-                        .frame(width: 32, height: 32)
-                        .background(Color.blue.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Voice with this article")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.primary)
-                        Text("Start live conversation mode")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    Spacer()
-                }
-                .padding(10)
-                .background(Color.surfaceSecondary)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("content.voice_with_article")
-
             Button {
                 Task { await toggleInlineSummaryNarration(for: content) }
             } label: {
@@ -810,28 +735,6 @@ struct ContentDetailView: View {
             guard !inlineNarrationViewModel.isAssistantSpeaking else { return }
             guard !inlineNarrationViewModel.isAwaitingAssistant else { return }
             await teardownInlineNarration()
-        }
-    }
-
-    private func launchLiveVoice(for content: ContentDetail, mode: LiveLaunchMode) {
-        let route = LiveVoiceRoute(
-            contentId: content.id,
-            launchMode: mode,
-            sourceSurface: .contentDetail
-        )
-        onStartLiveVoice?(route)
-    }
-
-    private func toggleRecording() async {
-        do {
-            if dictationService.isRecording {
-                let transcript = try await dictationService.stop()
-                audioTranscript = transcript
-            } else {
-                try await dictationService.start()
-            }
-        } catch {
-            chatError = error.localizedDescription
         }
     }
 
@@ -1040,9 +943,6 @@ struct ContentDetailView: View {
                     if let activeSession = chatSessionManager.getSession(forContentId: content.id) {
                         openChatSession(sessionId: activeSession.id, contentId: content.id)
                         return
-                    }
-                    if !content.isFavorited {
-                        await viewModel.toggleFavorite()
                     }
                     await handleChatButtonTapped(content)
                 }
