@@ -30,18 +30,13 @@ struct RecentlyReadView: View {
                 } else {
                     List {
                         ForEach(viewModel.contents) { content in
-                            ZStack {
-                                NavigationLink(destination: ContentDetailView(
+                            NavigationLink(destination: ContentDetailView(
                                     contentId: content.id,
                                     allContentIds: viewModel.contents.map(\.id)
                                 )) {
-                                    SwiftUI.EmptyView()
-                                }
-                                .opacity(0)
-                                .buttonStyle(PlainButtonStyle())
-
                                 ContentCard(content: content)
                             }
+                            .buttonStyle(.plain)
                             .appListRow()
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 Button {
@@ -110,7 +105,6 @@ struct RecentlyReadView: View {
                     selectedContentType: $viewModel.selectedContentType,
                     selectedDate: $viewModel.selectedDate,
                     selectedReadFilter: $viewModel.selectedReadFilter,
-                    isPresented: $showingFilters,
                     contentTypes: viewModel.contentTypes,
                     availableDates: viewModel.availableDates
                 )

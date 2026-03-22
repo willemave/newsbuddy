@@ -10,7 +10,6 @@ import SwiftUI
 struct ContentListView: View {
     @StateObject private var viewModel = ContentListViewModel()
     @State private var showingFilters = false
-    @State private var selectedContentId: Int?
     @State private var navigationPath = NavigationPath()
     
     var body: some View {
@@ -39,18 +38,11 @@ struct ContentListView: View {
                         } else {
                             List {
                                 ForEach(viewModel.contents) { content in
-                                    ZStack {
-                                        // Invisible navigation link to enable row tap navigation
-                                        NavigationLink(destination: ContentDetailView(
-                                            contentId: content.id,
-                                            allContentIds: viewModel.contents.map { $0.id }
-                                        )) { EmptyView() }
-                                        .opacity(0)
-                                        .buttonStyle(PlainButtonStyle())
-
+                                    NavigationLink(value: content.id) {
                                         ContentCard(content: content)
-                                        .contentShape(Rectangle())
                                     }
+                                    .buttonStyle(.plain)
+                                    .contentShape(Rectangle())
                                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                                     .listRowSeparator(.visible)
                                     .listRowBackground(Color.clear)
@@ -84,7 +76,6 @@ struct ContentListView: View {
                     let allIds = viewModel.contents.map { $0.id }
                     ContentDetailView(contentId: contentId, allContentIds: allIds)
                 }
-                                    // Row tap handled by the invisible NavigationLink above
                 
                 // Floating menu button
                 VStack {
@@ -109,7 +100,6 @@ struct ContentListView: View {
                     selectedContentType: $viewModel.selectedContentType,
                     selectedDate: $viewModel.selectedDate,
                     selectedReadFilter: $viewModel.selectedReadFilter,
-                    isPresented: $showingFilters,
                     contentTypes: viewModel.contentTypes,
                     availableDates: viewModel.availableDates
                 )

@@ -115,3 +115,7 @@ enum ChatModelProvider: String, Codable, CaseIterable {
         allCases.filter { !$0.isDeepResearch }
     }
 }
+
+extension ChatModelProvider: Identifiable {
+    var id: String { rawValue }
+}

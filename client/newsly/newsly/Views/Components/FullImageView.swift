@@ -10,15 +10,9 @@ import SwiftUI
 struct FullImageView: View {
     let imageURL: URL
     let thumbnailURL: URL?
-    @Binding var isPresented: Bool
+    @Environment(\.dismiss) private var dismiss
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
-
-    init(imageURL: URL, thumbnailURL: URL? = nil, isPresented: Binding<Bool>) {
-        self.imageURL = imageURL
-        self.thumbnailURL = thumbnailURL
-        self._isPresented = isPresented
-    }
 
     var body: some View {
         ZStack {
@@ -69,7 +63,7 @@ struct FullImageView: View {
                 HStack {
                     Spacer()
                     Button {
-                        isPresented = false
+                        dismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.title)
@@ -81,7 +75,7 @@ struct FullImageView: View {
             }
         }
         .onTapGesture {
-            isPresented = false
+            dismiss()
         }
     }
 }

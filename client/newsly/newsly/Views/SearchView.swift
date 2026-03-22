@@ -13,6 +13,8 @@ struct SearchView: View {
 
     var body: some View {
         List {
+            searchSection
+
             if !viewModel.hasQuery {
                 introSection
             } else if let error = viewModel.errorMessage,
@@ -38,12 +40,6 @@ struct SearchView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Search")
-        .searchable(text: $viewModel.searchText, prompt: "Search content, feeds, and podcasts")
-        .autocorrectionDisabled()
-        .textInputAutocapitalization(.never)
-        .onSubmit(of: .search) {
-            viewModel.submitSearch()
-        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -57,6 +53,21 @@ struct SearchView: View {
                 }
                 .disabled(!viewModel.hasQuery || viewModel.isLoadingMixed)
             }
+        }
+    }
+
+    private var searchSection: some View {
+        Section {
+            SearchBar(
+                placeholder: "Search content, feeds, and podcasts",
+                text: $viewModel.searchText,
+                isLoading: viewModel.isLoadingLocal || viewModel.isLoadingMixed,
+                onSubmit: {
+                    viewModel.submitSearch()
+                }
+            )
+            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+            .listRowBackground(Color.clear)
         }
     }
 

@@ -19,7 +19,7 @@ struct DebugMenuView: View {
     @State private var alertMessage = ""
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             List {
                 Section(header: Text("Server Configuration")) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -341,7 +341,7 @@ struct TokenInputView: View {
     let onSave: () -> Void
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
                 Section(header: Text("Access Token (Required)")) {
                     TextEditor(text: $accessToken)

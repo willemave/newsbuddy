@@ -76,7 +76,7 @@ struct SubmissionDetailView: View {
 }
 
 #Preview {
-    NavigationView {
+    NavigationStack {
         SubmissionDetailView(
             submission: SubmissionStatusItem(
                 id: 1,
@@ -117,7 +117,7 @@ private struct LinkRow: View {
     }
 }
 #Preview {
-    NavigationView {
+    NavigationStack {
         SubmissionDetailView(
             submission: SubmissionStatusItem(
                 id: 1,

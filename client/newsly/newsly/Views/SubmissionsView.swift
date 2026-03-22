@@ -34,17 +34,12 @@ struct SubmissionsView: View {
     private var listView: some View {
         List {
             ForEach(viewModel.submissions) { submission in
-                ZStack {
-                    NavigationLink {
-                        SubmissionDetailView(submission: submission)
-                    } label: {
-                        SwiftUI.EmptyView()
-                    }
-                    .opacity(0)
-                    .buttonStyle(PlainButtonStyle())
-
+                NavigationLink {
+                    SubmissionDetailView(submission: submission)
+                } label: {
                     SubmissionStatusRow(submission: submission)
                 }
+                .buttonStyle(.plain)
                 .appListRow()
                 .onAppear {
                     if submission.id == viewModel.submissions.last?.id {
@@ -79,7 +74,7 @@ struct SubmissionsView: View {
 }
 
 #Preview {
-    NavigationView {
+    NavigationStack {
         SubmissionsView(viewModel: SubmissionStatusViewModel())
     }
 }

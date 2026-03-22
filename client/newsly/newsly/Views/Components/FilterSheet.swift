@@ -11,13 +11,13 @@ struct FilterSheet: View {
     @Binding var selectedContentType: String
     @Binding var selectedDate: String
     @Binding var selectedReadFilter: String
-    @Binding var isPresented: Bool
+    @Environment(\.dismiss) private var dismiss
     
     let contentTypes: [String]
     let availableDates: [String]
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 0) {
                 Form {
                     // Content Type Section
@@ -70,7 +70,7 @@ struct FilterSheet: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
-                        isPresented = false
+                        dismiss()
                     }
                 }
             }

@@ -12,6 +12,7 @@ struct newslyApp: App {
     @StateObject private var authViewModel = AuthenticationViewModel()
 
     init() {
+        AppChrome.configure()
         if let accessGroup = SharedContainer.keychainAccessGroup {
             KeychainManager.shared.configure(accessGroup: accessGroup)
         }

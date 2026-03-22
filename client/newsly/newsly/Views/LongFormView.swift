@@ -30,19 +30,25 @@ struct LongFormView: View {
                         longFormEmptyState
                     } else {
                         ScrollView {
-                            LazyVStack(spacing: CardMetrics.cardSpacing) {
+                            LazyVStack(spacing: 0) {
                                 // Editorial header
                                 Text("Longread")
                                     .font(.terracottaDisplayLarge)
                                     .foregroundStyle(Color.onSurface)
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, Spacing.screenHorizontal)
+                                    .padding(.top, 16)
+                                    .padding(.bottom, 24)
 
-                                let items = viewModel.currentItems()
-                                let groups = bentoGroups(from: items)
-                                ForEach(groups.indices, id: \.self) { groupIndex in
-                                    let group = groups[groupIndex]
-                                    bentoGroupView(group: group, allItems: items)
+                                VStack(spacing: CardMetrics.cardSpacing) {
+                                    let items = viewModel.currentItems()
+                                    let groups = bentoGroups(from: items)
+                                    ForEach(groups.indices, id: \.self) { groupIndex in
+                                        let group = groups[groupIndex]
+                                        bentoGroupView(group: group, allItems: items)
+                                    }
                                 }
+                                .padding(.horizontal, Spacing.screenHorizontal)
 
                                 if viewModel.state == .loadingMore {
                                     HStack {
@@ -53,8 +59,7 @@ struct LongFormView: View {
                                     }
                                 }
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 20)
+                            .padding(.vertical, 12)
                         }
                         .refreshable {
                             await refreshLongFormSurface(forceReload: true)
