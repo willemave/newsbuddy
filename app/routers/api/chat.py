@@ -895,6 +895,7 @@ async def create_assistant_turn(
             user_id=current_user.id,
             context_snapshot=context_snapshot,
             screen_context=screen_context,
+            initial_message=request.message,
         )
 
     log_event(

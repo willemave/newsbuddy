@@ -21,77 +21,12 @@ struct ContentView: View {
     @State private var longFormPath = NavigationPath()
     @State private var shortFormPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
-    @State private var knowledgePrefersHistory = false
     @State private var isRestoringPath = false
     @Environment(\.scenePhase) private var scenePhase
 
-    init() {
-        // Style the system tab bar with terracotta theme
-        let terracotta = UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.831, green: 0.514, blue: 0.416, alpha: 1.0)
-                : UIColor(red: 0.439, green: 0.169, blue: 0.098, alpha: 1.0)
-        }
-        let unselected = UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.639, green: 0.616, blue: 0.588, alpha: 1.0)
-                : UIColor(red: 0.396, green: 0.365, blue: 0.337, alpha: 1.0)
-        }
-        let surface = UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 1.0)
-                : UIColor(red: 0.992, green: 0.976, blue: 0.957, alpha: 1.0)
-        }
-
-        let itemAppearance = UITabBarItemAppearance()
-        itemAppearance.selected.iconColor = terracotta
-        itemAppearance.selected.titleTextAttributes = [.foregroundColor: terracotta]
-        itemAppearance.normal.iconColor = unselected
-        itemAppearance.normal.titleTextAttributes = [.foregroundColor: unselected]
-
-        let appearance = UITabBarAppearance()
-        appearance.configureWithDefaultBackground()
-        appearance.backgroundColor = surface.withAlphaComponent(0.9)
-        appearance.stackedLayoutAppearance = itemAppearance
-        appearance.inlineLayoutAppearance = itemAppearance
-        appearance.compactInlineLayoutAppearance = itemAppearance
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
-
-        // Style navigation bar with warm tones
-        let navAppearance = UINavigationBarAppearance()
-        navAppearance.configureWithDefaultBackground()
-        navAppearance.backgroundColor = surface.withAlphaComponent(0.9)
-        UINavigationBar.appearance().standardAppearance = navAppearance
-        UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
-        UINavigationBar.appearance().tintColor = terracotta
-
-        let contentRepository = ContentRepository()
-        let readRepository = ReadStatusRepository()
-        let unreadService = UnreadCountService.shared
-
-        let shortNewsVM = ShortNewsListViewModel(
-            repository: contentRepository,
-            readRepository: readRepository,
-            unreadCountService: unreadService
-        )
-        let dailyDigestVM = DailyDigestListViewModel(
-            repository: DailyNewsDigestRepository(),
-            unreadCountService: unreadService
-        )
-        let longContentVM = LongContentListViewModel(
-            repository: contentRepository,
-            readRepository: readRepository,
-            unreadCountService: unreadService
-        )
-
-        _tabCoordinator = StateObject(
-            wrappedValue: TabCoordinatorViewModel(
-                shortNewsVM: shortNewsVM,
-                dailyDigestVM: dailyDigestVM,
-                longContentVM: longContentVM
-            )
-        )
+    @MainActor
+    init(tabCoordinator: TabCoordinatorViewModel? = nil) {
+        _tabCoordinator = StateObject(wrappedValue: tabCoordinator ?? RootDependencyFactory.makeTabCoordinator())
     }
 
     private var contentTextSize: DynamicTypeSize {
@@ -180,20 +115,16 @@ struct ContentView: View {
 
             NavigationStack(path: $knowledgePath) {
                 KnowledgeView(
-                    prefersHistoryView: $knowledgePrefersHistory,
                     onSelectSession: { route in
                         knowledgePath.append(route)
                     },
-                    onSelectContent: { route in
-                        knowledgePath.append(route)
+                    onShowSessionHistory: {
+                        knowledgePath.append(SessionHistoryRoute())
                     }
                 )
                 .withContentRoutes(
                     tab: .knowledge,
                     path: $knowledgePath,
-                    onShowKnowledgeHistory: {
-                        knowledgePrefersHistory = true
-                    },
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize
                 )
@@ -221,9 +152,6 @@ struct ContentView: View {
         }
         .onChange(of: tabCoordinator.selectedTab) { _, newValue in
             logger.info("[TabChange] selectedTab=\(String(describing: newValue), privacy: .public)")
-            if newValue == .knowledge {
-                knowledgePrefersHistory = false
-            }
             tabCoordinator.handleTabChange(to: newValue)
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -313,7 +241,6 @@ struct ContentView: View {
 
     private func openChatSession(sessionId: Int) {
         tabCoordinator.selectedTab = .knowledge
-        knowledgePrefersHistory = false
         knowledgePath = NavigationPath()
         knowledgePath.append(ChatSessionRoute(sessionId: sessionId))
     }
@@ -325,7 +252,6 @@ private extension View {
     func withContentRoutes(
         tab: RootTab,
         path: Binding<NavigationPath>,
-        onShowKnowledgeHistory: (() -> Void)? = nil,
         readingStateStore: ReadingStateStore,
         contentTextSize: DynamicTypeSize
     ) -> some View {
@@ -343,11 +269,17 @@ private extension View {
                     sessionId: route.sessionId,
                     onShowHistory: tab == .knowledge
                         ? {
-                            onShowKnowledgeHistory?()
+                            // Pop back to hub root, then push history
                             path.wrappedValue = NavigationPath()
+                            path.wrappedValue.append(SessionHistoryRoute())
                         }
                         : nil
                 )
+            }
+            .navigationDestination(for: SessionHistoryRoute.self) { _ in
+                ChatSessionHistoryView(onSelectSession: { route in
+                    path.wrappedValue.append(route)
+                })
             }
     }
 }

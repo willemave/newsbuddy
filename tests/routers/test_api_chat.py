@@ -522,6 +522,68 @@ def test_create_assistant_turn_creates_session_with_screen_context(
     )
 
 
+def test_create_assistant_turn_titles_new_ad_hoc_session_from_message(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Ad-hoc assistant turns should use the first message as the session title."""
+    captured: list[tuple[int, int, str, str]] = []
+
+    async def _fake_process_assistant_turn_async(
+        session_id: int,
+        message_id: int,
+        prompt: str,
+        *,
+        screen_context,
+        source: str = "assistant",
+    ) -> None:
+        del source
+        captured.append((session_id, message_id, prompt, screen_context.screen_type))
+
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+    monkeypatch.setattr("app.routers.api.chat.log_event", lambda *args, **kwargs: 0)
+
+    message = "Recommend a few feeds and newsletters I should add based on what I've read lately."
+    response = client.post(
+        "/api/content/chat/assistant/turns",
+        json={
+            "message": message,
+            "screen_context": {
+                "screen_type": "knowledge_hub",
+                "screen_title": "Knowledge",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "processing"
+    assert payload["session"]["content_id"] is None
+    assert payload["session"]["title"] == message[:80]
+    assert payload["user_message"]["content"] == message
+    assert captured == [
+        (
+            payload["session"]["id"],
+            payload["message_id"],
+            message,
+            "knowledge_hub",
+        )
+    ]
+
+    session = (
+        db_session.query(ChatSession).filter(ChatSession.id == payload["session"]["id"]).first()
+    )
+    assert session is not None
+    assert session.title == message[:80]
+    assert session.context_snapshot is not None
+    assert "Screen Type: knowledge_hub" in session.context_snapshot
+
+
 def test_create_assistant_turn_truncates_visible_content_ids(
     client: TestClient,
     db_session: Session,

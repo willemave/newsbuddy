@@ -841,6 +841,7 @@ def create_assistant_session(
     user_id: int,
     context_snapshot: str,
     screen_context: AssistantScreenContext,
+    initial_message: str | None = None,
 ) -> ChatSession:
     """Create a new assistant session."""
     title = screen_context.screen_title or "Knowledge Chat"
@@ -848,6 +849,10 @@ def create_assistant_session(
         content = db.query(Content).filter(Content.id == screen_context.content_id).first()
         if content and content.title:
             title = content.title
+    elif initial_message and initial_message.strip():
+        title = initial_message.strip()[:80]
+    elif screen_context.selected_topic:
+        title = screen_context.selected_topic
 
     session = ChatSession(
         user_id=user_id,
