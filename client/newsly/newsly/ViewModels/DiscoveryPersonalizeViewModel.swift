@@ -257,7 +257,8 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
                 selectedSubreddits: selectedSubreddits,
                 profileSummary: topicSummary,
                 inferredTopics: inferredTopics.isEmpty ? nil : inferredTopics,
-                twitterUsername: nil
+                twitterUsername: nil,
+                xDigestFilterPrompt: nil
             )
             _ = try await service.complete(request: request)
             onboardingStateStore.clearDiscoveryRun(userId: userId)

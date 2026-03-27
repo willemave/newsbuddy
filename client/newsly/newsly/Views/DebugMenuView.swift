@@ -309,6 +309,7 @@ struct DebugMenuView: View {
             email: user.email,
             fullName: user.fullName,
             twitterUsername: user.twitterUsername,
+            xDigestFilterPrompt: user.xDigestFilterPrompt,
             newsDigestTimezone: user.newsDigestTimezone,
             newsDigestIntervalHours: user.newsDigestIntervalHours,
             hasXBookmarkSync: user.hasXBookmarkSync,

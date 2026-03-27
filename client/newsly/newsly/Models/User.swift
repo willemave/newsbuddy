@@ -14,6 +14,7 @@ struct User: Codable, Identifiable, Equatable {
     let email: String
     let fullName: String?
     let twitterUsername: String?
+    let xDigestFilterPrompt: String
     let newsDigestTimezone: String
     let newsDigestIntervalHours: Int
     let hasXBookmarkSync: Bool
@@ -31,6 +32,7 @@ struct User: Codable, Identifiable, Equatable {
         case email
         case fullName = "full_name"
         case twitterUsername = "twitter_username"
+        case xDigestFilterPrompt = "x_digest_filter_prompt"
         case newsDigestTimezone = "news_digest_timezone"
         case newsDigestIntervalHours = "news_digest_interval_hours"
         case hasXBookmarkSync = "has_x_bookmark_sync"
@@ -49,6 +51,7 @@ struct User: Codable, Identifiable, Equatable {
         email: String,
         fullName: String?,
         twitterUsername: String?,
+        xDigestFilterPrompt: String,
         newsDigestTimezone: String,
         newsDigestIntervalHours: Int = 6,
         hasXBookmarkSync: Bool,
@@ -65,6 +68,7 @@ struct User: Codable, Identifiable, Equatable {
         self.email = email
         self.fullName = fullName
         self.twitterUsername = twitterUsername
+        self.xDigestFilterPrompt = xDigestFilterPrompt
         self.newsDigestTimezone = newsDigestTimezone
         self.newsDigestIntervalHours = newsDigestIntervalHours
         self.hasXBookmarkSync = hasXBookmarkSync
@@ -84,6 +88,7 @@ struct User: Codable, Identifiable, Equatable {
         email = try container.decode(String.self, forKey: .email)
         fullName = try container.decodeIfPresent(String.self, forKey: .fullName)
         twitterUsername = try container.decodeIfPresent(String.self, forKey: .twitterUsername)
+        xDigestFilterPrompt = try container.decodeIfPresent(String.self, forKey: .xDigestFilterPrompt) ?? ""
         newsDigestTimezone = try container.decodeIfPresent(String.self, forKey: .newsDigestTimezone) ?? "UTC"
         newsDigestIntervalHours = try container.decodeIfPresent(Int.self, forKey: .newsDigestIntervalHours) ?? 6
         hasXBookmarkSync = try container.decodeIfPresent(Bool.self, forKey: .hasXBookmarkSync) ?? false
@@ -147,12 +152,14 @@ struct AccessTokenResponse: Codable {
 struct UpdateUserProfileRequest: Codable {
     let fullName: String?
     let twitterUsername: String?
+    let xDigestFilterPrompt: String?
     let newsDigestTimezone: String?
     let newsDigestIntervalHours: Int?
 
     enum CodingKeys: String, CodingKey {
         case fullName = "full_name"
         case twitterUsername = "twitter_username"
+        case xDigestFilterPrompt = "x_digest_filter_prompt"
         case newsDigestTimezone = "news_digest_timezone"
         case newsDigestIntervalHours = "news_digest_interval_hours"
     }

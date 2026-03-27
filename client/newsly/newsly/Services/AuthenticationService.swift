@@ -106,6 +106,7 @@ final class AuthenticationService: NSObject {
     func updateCurrentUserProfile(
         fullName: String? = nil,
         twitterUsername: String? = nil,
+        xDigestFilterPrompt: String? = nil,
         newsDigestTimezone: String? = nil,
         newsDigestIntervalHours: Int? = nil
     ) async throws -> User {
@@ -122,6 +123,7 @@ final class AuthenticationService: NSObject {
         let body = UpdateUserProfileRequest(
             fullName: fullName,
             twitterUsername: twitterUsername,
+            xDigestFilterPrompt: xDigestFilterPrompt,
             newsDigestTimezone: newsDigestTimezone,
             newsDigestIntervalHours: newsDigestIntervalHours
         )

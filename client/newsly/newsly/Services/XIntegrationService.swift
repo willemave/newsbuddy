@@ -7,6 +7,13 @@ import AuthenticationServices
 import Foundation
 import UIKit
 
+protocol XIntegrationAPIClientProtocol {
+    func fetchConnection() async throws -> XConnectionResponse
+    func startOAuth(twitterUsername: String?) async throws -> XOAuthStartResponse
+    func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse
+    func disconnect() async throws
+}
+
 struct XOAuthStartRequest: Codable {
     let twitterUsername: String?
 
@@ -58,7 +65,7 @@ struct XConnectionResponse: Codable {
     }
 }
 
-private enum XIntegrationError: LocalizedError {
+enum XIntegrationError: LocalizedError {
     case invalidAuthorizeURL
     case missingCallbackCode
     case missingCallbackState
@@ -90,39 +97,38 @@ private enum XIntegrationError: LocalizedError {
 final class XIntegrationService {
     static let shared = XIntegrationService()
 
-    private let client = APIClient.shared
+    typealias OAuthSessionHandler = @MainActor (URL) async throws -> URL
+
+    private let client: XIntegrationAPIClientProtocol
     private let callbackScheme = "newsly"
     private let presentationContextProvider = OAuthPresentationContextProvider()
+    private let oauthSessionHandler: OAuthSessionHandler?
     private var authSession: ASWebAuthenticationSession?
 
-    private init() {}
+    init(
+        client: XIntegrationAPIClientProtocol = LiveXIntegrationAPIClient(),
+        oauthSessionHandler: OAuthSessionHandler? = nil
+    ) {
+        self.client = client
+        self.oauthSessionHandler = oauthSessionHandler
+    }
 
     func fetchConnection() async throws -> XConnectionResponse {
-        try await client.request(APIEndpoints.xIntegrationConnection)
+        try await client.fetchConnection()
     }
 
     func startOAuth(twitterUsername: String?) async throws -> XOAuthStartResponse {
-        let body = try JSONEncoder().encode(
-            XOAuthStartRequest(twitterUsername: normalizedUsername(twitterUsername))
-        )
-        return try await client.request(
-            APIEndpoints.xIntegrationOAuthStart,
-            method: "POST",
-            body: body
+        try await client.startOAuth(
+            twitterUsername: normalizedUsername(twitterUsername)
         )
     }
 
     func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse {
-        let body = try JSONEncoder().encode(XOAuthExchangeRequest(code: code, state: state))
-        return try await client.request(
-            APIEndpoints.xIntegrationOAuthExchange,
-            method: "POST",
-            body: body
-        )
+        try await client.exchangeOAuth(code: code, state: state)
     }
 
     func disconnect() async throws {
-        try await client.requestVoid(APIEndpoints.xIntegrationConnection, method: "DELETE")
+        try await client.disconnect()
     }
 
     @MainActor
@@ -132,7 +138,12 @@ final class XIntegrationService {
             throw XIntegrationError.invalidAuthorizeURL
         }
 
-        let callbackURL = try await runOAuthSession(authorizeURL: authorizeURL)
+        let callbackURL: URL
+        if let oauthSessionHandler {
+            callbackURL = try await oauthSessionHandler(authorizeURL)
+        } else {
+            callbackURL = try await runOAuthSession(authorizeURL: authorizeURL)
+        }
         guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
               let queryItems = components.queryItems else {
             throw XIntegrationError.callbackParsingFailed
@@ -195,6 +206,42 @@ final class XIntegrationService {
         let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
+    }
+}
+
+private struct LiveXIntegrationAPIClient: XIntegrationAPIClientProtocol {
+    private let client: APIClient
+
+    init(client: APIClient = .shared) {
+        self.client = client
+    }
+
+    func fetchConnection() async throws -> XConnectionResponse {
+        try await client.request(APIEndpoints.xIntegrationConnection)
+    }
+
+    func startOAuth(twitterUsername: String?) async throws -> XOAuthStartResponse {
+        let body = try JSONEncoder().encode(
+            XOAuthStartRequest(twitterUsername: twitterUsername)
+        )
+        return try await client.request(
+            APIEndpoints.xIntegrationOAuthStart,
+            method: "POST",
+            body: body
+        )
+    }
+
+    func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse {
+        let body = try JSONEncoder().encode(XOAuthExchangeRequest(code: code, state: state))
+        return try await client.request(
+            APIEndpoints.xIntegrationOAuthExchange,
+            method: "POST",
+            body: body
+        )
+    }
+
+    func disconnect() async throws {
+        try await client.requestVoid(APIEndpoints.xIntegrationConnection, method: "DELETE")
     }
 }
 
