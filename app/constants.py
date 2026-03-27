@@ -27,6 +27,11 @@ DEFAULT_POLLING_INTERVAL_SECONDS = 10
 # Source label applied to user-submitted items
 SELF_SUBMISSION_SOURCE = "self submission"
 
+# Per-user content visibility/status values
+CONTENT_STATUS_INBOX = "inbox"
+CONTENT_STATUS_DIGEST_SOURCE = "digest_source"
+CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY = "digest_only"
+
 # Worker concurrency limits
 DEFAULT_DOWNLOADER_CONCURRENCY = 5
 DEFAULT_TRANSCRIBER_CONCURRENCY = 2

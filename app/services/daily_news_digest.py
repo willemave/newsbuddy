@@ -7,18 +7,27 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session, aliased
 
 from app.constants import (
     ALLOWED_NEWS_DIGEST_INTERVAL_HOURS,
+    CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
+    CONTENT_STATUS_DIGEST_SOURCE,
     DAILY_NEWS_DIGEST_MODEL,
     DEFAULT_DAILY_DIGEST_SCHEDULER_LOOKBACK_HOURS,
     DEFAULT_NEWS_DIGEST_INTERVAL_HOURS,
 )
 from app.core.logging import get_logger
+from app.models.metadata import ContentStatus as ContentLifecycleStatus
 from app.models.metadata import DailyNewsRollupSummary
-from app.models.schema import Content, ContentDiscussion, DailyNewsDigest, ProcessingTask
-from app.repositories.content_feed_query import build_user_feed_query
+from app.models.schema import (
+    Content,
+    ContentDiscussion,
+    ContentStatusEntry,
+    DailyNewsDigest,
+    ProcessingTask,
+)
 from app.services.llm_models import resolve_model
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.queue import TaskStatus, TaskType, get_queue_service
@@ -362,18 +371,36 @@ def collect_daily_news_sources(
         timezone_name,
         coverage_end_at=coverage_end_at,
     )
-
+    digest_status = aliased(ContentStatusEntry)
+    digest_visibility = Content.content_metadata["digest_visibility"].as_string()
     query = (
-        build_user_feed_query(db, user_id, mode="inbox")
+        db.query(Content)
+        .outerjoin(
+            digest_status,
+            and_(
+                digest_status.content_id == Content.id,
+                digest_status.user_id == user_id,
+                digest_status.status == CONTENT_STATUS_DIGEST_SOURCE,
+            ),
+        )
         .filter(Content.content_type == "news")
+        .filter(Content.status == ContentLifecycleStatus.COMPLETED.value)
+        .filter((Content.classification != "skip") | (Content.classification.is_(None)))
         .filter(Content.created_at >= start_utc, Content.created_at < end_utc)
+        .filter(
+            or_(
+                digest_visibility.is_(None),
+                digest_visibility != CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
+                digest_status.id.is_not(None),
+            )
+        )
         .order_by(Content.created_at.desc(), Content.id.desc())
     )
     if max_items is not None:
         query = query.limit(max_items)
 
     rows = query.all()
-    content_ids = [row[0].id for row in rows if getattr(row[0], "id", None) is not None]
+    content_ids = [row.id for row in rows if getattr(row, "id", None) is not None]
     discussions_by_content_id: dict[int, ContentDiscussion] = {}
     if content_ids:
         discussion_rows = (
@@ -386,8 +413,7 @@ def collect_daily_news_sources(
         }
 
     sources: list[DailyDigestSourceItem] = []
-    for row in rows:
-        content = row[0]
+    for content in rows:
         metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
         title = _extract_source_title(content, metadata)
         points = _extract_summary_points(metadata)

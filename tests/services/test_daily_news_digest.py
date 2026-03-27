@@ -5,8 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import Mock
 
+from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY, CONTENT_STATUS_DIGEST_SOURCE
 from app.models.metadata import DailyNewsRollupSummary
-from app.models.schema import Content, ContentDiscussion, DailyNewsDigest, ProcessingTask
+from app.models.schema import (
+    Content,
+    ContentDiscussion,
+    ContentStatusEntry,
+    DailyNewsDigest,
+    ProcessingTask,
+)
 from app.services.daily_news_digest import (
     MAX_DAILY_DIGEST_BULLETS,
     DailyDigestSourceItem,
@@ -169,6 +176,67 @@ def test_upsert_daily_news_digest_for_user_day_builds_row(db_session, test_user)
     assert isinstance(digest.key_points, list)
     assert len(digest.source_content_ids) == 2
     assert digest.llm_model == "google:gemini-3.1-flash-lite-preview"
+
+
+def test_collect_daily_news_sources_includes_user_digest_only_x_items(
+    db_session,
+    test_user,
+) -> None:
+    """Digest collection should include digest-only X items linked to the current user."""
+    public_news = _build_news_content(
+        url="https://example.com/public-news",
+        title="Public News",
+        created_at=datetime(2026, 2, 28, 9, 0, 0),
+        key_points=["Public point"],
+    )
+    digest_only_x = _build_news_content(
+        url="https://x.com/willem/status/1#newsly-digest-user-1",
+        title="Digest X",
+        created_at=datetime(2026, 2, 28, 11, 0, 0),
+        key_points=["Digest-only X point"],
+    )
+    digest_only_x.content_metadata["digest_visibility"] = CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
+    hidden_other_user_x = _build_news_content(
+        url="https://x.com/other/status/2#newsly-digest-user-999",
+        title="Other User X",
+        created_at=datetime(2026, 2, 28, 12, 0, 0),
+        key_points=["Should stay hidden"],
+    )
+    hidden_other_user_x.content_metadata["digest_visibility"] = (
+        CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
+    )
+
+    db_session.add_all([public_news, digest_only_x, hidden_other_user_x])
+    db_session.commit()
+    db_session.refresh(digest_only_x)
+    db_session.refresh(hidden_other_user_x)
+    db_session.add_all(
+        [
+            ContentStatusEntry(
+                user_id=test_user.id,
+                content_id=digest_only_x.id,
+                status=CONTENT_STATUS_DIGEST_SOURCE,
+            ),
+            ContentStatusEntry(
+                user_id=999,
+                content_id=hidden_other_user_x.id,
+                status=CONTENT_STATUS_DIGEST_SOURCE,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    sources = collect_daily_news_sources(
+        db_session,
+        user_id=test_user.id,
+        local_date=datetime(2026, 2, 28).date(),
+        timezone_name="UTC",
+    )
+
+    titles = {source.title for source in sources}
+    assert "Public News" in titles
+    assert "Digest X" in titles
+    assert "Other User X" not in titles
 
 
 def test_upsert_daily_news_digest_for_user_day_retries_sparse_rollup(

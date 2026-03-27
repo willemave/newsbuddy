@@ -53,6 +53,7 @@ from app.services.llm_agents import get_basic_agent
 from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
 from app.services.queue import TaskType
 from app.services.scraper_configs import CreateUserScraperConfig, create_user_scraper_config
+from app.services.x_digest_filter import normalize_x_digest_filter_prompt
 from app.services.x_integration import normalize_twitter_username
 from app.utils.paths import resolve_config_path
 
@@ -516,9 +517,15 @@ def complete_onboarding(
         OnboardingCompleteResponse with status and inbox count.
     """
     normalized_username: str | None = None
+    normalized_x_digest_filter_prompt: str | None = None
     should_update_twitter_username = request.twitter_username is not None
     if should_update_twitter_username:
         normalized_username = normalize_twitter_username(request.twitter_username)
+    should_update_x_digest_filter_prompt = request.x_digest_filter_prompt is not None
+    if should_update_x_digest_filter_prompt:
+        normalized_x_digest_filter_prompt = normalize_x_digest_filter_prompt(
+            request.x_digest_filter_prompt
+        )
 
     created_types: set[str] = set()
     selections = request.selected_sources
@@ -622,6 +629,8 @@ def complete_onboarding(
     if user:
         if should_update_twitter_username and user.twitter_username != normalized_username:
             user.twitter_username = normalized_username
+        if should_update_x_digest_filter_prompt:
+            user.x_digest_filter_prompt = normalized_x_digest_filter_prompt
         user.has_completed_onboarding = True
         db.commit()
 

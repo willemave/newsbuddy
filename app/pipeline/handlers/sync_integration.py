@@ -8,13 +8,13 @@ from app.core.settings import get_settings
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.queue import TaskType
-from app.services.x_integration import sync_x_bookmarks_for_user
+from app.services.x_integration import sync_x_sources_for_user
 
 logger = get_logger(__name__)
 
 
 class SyncIntegrationHandler:
-    """Run bookmark sync tasks for connected integrations."""
+    """Run X integration sync tasks for connected integrations."""
 
     task_type = TaskType.SYNC_INTEGRATION
 
@@ -33,10 +33,10 @@ class SyncIntegrationHandler:
             )
         if not get_settings().x_bookmark_sync_enabled:
             logger.info(
-                "Integration sync skipped because X bookmark sync is disabled",
+                "Integration sync skipped because X sync is disabled",
                 extra={
                     "component": "sync_integration",
-                    "operation": "sync_x_bookmarks",
+                    "operation": "sync_x_sources",
                     "item_id": str(user_id),
                     "context_data": {"provider": provider},
                 },
@@ -45,19 +45,33 @@ class SyncIntegrationHandler:
 
         try:
             with get_db() as db:
-                summary = sync_x_bookmarks_for_user(db, user_id=user_id)
+                summary = sync_x_sources_for_user(db, user_id=user_id)
             logger.info(
                 "Integration sync completed",
                 extra={
                     "component": "sync_integration",
-                    "operation": "sync_x_bookmarks",
+                    "operation": "sync_x_sources",
                     "item_id": str(user_id),
                     "context_data": {
                         "status": summary.status,
                         "fetched": summary.fetched,
+                        "accepted": summary.accepted,
+                        "filtered_out": summary.filtered_out,
+                        "errored": summary.errored,
                         "created": summary.created,
                         "reused": summary.reused,
-                        "newest_bookmark_id": summary.newest_bookmark_id,
+                        "channels": {
+                            name: {
+                                "status": channel.status,
+                                "fetched": channel.fetched,
+                                "accepted": channel.accepted,
+                                "filtered_out": channel.filtered_out,
+                                "errored": channel.errored,
+                                "created": channel.created,
+                                "reused": channel.reused,
+                            }
+                            for name, channel in summary.channels.items()
+                        },
                     },
                 },
             )
@@ -67,7 +81,7 @@ class SyncIntegrationHandler:
                 "Integration sync rejected",
                 extra={
                     "component": "sync_integration",
-                    "operation": "sync_x_bookmarks",
+                    "operation": "sync_x_sources",
                     "item_id": str(user_id),
                     "context_data": {"error": str(exc)},
                 },
@@ -78,7 +92,7 @@ class SyncIntegrationHandler:
                 "Integration sync failed",
                 extra={
                     "component": "sync_integration",
-                    "operation": "sync_x_bookmarks",
+                    "operation": "sync_x_sources",
                     "item_id": str(user_id),
                     "context_data": {"error": str(exc)},
                 },

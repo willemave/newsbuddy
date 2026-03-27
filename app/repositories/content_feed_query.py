@@ -9,6 +9,7 @@ from typing import Literal
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
+from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
 from app.models.contracts import ContentStatus, ContentType
 from app.models.schema import Content, ContentFavorites, ContentReadStatus, ContentStatusEntry
 
@@ -72,6 +73,13 @@ def build_user_feed_query(
         )
         .filter(Content.status == ContentStatus.COMPLETED.value)
         .filter((Content.classification != "skip") | (Content.classification.is_(None)))
+    )
+    digest_visibility = Content.content_metadata["digest_visibility"].as_string()
+    query = query.filter(
+        or_(
+            digest_visibility.is_(None),
+            digest_visibility != CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
+        )
     )
 
     if mode == "inbox":

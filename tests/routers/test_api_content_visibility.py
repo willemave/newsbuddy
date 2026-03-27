@@ -1,6 +1,7 @@
 """Tests for API content visibility rules."""
 from sqlalchemy.orm import Session
 
+from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content, ContentStatusEntry
 
@@ -165,3 +166,29 @@ def test_api_excludes_inbox_content_not_completed(client, db_session: Session, t
 
     assert completed_article.id in ids
     assert processing_article.id not in ids
+
+
+def test_api_excludes_digest_only_news(client, db_session: Session, test_user):
+    """Digest-only X news should stay out of normal API feeds."""
+    hidden_digest_item = Content(
+        content_type="news",
+        url="https://x.com/test/status/1#newsly-digest-user-1",
+        source_url="https://x.com/test/status/1",
+        title="Hidden X item",
+        status="completed",
+        content_metadata={
+            "digest_visibility": CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
+            "summary": _news_summary_payload("Hidden X item"),
+            "summary_kind": "short_news_digest",
+            "summary_version": 1,
+        },
+    )
+
+    db_session.add(hidden_digest_item)
+    db_session.commit()
+
+    response = client.get("/api/content/", params={"content_type": "news"})
+    assert response.status_code == 200
+    ids = {item["id"] for item in response.json()["contents"]}
+
+    assert hidden_digest_item.id not in ids

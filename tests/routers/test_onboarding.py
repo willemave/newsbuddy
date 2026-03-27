@@ -48,6 +48,9 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
             "profile_summary": "AI researcher and writer",
             "inferred_topics": ["AI", "ML"],
             "twitter_username": "@willem_aw",
+            "x_digest_filter_prompt": (
+                "Prefer semiconductors, AI infrastructure, and product launches."
+            ),
         },
     )
 
@@ -69,6 +72,7 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     assert any(call[0] == TaskType.ONBOARDING_DISCOVER.value for call in calls)
     db_session.refresh(test_user)
     assert test_user.twitter_username == "willem_aw"
+    assert test_user.x_digest_filter_prompt.startswith("Prefer semiconductors")
     assert test_user.has_completed_onboarding is True
 
 
@@ -79,6 +83,21 @@ def test_onboarding_complete_rejects_invalid_twitter_username(client):
     )
     assert response.status_code == 400
     assert "Twitter username" in response.json()["detail"]
+
+
+def test_onboarding_complete_blank_prompt_resets_to_default(client, db_session, test_user):
+    test_user.x_digest_filter_prompt = "Only include chip foundry updates."
+    db_session.commit()
+
+    response = client.post(
+        "/api/onboarding/complete",
+        json={"x_digest_filter_prompt": "   "},
+    )
+
+    assert response.status_code == 200
+
+    db_session.refresh(test_user)
+    assert test_user.x_digest_filter_prompt is None
 
 
 def test_onboarding_tutorial_complete(client, db_session, test_user):

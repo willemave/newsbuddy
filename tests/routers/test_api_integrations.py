@@ -26,7 +26,7 @@ def test_start_x_oauth_returns_authorize_url(client, monkeypatch):
         lambda db, user, twitter_username=None: (
             "https://x.com/i/oauth2/authorize?state=test-state",
             "test-state",
-            ["tweet.read", "users.read", "bookmark.read"],
+            ["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],
         ),
     )
 
@@ -39,6 +39,20 @@ def test_start_x_oauth_returns_authorize_url(client, monkeypatch):
     assert data["state"] == "test-state"
     assert data["authorize_url"].startswith("https://x.com/i/oauth2/authorize")
     assert "bookmark.read" in data["scopes"]
+    assert "follows.read" in data["scopes"]
+    assert "list.read" in data["scopes"]
+
+
+def test_start_x_oauth_returns_400_for_validation_error(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.api.integrations.start_x_oauth",
+        lambda db, user, twitter_username=None: (_ for _ in ()).throw(ValueError("bad request")),
+    )
+
+    response = client.post("/api/integrations/x/oauth/start", json={})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "bad request"
 
 
 def test_exchange_x_oauth_returns_connection(client, monkeypatch):
@@ -67,6 +81,21 @@ def test_exchange_x_oauth_returns_connection(client, monkeypatch):
     assert data["connected"] is True
     assert data["provider_username"] == "willemaw"
     assert data["twitter_username"] == "willemaw"
+
+
+def test_exchange_x_oauth_returns_502_for_provider_runtime_error(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.routers.api.integrations.exchange_x_oauth",
+        lambda db, user, code, state: (_ for _ in ()).throw(RuntimeError("provider failed")),
+    )
+
+    response = client.post(
+        "/api/integrations/x/oauth/exchange",
+        json={"code": "oauth-code", "state": "oauth-state"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "provider failed"
 
 
 def test_disconnect_x_connection_clears_tokens(client, db_session, test_user):

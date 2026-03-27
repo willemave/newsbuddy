@@ -1,4 +1,4 @@
-"""Enqueue scheduled X bookmark sync tasks for connected users.
+"""Enqueue scheduled X integration sync tasks for connected users.
 
 Suggested cron:
 0 * * * * cd /opt/news_app && /opt/news_app/.venv/bin/python \
@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Enqueue X bookmark sync tasks")
+    parser = argparse.ArgumentParser(description="Enqueue X integration sync tasks")
     parser.add_argument("--user-id", type=int, default=None, help="Sync one user only")
     return parser.parse_args()
 
@@ -38,7 +38,7 @@ def main() -> None:
     settings = get_settings()
     if not settings.x_bookmark_sync_enabled:
         logger.info(
-            "X bookmark sync is disabled (X_BOOKMARK_SYNC_ENABLED=false); skipping enqueue."
+            "X integration sync is disabled (X_BOOKMARK_SYNC_ENABLED=false); skipping enqueue."
         )
         return
 

@@ -10,7 +10,7 @@ from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import DEFAULT_NEW_FEED_LIMIT
+from app.constants import CONTENT_STATUS_DIGEST_SOURCE, CONTENT_STATUS_INBOX, DEFAULT_NEW_FEED_LIMIT
 from app.core.logging import get_logger
 from app.models.schema import ContentStatusEntry, UserScraperConfig
 from app.models.user import User
@@ -312,13 +312,16 @@ def ensure_inbox_status(
         .first()
     )
     if existing:
+        if existing.status == CONTENT_STATUS_DIGEST_SOURCE:
+            existing.status = CONTENT_STATUS_INBOX
+            return True
         return False
 
     db.add(
         ContentStatusEntry(
             user_id=user_id,
             content_id=content_id,
-            status="inbox",
+            status=CONTENT_STATUS_INBOX,
         )
     )
     return True

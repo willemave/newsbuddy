@@ -1,4 +1,4 @@
-"""Official X API v2 helpers for OAuth, tweets, and bookmarks."""
+"""Official X API v2 helpers for OAuth, tweets, bookmarks, timelines, and lists."""
 
 from __future__ import annotations
 
@@ -15,8 +15,18 @@ from app.services.twitter_share import extract_tweet_id
 logger = get_logger(__name__)
 
 X_API_BASE = "https://api.x.com/2"
-X_DEFAULT_SCOPES = ["tweet.read", "users.read", "bookmark.read", "offline.access"]
-X_TWEET_FIELDS = "created_at,author_id,public_metrics,entities,conversation_id"
+X_DEFAULT_SCOPES = [
+    "tweet.read",
+    "users.read",
+    "bookmark.read",
+    "follows.read",
+    "list.read",
+    "offline.access",
+]
+X_TWEET_FIELDS = (
+    "created_at,author_id,public_metrics,entities,conversation_id,"
+    "in_reply_to_user_id,referenced_tweets"
+)
 X_USER_FIELDS = "name,username"
 
 
@@ -41,6 +51,9 @@ class XTweet:
     like_count: int | None = None
     retweet_count: int | None = None
     reply_count: int | None = None
+    conversation_id: str | None = None
+    in_reply_to_user_id: str | None = None
+    referenced_tweet_types: list[str] = field(default_factory=list)
     external_urls: list[str] = field(default_factory=list)
 
 
@@ -64,10 +77,26 @@ class XTweetFetchResult:
 
 
 @dataclass(frozen=True)
-class XBookmarksPage:
-    """Bookmark page from X API."""
+class XTweetsPage:
+    """Page of tweets returned from an X API collection endpoint."""
 
     tweets: list[XTweet]
+    next_token: str | None = None
+
+
+@dataclass(frozen=True)
+class XList:
+    """Minimal X list payload used for sync."""
+
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class XListsPage:
+    """Page of X lists returned from the API."""
+
+    lists: list[XList]
     next_token: str | None = None
 
 
@@ -220,7 +249,7 @@ def fetch_bookmarks(
     user_id: str,
     pagination_token: str | None = None,
     max_results: int = 100,
-) -> XBookmarksPage:
+) -> XTweetsPage:
     """Fetch one page of bookmarks for a user."""
     if not user_id.strip():
         raise ValueError("X user id is required for bookmark sync")
@@ -234,10 +263,119 @@ def fetch_bookmarks(
     if pagination_token:
         params["pagination_token"] = pagination_token
 
+    return _fetch_tweets_page(
+        url=f"{X_API_BASE}/users/{user_id}/bookmarks",
+        access_token=access_token,
+        params=params,
+    )
+
+
+def fetch_reverse_chronological_timeline(
+    *,
+    access_token: str,
+    user_id: str,
+    pagination_token: str | None = None,
+    since_id: str | None = None,
+    max_results: int = 100,
+    exclude: list[str] | None = None,
+) -> XTweetsPage:
+    """Fetch one page of the authenticated user's home timeline."""
+    if not user_id.strip():
+        raise ValueError("X user id is required for timeline sync")
+    clamped = max(5, min(max_results, 100))
+    params: dict[str, Any] = {
+        "max_results": clamped,
+        "expansions": "author_id",
+        "tweet.fields": X_TWEET_FIELDS,
+        "user.fields": X_USER_FIELDS,
+    }
+    if pagination_token:
+        params["pagination_token"] = pagination_token
+    if since_id:
+        params["since_id"] = since_id
+    if exclude:
+        params["exclude"] = ",".join(value for value in exclude if value)
+
+    return _fetch_tweets_page(
+        url=f"{X_API_BASE}/users/{user_id}/timelines/reverse_chronological",
+        access_token=access_token,
+        params=params,
+    )
+
+
+def fetch_list_tweets(
+    *,
+    list_id: str,
+    access_token: str | None = None,
+    pagination_token: str | None = None,
+    max_results: int = 100,
+) -> XTweetsPage:
+    """Fetch one page of tweets for a list."""
+    cleaned = list_id.strip()
+    if not cleaned:
+        raise ValueError("List id is required")
+    clamped = max(5, min(max_results, 100))
+    params: dict[str, Any] = {
+        "max_results": clamped,
+        "expansions": "author_id",
+        "tweet.fields": X_TWEET_FIELDS,
+        "user.fields": X_USER_FIELDS,
+    }
+    if pagination_token:
+        params["pagination_token"] = pagination_token
+
+    return _fetch_tweets_page(
+        url=f"{X_API_BASE}/lists/{cleaned}/tweets",
+        access_token=access_token,
+        allow_app_bearer=True,
+        params=params,
+    )
+
+
+def fetch_owned_lists(
+    *,
+    access_token: str,
+    user_id: str,
+    pagination_token: str | None = None,
+    max_results: int = 100,
+) -> XListsPage:
+    """Fetch one page of lists owned by a user."""
+    return _fetch_lists_page(
+        url=f"{X_API_BASE}/users/{user_id}/owned_lists",
+        access_token=access_token,
+        pagination_token=pagination_token,
+        max_results=max_results,
+    )
+
+
+def fetch_followed_lists(
+    *,
+    access_token: str,
+    user_id: str,
+    pagination_token: str | None = None,
+    max_results: int = 100,
+) -> XListsPage:
+    """Fetch one page of lists followed by a user."""
+    return _fetch_lists_page(
+        url=f"{X_API_BASE}/users/{user_id}/followed_lists",
+        access_token=access_token,
+        pagination_token=pagination_token,
+        max_results=max_results,
+    )
+
+
+def _fetch_tweets_page(
+    *,
+    url: str,
+    access_token: str | None,
+    params: dict[str, Any],
+    allow_app_bearer: bool = False,
+) -> XTweetsPage:
     payload = _request_json(
         "GET",
-        f"{X_API_BASE}/users/{user_id}/bookmarks",
+        url,
         access_token=access_token,
+        allow_app_bearer=allow_app_bearer,
         params=params,
     )
 
@@ -255,14 +393,42 @@ def fetch_bookmarks(
             if mapped:
                 tweets.append(mapped)
 
-    meta = payload.get("meta")
-    next_token = None
-    if isinstance(meta, dict):
-        token = meta.get("next_token")
-        if isinstance(token, str) and token.strip():
-            next_token = token.strip()
+    return XTweetsPage(
+        tweets=tweets,
+        next_token=_extract_next_token(payload.get("meta")),
+    )
 
-    return XBookmarksPage(tweets=tweets, next_token=next_token)
+
+def _fetch_lists_page(
+    *,
+    url: str,
+    access_token: str,
+    pagination_token: str | None,
+    max_results: int,
+) -> XListsPage:
+    clamped = max(5, min(max_results, 100))
+    params: dict[str, Any] = {"max_results": clamped}
+    if pagination_token:
+        params["pagination_token"] = pagination_token
+
+    payload = _request_json(
+        "GET",
+        url,
+        access_token=access_token,
+        params=params,
+    )
+    data = payload.get("data")
+    lists: list[XList] = []
+    if isinstance(data, list):
+        for item in data:
+            mapped = _map_list(item)
+            if mapped:
+                lists.append(mapped)
+
+    return XListsPage(
+        lists=lists,
+        next_token=_extract_next_token(payload.get("meta")),
+    )
 
 
 def _oauth_token_request(*, grant_type: str, extra: dict[str, str]) -> dict[str, Any]:
@@ -464,8 +630,21 @@ def _map_tweet(tweet_data: dict[str, Any], users_by_id: dict[str, dict[str, Any]
         like_count=_metric_int(metrics, "like_count"),
         retweet_count=_metric_int(metrics, "retweet_count"),
         reply_count=_metric_int(metrics, "reply_count"),
+        conversation_id=_optional_string(tweet_data.get("conversation_id")),
+        in_reply_to_user_id=_optional_string(tweet_data.get("in_reply_to_user_id")),
+        referenced_tweet_types=_referenced_tweet_types(tweet_data.get("referenced_tweets")),
         external_urls=_extract_external_urls(entities),
     )
+
+
+def _map_list(list_data: Any) -> XList | None:
+    if not isinstance(list_data, dict):
+        return None
+    list_id = _optional_string(list_data.get("id"))
+    name = _optional_string(list_data.get("name"))
+    if not list_id or not name:
+        return None
+    return XList(id=list_id, name=name)
 
 
 def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
@@ -474,6 +653,28 @@ def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
         return value
     if isinstance(value, str) and value.isdigit():
         return int(value)
+    return None
+
+
+def _referenced_tweet_types(raw_references: Any) -> list[str]:
+    if not isinstance(raw_references, list):
+        return []
+    values: list[str] = []
+    for reference in raw_references:
+        if not isinstance(reference, dict):
+            continue
+        reference_type = _optional_string(reference.get("type"))
+        if reference_type:
+            values.append(reference_type)
+    return values
+
+
+def _extract_next_token(meta: Any) -> str | None:
+    if not isinstance(meta, dict):
+        return None
+    token = meta.get("next_token")
+    if isinstance(token, str) and token.strip():
+        return token.strip()
     return None
 
 

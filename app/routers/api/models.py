@@ -1044,6 +1044,7 @@ class OnboardingCompleteRequest(BaseModel):
     profile_summary: str | None = None
     inferred_topics: list[str] | None = None
     twitter_username: str | None = Field(default=None, max_length=50)
+    x_digest_filter_prompt: str | None = Field(default=None, max_length=4000)
 
 
 class OnboardingCompleteResponse(BaseModel):

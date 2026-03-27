@@ -9,6 +9,7 @@ from app.core.security import create_access_token, create_refresh_token
 from app.main import app
 from app.models.schema import UserIntegrationConnection
 from app.models.user import User
+from app.services.x_digest_filter import DEFAULT_X_DIGEST_FILTER_PROMPT
 
 client = TestClient(app)
 
@@ -360,6 +361,7 @@ def test_get_current_user_info(db: Session, monkeypatch):
         assert data["twitter_username"] is None
         assert data["news_digest_timezone"] == "UTC"
         assert data["news_digest_interval_hours"] == 6
+        assert data["x_digest_filter_prompt"] == DEFAULT_X_DIGEST_FILTER_PROMPT
         assert data["has_x_bookmark_sync"] is False
     finally:
         app.dependency_overrides.clear()
@@ -447,6 +449,7 @@ def test_update_current_user_info(db: Session, monkeypatch):
                 "twitter_username": "@Willem_AW",
                 "news_digest_timezone": "America/New_York",
                 "news_digest_interval_hours": 3,
+                "x_digest_filter_prompt": "Prefer semiconductors, infrastructure, and AI models.",
             },
         )
         assert response.status_code == 200
@@ -455,12 +458,57 @@ def test_update_current_user_info(db: Session, monkeypatch):
         assert data["twitter_username"] == "willem_aw"
         assert data["news_digest_timezone"] == "America/New_York"
         assert data["news_digest_interval_hours"] == 3
+        assert data["x_digest_filter_prompt"].startswith("Prefer semiconductors")
 
         db.refresh(test_user)
         assert test_user.full_name == "Updated Name"
         assert test_user.twitter_username == "willem_aw"
         assert test_user.news_digest_timezone == "America/New_York"
         assert test_user.news_digest_interval_hours == 3
+        assert test_user.x_digest_filter_prompt.startswith("Prefer semiconductors")
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_update_current_user_info_empty_prompt_falls_back_to_default(db: Session, monkeypatch):
+    """Blank prompt updates should clear stored value and return the default prompt."""
+    from app.core.db import get_db_session, get_readonly_db_session
+    from app.core.settings import get_settings
+
+    monkeypatch.setattr(get_settings(), "debug", False)
+
+    def override_get_db_session():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    app.dependency_overrides[get_readonly_db_session] = override_get_db_session
+
+    test_user = User(
+        apple_id="001234.test.blankprompt",
+        email="blankprompt@icloud.com",
+        full_name="Blank Prompt",
+        x_digest_filter_prompt="Keep macro and chips only.",
+    )
+    db.add(test_user)
+    db.commit()
+    db.refresh(test_user)
+
+    access_token = create_access_token(test_user.id)
+
+    try:
+        response = client.patch(
+            "/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"x_digest_filter_prompt": "   "},
+        )
+        assert response.status_code == 200
+        assert response.json()["x_digest_filter_prompt"] == DEFAULT_X_DIGEST_FILTER_PROMPT
+
+        db.refresh(test_user)
+        assert test_user.x_digest_filter_prompt is None
     finally:
         app.dependency_overrides.clear()
 

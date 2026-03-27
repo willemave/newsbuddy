@@ -34,7 +34,7 @@ def test_sync_integration_skips_when_feature_disabled(monkeypatch):
     )
     sync_mock = Mock()
     monkeypatch.setattr(
-        "app.pipeline.handlers.sync_integration.sync_x_bookmarks_for_user",
+        "app.pipeline.handlers.sync_integration.sync_x_sources_for_user",
         sync_mock,
     )
 
@@ -69,13 +69,16 @@ def test_sync_integration_runs_when_feature_enabled(monkeypatch):
         return_value=SimpleNamespace(
             status="success",
             fetched=1,
+            accepted=1,
+            filtered_out=0,
+            errored=0,
             created=1,
             reused=0,
-            newest_bookmark_id="123",
+            channels={},
         )
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.sync_integration.sync_x_bookmarks_for_user",
+        "app.pipeline.handlers.sync_integration.sync_x_sources_for_user",
         sync_mock,
     )
 
