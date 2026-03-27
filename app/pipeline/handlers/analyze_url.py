@@ -8,7 +8,10 @@ from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 
-from app.constants import SELF_SUBMISSION_SOURCE
+from app.constants import (
+    DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
+    SELF_SUBMISSION_SOURCE,
+)
 from app.core.logging import get_logger
 from app.models.metadata import ContentClassification, ContentStatus, ContentType
 from app.models.metadata_state import normalize_metadata_shape, update_processing_state
@@ -20,8 +23,9 @@ from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.content_analyzer import AnalysisError
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.content_submission import normalize_url
+from app.services.feed_backfill import FeedBackfillRequest, backfill_feed_for_config
 from app.services.feed_detection import FeedDetector, detect_feeds_from_html
-from app.services.feed_subscription import subscribe_to_detected_feed
+from app.services.feed_subscription import subscribe_to_detected_feed_result
 from app.services.gateways.http_gateway import get_http_gateway
 from app.services.gateways.llm_gateway import get_llm_gateway
 from app.services.instruction_links import create_contents_from_instruction_links
@@ -88,6 +92,71 @@ class FlowOutcome:
 
 class FeedSubscriptionFlow:
     """Handle feed subscription requests during URL analysis."""
+
+    def _run_initial_feed_download(
+        self,
+        *,
+        user_id: Any,
+        subscription_status: str,
+        config_id: int | None,
+    ) -> dict[str, object]:
+        """Run the one-time initial feed backfill for newly created subscriptions."""
+        initial_download: dict[str, object] = {
+            "requested_count": DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
+            "ran": False,
+            "status": "skipped",
+            "reason": subscription_status,
+        }
+        if subscription_status != "created":
+            return initial_download
+        if not isinstance(user_id, int):
+            initial_download["reason"] = "missing_user"
+            return initial_download
+        if not isinstance(config_id, int):
+            initial_download["reason"] = "missing_config_id"
+            return initial_download
+
+        initial_download["ran"] = True
+        try:
+            result = backfill_feed_for_config(
+                FeedBackfillRequest(
+                    user_id=user_id,
+                    config_id=config_id,
+                    count=DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "Initial feed download failed for config %s",
+                config_id,
+                extra={
+                    "component": "feed_subscription",
+                    "operation": "initial_download",
+                    "item_id": config_id,
+                    "context_data": {
+                        "user_id": user_id,
+                        "config_id": config_id,
+                        "error": str(exc),
+                    },
+                },
+            )
+            initial_download["status"] = "failed"
+            initial_download["error"] = str(exc)
+            return initial_download
+
+        initial_download.update(
+            {
+                "status": "completed",
+                "config_id": result.config_id,
+                "base_limit": result.base_limit,
+                "target_limit": result.target_limit,
+                "scraped": result.scraped,
+                "saved": result.saved,
+                "duplicates": result.duplicates,
+                "errors": result.errors,
+            }
+        )
+        return initial_download
 
     def _detect_direct_feed_url(
         self,
@@ -165,22 +234,35 @@ class FeedSubscriptionFlow:
         if detected_feed:
             fetch_status = "detected"
         if detected_feed:
+            detected_title = detected_feed.get("title")
+            resolved_display_name = (
+                detected_title.strip()
+                if isinstance(detected_title, str) and detected_title.strip()
+                else content.title
+            )
             processing_updates: dict[str, object] = {"subscribe_to_feed": True}
             processing_updates["detected_feed"] = detected_feed
             if all_detected_feeds:
                 processing_updates["all_detected_feeds"] = all_detected_feeds
 
-            created, fetch_status = subscribe_to_detected_feed(
+            subscription_result = subscribe_to_detected_feed_result(
                 db,
                 metadata.get("submitted_by_user_id"),
                 detected_feed,
-                display_name=detected_feed.get("title"),
+                display_name=resolved_display_name,
             )
+            fetch_status = subscription_result.status
             processing_updates["feed_subscription"] = {
                 "status": fetch_status,
                 "feed_url": detected_feed.get("url"),
                 "feed_type": detected_feed.get("type"),
-                "created": created,
+                "created": subscription_result.created,
+                "config_id": subscription_result.config_id,
+                "initial_download": self._run_initial_feed_download(
+                    user_id=metadata.get("submitted_by_user_id"),
+                    subscription_status=subscription_result.status,
+                    config_id=subscription_result.config_id,
+                ),
             }
         else:
             processing_updates = {"subscribe_to_feed": True}

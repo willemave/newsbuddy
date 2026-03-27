@@ -13,6 +13,9 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         let route = await viewModel.startSearchChat(message: "What changed this week?")
 
         XCTAssertEqual(route?.sessionId, 91)
+        XCTAssertEqual(route?.initialUserMessageText, "Prompt")
+        XCTAssertEqual(route?.initialUserMessageTimestamp, "2026-03-21T18:00:00Z")
+        XCTAssertEqual(route?.pendingMessageId, 291)
         XCTAssertEqual(chatService.receivedMessages, ["What changed this week?"])
         XCTAssertEqual(chatService.receivedSessionIds, [nil])
         XCTAssertEqual(chatService.receivedScreenTypes, ["knowledge_hub"])

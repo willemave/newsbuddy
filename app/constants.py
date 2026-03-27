@@ -37,6 +37,7 @@ AGGREGATE_PLATFORMS = {"twitter", "techmeme"}
 
 # Default item limit for newly created feeds
 DEFAULT_NEW_FEED_LIMIT = 1
+DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT = 2
 
 # Summary kind/version constants
 SUMMARY_KIND_LONG_INTERLEAVED = "long_interleaved"

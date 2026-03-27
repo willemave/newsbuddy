@@ -31,17 +31,35 @@ class ChatSessionViewModel: ObservableObject {
     private let transcriptionService: any SpeechTranscribing
     private var thinkingTimer: Timer?
     let sessionId: Int
+    private let initialPendingUserMessage: ChatMessage?
+    private let initialPendingMessageId: Int?
 
-    init(sessionId: Int, transcriptionService: (any SpeechTranscribing)? = nil) {
+    init(
+        sessionId: Int,
+        initialPendingUserMessage: ChatMessage? = nil,
+        initialPendingMessageId: Int? = nil,
+        transcriptionService: (any SpeechTranscribing)? = nil
+    ) {
         self.sessionId = sessionId
+        self.initialPendingUserMessage = initialPendingUserMessage
+        self.initialPendingMessageId = initialPendingMessageId
+        self.messages = initialPendingUserMessage.map { [$0] } ?? []
         let resolvedService = transcriptionService ?? RealtimeTranscriptionService()
         self.transcriptionService = resolvedService
         configureTranscriptionCallbacks()
     }
 
-    init(session: ChatSessionSummary, transcriptionService: (any SpeechTranscribing)? = nil) {
+    init(
+        session: ChatSessionSummary,
+        initialPendingUserMessage: ChatMessage? = nil,
+        initialPendingMessageId: Int? = nil,
+        transcriptionService: (any SpeechTranscribing)? = nil
+    ) {
         self.sessionId = session.id
         self.session = session
+        self.initialPendingUserMessage = initialPendingUserMessage
+        self.initialPendingMessageId = initialPendingMessageId
+        self.messages = initialPendingUserMessage.map { [$0] } ?? []
         let resolvedService = transcriptionService ?? RealtimeTranscriptionService()
         self.transcriptionService = resolvedService
         configureTranscriptionCallbacks()
@@ -55,21 +73,25 @@ class ChatSessionViewModel: ObservableObject {
         logger.debug("[ViewModel] loadSession | sessionId=\(self.sessionId)")
         isLoading = true
         errorMessage = nil
-        messages = []
+        seedInitialPendingMessageIfNeeded()
 
         do {
             let detail = try await chatService.getSession(id: sessionId)
             session = detail.session
-            messages = detail.messages.filter { !$0.content.isEmpty }
+            let filteredMessages = detail.messages.filter { !$0.content.isEmpty }
+            messages = filteredMessages.isEmpty ? (initialPendingUserMessage.map { [$0] } ?? []) : filteredMessages
             let assistantPreview = messages.last(where: { $0.isAssistant })?.content.prefix(160) ?? ""
             logger.debug(
                 "[ViewModel] loadSession succeeded | sessionId=\(self.sessionId) messages=\(self.messages.count) assistantPreview=\(String(assistantPreview), privacy: .public)"
             )
 
             // Check if there's a processing message we need to poll for
-            if let processingMessage = detail.messages.first(where: { $0.isProcessing }) {
+            if let processingMessage = filteredMessages.first(where: { $0.isProcessing }) {
                 let pollingMessageId = processingMessage.sourceMessageId ?? processingMessage.id
                 await pollForMessageCompletion(messageId: pollingMessageId)
+            }
+            else if let pendingMessageId = initialPendingMessageId, detail.session.isProcessing {
+                await pollForMessageCompletion(messageId: pendingMessageId)
             }
             // If this is a topic-focused session (like "Dig deeper") with no messages, auto-send the topic
             else if let topic = detail.session.topic, !topic.isEmpty, detail.messages.isEmpty {
@@ -87,6 +109,10 @@ class ChatSessionViewModel: ObservableObject {
         isLoading = false
     }
 
+    var latestProcessSummary: String? {
+        messages.last(where: \.isProcessSummary)?.processSummaryText
+    }
+
     /// Poll for a processing message to complete
     private func pollForMessageCompletion(messageId: Int) async {
         isSending = true
@@ -95,7 +121,7 @@ class ChatSessionViewModel: ObservableObject {
         do {
             // Use the polling sendMessage which handles the polling loop
             let assistantMessage = try await pollUntilComplete(messageId: messageId)
-            messages.append(assistantMessage)
+            await refreshTranscriptAfterPolling(fallbackAssistantMessage: assistantMessage)
         } catch {
             logger.error("[ViewModel] pollForMessageCompletion error | error=\(error.localizedDescription)")
             errorMessage = error.localizedDescription
@@ -127,6 +153,9 @@ class ChatSessionViewModel: ObservableObject {
 
             case .processing:
                 attempts += 1
+                if attempts == 1 || attempts.isMultiple(of: 6) {
+                    await refreshTranscriptSnapshot()
+                }
                 try await Task.sleep(nanoseconds: 500_000_000) // 500ms
             }
         }
@@ -237,6 +266,42 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     /// All messages including any streaming message
     var allMessages: [ChatMessage] {
         return messages
+    }
+
+    private func seedInitialPendingMessageIfNeeded() {
+        guard messages.isEmpty, let initialPendingUserMessage else { return }
+        messages = [initialPendingUserMessage]
+    }
+
+    private func refreshTranscriptSnapshot() async {
+        do {
+            let detail = try await chatService.getSession(id: sessionId)
+            session = detail.session
+            let filteredMessages = detail.messages.filter { !$0.content.isEmpty }
+            if !filteredMessages.isEmpty {
+                messages = filteredMessages
+            }
+        } catch {
+            logger.debug("[ViewModel] refreshTranscriptSnapshot skipped | error=\(error.localizedDescription)")
+        }
+    }
+
+    private func refreshTranscriptAfterPolling(fallbackAssistantMessage: ChatMessage) async {
+        do {
+            let detail = try await chatService.getSession(id: sessionId)
+            session = detail.session
+            let filteredMessages = detail.messages.filter { !$0.content.isEmpty }
+            if filteredMessages.isEmpty {
+                messages.append(fallbackAssistantMessage)
+            } else {
+                messages = filteredMessages
+            }
+        } catch {
+            logger.debug("[ViewModel] refreshTranscriptAfterPolling fallback | error=\(error.localizedDescription)")
+            if !messages.contains(where: { $0.uiIdentity == fallbackAssistantMessage.uiIdentity }) {
+                messages.append(fallbackAssistantMessage)
+            }
+        }
     }
 
     // MARK: - Thinking Indicator

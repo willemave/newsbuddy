@@ -94,7 +94,12 @@ class KnowledgeHubViewModel: ObservableObject {
                 sessionId: nil,
                 screenContext: hubContext
             )
-            return ChatSessionRoute(sessionId: response.session.id)
+            return ChatSessionRoute(
+                sessionId: response.session.id,
+                initialUserMessageText: response.userMessage.content,
+                initialUserMessageTimestamp: response.userMessage.timestamp,
+                pendingMessageId: response.messageId
+            )
         } catch {
             errorMessage = error.localizedDescription
             return nil

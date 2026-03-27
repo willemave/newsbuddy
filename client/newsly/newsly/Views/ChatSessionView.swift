@@ -262,6 +262,35 @@ struct ChatSessionView: View {
     }
 
     init(
+        route: ChatSessionRoute,
+        onShowHistory: (() -> Void)? = nil
+    ) {
+        let initialPendingUserMessage: ChatMessage?
+        if let text = route.initialUserMessageText,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            initialPendingUserMessage = ChatMessage(
+                id: route.pendingMessageId ?? route.sessionId,
+                sourceMessageId: route.pendingMessageId,
+                role: .user,
+                timestamp: route.initialUserMessageTimestamp ?? ISO8601DateFormatter().string(from: Date()),
+                content: text,
+                status: .processing
+            )
+        } else {
+            initialPendingUserMessage = nil
+        }
+
+        _viewModel = StateObject(
+            wrappedValue: ChatSessionViewModel(
+                sessionId: route.sessionId,
+                initialPendingUserMessage: initialPendingUserMessage,
+                initialPendingMessageId: route.pendingMessageId
+            )
+        )
+        self.onShowHistory = onShowHistory
+    }
+
+    init(
         sessionId: Int,
         onShowHistory: (() -> Void)? = nil
     ) {
@@ -430,7 +459,7 @@ struct ChatSessionView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if viewModel.isLoading {
+                    if viewModel.isLoading && viewModel.allMessages.isEmpty {
                         ChatLoadingView()
                             .frame(maxWidth: .infinity)
                             .padding(.top, 40)
@@ -504,7 +533,8 @@ struct ChatSessionView: View {
 
                         if viewModel.isSending {
                             ThinkingBubbleView(
-                                elapsedSeconds: viewModel.thinkingElapsedSeconds
+                                elapsedSeconds: viewModel.thinkingElapsedSeconds,
+                                statusText: viewModel.latestProcessSummary
                             )
                             .id(thinkingIndicatorScrollId)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1084,6 +1114,7 @@ struct AssistantFeedOptionsSection: View {
 
 struct ThinkingBubbleView: View {
     let elapsedSeconds: Int
+    let statusText: String?
     @State private var isAnimating = false
 
     private var formattedDuration: String {
@@ -1121,6 +1152,14 @@ struct ThinkingBubbleView: View {
                 .padding(.vertical, 12)
                 .background(Color.surfaceContainer)
                 .clipShape(UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 16, bottomTrailingRadius: 16, topTrailingRadius: 16))
+
+                if let statusText, !statusText.isEmpty {
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundColor(Color.onSurfaceSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
+                }
 
                 Text(formattedDuration)
                     .font(.caption2)

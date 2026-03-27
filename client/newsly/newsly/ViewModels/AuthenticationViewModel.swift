@@ -129,14 +129,14 @@ final class AuthenticationViewModel: ObservableObject {
             if let user = lastKnownUser {
                 authState = .authenticated(user)
             } else {
-                authState = .loading
+                authState = .unauthenticated
             }
         case .serverError(_, let message):
             errorMessage = message
             if let user = lastKnownUser {
                 authState = .authenticated(user)
             } else {
-                authState = .loading
+                authState = .unauthenticated
             }
         default:
             authService.logout()
@@ -162,14 +162,14 @@ final class AuthenticationViewModel: ObservableObject {
                 if let user = lastKnownUser {
                     authState = .authenticated(user)
                 } else {
-                    authState = .loading
+                    authState = .unauthenticated
                 }
             case .serverError(_, let message):
                 errorMessage = message
                 if let user = lastKnownUser {
                     authState = .authenticated(user)
                 } else {
-                    authState = .loading
+                    authState = .unauthenticated
                 }
             default:
                 authService.logout()

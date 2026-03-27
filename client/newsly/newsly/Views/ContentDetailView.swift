@@ -558,11 +558,11 @@ struct ContentDetailView: View {
                 onTap: {
                     Task { await handleSummaryNarration(for: content) }
                 },
-                onLongPress: {
+                onSelectPlaybackSpeed: { option in
                     Task {
                         await handleSummaryNarration(
                             for: content,
-                            rate: NarrationPlaybackService.longPressPlaybackRate
+                            rate: option.rate
                         )
                     }
                 }
@@ -587,10 +587,12 @@ struct ContentDetailView: View {
                         Text(
                             isNarrationActive(for: content)
                                 ? "End spoken playback"
-                                : "Tap for normal speed or long press for 1.5x"
+                                : "Tap to listen at \(narrationPlaybackService.playbackSpeedTitle). Hold for speed options."
                         )
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                     }
 
                     Spacer()
@@ -629,7 +631,7 @@ struct ContentDetailView: View {
         if isNarrationActive(for: content) {
             return "Stop summary narration"
         }
-        return "Narrate summary"
+        return "Narrate summary at \(narrationPlaybackService.playbackSpeedTitle)"
     }
 
     private func isNarrationActive(for content: ContentDetail) -> Bool {
@@ -644,11 +646,12 @@ struct ContentDetailView: View {
     @MainActor
     private func handleSummaryNarration(
         for content: ContentDetail,
-        rate: Float = NarrationPlaybackService.defaultPlaybackRate
+        rate: Float? = nil
     ) async {
         let target = narrationTarget(for: content)
+        let playbackRate = rate ?? narrationPlaybackService.playbackRate
         if isNarrationActive(for: content),
-           abs(narrationPlaybackService.playbackRate - rate) < 0.001 {
+           abs(narrationPlaybackService.playbackRate - playbackRate) < 0.001 {
             narrationPlaybackService.stop()
             return
         }
@@ -659,7 +662,7 @@ struct ContentDetailView: View {
         do {
             try await narrationPlaybackService.playNarration(
                 for: target,
-                rate: rate,
+                rate: playbackRate,
                 fetchAudio: {
                     try await NarrationService.shared.fetchNarrationAudio(for: target)
                 },
@@ -869,11 +872,11 @@ struct ContentDetailView: View {
                     onTap: {
                         Task { await handleSummaryNarration(for: content) }
                     },
-                    onLongPress: {
+                    onSelectPlaybackSpeed: { option in
                         Task {
                             await handleSummaryNarration(
                                 for: content,
-                                rate: NarrationPlaybackService.longPressPlaybackRate
+                                rate: option.rate
                             )
                         }
                     }

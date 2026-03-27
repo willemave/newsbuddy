@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.constants import DEFAULT_NEW_FEED_LIMIT
 from app.core.logging import get_logger
 from app.models.schema import UserScraperConfig
+from app.scraping.rss_helpers import resolve_feed_source
 from app.services.scraper_configs import (
     ALLOWED_SCRAPER_TYPES,
     CreateUserScraperConfig,
@@ -17,6 +19,15 @@ from app.services.scraper_configs import (
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class FeedSubscriptionResult:
+    """Outcome for creating a feed subscription."""
+
+    created: bool
+    status: str
+    config_id: int | None = None
 
 
 def _normalize_feed_url_for_lookup(feed_url: str) -> str:
@@ -90,6 +101,23 @@ def subscribe_to_detected_feed(
     *,
     display_name: str | None = None,
 ) -> tuple[bool, str]:
+    """Create a scraper config for a detected feed."""
+    result = subscribe_to_detected_feed_result(
+        db,
+        user_id,
+        detected_feed,
+        display_name=display_name,
+    )
+    return result.created, result.status
+
+
+def subscribe_to_detected_feed_result(
+    db: Session,
+    user_id: int | None,
+    detected_feed: dict[str, Any] | None,
+    *,
+    display_name: str | None = None,
+) -> FeedSubscriptionResult:
     """Create a scraper config for a detected feed.
 
     Args:
@@ -99,25 +127,31 @@ def subscribe_to_detected_feed(
         display_name: Optional display name to store with the feed config.
 
     Returns:
-        Tuple of (created, status). Status is a short string describing the outcome.
+        FeedSubscriptionResult describing the outcome and created config id.
     """
     if user_id is None:
-        return False, "missing_user"
+        return FeedSubscriptionResult(created=False, status="missing_user")
     if not isinstance(detected_feed, dict):
-        return False, "missing_feed"
+        return FeedSubscriptionResult(created=False, status="missing_feed")
 
     feed_url = detected_feed.get("url")
     feed_type = detected_feed.get("type")
     if not isinstance(feed_url, str) or not feed_url.strip():
-        return False, "missing_feed_url"
+        return FeedSubscriptionResult(created=False, status="missing_feed_url")
     if not isinstance(feed_type, str) or not feed_type.strip():
-        return False, "missing_feed_type"
+        return FeedSubscriptionResult(created=False, status="missing_feed_type")
     if feed_type not in ALLOWED_SCRAPER_TYPES:
-        return False, "unsupported_feed_type"
+        return FeedSubscriptionResult(created=False, status="unsupported_feed_type")
+    feed_title = detected_feed.get("title")
+    resolved_display_name = resolve_feed_source(
+        display_name,
+        feed_title if isinstance(feed_title, str) else None,
+        feed_url,
+    )
 
     payload = CreateUserScraperConfig(
         scraper_type=feed_type,
-        display_name=display_name,
+        display_name=resolved_display_name,
         config={
             "feed_url": feed_url.strip(),
             "limit": DEFAULT_NEW_FEED_LIMIT,
@@ -126,7 +160,7 @@ def subscribe_to_detected_feed(
     )
 
     try:
-        create_user_scraper_config(db, user_id, payload)
+        record = create_user_scraper_config(db, user_id, payload)
     except ValueError as exc:
         logger.info(
             "Feed subscription skipped for user %s: %s",
@@ -138,6 +172,6 @@ def subscribe_to_detected_feed(
                 "context_data": {"feed_url": feed_url, "feed_type": feed_type},
             },
         )
-        return False, "already_exists"
+        return FeedSubscriptionResult(created=False, status="already_exists")
 
-    return True, "created"
+    return FeedSubscriptionResult(created=True, status="created", config_id=record.id)

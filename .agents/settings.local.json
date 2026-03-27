@@ -136,7 +136,11 @@
       "Bash(git -C /Users/willem/Development/news_app diff client/newsly/)",
       "Bash(git -C /Users/willem/Development/news_app diff app/models/metadata.py)",
       "Bash(git -C /Users/willem/Development/news_app diff client/newsly/newsly/Views/Components/ArticleCardView.swift)",
-      "Skill(frontend-design)"
+      "Skill(frontend-design)",
+      "mcp__XcodeBuildMCP__session-set-defaults",
+      "mcp__XcodeBuildMCP__build_run_sim",
+      "Bash(sudo xcode-select:*)",
+      "Bash(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -version)"
     ],
     "deny": []
   },

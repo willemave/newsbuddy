@@ -80,6 +80,18 @@ FEED_URL_HINTS = (
     "feed",
     ".xml",
 )
+FEED_CONTENT_TYPE_HINTS = (
+    "application/rss+xml",
+    "application/atom+xml",
+    "application/xml",
+    "text/xml",
+    "application/rdf+xml",
+)
+FEED_DOCUMENT_MARKERS = (
+    b"<rss",
+    b"<feed",
+    b"<rdf:rdf",
+)
 MAX_FEED_CANDIDATE_FETCHES = 6
 MAX_EXA_RESULTS = 5
 MAX_EXA_CANDIDATES = 8
@@ -296,6 +308,24 @@ def _infer_feed_format(
     if b"<feed" in head:
         return "atom"
     return "rss"
+
+
+def _looks_like_feed_document(
+    parsed_feed: Any,
+    content_type: str | None,
+    content: bytes,
+) -> bool:
+    """Return True when the fetched payload appears to be a real feed document."""
+    content_type_value = (content_type or "").lower()
+    if any(hint in content_type_value for hint in FEED_CONTENT_TYPE_HINTS):
+        return True
+
+    version = str(getattr(parsed_feed, "version", "") or "").lower()
+    if "rss" in version or "atom" in version:
+        return True
+
+    head = content[:2000].lower()
+    return any(marker in head for marker in FEED_DOCUMENT_MARKERS)
 
 
 def _extract_urls_from_text(text: str) -> list[str]:
@@ -564,6 +594,12 @@ class FeedDetector:
 
         parsed_feed = feedparser.parse(response.content)
         if parsed_feed.bozo and not parsed_feed.entries and not getattr(parsed_feed, "feed", None):
+            return None
+        if not _looks_like_feed_document(
+            parsed_feed,
+            response.headers.get("content-type"),
+            response.content,
+        ):
             return None
 
         title = None

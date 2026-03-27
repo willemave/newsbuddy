@@ -58,13 +58,11 @@ struct DailyDigestShortFormView: View {
                                 isSpeaking: isNarrationActive(for: digest),
                                 isLoadingVoice: isNarrationLoading(for: digest),
                                 isStartingDigDeeper: viewModel.isStartingDigDeeperChat(for: digest.id),
+                                selectedVoicePlaybackSpeedTitle: narrationPlaybackService.playbackSpeedTitle,
                                 onToggleRead: { toggleRead(for: digest) },
                                 onVoiceSummary: { handleVoiceSummary(for: digest) },
-                                onVoiceSummaryLongPress: {
-                                    handleVoiceSummary(
-                                        for: digest,
-                                        rate: NarrationPlaybackService.longPressPlaybackRate
-                                    )
+                                onSelectVoicePlaybackSpeed: { option in
+                                    handleVoiceSummary(for: digest, rate: option.rate)
                                 },
                                 onDigDeeper: { handleDigDeeper(for: digest) }
                             )
@@ -117,11 +115,12 @@ struct DailyDigestShortFormView: View {
 
     private func handleVoiceSummary(
         for digest: DailyNewsDigest,
-        rate: Float = NarrationPlaybackService.defaultPlaybackRate
+        rate: Float? = nil
     ) {
         let target = narrationTarget(for: digest)
+        let playbackRate = rate ?? narrationPlaybackService.playbackRate
         if isNarrationActive(for: digest),
-           abs(narrationPlaybackService.playbackRate - rate) < 0.001 {
+           abs(narrationPlaybackService.playbackRate - playbackRate) < 0.001 {
             narrationPlaybackService.stop()
             return
         }
@@ -132,7 +131,7 @@ struct DailyDigestShortFormView: View {
             do {
                 try await narrationPlaybackService.playNarration(
                     for: target,
-                    rate: rate,
+                    rate: playbackRate,
                     fetchAudio: {
                         try await NarrationService.shared.fetchNarrationAudio(for: target)
                     },
@@ -188,9 +187,10 @@ private struct DailyDigestCard: View {
     let isSpeaking: Bool
     let isLoadingVoice: Bool
     let isStartingDigDeeper: Bool
+    let selectedVoicePlaybackSpeedTitle: String
     let onToggleRead: () -> Void
     let onVoiceSummary: () -> Void
-    let onVoiceSummaryLongPress: () -> Void
+    let onSelectVoicePlaybackSpeed: (NarrationPlaybackSpeedOption) -> Void
     let onDigDeeper: () -> Void
 
     var body: some View {
@@ -273,9 +273,11 @@ private struct DailyDigestCard: View {
 
                 NarrationPressButton(
                     isDisabled: isLoadingVoice,
-                    accessibilityLabel: isSpeaking ? "Stop narration" : "Play narration",
+                    accessibilityLabel: isSpeaking
+                        ? "Stop narration"
+                        : "Play narration at \(selectedVoicePlaybackSpeedTitle)",
                     onTap: onVoiceSummary,
-                    onLongPress: onVoiceSummaryLongPress
+                    onSelectPlaybackSpeed: onSelectVoicePlaybackSpeed
                 ) {
                     Group {
                         if isLoadingVoice {
@@ -288,6 +290,8 @@ private struct DailyDigestCard: View {
                                 systemImage: isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2.fill"
                             )
                             .font(.terracottaBodySmall)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                             .foregroundStyle(
                                 isSpeaking
                                     ? Color.terracottaPrimary
@@ -333,6 +337,6 @@ private struct DailyDigestCard: View {
     }
 
     private var voiceSummaryButtonTitle: String {
-        isSpeaking ? "Stop" : "Listen"
+        isSpeaking ? "Stop" : "Listen \(selectedVoicePlaybackSpeedTitle)"
     }
 }

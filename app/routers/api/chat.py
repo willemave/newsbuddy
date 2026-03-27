@@ -79,12 +79,15 @@ def _format_process_summary_label(
 ) -> str | None:
     """Build a compact transcript label for intermediate tool/thinking activity."""
     normalized_tool_names = {name.strip().lower() for name in tool_names if name and name.strip()}
+    tool_call_count = len([name for name in tool_names if name and name.strip()])
 
-    if normalized_tool_names & _SEARCH_TOOL_NAMES:
-        return "Thinking • Searched the web and reviewed sources"
+    if tool_call_count:
+        tool_label = "tool" if tool_call_count == 1 else "tools"
 
-    if normalized_tool_names:
-        return "Thinking • Used tools and reviewed results"
+        if normalized_tool_names & _SEARCH_TOOL_NAMES:
+            return f"Thinking • Executed {tool_call_count} {tool_label} and reviewed sources"
+
+        return f"Thinking • Executed {tool_call_count} {tool_label} and reviewed results"
 
     if has_intermediate_assistant_text:
         return "Thinking • Considered the request"

@@ -268,7 +268,7 @@ private extension View {
             }
             .navigationDestination(for: ChatSessionRoute.self) { route in
                 ChatSessionView(
-                    sessionId: route.sessionId,
+                    route: route,
                     onShowHistory: tab == .knowledge
                         ? {
                             // Pop back to hub root, then push history

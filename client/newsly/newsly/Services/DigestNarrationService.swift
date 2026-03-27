@@ -13,10 +13,11 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
     nonisolated static let longPressPlaybackRate: Float = 1.5
 
     @Published private(set) var isSpeaking = false
-    @Published private(set) var playbackRate: Float = defaultPlaybackRate
+    @Published private(set) var playbackRate: Float
     @Published private(set) var speakingTarget: NarrationTarget?
 
     private let synthesizer = AVSpeechSynthesizer()
+    private let preferenceStore: NarrationPlaybackPreferenceStore
     private var audioPlayer: AVAudioPlayer?
     private var cachedAudioByTarget: [NarrationTarget: Data] = [:]
     private var cachedTextByTarget: [NarrationTarget: String] = [:]
@@ -24,15 +25,24 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
     private let maxCachedTargets = 12
 
     private override init() {
+        let preferenceStore = NarrationPlaybackPreferenceStore.shared
+        self.preferenceStore = preferenceStore
+        self.playbackRate = preferenceStore.preferredPlaybackRate()
         super.init()
         synthesizer.delegate = self
     }
 
+    var playbackSpeedTitle: String {
+        NarrationPlaybackSpeedOption.title(for: playbackRate)
+    }
+
     func setPlaybackRate(_ rate: Float) {
-        playbackRate = rate
+        let normalizedRate = preferenceStore.normalizedPlaybackRate(rate)
+        playbackRate = normalizedRate
+        preferenceStore.savePreferredPlaybackRate(normalizedRate)
         if let audioPlayer {
             audioPlayer.enableRate = true
-            audioPlayer.rate = rate
+            audioPlayer.rate = normalizedRate
         }
     }
 
@@ -214,5 +224,36 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
             false,
             options: [.notifyOthersOnDeactivation]
         )
+    }
+}
+
+final class NarrationPlaybackPreferenceStore {
+    static let shared = NarrationPlaybackPreferenceStore()
+
+    private let defaults: UserDefaults
+    private let storageKey: String
+
+    init(
+        defaults: UserDefaults = SharedContainer.userDefaults,
+        storageKey: String = "preferredNarrationPlaybackRate"
+    ) {
+        self.defaults = defaults
+        self.storageKey = storageKey
+    }
+
+    func preferredPlaybackRate() -> Float {
+        guard let storedRate = defaults.object(forKey: storageKey) as? NSNumber else {
+            return NarrationPlaybackService.defaultPlaybackRate
+        }
+        return normalizedPlaybackRate(storedRate.floatValue)
+    }
+
+    func savePreferredPlaybackRate(_ rate: Float) {
+        defaults.set(normalizedPlaybackRate(rate), forKey: storageKey)
+    }
+
+    func normalizedPlaybackRate(_ rate: Float) -> Float {
+        NarrationPlaybackSpeedOption.option(for: rate)?.rate
+            ?? NarrationPlaybackService.defaultPlaybackRate
     }
 }
