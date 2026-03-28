@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.models.metadata import ContentType
 from app.models.schema import Content
 from app.scraping.base import BaseScraper
+from app.services.x_api import fetch_list_tweets
 from app.utils.error_logger import log_scraper_event
 
 logger = get_logger(__name__)
@@ -48,6 +49,8 @@ class TwitterUnifiedScraper(BaseScraper):
         self._guest_token: str | None = None
         self._guest_token_acquired_at: datetime | None = None
         self._has_auth_cookies = False
+        self._api_access_token: str | None = None
+        self._api_access_token_checked = False
         self._bearer_token = self.settings.get("default_bearer_token", DEFAULT_GUEST_BEARER)
         # You can configure proxy here if needed
         self.proxy = self.settings.get("proxy")  # Format: "http://user:pass@host:port"
@@ -86,32 +89,240 @@ class TwitterUnifiedScraper(BaseScraper):
 
         # Scrape lists using Playwright
         for list_config in self.config.get("twitter_lists", []):
+            list_name = list_config.get("name", "Unknown List")
+            list_id = list_config.get("list_id")
+
+            if not list_id:
+                logger.error("No list_id provided for list: %s", list_name)
+                continue
+
+            recent_scrape_hours = self._recent_scrape_hours(list_config)
+            if recent_scrape_hours > 0 and self._check_recent_scrape(
+                str(list_id), hours=recent_scrape_hours
+            ):
+                logger.info(
+                    "Skipping list %s - already scraped within last %.2f hours",
+                    list_name,
+                    recent_scrape_hours,
+                )
+                continue
+
             try:
-                items = self._scrape_list_playwright(list_config)
+                try:
+                    items = self._scrape_list_api(list_config)
+                except Exception as exc:
+                    logger.warning(
+                        "X API list scrape failed for %s (%s); falling back to Playwright: %s",
+                        list_name,
+                        list_id,
+                        exc,
+                    )
+                    items = None
+                if not items:
+                    items = self._scrape_list_playwright(list_config)
                 if items:
                     all_items.extend(items)
-                    logger.info(f"Scraped Twitter list: {list_config.get('name')}")
+                    logger.info("Scraped Twitter list: %s", list_name)
             except Exception as e:
-                logger.error(f"Error scraping Twitter list {list_config.get('name')}: {e}")
+                logger.error("Error scraping Twitter list %s: %s", list_name, e)
                 continue
 
         logger.info(f"Total Twitter list items scraped: {len(all_items)}")
         return all_items
 
-    def _check_recent_scrape(self, list_id: str, list_name: str, hours: int = 6) -> bool:
+    def _recent_scrape_hours(self, list_config: dict[str, Any]) -> float:
+        raw_value = list_config.get(
+            "recent_scrape_hours",
+            self.settings.get("default_recent_scrape_hours", 0),
+        )
+        try:
+            hours = float(raw_value)
+        except (TypeError, ValueError):
+            return 0.0
+        return max(hours, 0.0)
+
+    def _check_recent_scrape(self, list_id: str, hours: float = 0) -> bool:
         """Check if list was scraped recently."""
+        if hours <= 0:
+            return False
+
         with get_db() as db:
             cutoff_time = datetime.now(UTC) - timedelta(hours=hours)
-            existing = (
-                db.query(Content)
+            recent_rows = (
+                db.query(Content.content_metadata)
                 .filter(
                     Content.platform == "twitter",
-                    Content.source == f"twitter:{list_name}",
                     Content.created_at > cutoff_time,
                 )
-                .first()
+                .all()
             )
-            return existing is not None
+
+        for row in recent_rows:
+            metadata = row[0] if isinstance(row, tuple) else getattr(row, "content_metadata", None)
+            if not isinstance(metadata, dict):
+                continue
+            aggregator = metadata.get("aggregator")
+            aggregator_metadata = aggregator.get("metadata") if isinstance(aggregator, dict) else {}
+            if not isinstance(aggregator_metadata, dict):
+                continue
+            if str(aggregator_metadata.get("list_id") or "").strip() == str(list_id).strip():
+                return True
+
+        return False
+
+    def _get_x_api_access_token(self) -> str | None:
+        """Resolve an active X OAuth user token for list scraping."""
+        if self._api_access_token_checked:
+            return self._api_access_token
+
+        self._api_access_token_checked = True
+
+        try:
+            from app.models.schema import UserIntegrationConnection
+            from app.services.x_integration import _ensure_valid_access_token
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Unable to load X integration helpers: %s", exc)
+            return None
+
+        with get_db() as db:
+            connections = (
+                db.query(UserIntegrationConnection)
+                .filter(UserIntegrationConnection.provider == "x")
+                .filter(UserIntegrationConnection.is_active.is_(True))
+                .order_by(UserIntegrationConnection.updated_at.desc())
+                .all()
+            )
+            for connection in connections:
+                scopes = {
+                    scope.strip()
+                    for scope in (connection.scopes or [])
+                    if isinstance(scope, str) and scope.strip()
+                }
+                required_scopes = {"tweet.read", "users.read", "list.read"}
+                if not required_scopes.issubset(scopes):
+                    continue
+
+                try:
+                    token = _ensure_valid_access_token(db, connection)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Unable to refresh X OAuth token for list scraping via connection %s: %s",
+                        connection.id,
+                        exc,
+                    )
+                    continue
+
+                if token:
+                    logger.info(
+                        "Using X API auth fallback for Twitter list scraping via connection %s",
+                        connection.id,
+                    )
+                    self._api_access_token = token
+                    return token
+
+        return None
+
+    def _scrape_list_api(self, list_config: dict[str, Any]) -> list[dict[str, Any]] | None:
+        """Scrape a Twitter list via the official X API using an active OAuth token."""
+        list_name = list_config.get("name", "Unknown List")
+        list_id = str(list_config.get("list_id") or "").strip()
+        limit = int(list_config.get("limit", self.settings.get("default_limit", 50)))
+        hours_back = list_config.get("hours_back", self.settings.get("default_hours_back", 24))
+
+        if not list_id:
+            return None
+
+        access_token = self._get_x_api_access_token()
+        if not access_token:
+            return None
+
+        logger.info("Scraping Twitter list via X API: %s (%s)", list_name, list_id)
+
+        tweets: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        next_token: str | None = None
+        cutoff_time = datetime.now(UTC) - timedelta(hours=hours_back)
+        page_size = min(max(limit, 5), 100)
+        max_pages = max(1, (limit + page_size - 1) // page_size)
+
+        for _ in range(max_pages):
+            page = fetch_list_tweets(
+                list_id=list_id,
+                access_token=access_token,
+                pagination_token=next_token,
+                max_results=page_size,
+            )
+            if not page.tweets:
+                break
+
+            for tweet in page.tweets:
+                if tweet.id in seen_ids:
+                    continue
+                seen_ids.add(tweet.id)
+
+                tweet_date = self._parse_tweet_date(tweet.created_at or "")
+                if tweet_date and tweet_date < cutoff_time:
+                    continue
+
+                if (
+                    not self.settings.get("include_retweets", False)
+                    and "retweeted" in tweet.referenced_tweet_types
+                ):
+                    continue
+
+                if not self.settings.get("include_replies", False) and tweet.in_reply_to_user_id:
+                    continue
+
+                likes = tweet.like_count or 0
+                retweets = tweet.retweet_count or 0
+                min_engagement = self.settings.get("min_engagement", 0)
+                if (likes + retweets) < min_engagement:
+                    continue
+
+                tweets.append(
+                    {
+                        "id": tweet.id,
+                        "url": f"https://x.com/i/status/{tweet.id}",
+                        "date": tweet.created_at or "",
+                        "username": tweet.author_username or "unknown",
+                        "display_name": (
+                            tweet.author_name or tweet.author_username or "Unknown User"
+                        ),
+                        "content": tweet.text,
+                        "likes": likes,
+                        "retweets": retweets,
+                        "replies": tweet.reply_count or 0,
+                        "quotes": 0,
+                        "created_at": tweet.created_at or "",
+                        "is_retweet": "retweeted" in tweet.referenced_tweet_types,
+                        "in_reply_to_status_id": tweet.in_reply_to_user_id,
+                        "links": [
+                            {
+                                "url": external_url,
+                                "expanded_url": external_url,
+                                "display_url": external_url,
+                            }
+                            for external_url in tweet.external_urls
+                        ],
+                    }
+                )
+
+                if len(tweets) >= limit:
+                    break
+
+            if len(tweets) >= limit or not page.next_token:
+                break
+            next_token = page.next_token
+
+        if not tweets:
+            return None
+
+        return self._build_news_entries(
+            tweets=tweets,
+            list_id=list_id,
+            list_name=list_name,
+            hours_back=int(hours_back),
+        )
 
     def _scrape_list_playwright(self, list_config: dict[str, Any]) -> list[dict[str, Any]] | None:
         """Scrape a Twitter list using Playwright to intercept XHR requests."""
@@ -122,11 +333,6 @@ class TwitterUnifiedScraper(BaseScraper):
 
         if not list_id:
             logger.error(f"No list_id provided for list: {list_name}")
-            return None
-
-        # Check if already scraped recently
-        if self._check_recent_scrape(list_id, list_name, hours=6):
-            logger.info(f"Skipping list {list_name} - already scraped within last 6 hours")
             return None
 
         logger.info(f"Scraping Twitter list with Playwright: {list_name} ({list_id})")
@@ -312,6 +518,22 @@ class TwitterUnifiedScraper(BaseScraper):
             logger.info(f"No tweets found for list: {list_name}")
             return None
 
+        return self._build_news_entries(
+            tweets=tweets,
+            list_id=str(list_id),
+            list_name=list_name,
+            hours_back=int(hours_back),
+        )
+
+    def _build_news_entries(
+        self,
+        *,
+        tweets: list[dict[str, Any]],
+        list_id: str,
+        list_name: str,
+        hours_back: int,
+    ) -> list[dict[str, Any]] | None:
+        """Convert normalized tweet payloads into news entries."""
         news_entries: list[dict[str, Any]] = []
         seen_pairs: set[tuple[str, str]] = set()
 
@@ -1207,5 +1429,11 @@ class TwitterUnifiedScraper(BaseScraper):
         try:
             # Twitter date format: "Wed Oct 05 20:17:27 +0000 2022"
             return datetime.strptime(date_str, "%a %b %d %H:%M:%S %z %Y")
+        except Exception:
+            pass
+
+        try:
+            iso_candidate = date_str.replace("Z", "+00:00")
+            return datetime.fromisoformat(iso_candidate)
         except Exception:
             return None
