@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user
 from app.models.pagination import PaginationMetadata
-from app.models.schema import Content, DailyNewsDigest
+from app.models.schema import DailyNewsDigest
 from app.models.user import User
 from app.routers.api.chat_models import (
     ChatMessageDto,
@@ -26,12 +26,19 @@ from app.routers.api.chat_models import (
     MessageProcessingStatus as MessageProcessingStatusDto,
 )
 from app.routers.api.models import (
+    DailyNewsDigestBulletDetailResponse,
+    DailyNewsDigestCitationResponse,
     DailyNewsDigestListResponse,
     DailyNewsDigestResponse,
 )
 from app.services.chat_agent import process_message_async
-from app.services.daily_digest_chat import start_daily_digest_chat
-from app.services.daily_news_digest import MAX_DAILY_DIGEST_BULLETS
+from app.services.daily_digest_chat import start_daily_digest_bullet_chat, start_daily_digest_chat
+from app.services.daily_news_digest import (
+    MAX_DAILY_DIGEST_BULLETS,
+    DailyDigestSourceItem,
+    load_daily_digest_source_items,
+    resolve_daily_digest_bullet_details,
+)
 from app.services.event_logger import log_event
 
 router = APIRouter()
@@ -79,86 +86,74 @@ def _decode_cursor(cursor: str) -> dict[str, Any]:
     return payload
 
 
-def _build_digest_response(digest: DailyNewsDigest) -> DailyNewsDigestResponse:
+def _build_digest_response(
+    digest: DailyNewsDigest,
+    *,
+    source_items_by_content_id: dict[int, DailyDigestSourceItem] | None = None,
+) -> DailyNewsDigestResponse:
     key_points = digest.key_points if isinstance(digest.key_points, list) else []
     source_ids = digest.source_content_ids if isinstance(digest.source_content_ids, list) else []
+    normalized_source_ids = [int(cid) for cid in source_ids if isinstance(cid, int)]
+    digest_source_items = source_items_by_content_id or {}
+    bullet_details = resolve_daily_digest_bullet_details(
+        digest,
+        source_items_by_content_id=digest_source_items,
+    )
+    bullet_detail_responses = [
+        DailyNewsDigestBulletDetailResponse(
+            text=bullet.text,
+            source_count=len(
+                [
+                    citation_id
+                    for citation_id in bullet.source_content_ids
+                    if citation_id in digest_source_items
+                ]
+            ),
+            citations=[
+                DailyNewsDigestCitationResponse(
+                    content_id=citation_id,
+                    label=digest_source_items[citation_id].source_label,
+                    title=digest_source_items[citation_id].title,
+                    url=digest_source_items[citation_id].source_url,
+                )
+                for citation_id in bullet.source_content_ids
+                if citation_id in digest_source_items
+            ],
+            comment_quotes=bullet.comment_quotes,
+        )
+        for bullet in bullet_details
+    ]
+    source_labels = list(
+        dict.fromkeys(
+            [
+                source_item.source_label.strip()
+                for content_id in normalized_source_ids
+                for source_item in [digest_source_items.get(content_id)]
+                if source_item is not None
+                and isinstance(source_item.source_label, str)
+                and source_item.source_label.strip()
+            ]
+        )
+    )
+    resolved_key_points = [point for point in key_points if isinstance(point, str)]
+    if not resolved_key_points:
+        resolved_key_points = [bullet.text for bullet in bullet_details]
     return DailyNewsDigestResponse(
         id=digest.id,
         local_date=digest.local_date.isoformat(),
         timezone=digest.timezone,
         title=digest.title,
         summary=digest.summary,
-        key_points=[point for point in key_points if isinstance(point, str)],
+        key_points=resolved_key_points,
+        bullet_details=bullet_detail_responses,
         source_count=int(digest.source_count or 0),
-        source_content_ids=[int(cid) for cid in source_ids if isinstance(cid, int)],
-        source_labels=[],
+        source_content_ids=normalized_source_ids,
+        source_labels=source_labels,
         is_read=digest.read_at is not None,
         read_at=_isoformat_utc(digest.read_at),
         generated_at=_isoformat_utc(digest.generated_at) or "",
         coverage_end_at=_isoformat_utc(digest.coverage_end_at),
     )
-
-
-def _resolve_source_label(content: Content) -> str | None:
-    metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
-    if content.platform == "twitter":
-        username = metadata.get("tweet_author_username")
-        if isinstance(username, str) and username.strip():
-            return f"@{username.strip().lstrip('@')}"
-        source_label = metadata.get("source_label")
-        if isinstance(source_label, str) and source_label.strip():
-            return source_label.strip()
-        return "X"
-    if content.platform == "hackernews":
-        return "Hacker News"
-    if content.platform == "techmeme":
-        return "Techmeme"
-    if content.platform == "reddit":
-        return "Reddit"
-
-    source_label = metadata.get("source_label")
-    if isinstance(source_label, str) and source_label.strip():
-        return source_label.strip()
-    if isinstance(content.source, str) and content.source.strip():
-        return content.source.strip()
-    if isinstance(content.platform, str) and content.platform.strip():
-        return content.platform.strip().replace("_", " ").title()
-    return None
-
-
-def _attach_source_labels(
-    db: Session,
-    digests: list[DailyNewsDigestResponse],
-) -> list[DailyNewsDigestResponse]:
-    source_ids = {
-        content_id
-        for digest in digests
-        for content_id in digest.source_content_ids
-        if isinstance(content_id, int)
-    }
-    if not source_ids:
-        return digests
-
-    contents = db.query(Content).filter(Content.id.in_(source_ids)).all()
-    labels_by_content_id = {
-        content.id: _resolve_source_label(content)
-        for content in contents
-        if content.id is not None
-    }
-    for digest in digests:
-        labels: list[str] = []
-        seen: set[str] = set()
-        for content_id in digest.source_content_ids:
-            label = labels_by_content_id.get(content_id)
-            if not isinstance(label, str):
-                continue
-            cleaned = label.strip()
-            if not cleaned or cleaned in seen:
-                continue
-            seen.add(cleaned)
-            labels.append(cleaned)
-        digest.source_labels = labels
-    return digests
 
 
 def _get_user_digest_or_404(
@@ -175,6 +170,18 @@ def _get_user_digest_or_404(
     if digest is None:
         raise HTTPException(status_code=404, detail="Daily digest not found")
     return digest
+
+
+def _get_digest_source_items(
+    db: Session,
+    digest: DailyNewsDigest,
+) -> dict[int, DailyDigestSourceItem]:
+    """Load normalized source items scoped to one digest row."""
+    source_ids = digest.source_content_ids if isinstance(digest.source_content_ids, list) else []
+    return load_daily_digest_source_items(
+        db,
+        content_ids=[int(content_id) for content_id in source_ids if isinstance(content_id, int)],
+    )
 
 
 def _build_digest_narration_text(digest: DailyNewsDigest) -> str:
@@ -254,7 +261,31 @@ def list_daily_news_digests(
             read_filter=read_filter,
         )
 
-    digest_responses = _attach_source_labels(db, [_build_digest_response(row) for row in rows])
+    all_source_ids = {
+        int(content_id)
+        for row in rows
+        for content_id in (
+            row.source_content_ids if isinstance(row.source_content_ids, list) else []
+        )
+        if isinstance(content_id, int)
+    }
+    source_items_by_content_id = load_daily_digest_source_items(
+        db,
+        content_ids=sorted(all_source_ids),
+    )
+    digest_responses = [
+        _build_digest_response(
+            row,
+            source_items_by_content_id={
+                content_id: source_items_by_content_id[content_id]
+                for content_id in (
+                    row.source_content_ids if isinstance(row.source_content_ids, list) else []
+                )
+                if isinstance(content_id, int) and content_id in source_items_by_content_id
+            },
+        )
+        for row in rows
+    ]
 
     return DailyNewsDigestListResponse(
         digests=digest_responses,
@@ -307,6 +338,83 @@ def mark_daily_digest_unread(
         "is_read": False,
         "read_at": None,
     }
+
+
+@router.post(
+    "/daily-digests/{digest_id}/bullets/{bullet_index}/dig-deeper",
+    response_model=StartDailyDigestChatResponse,
+    summary="Start a bullet-focused daily digest dig-deeper chat",
+)
+async def start_daily_digest_bullet_dig_deeper(
+    digest_id: Annotated[int, Path(..., gt=0)],
+    bullet_index: Annotated[int, Path(..., ge=0)],
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> StartDailyDigestChatResponse:
+    """Create a fresh daily-digest chat session focused on one selected bullet."""
+    digest = _get_user_digest_or_404(db=db, user_id=current_user.id, digest_id=digest_id)
+    source_items_by_content_id = _get_digest_source_items(db, digest)
+
+    try:
+        session, db_message, prompt = start_daily_digest_bullet_chat(
+            db,
+            digest=digest,
+            bullet_index=bullet_index,
+            user_id=current_user.id,
+            source_items_by_content_id=source_items_by_content_id,
+        )
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail="Daily digest bullet not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    background_tasks.add_task(process_message_async, session.id, db_message.id, prompt)
+
+    log_event(
+        event_type="chat",
+        event_name="daily_digest_bullet_chat_started",
+        status="started",
+        user_id=current_user.id,
+        session_id=session.id,
+        digest_id=digest.id,
+        model=session.llm_model,
+    )
+
+    return StartDailyDigestChatResponse(
+        session=ChatSessionSummaryDto(
+            id=session.id,
+            title=session.title,
+            content_id=session.content_id,
+            session_type=session.session_type,
+            topic=session.topic,
+            llm_model=session.llm_model,
+            llm_provider=session.llm_provider,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            last_message_at=session.last_message_at,
+            is_archived=session.is_archived,
+            article_title=None,
+            article_url=None,
+            article_summary=None,
+            article_source=None,
+            has_pending_message=True,
+            is_favorite=False,
+            has_messages=True,
+            last_message_preview=None,
+            last_message_role=None,
+        ),
+        user_message=ChatMessageDto(
+            id=db_message.id,
+            session_id=session.id,
+            role=ChatMessageRole.USER,
+            content=prompt,
+            timestamp=db_message.created_at,
+            status=MessageProcessingStatusDto.PROCESSING,
+        ),
+        message_id=db_message.id,
+        status=MessageProcessingStatusDto.PROCESSING,
+    )
 
 
 @router.post(

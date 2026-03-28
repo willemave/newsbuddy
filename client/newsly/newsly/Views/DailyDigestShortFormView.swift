@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct DailyDigestShortFormView: View {
     @ObservedObject var viewModel: DailyDigestListViewModel
@@ -11,11 +12,22 @@ struct DailyDigestShortFormView: View {
     @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
     @State private var loadingNarrationTargets: Set<NarrationTarget> = []
     @State private var activeAlert: ViewAlert?
+    @State private var selectedBulletSheet: SelectedBulletSheet?
 
     private struct ViewAlert: Identifiable {
         let id = UUID()
         let title: String
         let message: String
+    }
+
+    private struct SelectedBulletSheet: Identifiable {
+        let digest: DailyNewsDigest
+        let bullet: DailyNewsDigestBulletDetail
+        let bulletIndex: Int
+
+        var id: String {
+            "\(digest.id):\(bulletIndex)"
+        }
     }
 
     var body: some View {
@@ -57,14 +69,19 @@ struct DailyDigestShortFormView: View {
                                 isToday: isToday,
                                 isSpeaking: isNarrationActive(for: digest),
                                 isLoadingVoice: isNarrationLoading(for: digest),
-                                isStartingDigDeeper: viewModel.isStartingDigDeeperChat(for: digest.id),
                                 selectedVoicePlaybackSpeedTitle: narrationPlaybackService.playbackSpeedTitle,
                                 onToggleRead: { toggleRead(for: digest) },
                                 onVoiceSummary: { handleVoiceSummary(for: digest) },
                                 onSelectVoicePlaybackSpeed: { option in
                                     handleVoiceSummary(for: digest, rate: option.rate)
                                 },
-                                onDigDeeper: { handleDigDeeper(for: digest) }
+                                onLongPressBullet: { bulletIndex, bullet in
+                                    handleBulletLongPress(
+                                        digest: digest,
+                                        bullet: bullet,
+                                        bulletIndex: bulletIndex
+                                    )
+                                }
                             )
                             .onAppear {
                                 if digest.id == viewModel.currentItems().last?.id {
@@ -99,6 +116,19 @@ struct DailyDigestShortFormView: View {
                 title: Text(alert.title),
                 message: Text(alert.message),
                 dismissButton: .cancel(Text("OK"))
+            )
+        }
+        .sheet(item: $selectedBulletSheet) { selection in
+            DailyDigestBulletDetailSheet(
+                digest: selection.digest,
+                bullet: selection.bullet,
+                shareText: bulletShareText(for: selection.bullet),
+                isStartingDigDeeper: viewModel.isStartingDigDeeperChat(
+                    digestId: selection.digest.id,
+                    bulletIndex: selection.bulletIndex
+                ),
+                onCopy: { handleCopyBullet(selection) },
+                onDigDeeper: { handleBulletDigDeeper(selection) }
             )
         }
     }
@@ -161,21 +191,57 @@ struct DailyDigestShortFormView: View {
         loadingNarrationTargets.contains(narrationTarget(for: digest))
     }
 
-    private func handleDigDeeper(for digest: DailyNewsDigest) {
-        guard !viewModel.isStartingDigDeeperChat(for: digest.id) else { return }
+    private func handleBulletLongPress(
+        digest: DailyNewsDigest,
+        bullet: DailyNewsDigestBulletDetail,
+        bulletIndex: Int
+    ) {
+        selectedBulletSheet = SelectedBulletSheet(
+            digest: digest,
+            bullet: bullet,
+            bulletIndex: bulletIndex
+        )
+    }
 
+    private func handleBulletDigDeeper(_ selection: SelectedBulletSheet) {
+        guard !viewModel.isStartingDigDeeperChat(
+            digestId: selection.digest.id,
+            bulletIndex: selection.bulletIndex
+        ) else { return }
         Task { @MainActor in
             do {
-                let route = try await viewModel.startDigDeeperChat(id: digest.id)
+                let route = try await viewModel.startBulletDigDeeperChat(
+                    digestId: selection.digest.id,
+                    bulletIndex: selection.bulletIndex
+                )
+                selectedBulletSheet = nil
                 onOpenChatSession(route)
             } catch {
                 activeAlert = ViewAlert(
                     title: "Dig Deeper",
-                    message: viewModel.digDeeperError(for: digest.id) ?? error.localizedDescription
+                    message: viewModel.digDeeperError(
+                        digestId: selection.digest.id,
+                        bulletIndex: selection.bulletIndex
+                    ) ?? error.localizedDescription
                 )
-                viewModel.clearDigDeeperError(for: digest.id)
+                viewModel.clearDigDeeperError(
+                    digestId: selection.digest.id,
+                    bulletIndex: selection.bulletIndex
+                )
             }
         }
+    }
+
+    private func handleCopyBullet(_ selection: SelectedBulletSheet) {
+        UIPasteboard.general.string = bulletShareText(for: selection.bullet)
+    }
+
+    private func bulletShareText(for bullet: DailyNewsDigestBulletDetail) -> String {
+        let urls = bullet.citations.compactMap(\.url)
+        if urls.isEmpty {
+            return bullet.cleanedText
+        }
+        return ([bullet.cleanedText] + urls).joined(separator: "\n\n")
     }
 }
 
@@ -186,12 +252,11 @@ private struct DailyDigestCard: View {
     let isToday: Bool
     let isSpeaking: Bool
     let isLoadingVoice: Bool
-    let isStartingDigDeeper: Bool
     let selectedVoicePlaybackSpeedTitle: String
     let onToggleRead: () -> Void
     let onVoiceSummary: () -> Void
     let onSelectVoicePlaybackSpeed: (NarrationPlaybackSpeedOption) -> Void
-    let onDigDeeper: () -> Void
+    let onLongPressBullet: (Int, DailyNewsDigestBulletDetail) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -227,7 +292,7 @@ private struct DailyDigestCard: View {
             }
 
             // Key points
-            if digest.cleanedKeyPoints.isEmpty {
+            if digest.displayBulletDetails.isEmpty {
                 Text(digest.cleanedSummary.isEmpty ? "Summary unavailable." : digest.cleanedSummary)
                     .font(.terracottaHeadlineSmall)
                     .foregroundStyle(digest.isRead ? Color.onSurfaceSecondary : Color.onSurface)
@@ -235,17 +300,12 @@ private struct DailyDigestCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(digest.cleanedKeyPoints.enumerated()), id: \.offset) { _, point in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("–")
-                                .font(.terracottaHeadlineSmall)
-                                .foregroundStyle(Color.onSurfaceSecondary)
-                            Text(point)
-                                .font(.terracottaHeadlineSmall)
-                                .foregroundStyle(digest.isRead ? Color.onSurfaceSecondary : Color.onSurface)
-                                .lineSpacing(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                    ForEach(Array(digest.displayBulletDetails.enumerated()), id: \.offset) { index, bullet in
+                        DigestBulletRow(
+                            bullet: bullet,
+                            isRead: digest.isRead,
+                            onLongPress: { onLongPressBullet(index, bullet) }
+                        )
                     }
                 }
             }
@@ -307,23 +367,6 @@ private struct DailyDigestCard: View {
                         }
                     }
                 }
-
-                if digest.showsDigDeeperAction {
-                    Button(action: onDigDeeper) {
-                        if isStartingDigDeeper {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                                .frame(width: 16, height: 16)
-                        } else {
-                            Label("Dig Deeper", systemImage: "brain.head.profile")
-                                .font(.terracottaBodySmall)
-                                .foregroundStyle(Color.onSurfaceSecondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isStartingDigDeeper)
-                    .padding(.leading, 16)
-                }
             }
         }
     }
@@ -345,5 +388,162 @@ private struct DailyDigestCard: View {
 
     private var voiceSummaryButtonTitle: String {
         isSpeaking ? "Stop" : "Listen \(selectedVoicePlaybackSpeedTitle)"
+    }
+}
+
+private struct DigestBulletRow: View {
+    let bullet: DailyNewsDigestBulletDetail
+    let isRead: Bool
+    let onLongPress: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("–")
+                .font(.terracottaHeadlineSmall)
+                .foregroundStyle(Color.onSurfaceSecondary)
+
+            bulletText
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .contentShape(Rectangle())
+        .onLongPressGesture(perform: onLongPress)
+    }
+
+    private var bulletText: Text {
+        let baseText = Text(bullet.digestPreviewText)
+            .font(.terracottaHeadlineSmall)
+            .foregroundStyle(isRead ? Color.onSurfaceSecondary : Color.onSurface)
+
+        guard bullet.sourceCount > 0 else {
+            return baseText
+        }
+
+        let suffix = Text(" \(bullet.sourceCount) \(bullet.sourceCount == 1 ? "source" : "sources")")
+            .font(.terracottaBodySmall)
+            .foregroundStyle(Color.onSurfaceSecondary)
+
+        return baseText + suffix
+    }
+}
+
+private struct DailyDigestBulletDetailSheet: View {
+    let digest: DailyNewsDigest
+    let bullet: DailyNewsDigestBulletDetail
+    let shareText: String
+    let isStartingDigDeeper: Bool
+    let onCopy: () -> Void
+    let onDigDeeper: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var shareContent: ShareContent?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text(bullet.cleanedText)
+                        .font(.terracottaHeadlineLarge)
+                        .foregroundStyle(Color.onSurface)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !bullet.cleanedCommentQuotes.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Comments")
+                                .font(.terracottaCategoryPill)
+                                .foregroundStyle(Color.onSurfaceSecondary)
+
+                            ForEach(Array(bullet.cleanedCommentQuotes.enumerated()), id: \.offset) { _, quote in
+                                Text(quote)
+                                    .font(.terracottaBodyMedium)
+                                    .foregroundStyle(Color.onSurfaceSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+
+                    if !bullet.citations.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Sources")
+                                .font(.terracottaCategoryPill)
+                                .foregroundStyle(Color.onSurfaceSecondary)
+
+                            ForEach(bullet.citations) { citation in
+                                if let urlString = citation.url, let url = URL(string: urlString) {
+                                    Link(destination: url) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(citation.label ?? citation.title)
+                                                .font(.terracottaBodyMedium)
+                                                .foregroundStyle(Color.terracottaPrimary)
+                                            if citation.label != nil {
+                                                Text(citation.title)
+                                                    .font(.terracottaBodySmall)
+                                                    .foregroundStyle(Color.onSurfaceSecondary)
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                } else {
+                                    Text(citation.title)
+                                        .font(.terracottaBodyMedium)
+                                        .foregroundStyle(Color.onSurface)
+                                }
+                            }
+                        }
+                    }
+
+                    VStack(spacing: 12) {
+                        Button(action: onDigDeeper) {
+                            HStack {
+                                if isStartingDigDeeper {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "brain.head.profile")
+                                }
+                                Text("Dig Deeper")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isStartingDigDeeper)
+
+                        HStack(spacing: 12) {
+                            Button(action: onCopy) {
+                                Label("Copy", systemImage: "doc.on.doc")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button {
+                                shareContent = ShareContent(
+                                    messageContent: shareText,
+                                    articleTitle: nil,
+                                    articleUrl: nil
+                                )
+                            } label: {
+                                Label("Share", systemImage: "square.and.arrow.up")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+                .padding(Spacing.screenHorizontal)
+                .padding(.vertical, 20)
+            }
+            .navigationTitle(digest.displayDateLabel)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .sheet(item: $shareContent) { content in
+                ShareSheet(content: content)
+            }
+        }
     }
 }

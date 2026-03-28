@@ -5,6 +5,74 @@
 
 import Foundation
 
+struct DailyNewsDigestCitation: Codable, Identifiable {
+    let contentId: Int
+    let label: String?
+    let title: String
+    let url: String?
+
+    enum CodingKeys: String, CodingKey {
+        case contentId = "content_id"
+        case label
+        case title
+        case url
+    }
+
+    var id: String {
+        "\(contentId):\(url ?? title)"
+    }
+}
+
+struct DailyNewsDigestBulletDetail: Codable, Identifiable {
+    let text: String
+    let sourceCount: Int
+    let citations: [DailyNewsDigestCitation]
+    let commentQuotes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case text
+        case sourceCount = "source_count"
+        case citations
+        case commentQuotes = "comment_quotes"
+    }
+
+    var id: String {
+        text
+    }
+
+    var cleanedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var digestPreviewText: String {
+        var preview = cleanedText
+
+        for quote in cleanedCommentQuotes where !quote.isEmpty {
+            let suffixes = [
+                " \"\(quote)\"",
+                " “\(quote)”",
+                " '\(quote)'",
+                " ‘\(quote)’",
+                " \(quote)"
+            ]
+
+            for suffix in suffixes where preview.hasSuffix(suffix) {
+                preview.removeLast(suffix.count)
+                preview = preview.trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+        }
+
+        return preview
+    }
+
+    var cleanedCommentQuotes: [String] {
+        commentQuotes
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+}
+
 struct DailyNewsDigest: Codable, Identifiable {
     let id: Int
     let localDate: String
@@ -12,6 +80,7 @@ struct DailyNewsDigest: Codable, Identifiable {
     let title: String
     let summary: String
     let keyPoints: [String]
+    let bulletDetails: [DailyNewsDigestBulletDetail]
     let sourceCount: Int
     let sourceContentIds: [Int]
     let sourceLabels: [String]
@@ -27,6 +96,7 @@ struct DailyNewsDigest: Codable, Identifiable {
         case title
         case summary
         case keyPoints = "key_points"
+        case bulletDetails = "bullet_details"
         case sourceCount = "source_count"
         case sourceContentIds = "source_content_ids"
         case sourceLabels = "source_labels"
@@ -105,12 +175,26 @@ struct DailyNewsDigest: Codable, Identifiable {
         keyPoints.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
+    var displayBulletDetails: [DailyNewsDigestBulletDetail] {
+        if !bulletDetails.isEmpty {
+            return bulletDetails.filter { !$0.cleanedText.isEmpty }
+        }
+        return cleanedKeyPoints.map {
+            DailyNewsDigestBulletDetail(
+                text: $0,
+                sourceCount: 0,
+                citations: [],
+                commentQuotes: []
+            )
+        }
+    }
+
     var cleanedSourceLabels: [String] {
         sourceLabels.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
     var showsDigDeeperAction: Bool {
-        sourceCount > 0 && (!cleanedKeyPoints.isEmpty || !cleanedSummary.isEmpty)
+        !displayBulletDetails.isEmpty
     }
 }
 

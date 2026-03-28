@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
@@ -45,6 +46,43 @@ STABLE_DAILY_NEWS_DIGEST_MODEL = "google-gla:gemini-flash-latest"
 MAX_COMMENT_QUOTES_PER_SOURCE = 2
 MIN_COMMENT_QUOTE_CHARS = 40
 MAX_COMMENT_QUOTE_CHARS = 220
+MATCH_TOKEN_PATTERN = re.compile(r"[a-z0-9]{3,}")
+BROKEN_BULLET_JSON_TRAILER_PATTERN = re.compile(
+    r'^(?P<text>.*?)(?:(?:\\?"+)?\},\s*\{?\s*"?(?:source_indexes|text)"?\s*:.*)$',
+    re.IGNORECASE,
+)
+MATCH_STOPWORDS = {
+    "about",
+    "after",
+    "against",
+    "along",
+    "also",
+    "amid",
+    "been",
+    "between",
+    "could",
+    "daily",
+    "digest",
+    "from",
+    "have",
+    "into",
+    "over",
+    "said",
+    "than",
+    "that",
+    "their",
+    "them",
+    "they",
+    "this",
+    "through",
+    "under",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "with",
+}
 
 
 @dataclass(frozen=True)
@@ -54,6 +92,17 @@ class DailyDigestSourceItem:
     content_id: int
     title: str
     key_points: list[str]
+    comment_quotes: list[str]
+    source_url: str | None = None
+    source_label: str | None = None
+
+
+@dataclass(frozen=True)
+class DailyDigestBulletDetail:
+    """Stored or derived per-bullet metadata for one digest."""
+
+    text: str
+    source_content_ids: list[int]
     comment_quotes: list[str]
 
 
@@ -179,6 +228,48 @@ def _extract_source_title(content: Content, metadata: dict[str, Any]) -> str:
     return f"News item #{content.id}"
 
 
+def resolve_digest_source_label(content: Content) -> str | None:
+    """Resolve a human-readable label for one digest source."""
+    metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
+    if content.platform == "twitter":
+        username = metadata.get("tweet_author_username")
+        if isinstance(username, str) and username.strip():
+            return f"@{username.strip().lstrip('@')}"
+        source_label = metadata.get("source_label")
+        if isinstance(source_label, str) and source_label.strip():
+            return source_label.strip()
+        return "X"
+    if content.platform == "hackernews":
+        return "Hacker News"
+    if content.platform == "techmeme":
+        return "Techmeme"
+    if content.platform == "reddit":
+        return "Reddit"
+
+    source_label = metadata.get("source_label")
+    if isinstance(source_label, str) and source_label.strip():
+        return source_label.strip()
+    if isinstance(content.source, str) and content.source.strip():
+        return content.source.strip()
+    if isinstance(content.platform, str) and content.platform.strip():
+        return content.platform.strip().replace("_", " ").title()
+    return None
+
+
+def resolve_digest_source_url(content: Content) -> str | None:
+    """Resolve the most useful outward citation URL for one digest source."""
+    metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
+    candidates = [
+        content.source_url,
+        metadata.get("discussion_url"),
+        content.url,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
 def _truncate_comment_quote(text: str, max_chars: int = MAX_COMMENT_QUOTE_CHARS) -> str:
     """Normalize and truncate one discussion quote."""
     normalized = " ".join(text.split()).strip()
@@ -245,6 +336,270 @@ def _extract_discussion_comment_quotes(discussion_data: dict[str, Any]) -> list[
 
     scored_quotes.sort(reverse=True)
     return [quote for _, _, quote in scored_quotes[:MAX_COMMENT_QUOTES_PER_SOURCE]]
+
+
+def _build_daily_digest_source_item(
+    content: Content,
+    discussion: ContentDiscussion | None = None,
+) -> DailyDigestSourceItem:
+    """Build the normalized source payload used by digest generation and API responses."""
+    metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
+    discussion_data = (
+        discussion.discussion_data
+        if discussion is not None and isinstance(discussion.discussion_data, dict)
+        else {}
+    )
+    return DailyDigestSourceItem(
+        content_id=content.id,
+        title=_extract_source_title(content, metadata),
+        key_points=_extract_summary_points(metadata),
+        comment_quotes=_extract_discussion_comment_quotes(discussion_data),
+        source_url=resolve_digest_source_url(content),
+        source_label=resolve_digest_source_label(content),
+    )
+
+
+def load_daily_digest_source_items(
+    db: Session,
+    *,
+    content_ids: list[int],
+) -> dict[int, DailyDigestSourceItem]:
+    """Load normalized digest source items keyed by content ID."""
+    normalized_ids = [int(content_id) for content_id in content_ids if isinstance(content_id, int)]
+    if not normalized_ids:
+        return {}
+
+    contents = db.query(Content).filter(Content.id.in_(normalized_ids)).all()
+    discussions = (
+        db.query(ContentDiscussion)
+        .filter(ContentDiscussion.content_id.in_(normalized_ids))
+        .all()
+    )
+    discussions_by_content_id = {
+        row.content_id: row for row in discussions if isinstance(row.content_id, int)
+    }
+    return {
+        content.id: _build_daily_digest_source_item(
+            content,
+            discussions_by_content_id.get(content.id),
+        )
+        for content in contents
+        if isinstance(content.id, int)
+    }
+
+
+def _normalize_bullet_detail_text(value: object) -> str | None:
+    """Normalize one bullet text string for storage and responses."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    text = text.replace("\\n", " ")
+    text = text.replace('\\"', '"').replace("\\'", "'")
+
+    broken_json_match = BROKEN_BULLET_JSON_TRAILER_PATTERN.match(text)
+    if broken_json_match is not None:
+        text = broken_json_match.group("text").strip()
+
+    text = re.sub(r"\s+", " ", text).strip()
+    if text.count('"') % 2 == 1:
+        text = f'{text}"'
+    return text or None
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    """Return ordered unique strings."""
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = value.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        deduped.append(cleaned)
+    return deduped
+
+
+def _serialize_daily_digest_bullet_details(
+    bullets: list[DailyDigestBulletDetail],
+) -> list[dict[str, Any]]:
+    """Serialize normalized bullet details for JSON storage."""
+    payload: list[dict[str, Any]] = []
+    for bullet in bullets:
+        text = _normalize_bullet_detail_text(bullet.text)
+        if text is None:
+            continue
+        source_content_ids = [
+            int(content_id)
+            for content_id in bullet.source_content_ids
+            if isinstance(content_id, int)
+        ]
+        payload.append(
+            {
+                "text": text,
+                "source_content_ids": source_content_ids,
+                "comment_quotes": _dedupe_preserving_order(list(bullet.comment_quotes)),
+            }
+        )
+    return payload[:MAX_DAILY_DIGEST_BULLETS]
+
+
+def normalize_daily_digest_bullet_details(raw_bullets: object) -> list[DailyDigestBulletDetail]:
+    """Normalize stored digest bullet detail payloads."""
+    if not isinstance(raw_bullets, list):
+        return []
+
+    normalized: list[DailyDigestBulletDetail] = []
+    for raw_bullet in raw_bullets:
+        if not isinstance(raw_bullet, dict):
+            continue
+        text = _normalize_bullet_detail_text(raw_bullet.get("text"))
+        if text is None:
+            continue
+        raw_source_ids = raw_bullet.get("source_content_ids")
+        source_content_ids = (
+            [int(content_id) for content_id in raw_source_ids if isinstance(content_id, int)]
+            if isinstance(raw_source_ids, list)
+            else []
+        )
+        raw_quotes = raw_bullet.get("comment_quotes")
+        comment_quotes = (
+            [quote for quote in raw_quotes if isinstance(quote, str)]
+            if isinstance(raw_quotes, list)
+            else []
+        )
+        normalized.append(
+            DailyDigestBulletDetail(
+                text=text,
+                source_content_ids=source_content_ids,
+                comment_quotes=_dedupe_preserving_order(comment_quotes),
+            )
+        )
+    return normalized[:MAX_DAILY_DIGEST_BULLETS]
+
+
+def _tokenize_match_text(text: str) -> set[str]:
+    """Extract normalized match tokens from free text."""
+    return {
+        token
+        for token in MATCH_TOKEN_PATTERN.findall(text.lower())
+        if token not in MATCH_STOPWORDS and (len(token) >= 4 or token.isdigit())
+    }
+
+
+def _normalize_match_text(text: str) -> str:
+    """Normalize free text for exact bullet/source comparisons."""
+    return " ".join(text.lower().split()).strip()
+
+
+def _source_matches_bullet_text(bullet_text: str, source: DailyDigestSourceItem) -> bool:
+    """Return True when one source confidently supports a digest bullet."""
+    normalized_bullet_text = _normalize_match_text(bullet_text)
+    if normalized_bullet_text:
+        comparison_texts = [source.title, *source.key_points, *source.comment_quotes]
+        if any(
+            normalized_bullet_text == _normalize_match_text(candidate)
+            for candidate in comparison_texts
+        ):
+            return True
+
+    bullet_tokens = _tokenize_match_text(bullet_text)
+    if len(bullet_tokens) < 2:
+        return False
+
+    title_overlap = len(bullet_tokens & _tokenize_match_text(source.title))
+    if title_overlap >= 2:
+        return True
+
+    max_point_overlap = max(
+        (len(bullet_tokens & _tokenize_match_text(point)) for point in source.key_points),
+        default=0,
+    )
+    if max_point_overlap >= 2:
+        return True
+
+    max_quote_overlap = max(
+        (len(bullet_tokens & _tokenize_match_text(quote)) for quote in source.comment_quotes),
+        default=0,
+    )
+    return (title_overlap >= 1 and max_point_overlap >= 1) or (
+        title_overlap >= 1 and max_quote_overlap >= 1
+    )
+
+
+def _collect_bullet_comment_quotes(
+    *,
+    source_content_ids: list[int],
+    source_items_by_content_id: dict[int, DailyDigestSourceItem],
+) -> list[str]:
+    """Collect ordered unique comment quotes for a set of matched source IDs."""
+    return _dedupe_preserving_order(
+        [
+            quote
+            for source_id in source_content_ids
+            for source in [source_items_by_content_id.get(source_id)]
+            if source is not None
+            for quote in source.comment_quotes
+        ]
+    )
+
+
+def build_daily_digest_fallback_bullet_details(
+    *,
+    bullet_texts: list[str],
+    source_items_by_content_id: dict[int, DailyDigestSourceItem],
+) -> list[DailyDigestBulletDetail]:
+    """Build derived bullet details when no structured payload is stored."""
+    normalized_bullets: list[DailyDigestBulletDetail] = []
+    ordered_sources = list(source_items_by_content_id.values())
+    for bullet_text in bullet_texts:
+        text = _normalize_bullet_detail_text(bullet_text)
+        if text is None:
+            continue
+        matched_source_ids = [
+            source.content_id
+            for source in ordered_sources
+            if _source_matches_bullet_text(text, source)
+        ]
+        comment_quotes = _collect_bullet_comment_quotes(
+            source_content_ids=matched_source_ids,
+            source_items_by_content_id=source_items_by_content_id,
+        )
+        normalized_bullets.append(
+            DailyDigestBulletDetail(
+                text=text,
+                source_content_ids=matched_source_ids,
+                comment_quotes=comment_quotes,
+            )
+        )
+    return normalized_bullets[:MAX_DAILY_DIGEST_BULLETS]
+
+
+def resolve_daily_digest_bullet_details(
+    digest: DailyNewsDigest,
+    *,
+    source_items_by_content_id: dict[int, DailyDigestSourceItem] | None = None,
+) -> list[DailyDigestBulletDetail]:
+    """Return normalized stored bullet details or derived fallback bullets."""
+    stored_bullets = normalize_daily_digest_bullet_details(getattr(digest, "bullet_details", []))
+    if stored_bullets:
+        return stored_bullets
+
+    raw_points = digest.key_points if isinstance(digest.key_points, list) else []
+    bullet_texts = [point for point in raw_points if isinstance(point, str)]
+    if not bullet_texts:
+        return []
+
+    if source_items_by_content_id is None:
+        return [
+            DailyDigestBulletDetail(text=text.strip(), source_content_ids=[], comment_quotes=[])
+            for text in bullet_texts
+            if isinstance(text, str) and text.strip()
+        ][:MAX_DAILY_DIGEST_BULLETS]
+
+    return build_daily_digest_fallback_bullet_details(
+        bullet_texts=bullet_texts,
+        source_items_by_content_id=source_items_by_content_id,
+    )
 
 
 
@@ -400,40 +755,16 @@ def collect_daily_news_sources(
         query = query.limit(max_items)
 
     rows = query.all()
-    content_ids = [row.id for row in rows if getattr(row, "id", None) is not None]
-    discussions_by_content_id: dict[int, ContentDiscussion] = {}
-    if content_ids:
-        discussion_rows = (
-            db.query(ContentDiscussion)
-            .filter(ContentDiscussion.content_id.in_(content_ids))
-            .all()
+    content_ids = [row.id for row in rows if isinstance(getattr(row, "id", None), int)]
+    source_items_by_content_id = load_daily_digest_source_items(db, content_ids=content_ids)
+    return [
+        source_items_by_content_id[content.id]
+        for content in rows
+        if (
+            isinstance(getattr(content, "id", None), int)
+            and content.id in source_items_by_content_id
         )
-        discussions_by_content_id = {
-            row.content_id: row for row in discussion_rows if isinstance(row.content_id, int)
-        }
-
-    sources: list[DailyDigestSourceItem] = []
-    for content in rows:
-        metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
-        title = _extract_source_title(content, metadata)
-        points = _extract_summary_points(metadata)
-        discussion = discussions_by_content_id.get(content.id)
-        discussion_data = (
-            discussion.discussion_data
-            if discussion is not None and isinstance(discussion.discussion_data, dict)
-            else {}
-        )
-        comment_quotes = _extract_discussion_comment_quotes(discussion_data)
-        sources.append(
-            DailyDigestSourceItem(
-                content_id=content.id,
-                title=title,
-                key_points=points,
-                comment_quotes=comment_quotes,
-            )
-        )
-
-    return sources
+    ]
 
 
 def _estimate_tokens(text: str) -> int:
@@ -507,6 +838,8 @@ def _build_rollup_prompt_input(local_date: date, sources: list[DailyDigestSource
         f"Digest date: {local_date.isoformat()}",
         "",
         "Synthesize a daily news rollup from the following source stories and comment quotes:",
+        "Return concise daily bullets in the `bullets` field.",
+        "Each bullet must include `source_indexes` pointing to the supporting `Story N` items.",
     ]
 
     if not sources:
@@ -526,6 +859,61 @@ def _build_rollup_prompt_input(local_date: date, sources: list[DailyDigestSource
     return "\n".join(lines)
 
 
+def _build_rollup_bullet_details(
+    *,
+    summary: DailyNewsRollupSummary,
+    prompt_sources: list[DailyDigestSourceItem],
+    all_sources: list[DailyDigestSourceItem],
+) -> list[DailyDigestBulletDetail]:
+    """Build normalized stored bullet details from the LLM output plus source matching."""
+    all_sources_by_content_id = {source.content_id: source for source in all_sources}
+    raw_bullets: list[tuple[str, list[int]]] = []
+
+    if summary.bullets:
+        for bullet in summary.bullets:
+            text = _normalize_bullet_detail_text(bullet.text)
+            if text is None:
+                continue
+            source_indexes = [
+                source_index
+                for source_index in bullet.source_indexes
+                if isinstance(source_index, int)
+            ]
+            raw_bullets.append((text, source_indexes))
+    else:
+        raw_bullets.extend(
+            (text, [])
+            for text in _clean_rollup_key_points(summary.key_points)
+        )
+
+    normalized: list[DailyDigestBulletDetail] = []
+    for text, source_indexes in raw_bullets:
+        referenced_source_ids = {
+            prompt_sources[source_index - 1].content_id
+            for source_index in source_indexes
+            if 1 <= source_index <= len(prompt_sources)
+        }
+        matched_source_ids = {
+            source.content_id
+            for source in all_sources
+            if _source_matches_bullet_text(text, source)
+        }
+        resolved_source_ids = sorted(referenced_source_ids | matched_source_ids)
+        comment_quotes = _collect_bullet_comment_quotes(
+            source_content_ids=resolved_source_ids,
+            source_items_by_content_id=all_sources_by_content_id,
+        )
+        normalized.append(
+            DailyDigestBulletDetail(
+                text=text,
+                source_content_ids=resolved_source_ids,
+                comment_quotes=comment_quotes,
+            )
+        )
+
+    return normalized[:MAX_DAILY_DIGEST_BULLETS]
+
+
 
 def _synthesize_daily_rollup(
     *,
@@ -533,7 +921,7 @@ def _synthesize_daily_rollup(
     local_date: date,
     sources: list[DailyDigestSourceItem],
     model_spec: str = DAILY_NEWS_DIGEST_MODEL,
-) -> tuple[DailyNewsRollupSummary, str]:
+) -> tuple[DailyNewsRollupSummary, str, list[DailyDigestSourceItem]]:
     """Generate a daily news digest with Google Flash.
 
     Args:
@@ -542,7 +930,7 @@ def _synthesize_daily_rollup(
         sources: Source rows.
 
     Returns:
-        Tuple ``(rollup_summary, resolved_model_spec)``.
+        Tuple ``(rollup_summary, resolved_model_spec, prompt_sources)``.
 
     Raises:
         ValueError: When the summarizer returns an unexpected output.
@@ -574,7 +962,7 @@ def _synthesize_daily_rollup(
     )
     if not isinstance(summary, DailyNewsRollupSummary):
         raise ValueError("Daily digest synthesis returned unexpected summary payload")
-    return summary, resolved_model
+    return summary, resolved_model, prompt_sources
 
 
 def _clean_rollup_key_points(raw_points: list[str]) -> list[str]:
@@ -601,7 +989,9 @@ def _validate_rollup_summary(
     if not summary_text:
         raise ValueError("Daily digest summary was empty")
 
-    key_points = _clean_rollup_key_points(summary.key_points)
+    key_points = _clean_rollup_key_points(
+        [bullet.text for bullet in summary.bullets] if summary.bullets else summary.key_points
+    )
     if (
         source_count >= HIGH_VOLUME_DIGEST_SOURCE_COUNT
         and len(key_points) < MIN_HIGH_VOLUME_DIGEST_BULLETS
@@ -689,6 +1079,7 @@ def _digest_payload_changed(
     title: str,
     summary_text: str,
     key_points: list[str],
+    bullet_details: list[dict[str, Any]],
     source_content_ids: list[int],
     source_count: int,
 ) -> bool:
@@ -703,11 +1094,15 @@ def _digest_payload_changed(
         if isinstance(digest.source_content_ids, list)
         else []
     )
+    existing_bullet_details = _serialize_daily_digest_bullet_details(
+        normalize_daily_digest_bullet_details(getattr(digest, "bullet_details", []))
+    )
     return any(
         [
             digest.title != title,
             digest.summary != summary_text,
             existing_key_points != key_points,
+            existing_bullet_details != bullet_details,
             existing_source_ids != source_content_ids,
             int(digest.source_count or 0) != source_count,
         ]
@@ -800,8 +1195,9 @@ def upsert_daily_news_digest_for_user_day(
         )
 
     effective_summarizer = summarizer or get_content_summarizer()
+    prompt_sources: list[DailyDigestSourceItem] = []
     if sources:
-        summary, resolved_model = _synthesize_daily_rollup(
+        summary, resolved_model, prompt_sources = _synthesize_daily_rollup(
             summarizer=effective_summarizer,
             local_date=local_date,
             sources=sources,
@@ -838,7 +1234,7 @@ def upsert_daily_news_digest_for_user_day(
                     },
                 },
             )
-            summary, resolved_model = _synthesize_daily_rollup(
+            summary, resolved_model, prompt_sources = _synthesize_daily_rollup(
                 summarizer=effective_summarizer,
                 local_date=local_date,
                 sources=sources,
@@ -848,8 +1244,16 @@ def upsert_daily_news_digest_for_user_day(
                 summary,
                 source_count=len(sources),
             )
+        bullet_details = _serialize_daily_digest_bullet_details(
+            _build_rollup_bullet_details(
+                summary=summary,
+                prompt_sources=prompt_sources,
+                all_sources=sources,
+            )
+        )
     else:
         key_points = []
+        bullet_details = []
         summary_text = _daily_digest_summary_text(
             key_points=key_points,
             fallback_text=summary.summary,
@@ -862,6 +1266,7 @@ def upsert_daily_news_digest_for_user_day(
         title=title[:240],
         summary_text=summary_text,
         key_points=key_points,
+        bullet_details=bullet_details,
         source_content_ids=source_content_ids,
         source_count=len(sources),
     )
@@ -869,6 +1274,7 @@ def upsert_daily_news_digest_for_user_day(
     digest.title = title[:240]
     digest.summary = summary_text
     digest.key_points = key_points
+    digest.bullet_details = bullet_details
     digest.source_content_ids = source_content_ids
     digest.source_count = len(sources)
     digest.llm_model = resolved_model

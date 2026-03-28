@@ -231,6 +231,7 @@ class DailyNewsDigest(Base):
     title = Column(String(240), nullable=False)
     summary = Column(Text, nullable=False)
     key_points = Column(JSON, default=list, nullable=False)
+    bullet_details = Column(JSON, default=list, nullable=False)
     source_content_ids = Column(JSON, default=list, nullable=False)
     source_count = Column(Integer, nullable=False, default=0)
     llm_model = Column(String(120), nullable=False)

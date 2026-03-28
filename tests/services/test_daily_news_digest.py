@@ -6,7 +6,7 @@ from datetime import datetime
 from unittest.mock import Mock
 
 from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY, CONTENT_STATUS_DIGEST_SOURCE
-from app.models.metadata import DailyNewsRollupSummary
+from app.models.metadata import DailyNewsRollupBullet, DailyNewsRollupSummary
 from app.models.schema import (
     Content,
     ContentDiscussion,
@@ -23,6 +23,8 @@ from app.services.daily_news_digest import (
     collect_daily_news_sources,
     digest_requires_regeneration,
     enqueue_daily_news_digest_task,
+    normalize_daily_digest_bullet_details,
+    resolve_daily_digest_bullet_details,
     resolve_daily_digest_generation_target,
     upsert_daily_news_digest_for_user_day,
 )
@@ -41,6 +43,24 @@ class _StubSummarizer:
                 "A tight day with continued AI infrastructure demand "
                 "and incremental policy movement."
             ),
+        )
+
+
+class _StructuredBulletSummarizer:
+    def summarize_content(self, *_args, **_kwargs):
+        return DailyNewsRollupSummary(
+            title="Market and policy converged",
+            bullets=[
+                DailyNewsRollupBullet(
+                    text="Chip demand remained elevated across cloud providers.",
+                    source_indexes=[2],
+                ),
+                DailyNewsRollupBullet(
+                    text="Regulators advanced new disclosure requirements.",
+                    source_indexes=[1],
+                ),
+            ],
+            summary="A concise day spanning AI infrastructure demand and policy movement.",
         )
 
 
@@ -176,6 +196,174 @@ def test_upsert_daily_news_digest_for_user_day_builds_row(db_session, test_user)
     assert isinstance(digest.key_points, list)
     assert len(digest.source_content_ids) == 2
     assert digest.llm_model == "google:gemini-3.1-flash-lite-preview"
+    assert digest.bullet_details == [
+        {
+            "text": "Chip demand remained elevated across cloud providers.",
+            "source_content_ids": [],
+            "comment_quotes": [],
+        },
+        {
+            "text": "Regulators advanced new disclosure requirements.",
+            "source_content_ids": [],
+            "comment_quotes": [],
+        },
+    ]
+
+
+def test_upsert_daily_news_digest_for_user_day_persists_structured_bullet_details(
+    db_session,
+    test_user,
+) -> None:
+    first_story = _build_news_content(
+        url="https://example.com/news-1",
+        title="Cloud Chip Demand",
+        created_at=datetime(2026, 2, 28, 9, 0, 0),
+        key_points=["Chip demand remained elevated across cloud providers."],
+    )
+    second_story = _build_news_content(
+        url="https://example.com/news-2",
+        title="Policy Update",
+        created_at=datetime(2026, 2, 28, 10, 0, 0),
+        key_points=["Regulators advanced new disclosure requirements."],
+    )
+    db_session.add_all([first_story, second_story])
+    db_session.commit()
+    db_session.refresh(first_story)
+    db_session.refresh(second_story)
+
+    db_session.add(
+        ContentDiscussion(
+            content_id=second_story.id,
+            platform="hackernews",
+            status="completed",
+            discussion_data={
+                "comments": [
+                    {
+                        "author": "alice",
+                        "text": (
+                            "The disclosure regime will force larger platforms to publish "
+                            "risk assessments and measurable policy updates every quarter."
+                        ),
+                        "depth": 0,
+                    }
+                ]
+            },
+        )
+    )
+    db_session.commit()
+
+    result = upsert_daily_news_digest_for_user_day(
+        db_session,
+        user_id=test_user.id,
+        local_date=datetime(2026, 2, 28).date(),
+        timezone_name="UTC",
+        summarizer=_StructuredBulletSummarizer(),
+    )
+
+    digest = (
+        db_session.query(DailyNewsDigest)
+        .filter(DailyNewsDigest.user_id == test_user.id, DailyNewsDigest.id == result.digest_id)
+        .first()
+    )
+    assert digest is not None
+    assert digest.key_points == [
+        "Chip demand remained elevated across cloud providers.",
+        "Regulators advanced new disclosure requirements.",
+    ]
+    assert digest.bullet_details == [
+        {
+            "text": "Chip demand remained elevated across cloud providers.",
+            "source_content_ids": [first_story.id],
+            "comment_quotes": [],
+        },
+        {
+            "text": "Regulators advanced new disclosure requirements.",
+            "source_content_ids": [second_story.id],
+            "comment_quotes": [
+                (
+                    '"The disclosure regime will force larger platforms to publish '
+                    'risk assessments and measurable policy updates every quarter." - alice'
+                )
+            ],
+        },
+    ]
+
+
+def test_normalize_daily_digest_bullet_details_strips_broken_json_trailer() -> None:
+    normalized = normalize_daily_digest_bullet_details(
+        [
+            {
+                "text": (
+                    'Engineers reduced retrieval latency from 1.4s to 380ms by removing '
+                    'embedding refreshes from the request path. \\n\\"Biggest gain came from '
+                    'deleting work, not optimizing queries.\\""},{source_indexes:[15],text:'
+                ),
+                "source_content_ids": [42],
+                "comment_quotes": [],
+            }
+        ]
+    )
+
+    assert [bullet.text for bullet in normalized] == [
+        'Engineers reduced retrieval latency from 1.4s to 380ms by removing '
+        'embedding refreshes from the request path. "Biggest gain came from deleting '
+        'work, not optimizing queries."'
+    ]
+
+
+def test_resolve_daily_digest_bullet_details_builds_fallback_matches(
+    db_session,
+    test_user,
+) -> None:
+    first_story = _build_news_content(
+        url="https://example.com/news-1",
+        title="Cloud Chip Demand",
+        created_at=datetime(2026, 2, 28, 9, 0, 0),
+        key_points=["Chip demand remained elevated across cloud providers."],
+    )
+    second_story = _build_news_content(
+        url="https://example.com/news-2",
+        title="Policy Update",
+        created_at=datetime(2026, 2, 28, 10, 0, 0),
+        key_points=["Regulators advanced new disclosure requirements."],
+    )
+    db_session.add_all([first_story, second_story])
+    db_session.commit()
+    db_session.refresh(first_story)
+    db_session.refresh(second_story)
+
+    existing_digest = DailyNewsDigest(
+        user_id=test_user.id,
+        local_date=datetime(2026, 2, 28).date(),
+        timezone="UTC",
+        title="Fallback digest",
+        summary="Fallback summary",
+        key_points=[
+            "Chip demand remained elevated across cloud providers.",
+            "Regulators advanced new disclosure requirements.",
+        ],
+        source_content_ids=[first_story.id, second_story.id],
+        source_count=2,
+        llm_model="google:gemini-3.1-flash-lite-preview",
+        generated_at=datetime(2026, 3, 1, 3, 0, 0),
+    )
+    db_session.add(existing_digest)
+    db_session.commit()
+
+    source_items_by_content_id = collect_daily_news_sources(
+        db_session,
+        user_id=test_user.id,
+        local_date=datetime(2026, 2, 28).date(),
+        timezone_name="UTC",
+    )
+    resolved = resolve_daily_digest_bullet_details(
+        existing_digest,
+        source_items_by_content_id={item.content_id: item for item in source_items_by_content_id},
+    )
+
+    assert [bullet.text for bullet in resolved] == existing_digest.key_points
+    assert resolved[0].source_content_ids == [first_story.id]
+    assert resolved[1].source_content_ids == [second_story.id]
 
 
 def test_collect_daily_news_sources_includes_user_digest_only_x_items(

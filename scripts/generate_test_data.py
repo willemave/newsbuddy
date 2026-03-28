@@ -89,7 +89,7 @@ from app.models.metadata import (
     StructuredSummary,
     SummaryTextBullet,
 )
-from app.models.schema import Content, ContentReadStatus, ContentStatusEntry
+from app.models.schema import Content, ContentDiscussion, ContentReadStatus, ContentStatusEntry
 from app.models.user import User
 from app.services.twitter_share import canonical_tweet_url
 
@@ -1255,6 +1255,34 @@ def insert_test_data(
         session.query(ContentReadStatus).filter(
             ContentReadStatus.content_id == content.id
         ).delete(synchronize_session=False)
+
+        metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
+        discussion_url = metadata.get("discussion_url")
+        discussion_comments: list[dict[str, Any]] = []
+        top_comment = metadata.get("top_comment")
+        if isinstance(top_comment, dict) and top_comment.get("text"):
+            discussion_comments.append(top_comment)
+
+        if content.platform == "twitter" and content.status == ContentStatus.COMPLETED.value:
+            discussion_comments.extend(random.sample(DISCUSSION_COMMENTS, k=2))
+
+        if discussion_comments:
+            session.add(
+                ContentDiscussion(
+                    content_id=content.id,
+                    platform=content.platform,
+                    status="completed",
+                    discussion_data={
+                        "mode": "comments",
+                        "source_url": discussion_url,
+                        "comments": discussion_comments,
+                        "compact_comments": discussion_comments,
+                        "discussion_groups": [],
+                        "links": [],
+                        "stats": {"comment_count": len(discussion_comments)},
+                    },
+                )
+            )
 
         if target_status and target_user_id is not None:
             session.add(

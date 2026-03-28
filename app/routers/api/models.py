@@ -152,6 +152,30 @@ class ContentListResponse(BaseModel):
     )
 
 
+class DailyNewsDigestCitationResponse(BaseModel):
+    """Resolved citation metadata for one digest bullet."""
+
+    content_id: int = Field(..., description="Supporting content identifier")
+    label: str | None = Field(None, description="Human-readable source label")
+    title: str = Field(..., description="Supporting item title")
+    url: str | None = Field(None, description="Preferred outward URL for this citation")
+
+
+class DailyNewsDigestBulletDetailResponse(BaseModel):
+    """Resolved per-bullet metadata for one digest card."""
+
+    text: str = Field(..., description="Digest bullet text")
+    source_count: int = Field(..., ge=0, description="Number of linked supporting sources")
+    citations: list[DailyNewsDigestCitationResponse] = Field(
+        default_factory=list,
+        description="Resolved citations supporting this bullet",
+    )
+    comment_quotes: list[str] = Field(
+        default_factory=list,
+        description="Stored discussion comment quotes linked to this bullet",
+    )
+
+
 class DailyNewsDigestResponse(BaseModel):
     """Summary information for one daily news digest card."""
 
@@ -161,6 +185,10 @@ class DailyNewsDigestResponse(BaseModel):
     title: str = Field(..., description="Daily digest headline")
     summary: str = Field(..., description="Succinct daily roll-up summary")
     key_points: list[str] = Field(default_factory=list, description="Optional digest bullet points")
+    bullet_details: list[DailyNewsDigestBulletDetailResponse] = Field(
+        default_factory=list,
+        description="Resolved per-bullet metadata for the digest card",
+    )
     source_count: int = Field(..., ge=0, description="Number of source news items included")
     source_content_ids: list[int] = Field(
         default_factory=list,

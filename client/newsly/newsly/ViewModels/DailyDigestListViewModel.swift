@@ -9,12 +9,17 @@ import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "DailyDigestList")
 
+struct DailyDigestBulletKey: Hashable {
+    let digestId: Int
+    let bulletIndex: Int
+}
+
 @MainActor
 final class DailyDigestListViewModel: ObservableObject {
     @Published private(set) var items: [DailyNewsDigest] = []
     @Published private(set) var state: LoadingState = .idle
-    @Published private(set) var digDeeperLoadingIds: Set<Int> = []
-    @Published private(set) var digDeeperErrors: [Int: String] = [:]
+    @Published private(set) var digDeeperLoadingKeys: Set<DailyDigestBulletKey> = []
+    @Published private(set) var digDeeperErrors: [DailyDigestBulletKey: String] = [:]
 
     let refreshTrigger = PassthroughSubject<Void, Never>()
     let loadMoreTrigger = PassthroughSubject<Void, Never>()
@@ -105,28 +110,35 @@ final class DailyDigestListViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    func isStartingDigDeeperChat(for id: Int) -> Bool {
-        digDeeperLoadingIds.contains(id)
+    func isStartingDigDeeperChat(digestId: Int, bulletIndex: Int) -> Bool {
+        digDeeperLoadingKeys.contains(DailyDigestBulletKey(digestId: digestId, bulletIndex: bulletIndex))
     }
 
-    func digDeeperError(for id: Int) -> String? {
-        digDeeperErrors[id]
+    func digDeeperError(digestId: Int, bulletIndex: Int) -> String? {
+        digDeeperErrors[DailyDigestBulletKey(digestId: digestId, bulletIndex: bulletIndex)]
     }
 
-    func clearDigDeeperError(for id: Int) {
-        digDeeperErrors[id] = nil
+    func clearDigDeeperError(digestId: Int, bulletIndex: Int) {
+        digDeeperErrors[DailyDigestBulletKey(digestId: digestId, bulletIndex: bulletIndex)] = nil
     }
 
-    func startDigDeeperChat(id: Int) async throws -> ChatSessionRoute {
-        digDeeperErrors[id] = nil
-        digDeeperLoadingIds.insert(id)
-        defer { digDeeperLoadingIds.remove(id) }
+    func startBulletDigDeeperChat(
+        digestId: Int,
+        bulletIndex: Int
+    ) async throws -> ChatSessionRoute {
+        let key = DailyDigestBulletKey(digestId: digestId, bulletIndex: bulletIndex)
+        digDeeperErrors[key] = nil
+        digDeeperLoadingKeys.insert(key)
+        defer { digDeeperLoadingKeys.remove(key) }
 
         do {
-            let response = try await repository.startDigDeeperChat(id: id)
+            let response = try await repository.startBulletDigDeeperChat(
+                digestId: digestId,
+                bulletIndex: bulletIndex
+            )
             return ChatSessionRoute(sessionId: response.session.id)
         } catch {
-            digDeeperErrors[id] = error.localizedDescription
+            digDeeperErrors[key] = error.localizedDescription
             throw error
         }
     }

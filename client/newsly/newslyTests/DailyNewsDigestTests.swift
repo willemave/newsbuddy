@@ -22,16 +22,56 @@ final class DailyNewsDigestTests: XCTestCase {
         XCTAssertEqual(digest.cleanedKeyPoints, ["First point", "Second point"])
     }
 
-    func testShowsDigDeeperActionWhenSummaryExistsWithoutBullets() {
+    func testHidesDigDeeperActionWhenSummaryExistsWithoutBullets() {
         let digest = makeDigest(summary: "Summary text.", keyPoints: [], sourceCount: 3)
 
-        XCTAssertTrue(digest.showsDigDeeperAction)
+        XCTAssertFalse(digest.showsDigDeeperAction)
     }
 
     func testHidesDigDeeperActionWithoutSources() {
         let digest = makeDigest(summary: "Summary text.", keyPoints: [], sourceCount: 0)
 
         XCTAssertFalse(digest.showsDigDeeperAction)
+    }
+
+    func testShowsDigDeeperActionWhenBulletDetailsExist() {
+        let digest = makeDigest(
+            summary: "Summary text.",
+            keyPoints: [],
+            bulletDetails: [
+                DailyNewsDigestBulletDetail(
+                    text: " First point ",
+                    sourceCount: 2,
+                    citations: [],
+                    commentQuotes: []
+                )
+            ]
+        )
+
+        XCTAssertTrue(digest.showsDigDeeperAction)
+    }
+
+    func testDisplayBulletDetailsFallsBackToCleanedKeyPoints() {
+        let digest = makeDigest(
+            summary: "Summary text.",
+            keyPoints: [" First point ", "", "Second point "]
+        )
+
+        XCTAssertEqual(digest.displayBulletDetails.map(\.cleanedText), ["First point", "Second point"])
+    }
+
+    func testDigestPreviewTextStripsTrailingCommentQuote() {
+        let bullet = DailyNewsDigestBulletDetail(
+            text: "OpenAI shipped GPT-5 and developers are already testing new workflows. \"Biggest gain came from deleting work, not optimizing queries.\"",
+            sourceCount: 2,
+            citations: [],
+            commentQuotes: ["Biggest gain came from deleting work, not optimizing queries."]
+        )
+
+        XCTAssertEqual(
+            bullet.digestPreviewText,
+            "OpenAI shipped GPT-5 and developers are already testing new workflows."
+        )
     }
 
     func testCleanedSourceLabelsDropsBlankEntries() {
@@ -55,7 +95,8 @@ final class DailyNewsDigestTests: XCTestCase {
         keyPoints: [String],
         sourceCount: Int = 2,
         coverageEndAt: String? = nil,
-        sourceLabels: [String] = []
+        sourceLabels: [String] = [],
+        bulletDetails: [DailyNewsDigestBulletDetail] = []
     ) -> DailyNewsDigest {
         DailyNewsDigest(
             id: 7,
@@ -64,6 +105,7 @@ final class DailyNewsDigestTests: XCTestCase {
             title: "Digest",
             summary: summary,
             keyPoints: keyPoints,
+            bulletDetails: bulletDetails,
             sourceCount: sourceCount,
             sourceContentIds: [11, 12],
             sourceLabels: sourceLabels,

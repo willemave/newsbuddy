@@ -88,7 +88,7 @@ final class DailyDigestDigDeeperTests: XCTestCase {
     }
 
     @MainActor
-    func testDailyDigestListViewModelStartsDigDeeperChatAndTracksLoading() async throws {
+    func testDailyDigestListViewModelStartsBulletDigDeeperChatAndTracksLoading() async throws {
         let repository = FakeDailyNewsDigestRepository(
             startResult: .success(makeStartResponse(sessionId: 42))
         )
@@ -97,21 +97,24 @@ final class DailyDigestDigDeeperTests: XCTestCase {
             unreadCountService: .shared
         )
 
-        let task = Task { try await viewModel.startDigDeeperChat(id: 7) }
+        let task = Task {
+            try await viewModel.startBulletDigDeeperChat(digestId: 7, bulletIndex: 1)
+        }
         await Task.yield()
 
-        XCTAssertTrue(viewModel.isStartingDigDeeperChat(for: 7))
+        XCTAssertTrue(viewModel.isStartingDigDeeperChat(digestId: 7, bulletIndex: 1))
 
         let route = try await task.value
 
-        XCTAssertEqual(repository.startedIds, [7])
+        XCTAssertEqual(repository.startedBullets.map(\.digestId), [7])
+        XCTAssertEqual(repository.startedBullets.map(\.bulletIndex), [1])
         XCTAssertEqual(route.sessionId, 42)
-        XCTAssertFalse(viewModel.isStartingDigDeeperChat(for: 7))
-        XCTAssertNil(viewModel.digDeeperError(for: 7))
+        XCTAssertFalse(viewModel.isStartingDigDeeperChat(digestId: 7, bulletIndex: 1))
+        XCTAssertNil(viewModel.digDeeperError(digestId: 7, bulletIndex: 1))
     }
 
     @MainActor
-    func testDailyDigestListViewModelStoresDigDeeperErrorPerDigest() async {
+    func testDailyDigestListViewModelStoresDigDeeperErrorPerBullet() async {
         let repository = FakeDailyNewsDigestRepository(startResult: .failure(FakeRepositoryError.boom))
         let viewModel = DailyDigestListViewModel(
             repository: repository,
@@ -119,14 +122,14 @@ final class DailyDigestDigDeeperTests: XCTestCase {
         )
 
         do {
-            _ = try await viewModel.startDigDeeperChat(id: 11)
+            _ = try await viewModel.startBulletDigDeeperChat(digestId: 11, bulletIndex: 0)
             XCTFail("Expected dig deeper chat start to fail")
         } catch {
             XCTAssertEqual(error.localizedDescription, "Boom")
         }
 
-        XCTAssertEqual(viewModel.digDeeperError(for: 11), "Boom")
-        XCTAssertFalse(viewModel.isStartingDigDeeperChat(for: 11))
+        XCTAssertEqual(viewModel.digDeeperError(digestId: 11, bulletIndex: 0), "Boom")
+        XCTAssertFalse(viewModel.isStartingDigDeeperChat(digestId: 11, bulletIndex: 0))
     }
 
     private func makeStartResponse(sessionId: Int) -> StartDailyDigestChatResponse {
@@ -174,7 +177,7 @@ private enum FakeRepositoryError: LocalizedError {
 }
 
 private final class FakeDailyNewsDigestRepository: DailyNewsDigestRepositoryType {
-    var startedIds: [Int] = []
+    var startedBullets: [(digestId: Int, bulletIndex: Int)] = []
     let startResult: Result<StartDailyDigestChatResponse, Error>
 
     init(startResult: Result<StartDailyDigestChatResponse, Error>) {
@@ -198,7 +201,16 @@ private final class FakeDailyNewsDigestRepository: DailyNewsDigestRepositoryType
     }
 
     func startDigDeeperChat(id: Int) async throws -> StartDailyDigestChatResponse {
-        startedIds.append(id)
+        startedBullets.append((digestId: id, bulletIndex: -1))
+        try await Task.sleep(nanoseconds: 5_000_000)
+        return try startResult.get()
+    }
+
+    func startBulletDigDeeperChat(
+        digestId: Int,
+        bulletIndex: Int
+    ) async throws -> StartDailyDigestChatResponse {
+        startedBullets.append((digestId: digestId, bulletIndex: bulletIndex))
         try await Task.sleep(nanoseconds: 5_000_000)
         return try startResult.get()
     }

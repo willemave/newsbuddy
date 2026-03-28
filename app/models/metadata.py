@@ -573,6 +573,22 @@ class DailyNewsRollupSummary(BaseModel):
                     "Infrastructure, payments, and policy stories carried the most "
                     "practical signal."
                 ),
+                "bullets": [
+                    {
+                        "text": (
+                            "AI developer tooling and automation launches dominated "
+                            "software news."
+                        ),
+                        "source_indexes": [1, 2],
+                    },
+                    {
+                        "text": (
+                            "Privacy and child-safety regulation advanced across "
+                            "multiple jurisdictions."
+                        ),
+                        "source_indexes": [3],
+                    },
+                ],
                 "key_points": [
                     "AI developer tooling and automation launches dominated software news.",
                     "Privacy and child-safety regulation advanced across multiple jurisdictions.",
@@ -594,9 +610,25 @@ class DailyNewsRollupSummary(BaseModel):
         max_length=1000,
         description="Short overview paragraph summarizing the day as a whole",
     )
+    bullets: list[DailyNewsRollupBullet] = Field(
+        default_factory=list,
+        description="Structured digest bullets with explicit source indexes from the prompt input",
+    )
     key_points: list[str] = Field(
         default_factory=list,
         description="Variable-length list of distinct major themes or stories from the day",
+    )
+
+
+class DailyNewsRollupBullet(BaseModel):
+    """Structured daily rollup bullet returned by the summarizer."""
+
+    text: str = Field(..., min_length=1, max_length=500)
+    source_indexes: list[int] = Field(
+        default_factory=list,
+        description=(
+            "1-based indexes referencing the prompt source stories that support this bullet"
+        ),
     )
 
 

@@ -16,6 +16,10 @@ protocol DailyNewsDigestRepositoryType {
     func markRead(id: Int) -> AnyPublisher<Void, Error>
     func markUnread(id: Int) -> AnyPublisher<Void, Error>
     func startDigDeeperChat(id: Int) async throws -> StartDailyDigestChatResponse
+    func startBulletDigDeeperChat(
+        digestId: Int,
+        bulletIndex: Int
+    ) async throws -> StartDailyDigestChatResponse
 }
 
 final class DailyNewsDigestRepository: DailyNewsDigestRepositoryType {
@@ -58,6 +62,16 @@ final class DailyNewsDigestRepository: DailyNewsDigestRepositoryType {
     func startDigDeeperChat(id: Int) async throws -> StartDailyDigestChatResponse {
         try await client.request(
             APIEndpoints.dailyDigestDigDeeper(id: id),
+            method: "POST"
+        )
+    }
+
+    func startBulletDigDeeperChat(
+        digestId: Int,
+        bulletIndex: Int
+    ) async throws -> StartDailyDigestChatResponse {
+        try await client.request(
+            APIEndpoints.dailyDigestBulletDigDeeper(id: digestId, bulletIndex: bulletIndex),
             method: "POST"
         )
     }

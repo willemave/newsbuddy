@@ -247,4 +247,11 @@ private final class FakeDailyNewsDigestRepository: DailyNewsDigestRepositoryType
     func startDigDeeperChat(id: Int) async throws -> StartDailyDigestChatResponse {
         fatalError("unused in test")
     }
+
+    func startBulletDigDeeperChat(
+        digestId: Int,
+        bulletIndex: Int
+    ) async throws -> StartDailyDigestChatResponse {
+        fatalError("unused in test")
+    }
 }

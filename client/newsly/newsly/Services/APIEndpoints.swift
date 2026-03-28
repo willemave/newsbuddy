@@ -36,6 +36,9 @@ enum APIEndpoints {
     static func dailyDigestDigDeeper(id: Int) -> String {
         return "/api/content/daily-digests/\(id)/dig-deeper"
     }
+    static func dailyDigestBulletDigDeeper(id: Int, bulletIndex: Int) -> String {
+        return "/api/content/daily-digests/\(id)/bullets/\(bulletIndex)/dig-deeper"
+    }
     static let analytics = "/api/analytics"
     static let bulkMarkRead = "/api/content/bulk-mark-read"
     static func toggleFavorite(id: Int) -> String {

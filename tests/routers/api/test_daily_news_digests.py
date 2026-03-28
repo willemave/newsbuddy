@@ -15,6 +15,7 @@ def _create_digest(
     read_at: datetime | None = None,
     title: str = "Digest title",
     coverage_end_at: datetime | None = None,
+    bullet_details: list[dict[str, object]] | None = None,
 ) -> DailyNewsDigest:
     return DailyNewsDigest(
         user_id=user_id,
@@ -23,6 +24,7 @@ def _create_digest(
         title=title,
         summary="Daily summary body.",
         key_points=["Point 1", "Point 2"],
+        bullet_details=bullet_details or [],
         source_content_ids=[1, 2],
         source_count=2,
         llm_model="google:gemini-3.1-flash-lite-preview",
@@ -126,6 +128,122 @@ def test_list_daily_digests_includes_source_labels(client, db_session, test_user
     assert response.status_code == 200
     payload = response.json()
     assert payload["digests"][0]["source_labels"] == ["Hacker News", "@swyx"]
+
+
+def test_list_daily_digests_includes_bullet_details(client, db_session, test_user) -> None:
+    db_session.add_all(
+        [
+            Content(
+                id=1,
+                content_type="news",
+                url="https://news.ycombinator.com/item?id=1",
+                title="HN story",
+                source="hackernews",
+                platform="hackernews",
+                status="completed",
+                classification="to_read",
+                content_metadata={"discussion_url": "https://news.ycombinator.com/item?id=1"},
+            ),
+            Content(
+                id=2,
+                content_type="news",
+                url="https://x.com/swyx/status/1#newsly-digest-user-1",
+                source_url="https://x.com/swyx/status/1",
+                title="X post",
+                source="X Following",
+                platform="twitter",
+                status="completed",
+                classification="to_read",
+                content_metadata={"tweet_author_username": "swyx", "source_label": "X Following"},
+            ),
+            _create_digest(
+                user_id=test_user.id,
+                local_date="2026-02-28",
+                bullet_details=[
+                    {
+                        "text": "Point 1",
+                        "source_content_ids": [1, 2],
+                        "comment_quotes": ['"Quoted discussion comment" - alice'],
+                    }
+                ],
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/content/daily-digests")
+    assert response.status_code == 200
+    payload = response.json()
+
+    bullet = payload["digests"][0]["bullet_details"][0]
+    assert bullet["text"] == "Point 1"
+    assert bullet["source_count"] == 2
+    assert bullet["comment_quotes"] == ['"Quoted discussion comment" - alice']
+    assert bullet["citations"] == [
+        {
+            "content_id": 1,
+            "label": "Hacker News",
+            "title": "HN story",
+            "url": "https://news.ycombinator.com/item?id=1",
+        },
+        {
+            "content_id": 2,
+            "label": "@swyx",
+            "title": "X post",
+            "url": "https://x.com/swyx/status/1",
+        },
+    ]
+
+
+def test_list_daily_digests_builds_fallback_bullet_details_for_legacy_digests(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    db_session.add_all(
+        [
+            Content(
+                id=1,
+                content_type="news",
+                url="https://example.com/chips",
+                title="Cloud Chip Demand",
+                source="Example",
+                platform="hackernews",
+                status="completed",
+                classification="to_read",
+                content_metadata={
+                    "summary": {
+                        "title": "Cloud Chip Demand",
+                        "key_points": ["Point 1"],
+                    }
+                },
+            ),
+            Content(
+                id=2,
+                content_type="news",
+                url="https://example.com/policy",
+                title="Policy Update",
+                source="Example",
+                platform="reddit",
+                status="completed",
+                classification="to_read",
+                content_metadata={
+                    "summary": {
+                        "title": "Policy Update",
+                        "key_points": ["Point 2"],
+                    }
+                },
+            ),
+            _create_digest(user_id=test_user.id, local_date="2026-02-28"),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/content/daily-digests")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["digests"][0]["bullet_details"][0]["text"] == "Point 1"
+    assert payload["digests"][0]["bullet_details"][0]["source_count"] == 1
 
 
 def test_mark_daily_digest_read_and_unread(client, db_session, test_user) -> None:
@@ -346,6 +464,106 @@ def test_start_daily_digest_chat_creates_fresh_session_each_time(
     assert captured[0][0] == sessions[0].id
     assert captured[1][0] == sessions[1].id
     assert "Dig deeper into these digest bullets." in captured[0][2]
+
+
+def test_start_daily_digest_bullet_chat_scopes_context_to_selected_bullet(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    db_session.add_all(
+        [
+            Content(
+                id=1,
+                content_type="news",
+                url="https://news.ycombinator.com/item?id=1",
+                title="HN story",
+                source="hackernews",
+                platform="hackernews",
+                status="completed",
+                classification="to_read",
+                content_metadata={},
+            ),
+            _create_digest(
+                user_id=test_user.id,
+                local_date="2026-02-28",
+                title="Daily AI Digest",
+                bullet_details=[
+                    {
+                        "text": "Point 1",
+                        "source_content_ids": [1],
+                        "comment_quotes": ['"Quoted discussion comment" - alice'],
+                    },
+                    {
+                        "text": "Point 2",
+                        "source_content_ids": [],
+                        "comment_quotes": [],
+                    },
+                ],
+            ),
+        ]
+    )
+    db_session.commit()
+
+    digest = db_session.query(DailyNewsDigest).filter(DailyNewsDigest.user_id == test_user.id).one()
+    captured: list[tuple[int, int, str]] = []
+
+    async def _fake_process_message_async(session_id: int, message_id: int, prompt: str) -> None:
+        captured.append((session_id, message_id, prompt))
+
+    monkeypatch.setattr(
+        "app.routers.api.daily_news_digests.process_message_async",
+        _fake_process_message_async,
+    )
+    monkeypatch.setattr("app.routers.api.daily_news_digests.log_event", lambda *args, **kwargs: 0)
+
+    response = client.post(f"/api/content/daily-digests/{digest.id}/bullets/0/dig-deeper")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session"]["session_type"] == "daily_digest_brain"
+    assert payload["session"]["topic"] == "Point 1"
+
+    session = (
+        db_session.query(ChatSession)
+        .filter(ChatSession.user_id == test_user.id, ChatSession.id == payload["session"]["id"])
+        .one()
+    )
+    assert "Selected digest bullet:\n- Point 1" in session.context_snapshot
+    assert (
+        "Linked sources:\n- Hacker News: HN story (https://news.ycombinator.com/item?id=1)"
+        in session.context_snapshot
+    )
+    assert (
+        'Stored discussion comments:\n- "Quoted discussion comment" - alice'
+        in session.context_snapshot
+    )
+    assert "Point 2" not in session.context_snapshot
+    assert "Dig deeper into this digest bullet." in captured[0][2]
+
+
+def test_start_daily_digest_bullet_chat_returns_404_for_invalid_bullet_index(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    digest = _create_digest(user_id=test_user.id, local_date="2026-02-28")
+    db_session.add(digest)
+    db_session.commit()
+    db_session.refresh(digest)
+
+    monkeypatch.setattr(
+        "app.routers.api.daily_news_digests.process_message_async",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("app.routers.api.daily_news_digests.log_event", lambda *args, **kwargs: 0)
+
+    response = client.post(f"/api/content/daily-digests/{digest.id}/bullets/5/dig-deeper")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Daily digest bullet not found"
 
 
 def test_start_daily_digest_chat_is_user_scoped(client, db_session, test_user, monkeypatch) -> None:
