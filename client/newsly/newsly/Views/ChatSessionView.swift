@@ -350,7 +350,7 @@ struct ChatSessionView: View {
                                         .font(.caption2)
                                 }
                                 .frame(maxWidth: titleMaxWidth)
-                                .foregroundColor(.primary)
+                                .foregroundColor(Color.onSurface)
                             }
                         } else {
                             Text(session.displayTitle)
@@ -371,7 +371,7 @@ struct ChatSessionView: View {
                                     .layoutPriority(1)
                             }
                             .frame(maxWidth: titleMaxWidth)
-                            .foregroundColor(session.isDeepResearch ? .purple : .secondary)
+                            .foregroundColor(session.isDeepResearch ? Color.terracottaPrimary : Color.onSurfaceSecondary)
                         }
                     }
                 }
@@ -417,7 +417,7 @@ struct ChatSessionView: View {
                             } else {
                                 Image(systemName: session.providerIconFallback)
                                     .font(.system(size: 16))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(Color.onSurfaceSecondary)
                             }
                         }
                         .frame(width: 32, height: 32)
@@ -467,9 +467,9 @@ struct ChatSessionView: View {
                         VStack(spacing: 8) {
                             Image(systemName: "exclamationmark.triangle")
                                 .font(.largeTitle)
-                                .foregroundColor(.orange)
+                                .foregroundColor(Color.statusDestructive)
                             Text(error)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Color.onSurfaceSecondary)
                                 .multilineTextAlignment(.center)
                             Button("Retry") {
                                 Task { await viewModel.loadSession() }
@@ -499,11 +499,11 @@ struct ChatSessionView: View {
                                         .foregroundColor(.secondary.opacity(0.5))
                                     Text("Start the conversation")
                                         .font(.headline)
-                                        .foregroundColor(.secondary)
+                                        .foregroundColor(Color.onSurfaceSecondary)
                                     if let topic = viewModel.session?.topic {
                                         Text("Topic: \(topic)")
                                             .font(.subheadline)
-                                            .foregroundColor(.blue)
+                                            .foregroundColor(Color.topicAccent)
                                     }
                                 }
                                 .frame(maxWidth: .infinity)
@@ -660,13 +660,13 @@ struct ChatSessionView: View {
                         Text(source)
                             .font(.caption)
                     }
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                 }
 
                 if let summary = summary, !summary.isEmpty {
                     Text(summary)
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(4)
                 }
 
@@ -678,7 +678,7 @@ struct ChatSessionView: View {
                             Image(systemName: "arrow.up.right.square")
                                 .font(.caption2)
                         }
-                        .foregroundColor(.blue)
+                        .foregroundColor(Color.topicAccent)
                     }
                 }
             }
@@ -692,10 +692,10 @@ struct ChatSessionView: View {
             VStack(spacing: 8) {
                 Text("Ask me anything about this article")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                 Text("I can summarize, explain, find related topics, or answer your questions.")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
             }
             .padding(.horizontal)
@@ -721,7 +721,7 @@ struct ChatSessionView: View {
                 .overlay(
                     Capsule()
                         .stroke(
-                            viewModel.isRecording ? Color.red.opacity(0.6) : Color.outlineVariant.opacity(0.3),
+                            viewModel.isRecording ? Color.statusDestructive.opacity(0.6) : Color.outlineVariant.opacity(0.3),
                             lineWidth: 1
                         )
                 )
@@ -780,7 +780,7 @@ struct ChatSessionView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "waveform")
                                 .font(.terracottaBodySmall)
-                                .foregroundColor(.red)
+                                .foregroundColor(Color.statusDestructive)
                             Text("Listening...")
                                 .font(.terracottaBodySmall)
                                 .foregroundColor(.onSurfaceSecondary)
@@ -1047,7 +1047,7 @@ struct AssistantFeedOptionsSection: View {
                     HStack(spacing: 8) {
                         Image(systemName: option.systemIcon)
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(Color.terracottaPrimary)
                         Text(option.feedTypeLabel.uppercased())
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
@@ -1099,10 +1099,10 @@ struct AssistantFeedOptionsSection: View {
                     }
                 }
                 .padding(12)
-                .background(Color.black.opacity(0.03))
+                .background(Color.surfaceTertiary)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(.separator).opacity(0.5), lineWidth: 0.5)
+                        .stroke(Color.outlineVariant.opacity(0.5), lineWidth: 0.5)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
@@ -1216,11 +1216,11 @@ struct InitialSuggestionsLoadingView: View {
             VStack(spacing: 6) {
                 Text("Preparing suggestions")
                     .font(.headline)
-                    .foregroundColor(.primary)
+                    .foregroundColor(Color.onSurface)
 
                 Text("Analyzing the article for you")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
             }
         }
     }

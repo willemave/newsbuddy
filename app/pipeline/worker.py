@@ -27,6 +27,10 @@ from app.services.http import NonRetryableError, get_http_service
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.queue import TaskType, get_queue_service
 from app.utils.dates import parse_date_with_tz
+from app.utils.summarization_inputs import (
+    build_summarization_payload,
+    compute_summarization_input_fingerprint,
+)
 from app.utils.url_utils import is_http_url, normalize_http_url
 
 logger = get_logger(__name__)
@@ -104,6 +108,34 @@ class ContentWorker:
         content.processed_at = datetime.now(UTC)
 
     @staticmethod
+    def _should_reuse_existing_summary(
+        content: ContentData,
+        starting_metadata: dict[str, Any],
+    ) -> bool:
+        """Return True when processed content already has a matching summary."""
+        if not isinstance(starting_metadata.get("summary"), dict):
+            return False
+
+        current_payload = build_summarization_payload(content.content_type, content.metadata or {})
+        previous_payload = build_summarization_payload(content.content_type, starting_metadata)
+        if not current_payload or not previous_payload:
+            return False
+
+        current_fingerprint = compute_summarization_input_fingerprint(
+            content.content_type,
+            current_payload,
+        )
+        previous_fingerprint = starting_metadata.get("summarization_input_fingerprint")
+        if isinstance(previous_fingerprint, str) and previous_fingerprint == current_fingerprint:
+            return True
+
+        previous_payload_fingerprint = compute_summarization_input_fingerprint(
+            content.content_type,
+            previous_payload,
+        )
+        return previous_payload_fingerprint == current_fingerprint
+
+    @staticmethod
     def _normalize_rss_content_text(raw_rss_content: str) -> str:
         """Convert RSS HTML-ish content into compact plain text."""
         without_scripts = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", raw_rss_content)
@@ -171,6 +203,28 @@ class ContentWorker:
 
             if success:
                 enqueue_summarize_task = self.processing_workflow.should_enqueue_summarize(content)
+                if enqueue_summarize_task and self._should_reuse_existing_summary(
+                    content,
+                    starting_metadata,
+                ):
+                    current_payload = build_summarization_payload(
+                        content.content_type,
+                        content.metadata or {},
+                    )
+                    if current_payload:
+                        content.metadata["summarization_input_fingerprint"] = (
+                            compute_summarization_input_fingerprint(
+                                content.content_type,
+                                current_payload,
+                            )
+                        )
+                    content.status = ContentStatus.COMPLETED
+                    content.processed_at = datetime.now(UTC)
+                    enqueue_summarize_task = False
+                    logger.info(
+                        "Skipping summarize enqueue for content %s; summarization input unchanged",
+                        content.id,
+                    )
 
             # Update database when processing succeeded or content was marked failed/skipped.
             if success or content.status in self.processing_workflow.TERMINAL_STATUSES:

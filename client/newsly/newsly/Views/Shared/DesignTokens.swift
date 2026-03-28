@@ -55,19 +55,19 @@ extension Color {
         })
     }
 
-    // Terracotta accent colors
+    // Accent colors — storm gray
     static var terracottaPrimary: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.831, green: 0.514, blue: 0.416, alpha: 1.0)  // #d4836a
-                : UIColor(red: 0.439, green: 0.169, blue: 0.098, alpha: 1.0)  // #702b19
+                ? UIColor(red: 0.616, green: 0.631, blue: 0.667, alpha: 1.0)  // #9DA1AA
+                : UIColor(red: 0.290, green: 0.306, blue: 0.341, alpha: 1.0)  // #4A4E57
         })
     }
     static var terracottaDark: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.765, green: 0.420, blue: 0.310, alpha: 1.0)  // #c36b4f
-                : UIColor(red: 0.353, green: 0.133, blue: 0.078, alpha: 1.0)  // #5a2214
+                ? UIColor(red: 0.529, green: 0.545, blue: 0.580, alpha: 1.0)  // #878B94
+                : UIColor(red: 0.227, green: 0.243, blue: 0.278, alpha: 1.0)  // #3A3E47
         })
     }
 
@@ -87,28 +87,28 @@ extension Color {
         })
     }
 
-    // Chat-specific colors (warm brown/ink, not orange)
+    // Chat-specific colors — cool ink, matching storm gray palette
     static var chatUserBubble: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.376, green: 0.318, blue: 0.282, alpha: 1.0)  // #604f47
-                : UIColor(red: 0.224, green: 0.165, blue: 0.125, alpha: 1.0)  // #392a20
+                ? UIColor(red: 0.302, green: 0.314, blue: 0.341, alpha: 1.0)  // #4D5057
+                : UIColor(red: 0.200, green: 0.212, blue: 0.239, alpha: 1.0)  // #33363D
         })
     }
     static var chatAccent: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.729, green: 0.667, blue: 0.620, alpha: 1.0)  // #baaa9e
-                : UIColor(red: 0.376, green: 0.310, blue: 0.263, alpha: 1.0)  // #604f43
+                ? UIColor(red: 0.667, green: 0.678, blue: 0.702, alpha: 1.0)  // #AAADB3
+                : UIColor(red: 0.353, green: 0.365, blue: 0.392, alpha: 1.0)  // #5A5D64
         })
     }
 
-    // Terracotta outline
+    // Outline — cool neutral
     static var outlineVariant: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.290, green: 0.263, blue: 0.251, alpha: 1.0)  // #4a4340
-                : UIColor(red: 0.855, green: 0.757, blue: 0.733, alpha: 1.0)  // #dac1bb
+                ? UIColor(red: 0.263, green: 0.271, blue: 0.286, alpha: 1.0)  // #434549
+                : UIColor(red: 0.776, green: 0.788, blue: 0.808, alpha: 1.0)  // #C6C9CE
         })
     }
 
@@ -407,5 +407,31 @@ extension View {
     /// Apply standard screen-level background.
     func screenContainer() -> some View {
         self.background(Color.surfacePrimary)
+    }
+}
+
+// MARK: - UIColor Design Tokens (for UIKit appearance APIs)
+
+extension UIColor {
+    static var appAccent: UIColor {
+        UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.616, green: 0.631, blue: 0.667, alpha: 1.0)  // #9DA1AA
+                : UIColor(red: 0.290, green: 0.306, blue: 0.341, alpha: 1.0)  // #4A4E57
+        }
+    }
+    static var appOnSurfaceSecondary: UIColor {
+        UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.639, green: 0.616, blue: 0.588, alpha: 1.0)  // #a39d96
+                : UIColor(red: 0.302, green: 0.271, blue: 0.247, alpha: 1.0)  // #4d453f
+        }
+    }
+    static var appSurfacePrimary: UIColor {
+        UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 1.0)  // #1a1815
+                : UIColor(red: 0.992, green: 0.976, blue: 0.957, alpha: 1.0)  // #fdf9f4
+        }
     }
 }

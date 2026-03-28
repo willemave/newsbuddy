@@ -31,6 +31,12 @@ from app.services.url_detection import (  # noqa: F401
 logger = get_logger(__name__)
 
 URL_ADAPTER = TypeAdapter(HttpUrl)
+REANALYZE_EXISTING_STATUSES: set[str] = {
+    ContentStatus.NEW.value,
+    ContentStatus.PENDING.value,
+    ContentStatus.FAILED.value,
+    ContentStatus.SKIPPED.value,
+}
 
 
 def normalize_url(raw_url: str) -> str:
@@ -152,6 +158,19 @@ def _append_share_and_chat_user(
     return update_processing_state(updated, share_and_chat_user_ids=user_ids)
 
 
+def _should_enqueue_analysis_for_existing_content(
+    *,
+    existing_status: str,
+    instruction: str | None,
+    crawl_links: bool,
+    subscribe_to_feed: bool,
+) -> bool:
+    """Return True when a duplicate submission should enqueue ANALYZE_URL again."""
+    if subscribe_to_feed or crawl_links or bool(instruction):
+        return True
+    return existing_status in REANALYZE_EXISTING_STATUSES
+
+
 def submit_user_content(
     db: Session,
     payload: SubmitContentRequest,
@@ -223,13 +242,20 @@ def submit_user_content(
                 read_status.mark_content_as_read(db, existing.id, current_user.id)
                 if existing.status == ContentStatus.COMPLETED.value:
                     enqueue_dig_deeper_task(db, existing.id, current_user.id)
-        task_id = _ensure_analyze_url_task(
-            db,
-            existing.id,
+        task_id: int | None = None
+        if _should_enqueue_analysis_for_existing_content(
+            existing_status=existing.status,
             instruction=instruction,
             crawl_links=crawl_links,
             subscribe_to_feed=subscribe_to_feed,
-        )
+        ):
+            task_id = _ensure_analyze_url_task(
+                db,
+                existing.id,
+                instruction=instruction,
+                crawl_links=crawl_links,
+                subscribe_to_feed=subscribe_to_feed,
+            )
         return ContentSubmissionResponse(
             content_id=existing.id,
             content_type=ContentType(existing.content_type),

@@ -259,7 +259,7 @@ private struct DailyDigestCard: View {
     let onLongPressBullet: (Int, DailyNewsDigestBulletDetail) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             // Date + time with extending rule
             HStack(spacing: 10) {
                 HStack(spacing: 5) {
@@ -271,16 +271,6 @@ private struct DailyDigestCard: View {
                             .foregroundStyle(Color.onSurfaceSecondary)
                         Text(digest.displayTimeLabel.uppercased())
                             .foregroundStyle(Color.onSurfaceSecondary)
-                    }
-
-                    if let coverageLabel = digest.displayCoverageLabel {
-                        Text(coverageLabel)
-                            .font(.terracottaCategoryPill)
-                            .foregroundStyle(Color.terracottaPrimary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 3)
-                            .background(Color.terracottaPrimary.opacity(0.1))
-                            .clipShape(Capsule())
                     }
                 }
                 .font(.terracottaCategoryPill)
@@ -299,7 +289,7 @@ private struct DailyDigestCard: View {
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(digest.displayBulletDetails.enumerated()), id: \.offset) { index, bullet in
                         DigestBulletRow(
                             bullet: bullet,
@@ -308,35 +298,28 @@ private struct DailyDigestCard: View {
                         )
                     }
                 }
+                .padding(.horizontal, -8) // offset bullet row's internal padding
             }
 
             if !digest.cleanedSourceLabels.isEmpty {
-                Text("From " + digest.cleanedSourceLabels.joined(separator: " · "))
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(Color.onSurfaceSecondary)
+                Text(digest.cleanedSourceLabels.joined(separator: " · "))
+                    .font(.terracottaCategoryPill)
+                    .foregroundStyle(Color.onSurfaceSecondary.opacity(0.7))
+                    .tracking(0.3)
                     .lineLimit(2)
             }
 
             // Actions row
             HStack(spacing: 0) {
-                if digest.sourceCount > 0 {
-                    Text("\(digest.sourceCount) sources")
-                        .font(.terracottaBodySmall)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                }
-
                 Spacer()
 
                 Button(action: onToggleRead) {
-                    Label(
-                        digest.isRead ? "Mark Unread" : "Mark Read",
-                        systemImage: digest.isRead ? "envelope.badge" : "checkmark.circle"
-                    )
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(Color.onSurfaceSecondary)
+                    Image(systemName: digest.isRead ? "envelope.badge" : "checkmark.circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.onSurfaceSecondary.opacity(0.6))
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, 16)
+                .padding(.trailing, 20)
 
                 NarrationPressButton(
                     isDisabled: isLoadingVoice,
@@ -352,18 +335,13 @@ private struct DailyDigestCard: View {
                                 .scaleEffect(0.7)
                                 .frame(width: 16, height: 16)
                         } else {
-                            Label(
-                                voiceSummaryButtonTitle,
-                                systemImage: isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2.fill"
-                            )
-                            .font(.terracottaBodySmall)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                            .foregroundStyle(
-                                isSpeaking
-                                    ? Color.terracottaPrimary
-                                    : Color.onSurfaceSecondary
-                            )
+                            Image(systemName: isSpeaking ? "speaker.wave.3.fill" : "speaker.wave.2.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(
+                                    isSpeaking
+                                        ? Color.terracottaPrimary
+                                        : Color.onSurfaceSecondary.opacity(0.6)
+                                )
                         }
                     }
                 }
@@ -396,34 +374,50 @@ private struct DigestBulletRow: View {
     let isRead: Bool
     let onLongPress: () -> Void
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("–")
-                .font(.terracottaHeadlineSmall)
-                .foregroundStyle(Color.onSurfaceSecondary)
+    @State private var isPressed = false
 
-            bulletText
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(isRead ? Color.onSurfaceSecondary.opacity(0.4) : Color.terracottaPrimary.opacity(0.6))
+                .frame(width: 5, height: 5)
+                .padding(.top, 9)
+
+            VStack(alignment: .leading, spacing: 4) {
+                bulletText
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if bullet.sourceCount > 0 {
+                    Text("\(bullet.sourceCount) \(bullet.sourceCount == 1 ? "source" : "sources")")
+                        .font(.terracottaCategoryPill)
+                        .foregroundStyle(Color.onSurfaceSecondary.opacity(0.7))
+                        .tracking(0.4)
+                }
+            }
         }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isPressed ? Color.surfaceContainer.opacity(0.6) : Color.clear)
+        )
         .contentShape(Rectangle())
-        .onLongPressGesture(perform: onLongPress)
+        .onLongPressGesture(
+            minimumDuration: 0.4,
+            pressing: { pressing in
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isPressed = pressing
+                }
+            },
+            perform: onLongPress
+        )
     }
 
     private var bulletText: Text {
-        let baseText = Text(bullet.digestPreviewText)
+        Text(bullet.digestPreviewText)
             .font(.terracottaHeadlineSmall)
             .foregroundStyle(isRead ? Color.onSurfaceSecondary : Color.onSurface)
-
-        guard bullet.sourceCount > 0 else {
-            return baseText
-        }
-
-        let suffix = Text(" \(bullet.sourceCount) \(bullet.sourceCount == 1 ? "source" : "sources")")
-            .font(.terracottaBodySmall)
-            .foregroundStyle(Color.onSurfaceSecondary)
-
-        return baseText + suffix
     }
 }
 
@@ -437,100 +431,165 @@ private struct DailyDigestBulletDetailSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var shareContent: ShareContent?
+    @State private var showAllSources = false
+
+    private let sourcePreviewLimit = 5
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(bullet.cleanedText)
+                VStack(alignment: .leading, spacing: 0) {
+                    // Bullet headline — use preview text to avoid repeating
+                    // comment quotes that are shown separately below.
+                    Text(bullet.digestPreviewText)
                         .font(.terracottaHeadlineLarge)
                         .foregroundStyle(Color.onSurface)
+                        .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, bullet.cleanedCommentQuotes.isEmpty && bullet.citations.isEmpty ? 24 : 28)
 
+                    // Comments section
                     if !bullet.cleanedCommentQuotes.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Comments")
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("DISCUSSION")
                                 .font(.terracottaCategoryPill)
-                                .foregroundStyle(Color.onSurfaceSecondary)
+                                .foregroundStyle(Color.onSurfaceSecondary.opacity(0.6))
+                                .tracking(1.0)
 
-                            ForEach(Array(bullet.cleanedCommentQuotes.enumerated()), id: \.offset) { _, quote in
-                                Text(quote)
-                                    .font(.terracottaBodyMedium)
-                                    .foregroundStyle(Color.onSurfaceSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(Array(bullet.cleanedCommentQuotes.enumerated()), id: \.offset) { _, quote in
+                                    HStack(alignment: .top, spacing: 12) {
+                                        RoundedRectangle(cornerRadius: 1)
+                                            .fill(Color.outlineVariant)
+                                            .frame(width: 2)
 
-                    if !bullet.citations.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Sources")
-                                .font(.terracottaCategoryPill)
-                                .foregroundStyle(Color.onSurfaceSecondary)
-
-                            ForEach(bullet.citations) { citation in
-                                if let urlString = citation.url, let url = URL(string: urlString) {
-                                    Link(destination: url) {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(citation.label ?? citation.title)
-                                                .font(.terracottaBodyMedium)
-                                                .foregroundStyle(Color.terracottaPrimary)
-                                            if citation.label != nil {
-                                                Text(citation.title)
-                                                    .font(.terracottaBodySmall)
-                                                    .foregroundStyle(Color.onSurfaceSecondary)
-                                            }
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        Text(quote)
+                                            .font(.terracottaBodyMedium)
+                                            .foregroundStyle(Color.onSurfaceSecondary)
+                                            .lineSpacing(3)
+                                            .fixedSize(horizontal: false, vertical: true)
                                     }
-                                } else {
-                                    Text(citation.title)
-                                        .font(.terracottaBodyMedium)
-                                        .foregroundStyle(Color.onSurface)
                                 }
                             }
                         }
+                        .padding(.bottom, bullet.citations.isEmpty ? 24 : 28)
                     }
 
-                    VStack(spacing: 12) {
+                    // Sources section
+                    if !bullet.citations.isEmpty {
+                        let visibleCitations = showAllSources
+                            ? bullet.citations
+                            : Array(bullet.citations.prefix(sourcePreviewLimit))
+                        let hasOverflow = bullet.citations.count > sourcePreviewLimit
+
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("SOURCES")
+                                .font(.terracottaCategoryPill)
+                                .foregroundStyle(Color.onSurfaceSecondary.opacity(0.6))
+                                .tracking(1.0)
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(visibleCitations) { citation in
+                                    if let urlString = citation.url, let url = URL(string: urlString) {
+                                        Link(destination: url) {
+                                            HStack(alignment: .top, spacing: 8) {
+                                                Image(systemName: "arrow.up.right")
+                                                    .font(.system(size: 10, weight: .semibold))
+                                                    .foregroundStyle(Color.terracottaPrimary.opacity(0.6))
+                                                    .padding(.top, 3)
+
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(citation.label ?? citation.title)
+                                                        .font(.terracottaBodyMedium)
+                                                        .foregroundStyle(Color.terracottaPrimary)
+                                                        .lineLimit(2)
+                                                    if citation.label != nil {
+                                                        Text(citation.title)
+                                                            .font(.terracottaBodySmall)
+                                                            .foregroundStyle(Color.onSurfaceSecondary.opacity(0.7))
+                                                            .lineLimit(1)
+                                                    }
+                                                }
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                    } else {
+                                        Text(citation.title)
+                                            .font(.terracottaBodyMedium)
+                                            .foregroundStyle(Color.onSurface)
+                                    }
+                                }
+
+                                if hasOverflow && !showAllSources {
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            showAllSources = true
+                                        }
+                                    } label: {
+                                        Text("Show all \(bullet.citations.count) sources")
+                                            .font(.terracottaBodySmall)
+                                            .foregroundStyle(Color.terracottaPrimary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.top, 4)
+                                }
+                            }
+                        }
+                        .padding(.bottom, 24)
+                    }
+
+                    // Separator before actions
+                    Rectangle()
+                        .fill(Color.outlineVariant.opacity(0.3))
+                        .frame(height: 1)
+                        .padding(.bottom, 16)
+
+                    // Actions — compact row
+                    HStack(spacing: 16) {
                         Button(action: onDigDeeper) {
-                            HStack {
+                            HStack(spacing: 6) {
                                 if isStartingDigDeeper {
                                     ProgressView()
-                                        .scaleEffect(0.8)
+                                        .scaleEffect(0.7)
+                                        .frame(width: 14, height: 14)
                                 } else {
                                     Image(systemName: "brain.head.profile")
+                                        .font(.system(size: 13))
                                 }
                                 Text("Dig Deeper")
+                                    .font(.terracottaBodyMedium)
                             }
-                            .frame(maxWidth: .infinity)
+                            .foregroundStyle(Color.terracottaPrimary)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.plain)
                         .disabled(isStartingDigDeeper)
 
-                        HStack(spacing: 12) {
-                            Button(action: onCopy) {
-                                Label("Copy", systemImage: "doc.on.doc")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
+                        Spacer()
 
-                            Button {
-                                shareContent = ShareContent(
-                                    messageContent: shareText,
-                                    articleTitle: nil,
-                                    articleUrl: nil
-                                )
-                            } label: {
-                                Label("Share", systemImage: "square.and.arrow.up")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
+                        Button(action: onCopy) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 14))
+                                .foregroundStyle(Color.onSurfaceSecondary)
                         }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            shareContent = ShareContent(
+                                messageContent: shareText,
+                                articleTitle: nil,
+                                articleUrl: nil
+                            )
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 14))
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .padding(Spacing.screenHorizontal)
-                .padding(.vertical, 20)
+                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.top, 24)
+                .padding(.bottom, 20)
             }
             .navigationTitle(digest.displayDateLabel)
             .navigationBarTitleDisplayMode(.inline)
@@ -539,11 +598,15 @@ private struct DailyDigestBulletDetailSheet: View {
                     Button("Done") {
                         dismiss()
                     }
+                    .font(.terracottaBodyMedium)
                 }
             }
             .sheet(item: $shareContent) { content in
                 ShareSheet(content: content)
             }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(24)
     }
 }

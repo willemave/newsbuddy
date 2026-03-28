@@ -233,10 +233,18 @@ class TwitterUnifiedScraper(BaseScraper):
             return None
 
         access_token = self._get_x_api_access_token()
-        if not access_token:
-            return None
-
-        logger.info("Scraping Twitter list via X API: %s (%s)", list_name, list_id)
+        if access_token:
+            logger.info(
+                "Scraping Twitter list via X API with user auth: %s (%s)",
+                list_name,
+                list_id,
+            )
+        else:
+            logger.info(
+                "Scraping Twitter list via X API with app bearer fallback: %s (%s)",
+                list_name,
+                list_id,
+            )
 
         tweets: list[dict[str, Any]] = []
         seen_ids: set[str] = set()

@@ -1,247 +1,1347 @@
-# News App Architecture
+# Newsly Architecture
 
-> Technical reference for the FastAPI backend, content pipeline, chat system, and SwiftUI client contracts.
+> Canonical architecture reference for the FastAPI backend, DB-backed processing pipeline, discovery and chat systems, and the SwiftUI iOS client.
 
-**Last Updated:** 2026-03-19  
-**Runtime:** Python 3.13, FastAPI + SQLAlchemy 2, Pydantic v2, pydantic-ai  
-**Database:** SQLite (first-class) / PostgreSQL-ready seams  
-**Clients:** SwiftUI (iOS 17+), Jinja admin views, remote `newsly-agent` CLI
+**Last Updated:** 2026-03-27  
+**Repository Root:** `news_app/`  
+**Primary Runtime:** Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, pydantic-ai  
+**Primary Clients:** SwiftUI iOS app, iOS Share Extension, Jinja admin UI, machine-facing agent/CLI APIs  
+**Storage:** SQLite today, PostgreSQL-ready seams in key repository/search areas  
+**Processing Model:** Database-backed async task queue with queue partitions and sequential workers
 
-## Documentation Layout
-- `docs/codebase/` is the folder-by-folder reference for `app/`, `client/`, and `config/`.
-- `docs/initiatives/` holds historical plans, specs, and research grouped by initiative rather than document type.
-- `docs/library/` holds durable operational, integration, deploy, feature, and reference docs.
+## 1. Documentation Map
 
-## System Overview
-- Unified content ingestion (scrapers + user submissions) feeding a DB-backed task queue (`analyze → process → summarize → image`) plus feed/discovery and dig-deeper follow-up task flows.
-- URL analysis stage uses pattern matching + LLM page analysis to detect content type/platform and embedded media.
-- Processing workers apply URL strategies, fetch/extract content, summarize with LLMs (editorial narrative by default with interleaved variants), and persist typed metadata.
-- Post-summary imagery uses AI infographics for articles/podcasts; news currently skips post-summary image generation.
-- API surface covers auth, feed/list/search, read/favorite state, conversions, tweet ideas, chat, and user-managed scrapers.
-- Deep-dive chat uses pydantic-ai agents with Exa web search; conversations are stored server-side.
-- Deep Research uses OpenAI's `o4-mini-deep-research-2025-06-26` model for comprehensive async research (up to ~10 minutes, with 2-second polling).
-- Admin/Jinja web UI shares the same services as the mobile API.
-- Agent CLI is a remote HTTP client of the FastAPI server. Mutating and long-running operations remain async and return task handles; client-side polling is optional convenience only.
+- `docs/architecture.md`
+  - This file. It explains system boundaries, runtime flows, package responsibilities, data model, APIs, workers, and operational constraints.
+- `docs/codebase/`
+  - Generated folder-by-folder reference for `app/`, `client/`, and `config/`.
+- `docs/library/`
+  - Durable operational, deployment, integration, and feature docs.
+- `docs/initiatives/`
+  - Historical plans, specs, and research grouped by initiative.
+
+## 2. System Summary
+
+Newsly is a content ingestion and reading system with four major surfaces:
+
+1. A FastAPI backend that owns auth, APIs, admin pages, chat, voice, discovery, integrations, and processing orchestration.
+2. A database-backed task queue that handles analysis, extraction, summarization, discussion fetching, image generation, onboarding discovery, digest generation, and external sync.
+3. Scrapers and ingestion paths that create canonical `contents` records from feeds, user submissions, and synced external sources.
+4. A SwiftUI iOS client plus share extension that consume the backend as the source of truth.
+
+The backend is not split into microservices. Most application logic lives in one deployable FastAPI codebase with clear internal boundaries:
+
+- routers and HTML endpoints in `app/routers/`
+- router-facing application entrypoints in `app/application/`
+- persistence/query logic in `app/repositories/`
+- orchestration and external integrations in `app/services/`
+- task execution in `app/pipeline/`
+- extraction implementations in `app/processing_strategies/`
+- scrapers in `app/scraping/`
+
+## 3. Runtime Topology
 
 ```mermaid
 flowchart LR
-  iOS[SwiftUI App] -->|JWT| API[FastAPI app\napp/main.py]
-  Admin[Jinja Admin] --> API
-  CLI[newsly-agent CLI] -->|API key| API
-  API --> DB[(Postgres/SQLite)]
+  iOS["SwiftUI iOS App"] -->|JWT| API["FastAPI app"]
+  Share["iOS Share Extension"] -->|submit URL| API
+  Admin["Jinja Admin UI"] --> API
+  Agent["Agent / CLI / machine clients"] -->|API key or JWT| API
+
+  API --> DB[(SQLite / PostgreSQL-ready seams)]
+  API --> Static["/static and /static/images"]
   API --> Queue[(processing_tasks)]
-  Scrapers -->|enqueue PROCESS_CONTENT| Queue
-  UserSubmit[User /submit] -->|normalize + enqueue ANALYZE_URL| Queue
-  Queue -->|dequeue| Worker[SequentialTaskProcessor\n+ ContentWorker]
-  Worker --> Analyzer[ContentAnalyzer\ntrafilatura + LLM]
-  Analyzer -->|enqueue PROCESS_CONTENT| Queue
-  Worker --> Strategies[StrategyRegistry\nHTML/PDF/YT/HN/etc]
-  Strategies --> HTTP[RobustHttpClient\nCrawl4AI]
-  Worker --> LLM[ContentSummarizer\npydantic-ai]
-  Worker --> ImageGen[Image Generation\nGemini]
-  Worker --> Media[(media/logs dirs)]
-  API <--> Chat[Chat Agent\nExa search]
-  API <--> DeepResearch[Deep Research\nOpenAI o4-mini-deep-research]
+
+  Scrapers["Scrapers"] -->|create contents + enqueue| Queue
+  Submit["User submission"] -->|ANALYZE_URL| Queue
+  Voice["Realtime voice websocket"] <--> API
+
+  Queue --> Workers["SequentialTaskProcessor workers"]
+  Workers --> Analyzer["ContentAnalyzer"]
+  Workers --> Strategies["Processing strategies"]
+  Workers --> Summarizer["ContentSummarizer"]
+  Workers --> Discussion["Discussion fetcher"]
+  Workers --> ImageGen["Gemini image generation"]
+  Workers --> Discovery["Discovery / onboarding workflows"]
+  Workers --> XSync["X integration sync"]
+
+  API <--> Chat["Chat agent / deep research"]
+  API <--> Integrations["X OAuth + BYO LLM keys"]
 ```
 
-## Dependency Direction
-- Routers and API adapters call `app/application/commands` and `app/application/queries`, not repositories or low-level services directly.
-- Pipeline handlers stay thin: parse payload, call one workflow/use-case, map outcome to `TaskResult`.
-- Repositories own SQLAlchemy query composition only.
-- Presenters map prepared rows/domain objects to DTOs only.
-- Infrastructure owns DB capability seams, HTTP implementations, queue implementations, config authority, and auth/security implementations.
-- Domain stays small and stable. `content_item` is the internal canonical noun in new code, while public DTO names remain compatibility boundaries.
+## 4. FastAPI Application Structure
 
-## New Boundary Packages
-- `app/application/commands/` and `app/application/queries/` provide router-facing entrypoints for content cards/detail, read/favorite state, submission/ingest, jobs, onboarding, API keys, digests, and user LLM integrations.
-- `app/infrastructure/db/search/` isolates SQLite FTS branching behind search backends (`sqlite_search_backend.py`, `generic_search_backend.py`).
-- `app/infrastructure/db/capabilities.py` exposes the current DB feature seams used by repositories without introducing Postgres-specific behavior.
-- `app/infrastructure/security/` owns API-key generation/parsing and hashing.
-- `app/infrastructure/http/` and `app/infrastructure/queue/` contain implementation adapters behind application-facing gateways.
+### 4.1 App bootstrap
 
-## Auth Modes
-- Mobile app auth remains JWT-based and unchanged.
-- Remote CLI auth uses bearer API keys stored as hash + prefix in `user_api_keys`; raw keys are revealed only once at creation time.
-- Selected API routes accept either JWT bearer tokens or bearer API keys through `app/core/deps.py`.
-- Admin key management is server-rendered for simplicity:
-  - `GET /admin/api-keys`
-  - `POST /admin/api-keys/create`
-  - `POST /admin/api-keys/{id}/revoke`
+`app/main.py` creates the FastAPI app and is the top-level runtime entrypoint.
 
-## Agent API Surface
-- The additive machine-facing routes live under the existing `/api` namespace, not `/api/v2`.
-- New endpoints:
-  - `GET /api/jobs/{id}`
-  - `POST /api/agent/search`
-  - `POST /api/agent/onboarding`
-  - `GET /api/agent/onboarding/{run_id}`
-  - `POST /api/agent/onboarding/{run_id}/complete`
-  - `POST /api/agent/digests`
-- Existing mobile-facing content, onboarding, digest, and submission routes stay intact.
+Current bootstrap responsibilities:
 
-## Config Authority
-- User-editable subscriptions are DB-authoritative. File config is seed/default input only.
-- Reddit runtime subscriptions are DB-authoritative; file defaults are bootstrap-only and must be explicitly included if needed.
-- Techmeme remains file-authoritative until a DB-backed runtime/admin surface exists.
-- Twitter and YouTube file configs remain disabled/ad hoc inputs and are not silently treated as live scheduled runtime config.
+- load settings via `app/core/settings.py`
+- initialize structured logging
+- initialize Langfuse tracing during lifespan startup
+- initialize the database during lifespan startup
+- mount `/static/images` from `settings.images_base_dir`
+- mount `/static` from the local `static/` directory
+- register exception handlers for request validation and admin auth redirects
+- add request logging middleware
+- add permissive CORS middleware
+- expose `/health`
+- redirect `/` to `/admin`
 
-## User-Provided LLM Keys
-- User-managed provider keys live in `user_integration_connections` and reuse the existing token encryption helpers.
-- Supported BYO providers in this refactor: `anthropic`, `openai`, `google`.
-- Runtime credential resolution prefers a user-managed provider key when present, then falls back to platform credentials.
-- Current user-scoped chat and voice model construction already resolves effective provider credentials through `app/services/llm_models.py`.
+### 4.2 Mounted routers
 
-## Performance Note
-- The list/detail/stats refactor now has dedicated query entrypoints (`content_card_repository.py`, `content_detail_repository.py`, `stats_repository.py`) and additive regression coverage around the affected routes.
-- Local regression coverage in this refactor validated:
-  - boundary-cleanup slice: `51 passed`
-  - additive auth/agent/admin/integration slice: `18 passed`
-- The intended query-count guardrail remains: card endpoints share a narrow projection path, detail uses a dedicated detail path, and stats uses a dedicated repository/query layer.
+The app currently mounts:
 
-## Codebase Map
-- `app/main.py` – FastAPI creation, middleware (CORS *), router mounting, lifespan bootstrap, request logging.
-- `app/core/` – settings (`Settings`), DB bootstrap, JWT/security, dependencies, logging helpers.
-- `app/models/` – SQLAlchemy tables (`schema.py`, `user.py`), Pydantic metadata/types, pagination helpers, scraper stats dataclass.
-- `app/domain/` – converters between ORM and `ContentData` domain model.
-- `app/http_client/` – resilient low-level HTTP client used by processing strategies and scraper-adjacent fetch paths.
-- `app/repositories/` – shared feed/search/visibility query builders used by list and stats endpoints.
-- `app/routers/` – auth, admin/content Jinja pages, logs, and API routers under `app/routers/api/`.
-- `app/services/` – queue, LLM models/agents/prompts, summarization, chat agent, event logging, HTTP client, scraper config management, content analyzer, feed detection, image generation, tweet suggestions, Exa client, content submission helpers.
-- `app/services/voice/` – live voice session orchestration, persistence, streaming, and ElevenLabs/TTS glue.
-- `app/services/gateways/` – small infrastructure interfaces for HTTP, LLM, and queue dependencies.
-- `app/pipeline/` – checkout manager, sequential processor, task dispatcher/handlers, content worker, podcast download/transcribe workers.
-- `app/pipeline/workflows/` – focused state-transition helpers used by larger task handlers.
-- `app/processing_strategies/` – URL strategy implementations + registry.
-- `app/presenters/` – API response shaping and list/detail readiness rules.
-- `app/scraping/` – scrapers (HN, Reddit, Substack, Techmeme, podcasts, Atom), runner, base class.
-- `app/utils/` – shared helpers for URLs, paths, pagination, dates, summaries, and image paths.
-- `client/newsly/` – SwiftUI app + ShareExtension consuming the API.
-- `config/` – file-backed feed defaults plus tooling guardrails.
-- `docs/codebase/` – generated reference inventory for the folders above.
+- `/auth`
+  - Apple Sign In, token refresh, `/me`, profile updates, admin login/logout.
+- `/admin`
+  - Dashboard, eval tooling, API key management, onboarding lane preview, conversational admin interface.
+- `/admin/logs` and `/admin/errors`
+  - Log browser and error reset utilities.
+- `/api/content`
+  - Main content list/detail/actions/state/chat/digests/narration surface.
+- `/api`
+  - Discovery, onboarding, analytics interactions, X integrations, LLM integrations, agent APIs, OpenAI helper endpoints, voice APIs.
 
-## Core Runtime & Infrastructure
-- **FastAPI app (`app/main.py`)**: CORS `*`, static files at `/static`, routers for auth/content/admin/logs/api. Lifespan startup initializes Langfuse tracing and the database. Health at `/health`.
-- **Settings (`app/core/settings.py`)**: DB URL + pool tuning, JWT settings, worker timeouts, content length limits, API keys (OpenAI/Anthropic/Google/Exa), HTTP timeouts, Reddit creds, media/log paths, Crawl4AI toggles.
-- **Database (`app/core/db.py`)**: lazy engine/session creation, `get_db()` context manager, `get_db_session()` dependency, optional `run_migrations()` helper.
-- **Security (`app/core/security.py`)**: JWT create/verify; refresh/access expiries come from settings. Apple token verification currently skips signature validation (dev-only). Admin password check against env.
-- **Dependencies (`app/core/deps.py`)**: `get_current_user` via JWT, `get_optional_user`, admin session guard (`require_admin`) using in-memory cookie store `admin_sessions`.
-- **Logging (`app/core/logging.py`)**: root logger with structured format; `get_logger()` shortcut.
+### 4.3 Middleware and request behavior
 
-## Key Classes & Services
-| Class | Location | Responsibilities | Key Methods |
-|---|---|---|---|
-| `Settings` | app/core/settings.py | Env-driven config (DB, JWT, API keys, paths, worker limits) | properties `podcast_media_dir`, `substack_media_dir`, `logs_dir` |
-| `QueueService` | app/services/queue.py | DB-backed task queue (`scrape`/`analyze_url`/`process_content`/`download_audio`/`transcribe`/`summarize`/`generate_image`/`discover_feeds`/`onboarding_discover`/`dig_deeper`) with retries | `enqueue`, `dequeue`, `complete_task`, `retry_task`, `get_queue_stats`, `cleanup_old_tasks` |
-| `CheckoutManager` | app/pipeline/checkout.py | Row-level locking for content checkout/release | `checkout_content` context, `release_stale_checkouts`, `get_checkout_stats` |
-| `ContentWorker` | app/pipeline/worker.py | Process articles/news/podcasts: choose strategy, download/extract, summarize, persist | `process_content`, `_process_article`, `_process_podcast` |
-| `PodcastDownloadWorker` / `PodcastTranscribeWorker` | app/pipeline/podcast_workers.py | Download audio (with retries) then transcribe via Whisper; queue follow-up tasks | `process_download_task`, `process_transcribe_task` |
-| `ContentSummarizer` | app/services/llm_summarization.py | pydantic-ai summarization with per-type defaults (news digest + editorial narrative + interleaved variants) | `summarize`, `summarize_content` |
-| `ContentAnalyzer` | app/services/content_analyzer.py | Fetch page text (trafilatura), detect embedded media/RSS, LLM classify type/platform | `analyze_url`, `_detect_media_in_html` |
-| `StrategyRegistry` | app/processing_strategies/registry.py | Ordered URL strategy matching | `get_strategy`, `register`, `list_strategies` |
-| `RobustHttpClient` | app/http_client/robust_http_client.py | Resilient HTTP GET/HEAD with retries/logging | `get`, `head`, `close` |
-| `ScraperRunner` | app/scraping/runner.py | Orchestrates scrapers, logs stats to EventLog | `run_all(_with_stats)`, `run_scraper`, `list_scrapers` |
-| `Chat Agent` | app/services/chat_agent.py | pydantic-ai agent with Exa tool, message persistence | `get_chat_agent`, `run_chat_turn`, `generate_initial_suggestions` |
-| `DeepResearchClient` | app/services/deep_research.py | OpenAI Responses API client for async deep research | `start_research`, `poll_result`, `wait_for_completion`, `process_deep_research_message` |
-| `ImageGenerationService` | app/services/image_generation.py | Gemini image generation (16:9 infographics) + local thumbnailing for generated assets | `generate_image`, `generate_thumbnail`, `get_image_url` |
-| `Feed Detection` | app/services/feed_detection.py | Extract RSS/Atom links and classify feed type with LLM | `extract_feed_links`, `classify_feed_type_with_llm` |
-| `Event Logger` | app/services/event_logger.py | Structured event logging to DB | `log_event`, `track_event`, `get_recent_events` |
+Actual middleware/handler behavior in `app/main.py`:
 
-## Database Schema (ORM in `app/models/schema.py`)
-| Table | Purpose | Key Columns/Constraints |
+- request logging with duration-based severity and Langfuse trace context
+- CORS allowing all origins, methods, and headers
+- validation exceptions logged with redacted sensitive headers and bounded request body summaries
+- admin auth failures redirected to login through a custom exception handler
+
+## 5. Core Backend Packages
+
+### 5.1 `app/core/`
+
+Infrastructure authority for:
+
+- settings and environment loading
+- SQLAlchemy engine/session setup
+- JWT and Apple token verification helpers
+- admin/session and current-user dependencies
+- logging setup and logger helpers
+- lightweight timing utilities
+
+Important files:
+
+- `app/core/settings.py`
+- `app/core/db.py`
+- `app/core/security.py`
+- `app/core/deps.py`
+- `app/core/logging.py`
+
+### 5.2 `app/application/`
+
+Router-facing use-case entrypoints. These modules are intentionally thin and stable.
+
+Commands:
+
+- content submission and ingestion
+- mark read / unread
+- toggle favorites
+- start and complete agent onboarding
+- create and revoke API keys
+- upsert and delete user-managed LLM provider keys
+- queue agent digest generation
+
+Queries:
+
+- list/search content cards
+- content detail
+- favorites and recently read
+- unread/processing/long-form stats
+- job status
+- API key listing
+- user LLM integration listing
+- external machine-oriented search
+
+### 5.3 `app/repositories/`
+
+SQLAlchemy query composition and persistence helpers.
+
+Notable repository slices:
+
+- `content_card_repository.py`
+  - card/list/favorites/recently-read projections
+- `content_detail_repository.py`
+  - detail projection
+- `content_feed_query.py`
+  - feed visibility rules shared by list-like endpoints
+- `stats_repository.py`
+  - unread/processing/long-form metrics
+- `api_key_repository.py`
+  - machine API key CRUD
+- `user_integration_repository.py`
+  - user-managed provider credentials
+
+### 5.4 `app/presenters/`
+
+Maps persisted content into API DTOs. The presenter layer owns:
+
+- image URL resolution
+- normalization of news-specific presentation fields
+- list readiness checks
+- detected-feed presentation
+
+### 5.5 `app/infrastructure/`
+
+Holds implementation seams rather than business rules:
+
+- `app/infrastructure/db/search/`
+  - search backend abstraction with SQLite FTS vs generic fallback
+- `app/infrastructure/http/`
+  - HTTP gateway implementation
+- `app/infrastructure/queue/`
+  - queue gateway implementation
+- `app/infrastructure/security/`
+  - API key formatting/hashing helpers
+
+### 5.6 `app/domain/`
+
+Small domain conversion layer used to move between ORM records and canonical `ContentData`.
+
+Important files:
+
+- `app/domain/converters.py`
+- `app/domain/content_form.py`
+
+### 5.7 `app/services/`
+
+Most orchestration logic lives here. Major service families:
+
+- ingestion and content analysis
+- LLM model resolution and prompt building
+- summarization and long-form image support
+- feed detection and feed discovery
+- onboarding flows
+- chat and deep research
+- X integration and sync
+- content interactions, favorites, read state
+- narration and voice systems
+- Langfuse tracing
+- Exa and external API clients
+
+### 5.8 `app/pipeline/`
+
+Task execution runtime for the async processing system:
+
+- queue polling
+- task dispatch
+- per-task handlers
+- checkout/lock handling
+- content worker orchestration
+- podcast download and transcription workers
+
+### 5.9 `app/processing_strategies/`
+
+URL/content-type-specific extraction logic:
+
+- Hacker News
+- arXiv
+- PubMed
+- YouTube
+- PDF
+- image URLs
+- general HTML fallback
+- Twitter/X share strategy
+
+### 5.10 `app/scraping/`
+
+Unified scrapers for scheduled or manual feed ingestion:
+
+- Hacker News
+- Reddit
+- Substack
+- Techmeme
+- Podcast RSS
+- Twitter/X
+- Atom feeds
+- YouTube scraper code exists, but is disabled in the default runner
+
+## 6. Configuration and Environment
+
+`app/core/settings.py` is the config authority. Settings are loaded from `.env` and exposed through a cached `Settings` object.
+
+### 6.1 Core configuration groups
+
+- database
+  - `DATABASE_URL`, pool size, overflow
+- auth
+  - `JWT_SECRET_KEY`, algorithm, access/refresh expiry, `ADMIN_PASSWORD`
+- worker limits
+  - max workers, timeouts, retry limits, checkout timeout
+- external providers
+  - OpenAI, Anthropic, Google, Cerebras, Exa, ElevenLabs
+- tracing
+  - Langfuse host, keys, sample rate, instrumentation mode
+- discovery and onboarding
+  - default models and limits
+- podcast search
+  - Listen Notes, Spotify, Podcast Index, circuit breaker settings
+- X integration
+  - OAuth client settings, bearer token, encryption key
+- PDF extraction
+  - Gemini model validation
+- Whisper
+  - model size and device selection
+- HTTP client
+  - timeout and retry counts
+- storage paths
+  - media, logs, and generated images
+- crawl4ai options
+  - table extraction and chunking flags
+
+### 6.2 Path conventions
+
+- media defaults to `./data/media`
+- logs default to `./logs`
+- images default to `/data/images` when writable, otherwise `./data/images`
+
+## 7. Data Model
+
+The SQLAlchemy schema lives primarily in `app/models/schema.py` and `app/models/user.py`.
+
+### 7.1 Primary tables
+
+| Table | Purpose | Notes |
 |---|---|---|
-| `users` | Accounts from Apple Sign In + admin | `id`, `apple_id` UQ, `email` UQ, `full_name`, `is_admin`, `is_active`, `news_digest_timezone`, `news_digest_interval_hours` (3/6/12, default 6), timestamps |
-| `contents` | Core content records | `id`, `content_type` (`article/podcast/news/unknown`), `url` (canonical, UQ per type), `source_url` (original scraped/submitted URL), `title`, `source`, `platform`, `is_aggregate` (legacy, always false), `status`, `classification`, `error_message`, `retry_count`, checkout fields, `content_metadata` JSON (summary/interleaved, detected_feed, image_generated_at, thumbnail_url), timestamps, indexes on type/status/created_at |
-| `processing_tasks` | Task queue | `task_type` (`scrape`/`analyze_url`/`process_content`/`download_audio`/`transcribe`/`summarize`/`generate_image`/`discover_feeds`/`onboarding_discover`/`dig_deeper`), `content_id`, `payload` JSON, `status`, retry counters, timestamps, idx on status+created_at |
-| `content_read_status` | User read marks | UQ `(user_id, content_id)`, `read_at` |
-| `content_favorites` | User favorites | UQ `(user_id, content_id)` |
-| `content_unlikes` | User unlikes | UQ `(user_id, content_id)` |
-| `content_status` | Per-user feed membership (inbox/archive) | UQ `(user_id, content_id)`, `status`, timestamps |
-| `user_scraper_configs` | User-managed feeds (substack/atom/podcast_rss/youtube) | UQ `(user_id, scraper_type, feed_url)`, `config` JSON, `is_active` |
-| `event_logs` | Structured event telemetry | `event_type`, `event_name`, `status`, `data` JSON, `created_at` |
-| `chat_sessions` | Stored chat threads | `user_id`, `content_id` (optional), `title`, `session_type` (`article_brain/topic/ad_hoc/deep_research`), `topic`, `llm_model`, `llm_provider`, `last_message_at`, `is_archived` |
-| `chat_messages` | Persisted pydantic-ai messages | `session_id`, `message_list` JSON (ModelMessagesTypeAdapter), `created_at` |
-| `daily_news_digests` | Per-user daily digest cards | UQ `(user_id, local_date)`, rendered digest content, `read_at`, `generated_at`, `coverage_end_at` (UTC checkpoint end for the latest same-day refresh) |
+| `users` | End users and admin users | Apple identity, profile, digest settings, onboarding flags, X username |
+| `contents` | Canonical content records | Content type, URL, source/platform, lifecycle status, JSON metadata, publication date |
+| `processing_tasks` | Async task queue | Task type, queue partition, payload, retries, timestamps |
+| `content_read_status` | Per-user read marks | One row per user/content |
+| `content_favorites` | Per-user favorites | One row per user/content |
+| `content_unlikes` | Per-user dislike/unlike state | One row per user/content |
+| `content_status` | Per-user inbox/feed membership | Used to decide whether long-form content is visible to a given user |
+| `content_discussions` | Persisted discussion payload | HN/Reddit/Techmeme/social discussion snapshots |
+| `user_scraper_configs` | User-managed feed subscriptions | Substack, Atom, podcast RSS, YouTube, Reddit |
+| `event_logs` | Flexible event telemetry | Scraper stats, errors, maintenance events |
+| `daily_news_digests` | Per-user daily digest cards | Roll-up summary, key points, bullet details, coverage checkpoint |
+| `feed_discovery_runs` | Discovery run metadata | Seed favorites, token/timing usage, status |
+| `feed_discovery_suggestions` | Discovery recommendations | Feed/podcast/YouTube suggestions with score/rationale |
+| `onboarding_discovery_runs` | Async onboarding runs | Audio/topic-driven discovery state |
+| `onboarding_discovery_lanes` | Onboarding lane plans | Lane target, queries, progress |
+| `onboarding_discovery_suggestions` | Onboarding recommendations | Sources/subreddits chosen during onboarding |
+| `analytics_interactions` | Append-only interaction events | Surface + context payload |
+| `user_integration_connections` | Per-user external connections | X OAuth and BYO provider credential storage |
+| `user_integration_sync_state` | Cursor/state for a connection | Last sync cursor, status, metadata |
+| `user_api_keys` | Machine access keys | Prefix + hash + audit fields |
+| `chat_sessions` | Stored chat sessions | Session type, model/provider, optional content link, snapshot |
+| `chat_messages` | Stored message history | Serialized pydantic-ai messages plus async message status |
 
-## Domain & Pydantic Types
-- **Enums (app/models/metadata.py)**: `ContentType` (`ARTICLE/PODCAST/NEWS/UNKNOWN`), `ContentStatus` (`new/pending/processing/completed/failed/skipped`), `ContentClassification` (`to_read/skip`).
-- **Metadata models**: `ArticleMetadata` (author, publication_date, content, word_count, summary), `PodcastMetadata` (audio_url, transcript, duration, episode_number, YouTube fields, thumbnail_url, summary), `NewsMetadata` (article: url/title/source_domain; aggregator info + `discussion_url`; discovery_time; summary `NewsSummary`).
-- **Summaries**: `InterleavedSummary` (summary_type, hook, insights w/ supporting quotes, takeaway), `InterleavedSummaryV2` (key_points, topics, quotes, takeaway), `StructuredSummary` (title, overview, bullet_points, quotes, topics, questions, counter_arguments, classification, full_markdown), `EditorialNarrativeSummary` (headline + structured narrative), `BulletedSummary`, `NewsSummary` (title, article_url, key_points, summary, classification, summarization_date).
-- **Domain wrapper**: `ContentData` (id, content_type, url, source_url, title, status, metadata dict + computed `display_title`, `short_summary`, `structured_summary`, `interleaved_summary`, `bullet_points`, `quotes`, `topics`, `transcript`; timestamps, retry/error fields). Interleaved summaries are normalized into bullets/quotes/topics for list views.
-- **API schemas (app/routers/api/models.py)**: `ContentSummaryResponse`/`ContentDetailResponse` (includes `image_url`, `thumbnail_url`, `detected_feed`), `ContentListResponse`, `UnreadCountsResponse`, `SubmitContentRequest` + `ContentSubmissionResponse`, `ConvertNewsResponse`, `TweetSuggestionsRequest/Response`, chat DTOs (`ChatSessionSummaryResponse`, `ChatSessionDetailResponse`, `ChatMessageResponse`, `CreateChatSessionRequest/Response`, `SendChatMessageRequest`).
+### 7.2 Content model
 
-## API Surface (routers)
-- **Auth (`/auth`, app/routers/auth.py)**: `POST /apple` (Apple Sign In, upsert user, returns JWT + optional OpenAI key), `POST /refresh`, admin login/logout pages (Jinja, in-memory sessions).
-- **Content list/search (`/api/content`, app/routers/api/content_list.py)**: `GET /` (filters type/date/read, cursor pagination, only summarized/visible items), `GET /search`, `GET /unread-counts` (per type). Responses include `image_url` + `thumbnail_url` when available.
-- **Content detail/actions**: `GET /{id}` (detail with validated metadata, `detected_feed`, `image_url`, `thumbnail_url`), `GET /{id}/chat-url` (ChatGPT deeplink), `POST /{id}/convert-to-article`, `POST /{id}/tweet-suggestions` (Gemini model defined in `TWEET_SUGGESTION_MODEL`).
-- **State**: `POST /{id}/mark-read`, `POST /bulk-mark-read` (read_status), `POST /{id}/favorites/toggle` + `GET /favorites` (favorites).
-- **Daily digests**: `GET /api/daily-news-digests` returns one digest card per local day. The current-day card may be refreshed at user-selected 3/6/12-hour checkpoints and now includes `coverage_end_at` so clients can show how current it is.
-- **User submissions**: `POST /submit` creates or reuses content with `content_type=unknown`, enqueues `ANALYZE_URL` (then `PROCESS_CONTENT`); returns `task_id` and `already_exists` flag.
-- **User scraper configs (`/api/scrapers`)**: CRUD for per-user feed configs; validates `feed_url` and allowed types. Supports type filtering (`?type=podcast_rss` or `?types=substack,atom`) and returns derived `feed_url`/`limit` fields (limit optional 1–100, default 10).
-- **Chat (`/api/chat`)**: list/create sessions, get session detail, send message (runs agent and persists), initial suggestions for article sessions. Session list includes `is_favorite`, `has_pending_message`, and `has_messages`.
-- **Compatibility**: `app/routers/api_content.py` re-exports the API router for older imports; admin/content/logs routers serve Jinja pages.
+`contents` is the central table. Key fields:
 
-## Ingestion & Processing Pipeline
-- **Queueing**: Scrapers enqueue `PROCESS_CONTENT`; `/submit` enqueues `ANALYZE_URL` which then enqueues `PROCESS_CONTENT`. Tasks stored in `processing_tasks` with retry counts and `TaskStatus`.
-- **Processor (`app/pipeline/sequential_task_processor.py`)**: polls queue, dispatches by `TaskType` via `TaskDispatcher` and per-task handlers in `app/pipeline/handlers/`, exponential backoff retries, graceful signal handling.
-- **Analyze URL (`ANALYZE_URL`)**: `ContentAnalyzer` fetches page text (trafilatura), detects embedded media/RSS, and uses LLM classification; falls back to pattern-based detection for known platforms; writes platform/media metadata before `PROCESS_CONTENT`.
-- **Checkout (`app/pipeline/checkout.py`)**: optional row-level locks for multi-worker safety; releases stale checkouts back to `new`.
-- **ContentWorker flow (`app/pipeline/worker.py`)**:
-  1) Load ORM → domain `ContentData`.
-  2) Select strategy via `StrategyRegistry` (ordered; HackerNews → Arxiv → PubMed → YouTube → PDF → Image → HTML fallback).
-  3) Download (sync/async) via strategy/RobustHttpClient; handle non-retryable HTTP errors.
-  4) Extract structured data; handle delegation (`next_url_to_process`), skips (images), or aggregator normalization.
-  5) Prepare LLM payload; enqueue `SUMMARIZE` task (pydantic-ai prompts in `app/services/llm_prompts.py`).
-  6) Persist extraction metadata, set `status=processing`, set `processed_at`; summarization task later writes summary + final status and enqueues image generation.
-- **Podcasts**: `PodcastDownloadWorker` saves audio under `settings.podcast_media_dir`, skips YouTube audio, enqueues transcribe; `PodcastTranscribeWorker` runs Whisper (`app/services/whisper_local.py`), updates metadata, sets status to `completed`.
-- **Summarization defaults**: per-type default models (news/news digests/daily rollups → `google:gemini-3.1-flash-lite-preview`; article/podcast/editorial_narrative → `openai:gpt-5.2`), fallback Gemini Flash for failures; truncates content above 220k chars and prunes empty quotes.
-- **Image generation**: post-summary tasks call Gemini for article/podcast infographics (`GENERATE_IMAGE`); news currently skips post-summary image generation. Generated images are stored under `IMAGES_BASE_DIR` (default `/data/images`) and served at `/static/images/...`.
+- `content_type`
+  - `article`, `podcast`, `news`, `unknown`
+- `url`
+  - canonical normalized URL
+- `source_url`
+  - original submission/source URL when different from canonical
+- `source`
+  - human-readable source label
+- `platform`
+  - source platform such as `youtube`, `substack`, `reddit`, `hackernews`, `x`
+- `status`
+  - `new`, `pending`, `processing`, `completed`, `failed`, `skipped`
+- `classification`
+  - currently used for read priority / skip behavior
+- `content_metadata`
+  - type-specific JSON payload and processing/summarization state
 
-## Processing Strategies (`app/processing_strategies/`)
-- **HackerNewsProcessorStrategy**: handles HN item URLs, extracts linked article, metadata.
-- **ArxivProcessorStrategy**: converts `/abs/` to PDF, feeds PDF strategy.
-- **PubMedProcessorStrategy**: domain-specific extraction, may delegate.
-- **YouTubeProcessorStrategy**: extracts transcript/metadata; skips summarization when no transcript; stores `thumbnail_url` when available.
-- **PdfProcessorStrategy**: fetches bytes, base64 encodes for multimodal LLM prompt.
-- **ImageProcessorStrategy**: detects image URLs and marks `skip_processing`.
-- **HtmlProcessorStrategy**: Crawl4AI render + BeautifulSoup metadata; extracts RSS/Atom feed links for user submissions; fallback for general web pages.
+The `content_metadata` JSON holds most type-specific payloads:
 
-## Scrapers & Dynamic Feeds
-- **BaseScraper (`app/scraping/base.py`)**: ensures `platform` (scraper name) and immutable `source` (feed name/domain); dedupes by URL+type; sets `status=new`, queues processing; ensures per-user inbox rows for articles/podcasts.
-- **Runner (`app/scraping/runner.py`)**: sequentially runs `HackerNewsUnifiedScraper`, `RedditUnifiedScraper`, `SubstackScraper`, `TechmemeScraper`, `PodcastUnifiedScraper`, `AtomScraper` (Twitter/YouTube currently disabled); logs stats via `EventLog`.
-- **User-managed scrapers**: configs stored in `user_scraper_configs`; `build_feed_payloads` converts configs into feed inputs for scrapers.
-- **File-backed configs**: `app/utils/paths.py` resolves `config/` defaults and env overrides such as `NEWSAPP_CONFIG_DIR`, while `config/twitter.yml` and `config/youtube.yml` remain available even though those scheduled scrapers are disabled in the default runner.
+- article body and author data
+- podcast transcript/audio/thumbnail
+- news article/discussion metadata
+- summaries and summary version/kind
+- image generation outputs
+- feed detection payloads
+- processing workflow state
+- share-and-chat flags and other submission metadata
 
-## User-Driven Content & State
-- **Submissions (`POST /api/submit`)**: normalizes URL, creates `content_type=unknown`, sets `source="self submission"`, enqueues `ANALYZE_URL` then `PROCESS_CONTENT`, ensures `content_status` inbox row for the submitter. HTML extraction may detect RSS/Atom feeds and stores `detected_feed` metadata.
-- **Per-user status**: `ContentStatusEntry` controls visibility in list/search (articles/podcasts require inbox entry; news always visible); `classification` column mirrors summary classification for filtering skips.
-- **Read/Favorite/Unlike**: services in `app/services/read_status.py` and `app/services/favorites.py` manage idempotent inserts; favoriting also creates a ChatSession (and unfavorite removes empty sessions); list/search include state flags.
-- **Conversions/Tweets**: `convert-to-article` clones news article URL into a new article; tweet suggestions generated via Gemini 3 Pro (`google-gla:gemini-3-pro-preview`, `app/services/tweet_suggestions.py`).
+### 7.3 User visibility model
 
-## Deep-Dive Chat
-- **Data model**: `chat_sessions` + `chat_messages` (serialized pydantic-ai `ModelMessage` lists). Sessions store provider/model, topic/session_type, archive flag; messages track async `status` + `error`. List responses surface `is_favorite`, `has_messages`, `has_pending_message`.
-- **Agent**: `app/services/chat_agent.py` builds pydantic-ai `Agent` with system prompt + Exa search tool (`exa_web_search`); article context pulled from summaries/content; model resolution via `app/services/llm_models.py` (OpenAI/Anthropic/Google with API-key aware construction).
-- **Deep Research**: `app/services/deep_research.py` uses OpenAI's Responses API with `o4-mini-deep-research-2025-06-26` model for comprehensive research. Runs as a background task with web search and code interpreter tools. Uses `background=True` mode with ~2-second polling via `AsyncOpenAI` SDK (up to 10 minutes by default).
-- **Session Types**: `article_brain` (dig deeper into article), `topic` (search/corroborate), `ad_hoc` (general chat), `deep_research` (comprehensive async research).
-- **Endpoints**: create/list/get sessions, send messages (runs agent, appends DB message list), initial suggestions for article sessions; list includes favorite/pending flags. Deep research sessions route to `process_deep_research_message` background task instead of pydantic-ai agent. Message displays extract user/assistant text from stored message lists and may add a compact `process_summary` display row for intermediate tool/thinking activity without changing session previews.
+Long-form content visibility is user-scoped. News items are globally visible once completed; articles and podcasts usually require a `content_status` inbox row for that user.
 
-## iOS Client (high level)
-- Located in `client/newsly/`; SwiftUI app uses Apple Sign In → `POST /auth/apple`, stores JWT in Keychain, refreshes via `/auth/refresh`.
-- API client attaches Bearer tokens, retries on 401 with refresh token; consumes list/search/detail/read/favorites, submission, chat, tweet suggestions endpoints.
-- Views model feed (list/search with cursor), detail, favorites, chat sessions/messages; supports share-sheet submissions and topic/ad-hoc chats; Knowledge tab unifies favorites + chat sessions.
-- **Rendering**: content detail renders interleaved summaries when `summary_type=interleaved`; list views prefer `thumbnail_url` for progressive image loading with local caching.
-- **Share Extension**: `client/newsly/ShareExtension` target reads shared auth token (Keychain/app group) and submits URLs to `POST /api/content/submit`.
-- **Chat UI**: Chat list shows session type icons (dig deeper, search, deep research, chat). Article detail "Start a Chat" sheet offers Dig Deeper, Corroborate, Deep Research, and voice input options. `ChatModelProvider` enum defines available providers (OpenAI, Anthropic, Google, Deep Research).
+The shared visibility query in `app/repositories/content_feed_query.py` enforces:
 
-## Security & Observability Notes
-- **Gaps**: Apple token signature verification disabled (dev only) in `app/core/security.py`; admin sessions stored in-memory (`app/routers/auth.py`); CORS allows all origins; JWT secret/ADMIN_PASSWORD must be provided via env.
-- **Logging/Telemetry**: request logging middleware; structured `EventLog` via `log_event/track_event`; processing errors use `logger.error()`/`logger.exception()` with structured `extra` fields (`component`, `operation`, `item_id`, `context_data`); errors at ERROR+ level auto-written to JSONL files in `logs/errors/` with sensitive data redaction.
-- **Storage**: media/log paths default to `./data/media` and `./logs` (settings override); podcast downloads sanitized to filesystem-safe names.
+- `Content.status == completed`
+- `classification != skip`
+- digest-only content excluded from the normal feed
+- inbox membership for articles and podcasts
+- favorites/recently-read derived from overlay tables
 
-## Data Flow Cheat Sheet
-1) Scrapers create `contents` rows → enqueue `PROCESS_CONTENT`; `/submit` creates `content_type=unknown` → enqueue `ANALYZE_URL` → `PROCESS_CONTENT`.
-2) `SequentialTaskProcessor` dequeues → `ContentWorker` selects strategy, downloads, extracts, summarizes (interleaved/news digest) → updates `contents.status` + metadata/summary.
-3) Podcasts: download → transcribe → summarize; tasks chained via queue.
-4) Summaries enqueue `GENERATE_IMAGE` for article/podcast content; news does not enqueue a post-summary image task.
-5) API list/search filters: only summarized articles/podcasts + completed news, excludes `classification=skip`, requires `content_status` inbox rows for per-user feeds.
-6) Chat sessions reference `contents` (optional) and persist assistant/user messages; Exa search tool available when `EXA_API_KEY` is set.
-7) Deep research sessions use OpenAI Responses API: message sent → background task polls for completion (up to ~10 min) → result persisted to `chat_messages`.
+### 7.4 Chat persistence model
+
+Chat is server-stored, not client-authoritative.
+
+- `chat_sessions`
+  - one logical conversation
+- `chat_messages`
+  - serialized pydantic-ai message arrays plus render metadata
+- async message state
+  - `processing`, `completed`, `failed`
+
+### 7.5 Schema evolution
+
+Alembic migration history in `alembic/versions/` shows the app’s major feature evolution:
+
+- initial content + user schema
+- read/favorite state and user-based tracking
+- chat tables
+- per-user scraper configs and `content_status`
+- news content type
+- feed discovery tables
+- onboarding discovery tables
+- analytics interactions
+- content discussions
+- user integration tables
+- daily news digests
+- chat context snapshots
+- user API keys
+- digest checkpoint settings
+- X digest filter prompt
+- daily digest bullet details
+
+## 8. API Surface
+
+The API is split between the main content namespace and additive feature namespaces.
+
+### 8.1 Auth and profile
+
+Prefix: `/auth`
+
+Key endpoints:
+
+- `POST /auth/apple`
+- `POST /auth/debug/new-user`
+- `POST /auth/refresh`
+- `GET /auth/me`
+- `PATCH /auth/me`
+- `GET /auth/admin/login`
+- `POST /auth/admin/login`
+- `POST /auth/admin/logout`
+
+Behavior:
+
+- Apple Sign In creates or reuses a user and returns JWT access + refresh tokens.
+- `/me` includes digest settings, onboarding flags, X sync state summary, and profile metadata.
+- Admin auth is cookie-based and separate from mobile JWT auth.
+- The shared bearer auth dependency also accepts Newsly API keys with the `newsly_ak_...` prefix on routes that use `get_current_user`.
+
+### 8.2 Content API
+
+Prefix: `/api/content`
+
+#### List and search
+
+- `GET /api/content/`
+- `GET /api/content/search`
+- `GET /api/content/search/mixed`
+- `GET /api/content/search/podcasts`
+
+#### Daily digests
+
+- `GET /api/content/daily-digests`
+- `POST /api/content/daily-digests/{digest_id}/mark-read`
+- `DELETE /api/content/daily-digests/{digest_id}/mark-unread`
+- `POST /api/content/daily-digests/{digest_id}/bullets/{bullet_index}/dig-deeper`
+- `POST /api/content/daily-digests/{digest_id}/dig-deeper`
+
+#### Detail and narration
+
+- `GET /api/content/{content_id}`
+- `GET /api/content/{content_id}/discussion`
+- `GET /api/content/{content_id}/chat-url`
+- `GET /api/content/narration/{target_type}/{target_id}`
+
+#### Content actions
+
+- `POST /api/content/{content_id}/convert-to-article`
+- `POST /api/content/{content_id}/download-more`
+- `POST /api/content/{content_id}/tweet-suggestions`
+
+#### Read/favorite state
+
+- `POST /api/content/{content_id}/mark-read`
+- `DELETE /api/content/{content_id}/mark-unread`
+- `POST /api/content/bulk-mark-read`
+- `GET /api/content/recently-read/list`
+- `POST /api/content/{content_id}/favorite`
+- `DELETE /api/content/{content_id}/unfavorite`
+- `GET /api/content/favorites/list`
+
+#### Submission and status
+
+- `POST /api/content/submit`
+- `GET /api/content/submissions/list`
+
+#### Stats
+
+- `GET /api/content/unread-counts`
+- `GET /api/content/processing-count`
+- `GET /api/content/long-form`
+
+#### Chat
+
+- `GET /api/content/chat/sessions`
+- `POST /api/content/chat/sessions`
+- `PATCH /api/content/chat/sessions/{session_id}`
+- `GET /api/content/chat/sessions/{session_id}`
+- `DELETE /api/content/chat/sessions/{session_id}`
+- `POST /api/content/chat/sessions/{session_id}/messages`
+- `POST /api/content/chat/assistant/turns`
+- `GET /api/content/chat/messages/{message_id}/status`
+- `POST /api/content/chat/sessions/{session_id}/initial-suggestions`
+
+### 8.3 Discovery
+
+Prefix: `/api/discovery/...`
+
+Endpoints:
+
+- `GET /api/discovery/suggestions`
+- `GET /api/discovery/history`
+- `GET /api/discovery/search/podcasts`
+- `POST /api/discovery/refresh`
+- `POST /api/discovery/subscribe`
+- `POST /api/discovery/add-item`
+- `POST /api/discovery/dismiss`
+- `POST /api/discovery/clear`
+
+### 8.4 Onboarding
+
+Prefix: `/api/onboarding`
+
+Endpoints:
+
+- `POST /api/onboarding/profile`
+- `POST /api/onboarding/parse-voice`
+- `POST /api/onboarding/fast-discover`
+- `POST /api/onboarding/audio-discover`
+- `GET /api/onboarding/discovery-status`
+- `POST /api/onboarding/complete`
+- `POST /api/onboarding/tutorial-complete`
+
+### 8.5 Scraper config management
+
+Prefix: `/api/scrapers`
+
+Endpoints:
+
+- `GET /api/scrapers/`
+- `POST /api/scrapers/`
+- `PUT /api/scrapers/{config_id}`
+- `DELETE /api/scrapers/{config_id}`
+- `POST /api/scrapers/subscribe`
+
+### 8.6 Analytics interactions
+
+Prefix: `/api`
+
+Endpoints:
+
+- `POST /api/analytics`
+
+### 8.7 Agent / machine-facing APIs
+
+Prefix: `/api`
+
+Endpoints:
+
+- `GET /api/jobs/{job_id}`
+- `POST /api/agent/search`
+- `POST /api/agent/onboarding`
+- `GET /api/agent/onboarding/{run_id}`
+- `POST /api/agent/onboarding/{run_id}/complete`
+- `POST /api/agent/digests`
+
+These are additive APIs for machine or agent flows, not a separate v2 backend.
+
+### 8.8 X integrations
+
+Prefixes:
+
+- `/api/integrations/x`
+- `/api/integrations/llm`
+
+X endpoints:
+
+- `GET /api/integrations/x/connection`
+- `POST /api/integrations/x/oauth/start`
+- `POST /api/integrations/x/oauth/exchange`
+- `DELETE /api/integrations/x/connection`
+
+LLM integration endpoints are mounted from `integrations.llm_router` and back user-managed provider keys.
+
+### 8.9 OpenAI helper endpoints
+
+Prefix: `/api/openai`
+
+Endpoints:
+
+- `POST /api/openai/realtime/token`
+- `POST /api/openai/transcriptions`
+
+### 8.10 Voice APIs
+
+Prefix: `/api/voice`
+
+Endpoints:
+
+- `POST /api/voice/sessions`
+- `GET /api/voice/health`
+- `WS /api/voice/ws/{session_id}`
+
+### 8.11 Admin UI and logs
+
+Prefix: `/admin`
+
+Representative routes:
+
+- dashboard
+- onboarding lane preview
+- eval summaries and eval run trigger
+- API key management
+- conversational admin UI
+- conversational health
+- log browser and error reset tools
+
+## 9. Queue and Worker Architecture
+
+Async work is persisted in `processing_tasks`, not delegated to an external broker.
+
+### 9.1 Task types
+
+Defined in `app/models/contracts.py`:
+
+- `scrape`
+- `analyze_url`
+- `process_content`
+- `download_audio`
+- `transcribe`
+- `summarize`
+- `fetch_discussion`
+- `generate_image`
+- `discover_feeds`
+- `onboarding_discover`
+- `dig_deeper`
+- `sync_integration`
+- `generate_daily_news_digest`
+
+### 9.2 Queue partitions
+
+Defined in `TaskQueue`:
+
+- `content`
+- `image`
+- `transcribe`
+- `onboarding`
+- `twitter`
+- `chat`
+
+Current task-to-queue mapping in `app/services/queue.py`:
+
+| Task type | Queue |
+|---|---|
+| `scrape` | `content` |
+| `analyze_url` | `content` |
+| `process_content` | `content` |
+| `download_audio` | `content` |
+| `transcribe` | `transcribe` |
+| `summarize` | `content` |
+| `fetch_discussion` | `content` |
+| `generate_image` | `image` |
+| `generate_daily_news_digest` | `content` |
+| `discover_feeds` | `content` |
+| `onboarding_discover` | `onboarding` |
+| `dig_deeper` | `chat` |
+| `sync_integration` | `twitter` |
+
+### 9.3 Queue semantics
+
+`QueueService` provides:
+
+- enqueue with optional dedupe for selected content task types
+- dequeue with compare-and-set claiming
+- retry bucket rotation to reduce starvation
+- retry scheduling through delayed `created_at`
+- completion and retry state transitions
+
+This design is intentionally compatible with SQLite, where advanced row-locking semantics are limited.
+
+### 9.4 Sequential task processor
+
+`app/pipeline/sequential_task_processor.py` is the runtime for workers.
+
+Responsibilities:
+
+- poll one queue partition
+- normalize task payload into `TaskEnvelope`
+- dispatch to a typed handler
+- wrap execution in Langfuse tracing
+- apply retry/backoff policy
+- gracefully handle shutdown signals
+
+Registered handlers:
+
+- scrape
+- analyze URL
+- process content
+- download audio
+- transcribe
+- summarize
+- fetch discussion
+- generate image
+- generate daily news digest
+- discover feeds
+- onboarding discover
+- dig deeper
+- sync integration
+
+## 10. Content Ingestion and Processing Flow
+
+### 10.1 Main long-form flow
+
+```mermaid
+flowchart TD
+  Submit["User submit or scraper"] --> Create["Create/reuse content row"]
+  Create --> Analyze["ANALYZE_URL (optional)"]
+  Analyze --> Process["PROCESS_CONTENT"]
+  Process --> Summary["SUMMARIZE"]
+  Summary --> Discussion["FETCH_DISCUSSION (when applicable)"]
+  Summary --> Image["GENERATE_IMAGE (article/podcast)"]
+  Summary --> Done["completed content"]
+```
+
+### 10.2 User submission flow
+
+Implemented primarily in `app/services/content_submission.py`.
+
+Behavior:
+
+- normalize and validate URL
+- reuse existing `contents` row when possible
+- create `content_type=unknown` when new
+- attach submission metadata such as `submitted_by_user_id`, `submitted_via`, `platform_hint`
+- ensure inbox status for the submitting user
+- enqueue `ANALYZE_URL`
+- optionally set `crawl_links`, `subscribe_to_feed`, or `share_and_chat`
+
+### 10.3 URL analysis
+
+`app/services/content_analyzer.py`:
+
+- fetches page HTML with `httpx`
+- extracts readable text with `trafilatura`
+- detects podcast/video/media patterns in raw HTML
+- extracts RSS/Atom links
+- uses an LLM to classify `article`, `podcast`, or `video`
+- supports optional instruction-driven link extraction for share flows
+
+### 10.4 Content processing worker
+
+`app/pipeline/worker.py` is the main orchestrator for content extraction.
+
+High-level behavior:
+
+- load ORM content and convert to `ContentData`
+- choose a processing strategy by URL
+- download/extract strategy-specific data
+- merge metadata safely
+- persist workflow state transitions
+- enqueue `SUMMARIZE` when extraction succeeded and summarization is applicable
+
+### 10.5 Processing strategies
+
+Ordered strategy selection is provided by `app/processing_strategies/registry.py`.
+
+Current strategy set:
+
+- `HackerNewsProcessorStrategy`
+- `ArxivProcessorStrategy`
+- `PubMedProcessorStrategy`
+- `YouTubeProcessorStrategy`
+- `PdfProcessorStrategy`
+- `ImageProcessorStrategy`
+- `HtmlProcessorStrategy`
+- `TwitterShareStrategy`
+
+Behavioral notes:
+
+- arXiv can redirect processing toward PDF extraction
+- YouTube extraction can provide transcript and provider thumbnail metadata
+- image URLs can short-circuit to skipped states
+- HTML is the broad fallback and uses crawl4ai-related extraction paths
+
+### 10.6 Podcast-specific flow
+
+Podcast processing is split further:
+
+- `download_audio`
+  - fetch audio and store under `settings.podcast_media_dir`
+- `transcribe`
+  - run Whisper through `app/services/whisper_local.py`
+- `summarize`
+  - summarize transcript once text is available
+
+Workers:
+
+- `PodcastDownloadWorker`
+- `PodcastTranscribeWorker`
+
+### 10.7 Summarization
+
+`app/services/llm_summarization.py` owns summary generation and fallbacks.
+
+Current defaults:
+
+- news, news digests, daily rollups
+  - `google:gemini-3.1-flash-lite-preview`
+- articles, podcasts, editorial/interleaved/long-bullets
+  - `openai:gpt-5.2`
+- fallback model
+  - `google:gemini-2.5-flash`
+
+Key behaviors:
+
+- payload clipping for long inputs
+- structured summary cleanup
+- quote pruning
+- fallback routing for provider errors, context limits, and event-loop issues
+
+Summary shapes live in `app/models/metadata.py` and `app/models/summary_contracts.py`.
+
+### 10.8 Discussion fetching
+
+`app/services/discussion_fetcher.py` persists separate discussion payloads for eligible content.
+
+Supported discussion sources include:
+
+- Hacker News
+- Reddit
+- Techmeme-linked discussions
+- selected social/link platforms when discoverable
+
+Stored output lands in `content_discussions` and may also denormalize preview fields into content metadata.
+
+### 10.9 Image generation
+
+`app/services/image_generation.py` uses Google Gemini image generation to create:
+
+- editorial infographics for articles and podcasts
+- thumbnails and derivative resized assets
+
+Generated files are stored in image directories resolved by `app/utils/image_paths.py` and exposed from `/static/images/...`.
+
+### 10.10 Daily digest generation
+
+Daily digest generation is its own queued workflow:
+
+- task type: `generate_daily_news_digest`
+- table: `daily_news_digests`
+- output includes title, summary, key points, bullet details, source content ids, source count, `coverage_end_at`
+- dedicated routes support read/unread state and launching dig-deeper chats from digest bullets
+
+## 11. Scrapers and Feed Sources
+
+### 11.1 Default runner
+
+`app/scraping/runner.py` currently runs these scrapers by default:
+
+- Hacker News
+- Reddit
+- Substack
+- Techmeme
+- Podcast RSS
+- Twitter/X
+- Atom
+
+The YouTube scraper implementation exists but is commented out in the default runner.
+
+### 11.2 Scraper behavior
+
+Scrapers generally:
+
+- fetch items from a source
+- normalize URLs and metadata
+- dedupe against existing content
+- create new `contents` rows with `status=new`
+- enqueue processing
+- ensure inbox visibility for relevant users when source ownership is user-specific
+- emit stats and errors into `event_logs`
+
+### 11.3 User-managed source configs
+
+`user_scraper_configs` lets each user add feeds for:
+
+- `substack`
+- `atom`
+- `podcast_rss`
+- `youtube`
+- `reddit`
+
+`app/services/scraper_configs.py` normalizes config payloads and enforces limits and required fields.
+
+## 12. Discovery and Onboarding
+
+These are related but separate systems.
+
+### 12.1 Feed discovery
+
+`app/services/feed_discovery.py` is a favorites-driven discovery workflow.
+
+Inputs:
+
+- user favorites
+- Exa web results
+- LLM-selected discovery directions and lanes
+
+Outputs:
+
+- `feed_discovery_runs`
+- `feed_discovery_suggestions`
+
+Supported suggestion targets:
+
+- Atom/Substack-like feeds
+- podcast RSS
+- YouTube
+
+### 12.2 Onboarding discovery
+
+`app/services/onboarding.py` handles the new-user source discovery experience.
+
+Capabilities:
+
+- build onboarding profile from interests
+- parse voice transcript into candidate topics
+- run fast source discovery
+- run audio-driven discovery planning with multiple lanes
+- persist onboarding lanes and suggestions
+- complete onboarding by creating user scraper configs and feed memberships
+
+Primary/default onboarding model today:
+
+- `cerebras:zai-glm-4.7`
+
+Fallbacks are defined for discovery and audio plan generation.
+
+### 12.3 Discovery boundaries
+
+Discovery does not directly replace the content feed. It proposes sources or feed subscriptions that then become normal user scraper configs or inbox content through the existing ingestion pipeline.
+
+## 13. Chat, Deep Research, and Agent Features
+
+### 13.1 Chat sessions
+
+`app/services/chat_agent.py` powers server-side chat using pydantic-ai.
+
+Capabilities:
+
+- article-aware deep-dive chat
+- topic chat
+- ad hoc chat
+- source-backed Exa web search
+- persisted sessions and messages
+- model/provider tracking per session
+
+The system prompt explicitly instructs the agent to use web search and cite sources when it does.
+
+### 13.2 Deep research
+
+`app/services/deep_research.py` is a separate OpenAI Responses API path for long-running research.
+
+Characteristics:
+
+- async/background execution
+- model from `app/services/llm_models.py` (`DEEP_RESEARCH_MODEL`)
+- web search + code interpreter tools enabled
+- response polling every 2 seconds
+- 10 minute default timeout window
+
+### 13.3 Daily digest chat
+
+Daily digest routes can start dig-deeper chats from:
+
+- the whole digest
+- a specific digest bullet
+
+This keeps digest exploration inside the same chat infrastructure instead of inventing a separate discussion stack.
+
+### 13.4 Agent-facing APIs
+
+The `/api/agent/*` surface wraps existing features into machine-friendly flows:
+
+- external search
+- onboarding start/status/complete
+- digest generation
+- job polling
+
+These APIs are intended for assistant and CLI style clients that do not need the full mobile UI semantics.
+
+## 14. Voice and Realtime Systems
+
+Voice support lives under `app/services/voice/` and `app/routers/api/voice.py`.
+
+Modules:
+
+- `session_manager.py`
+- `persistence.py`
+- `orchestrator.py`
+- `agent_streaming.py`
+- `elevenlabs_streaming.py`
+- `narration_tts.py`
+
+### 14.1 Voice session flow
+
+1. client creates or resumes a voice session via `POST /api/voice/sessions`
+2. backend loads content context and/or chat context
+3. backend resolves or creates a linked chat session
+4. websocket client connects to `/api/voice/ws/{session_id}`
+5. orchestrator streams turn events, transcript deltas, assistant text, and assistant audio
+
+### 14.2 Voice dependencies
+
+The voice system coordinates:
+
+- JWT-authenticated websocket access
+- ElevenLabs streaming/TTS health and audio output
+- persisted content/chat context
+- live onboarding intro state
+- session pruning and TTL behavior
+
+### 14.3 OpenAI helper endpoints
+
+Separate from the main voice websocket stack, `/api/openai/*` exposes:
+
+- realtime token creation
+- backend-assisted audio transcription
+
+## 15. X Integration and External Connections
+
+`app/services/x_integration.py` owns per-user X integration state and sync.
+
+Capabilities:
+
+- start and exchange OAuth flow
+- store encrypted access/refresh tokens
+- fetch bookmarks, timeline items, and lists
+- score/filter candidates into digest visibility or inbox flows
+- persist sync cursors and summaries
+
+Related storage:
+
+- `user_integration_connections`
+- `user_integration_sync_state`
+
+Related APIs:
+
+- `/api/integrations/x/*`
+- sync tasks through `sync_integration`
+
+### 15.1 BYO LLM keys
+
+User-managed provider keys are stored through the LLM integrations API and repository path.
+
+Supported providers are enforced in the integration repository and command layer. This allows user-specific model credentials without changing the rest of the router contract.
+
+## 16. Search
+
+Search is intentionally abstracted from the routers.
+
+### 16.1 Content search
+
+`app/application/queries/search_content_cards.py` uses:
+
+- `build_user_feed_query(...)`
+- a backend returned by `app/infrastructure/db/search/base.py`
+
+Search backend selection:
+
+- SQLite
+  - `SQLiteSearchBackend`
+- non-SQLite
+  - `GenericSearchBackend`
+
+### 16.2 External search
+
+`/api/agent/search` and parts of chat/discovery rely on:
+
+- Exa web search
+- podcast episode search providers
+
+## 17. iOS Client Architecture
+
+The SwiftUI client lives in `client/newsly/newsly/`.
+
+### 17.1 App structure
+
+Top-level app bootstrap:
+
+- `client/newsly/newsly/newslyApp.swift`
+
+Primary layers:
+
+- `Models/`
+  - API-facing and UI-facing model types, including generated API contracts
+- `Repositories/`
+  - content/read-status/daily-digest repository wrappers
+- `Services/`
+  - API client, auth, chat, discovery, narration, voice, X integration, image cache, notifications
+- `ViewModels/`
+  - feature-level state and pagination
+- `Views/`
+  - authenticated root, lists, detail, chat, discovery, onboarding, settings, sources, live voice, knowledge views
+- `Shared/`
+  - app chrome, state stores, shared container utilities
+
+### 17.2 Auth model
+
+The iOS app authenticates with Apple Sign In against `/auth/apple`, stores credentials in Keychain, and boots the authenticated shell from `AuthenticationViewModel`.
+
+### 17.3 Client features visible from code structure
+
+The client has dedicated flows for:
+
+- content lists and search
+- content detail
+- daily digests
+- chat session history and message views
+- discovery and onboarding
+- live voice
+- settings and sources
+- submissions and processing status
+- X integration
+
+### 17.4 Generated API contracts
+
+The repo contains generated Swift API contract models under:
+
+- `client/newsly/newsly/Models/Generated/`
+
+Supporting scripts:
+
+- `scripts/export_openapi_schema.py`
+- `scripts/export_agent_openapi_schema.py`
+- `scripts/generate_ios_contracts.py`
+
+## 18. iOS Share Extension
+
+The share extension lives in `client/newsly/ShareExtension/`.
+
+`ShareViewController.swift` currently supports three submission modes:
+
+- Add content
+- Add links
+- Add feed
+
+The extension:
+
+- extracts shared URLs from extension items
+- shares auth state through the app group / shared keychain
+- submits URLs to the backend
+- lets the user choose whether the backend should summarize, crawl linked pages, or subscribe to the site feed
+
+## 19. Admin UI
+
+The server-rendered admin UI is intentionally simple and lives alongside the API.
+
+Capabilities visible in `app/routers/admin.py`:
+
+- queue partition status
+- task phase status
+- recent failure rollups
+- scraper health metrics
+- onboarding lane preview
+- eval execution and summaries
+- API key creation/revocation
+- conversational admin assistant and health checks
+
+This is not a separate frontend application. Templates are rendered via Jinja in `app/templates/`.
+
+## 20. Observability and Logging
+
+### 20.1 Structured logging
+
+The codebase standard is direct `logger.error()` / `logger.exception()` calls with structured `extra` payloads such as:
+
+- `component`
+- `operation`
+- `item_id`
+- `context_data`
+
+### 20.2 Event logs
+
+`event_logs` stores flexible JSON payloads for:
+
+- scraper stats
+- scraper failures
+- maintenance/cleanup events
+- other service-level telemetry
+
+### 20.3 Langfuse
+
+Langfuse tracing is initialized during app startup and used in:
+
+- request traces
+- queue task traces
+- LLM generation paths
+- selected provider integrations
+
+### 20.4 Error file logging
+
+Per repo conventions, ERROR+ logs are written to JSONL error logs under `logs/errors/`.
+
+## 21. Operations and Scripts
+
+Representative scripts under `scripts/`:
+
+### 21.1 Core runtime
+
+- `scripts/start_server.sh`
+- `scripts/run_workers.py`
+- `scripts/start_workers.sh`
+- `scripts/run_scrapers.py`
+- `scripts/start_scrapers.sh`
+
+### 21.2 Schema and bootstrapping
+
+- `scripts/init_database.py`
+- `scripts/check_and_run_migrations.sh`
+- Alembic migrations under `alembic/`
+
+### 21.3 Discovery, digests, and sync
+
+- `scripts/run_feed_discovery.py`
+- `scripts/run_daily_news_digest.py`
+- `scripts/run_integration_sync.py`
+- `scripts/backfill_daily_news_digests.py`
+
+### 21.4 Content maintenance
+
+- `scripts/reset_errored_content.py`
+- `scripts/reset_content_processing.py`
+- `scripts/reconcile_stale_long_form_processing.py`
+- `scripts/cancel_ineligible_generate_image_tasks.py`
+- `scripts/resummarize_podcasts.py`
+- `scripts/retranscribe_podcasts.py`
+- `scripts/generate_thumbnails.py`
+- `scripts/resize_thumbnails.py`
+
+### 21.5 Contract and documentation generation
+
+- `scripts/export_openapi_schema.py`
+- `scripts/export_agent_openapi_schema.py`
+- `scripts/generate_ios_contracts.py`
+- `scripts/generate_codebase_docs.py`
+- `scripts/update-docs-from-commit.sh`
+
+### 21.6 Diagnostics and reports
+
+- `scripts/dump_database.py`
+- `scripts/dump_system_stats.py`
+- `scripts/view_remote_errors.sh`
+- `scripts/build_prompt_debug_report.py`
+- `scripts/generate_eval_html_report.py`
+
+## 22. Testing Strategy
+
+The test suite under `tests/` mirrors the codebase structure and covers both unit and integration concerns.
+
+Top-level coverage areas include:
+
+- `tests/core/`
+- `tests/domain/`
+- `tests/http_client/`
+- `tests/integration/`
+- `tests/models/`
+- `tests/pipeline/`
+- `tests/presenters/`
+- `tests/processing_strategies/`
+- `tests/routers/`
+- `tests/scraping/`
+- `tests/services/`
+- `tests/utils/`
+- `tests/cli/`
+
+Key test infrastructure:
+
+- in-memory SQLite fixtures via `tests/conftest.py`
+- FastAPI `TestClient`
+- fixture-driven content samples in `tests/fixtures/`
+
+The suite covers:
+
+- API route behavior
+- queue and retry logic
+- processing handlers and worker terminal paths
+- discovery and onboarding logic
+- chat and voice services
+- X integration
+- search and visibility semantics
+- scraper behavior
+
+## 23. Known Constraints and Risks
+
+The architecture is intentionally pragmatic, but a few constraints are explicit in the code:
+
+### 23.1 Admin sessions are in memory
+
+`app/routers/auth.py` stores admin sessions in an in-memory set.
+
+Implications:
+
+- lost on restart
+- not multi-instance safe
+- no persistent audit trail
+- no TTL-backed expiry
+
+### 23.2 Apple token verification is not production-grade yet
+
+`app/core/security.py` currently decodes Apple ID tokens without verifying the signature against Apple's public keys. The file explicitly marks this as MVP-only behavior.
+
+### 23.3 CORS is wide open
+
+`app/main.py` currently allows all origins, methods, and headers.
+
+### 23.4 Queue is DB-backed
+
+This keeps deployment simple and SQLite-compatible, but it also means:
+
+- worker throughput is constrained by DB polling and row updates
+- partitioning is logical, not broker-native
+- horizontal scale requires care
+
+### 23.5 Metadata is flexible JSON
+
+`content_metadata` makes the system adaptable, but schema drift is always possible if validations or migration discipline weaken.
+
+## 24. Mental Model for Working in This Repo
+
+When making backend changes, use this dependency direction:
+
+1. routers
+2. application commands/queries
+3. repositories/services
+4. models/infrastructure
+
+When making processing changes, use this direction:
+
+1. task type or handler
+2. worker/service orchestration
+3. strategy or provider implementation
+4. persistence and presenter updates
+
+When making product changes, remember the system has three parallel user-facing states:
+
+- shared canonical content in `contents`
+- per-user visibility/state overlays in `content_status`, read, favorite, unlike
+- per-user conversational/discovery/integration state in dedicated tables
+
+That split is the core architectural idea behind Newsly.

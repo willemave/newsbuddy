@@ -16,6 +16,7 @@ from app.pipeline.handlers.summarize import SummarizeHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
 from app.services.queue import TaskType
+from app.utils.summarization_inputs import compute_summarization_input_fingerprint
 
 
 @pytest.fixture
@@ -277,3 +278,46 @@ def test_summarize_task_handles_missing_text(db_session):
     assert isinstance(processing_errors, list)
     assert processing_errors
     assert processing_errors[-1]["stage"] == "summarization"
+
+
+def test_summarize_task_skips_llm_when_input_fingerprint_matches(db_session):
+    """Matching fingerprints should reuse the existing summary without another model call."""
+    article_text = "This is the full text content of the article."
+    content = Mock(spec=Content)
+    content.id = 1
+    content.content_type = "article"
+    content.status = "processing"
+    content.content_metadata = {
+        "content": article_text,
+        "summary": {
+            "title": "Existing Summary",
+            "overview": "Already summarized.",
+            "bullet_points": [],
+            "topics": [],
+            "classification": "to_read",
+        },
+        "summarization_input_fingerprint": compute_summarization_input_fingerprint(
+            "article",
+            article_text,
+        ),
+    }
+
+    db_session.first.return_value = content
+
+    llm_service = Mock()
+    handler = SummarizeHandler()
+    context = _build_context(db_session, llm_service)
+
+    task = TaskEnvelope(
+        id=1,
+        task_type=TaskType.SUMMARIZE,
+        content_id=1,
+        payload={"content_id": 1},
+    )
+
+    result = handler.handle(task, context)
+
+    assert result.success is True
+    llm_service.summarize_content.assert_not_called()
+    assert content.status == "completed"
+    assert content.processed_at is not None

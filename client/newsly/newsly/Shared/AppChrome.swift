@@ -10,25 +10,13 @@ import UIKit
 
 enum AppChrome {
     static func configure() {
-        let terracotta = UIColor { traitCollection in
-            traitCollection.userInterfaceStyle == .dark
-                ? UIColor(red: 0.831, green: 0.514, blue: 0.416, alpha: 1.0)
-                : UIColor(red: 0.439, green: 0.169, blue: 0.098, alpha: 1.0)
-        }
-        let unselected = UIColor { traitCollection in
-            traitCollection.userInterfaceStyle == .dark
-                ? UIColor(red: 0.639, green: 0.616, blue: 0.588, alpha: 1.0)
-                : UIColor(red: 0.396, green: 0.365, blue: 0.337, alpha: 1.0)
-        }
-        let surface = UIColor { traitCollection in
-            traitCollection.userInterfaceStyle == .dark
-                ? UIColor(red: 0.102, green: 0.094, blue: 0.082, alpha: 1.0)
-                : UIColor(red: 0.992, green: 0.976, blue: 0.957, alpha: 1.0)
-        }
+        let accent = UIColor.appAccent
+        let unselected = UIColor.appOnSurfaceSecondary
+        let surface = UIColor.appSurfacePrimary
 
         let itemAppearance = UITabBarItemAppearance()
-        itemAppearance.selected.iconColor = terracotta
-        itemAppearance.selected.titleTextAttributes = [.foregroundColor: terracotta]
+        itemAppearance.selected.iconColor = accent
+        itemAppearance.selected.titleTextAttributes = [.foregroundColor: accent]
         itemAppearance.normal.iconColor = unselected
         itemAppearance.normal.titleTextAttributes = [.foregroundColor: unselected]
 
@@ -46,7 +34,7 @@ enum AppChrome {
         navigationAppearance.backgroundColor = surface.withAlphaComponent(0.9)
         UINavigationBar.appearance().standardAppearance = navigationAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navigationAppearance
-        UINavigationBar.appearance().tintColor = terracotta
+        UINavigationBar.appearance().tintColor = accent
     }
 }
 

@@ -94,3 +94,54 @@ def test_scrape_list_api_builds_news_entries(monkeypatch) -> None:
     assert item["url"] == "https://example.com/story"
     assert item["metadata"]["platform"] == "twitter"
     assert item["metadata"]["aggregator"]["metadata"]["list_id"] == "1521123920950222849"
+
+
+def test_scrape_list_api_uses_app_bearer_when_user_token_missing(monkeypatch) -> None:
+    """List scraping should still try the official API with app bearer auth."""
+    scraper = TwitterUnifiedScraper()
+    scraper.settings = {
+        "default_limit": 50,
+        "default_hours_back": 24,
+        "include_retweets": False,
+        "include_replies": False,
+        "min_engagement": 0,
+    }
+
+    observed_access_tokens: list[str | None] = []
+
+    monkeypatch.setattr(scraper, "_get_x_api_access_token", lambda: None)
+
+    def fake_fetch_list_tweets(**kwargs):  # noqa: ANN003
+        observed_access_tokens.append(kwargs.get("access_token"))
+        return XTweetsPage(
+            tweets=[
+                XTweet(
+                    id="tweet-2",
+                    text="App bearer fallback link",
+                    author_username="news_bot",
+                    author_name="News Bot",
+                    created_at="2026-03-27T21:56:00Z",
+                    like_count=9,
+                    retweet_count=3,
+                    reply_count=1,
+                    external_urls=["https://example.com/fallback-story"],
+                )
+            ],
+            next_token=None,
+        )
+
+    monkeypatch.setattr("app.scraping.twitter_unified.fetch_list_tweets", fake_fetch_list_tweets)
+
+    items = scraper._scrape_list_api(
+        {
+            "name": "FinTech",
+            "list_id": "1521123920950222849",
+            "limit": 10,
+            "hours_back": 24,
+        }
+    )
+
+    assert observed_access_tokens == [None]
+    assert items is not None
+    assert len(items) == 1
+    assert items[0]["url"] == "https://example.com/fallback-story"

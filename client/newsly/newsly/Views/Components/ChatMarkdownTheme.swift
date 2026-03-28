@@ -15,11 +15,11 @@ extension Theme {
         // MARK: - Text styles
         .text {
             FontFamily(.custom("Newsreader"))
-            ForegroundColor(.primary)
+            ForegroundColor(Color.onSurface)
             FontSize(.em(1.0))
         }
         .link {
-            ForegroundColor(Color(UIColor.link))
+            ForegroundColor(Color.topicAccent)
         }
         .strong {
             FontWeight(.semibold)
@@ -28,7 +28,7 @@ extension Theme {
         .code {
             FontFamilyVariant(.monospaced)
             FontSize(.em(0.88))
-            BackgroundColor(Color(light: Color(.sRGB, red: 0.95, green: 0.96, blue: 0.97), dark: Color(.sRGB, red: 0.2, green: 0.21, blue: 0.23)))
+            BackgroundColor(Color.surfaceContainer)
         }
 
         // MARK: - Headings (compact for chat)
@@ -78,7 +78,7 @@ extension Theme {
                 .markdownTextStyle {
                     FontWeight(.semibold)
                     FontSize(.em(0.85))
-                    ForegroundColor(.secondary)
+                    ForegroundColor(Color.onSurfaceSecondary)
                 }
         }
 
@@ -96,7 +96,7 @@ extension Theme {
                     .frame(width: 3)
                 configuration.label
                     .markdownTextStyle {
-                        ForegroundColor(.secondary)
+                        ForegroundColor(Color.onSurfaceSecondary)
                         FontStyle(.italic)
                     }
                     .padding(.leading, 10)
@@ -114,7 +114,7 @@ extension Theme {
                     }
             }
             .padding(12)
-            .background(Color(light: Color(.sRGB, red: 0.95, green: 0.96, blue: 0.97), dark: Color(.sRGB, red: 0.14, green: 0.15, blue: 0.17)))
+            .background(Color.surfaceContainer)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .markdownMargin(top: 4, bottom: 12)
         }
@@ -134,7 +134,7 @@ extension Theme {
         // MARK: - Table
         .table { configuration in
             configuration.label
-                .markdownTableBorderStyle(.init(color: .secondary.opacity(0.3)))
+                .markdownTableBorderStyle(.init(color: Color.outlineVariant.opacity(0.3)))
                 .markdownMargin(top: 4, bottom: 8)
         }
         .tableCell { configuration in

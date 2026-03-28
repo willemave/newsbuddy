@@ -34,7 +34,7 @@ struct ChatStatusBanner: View {
                 if style == .floating {
                     Text(session.contentTitle)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(1)
                 }
             }
@@ -76,12 +76,12 @@ struct ChatStatusBanner: View {
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(.title3)
-                .foregroundColor(.green)
+                .foregroundColor(Color.statusActive)
 
         case .failed:
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.title3)
-                .foregroundColor(.red)
+                .foregroundColor(Color.statusDestructive)
         }
     }
 
@@ -117,7 +117,7 @@ struct ChatStatusBanner: View {
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
             }
         }
     }
@@ -130,11 +130,11 @@ struct ChatStatusBanner: View {
     private var backgroundColor: Color {
         switch session.status {
         case .processing:
-            return Color(.secondarySystemBackground)
+            return Color.surfaceSecondary
         case .completed:
-            return Color(.secondarySystemBackground)
+            return Color.surfaceSecondary
         case .failed:
-            return Color.red.opacity(0.1)
+            return Color.statusDestructive.opacity(0.1)
         }
     }
 }
@@ -155,7 +155,7 @@ private extension View {
                 .cornerRadius(10)
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color(.separator), lineWidth: 0.5)
+                        .stroke(Color.outlineVariant, lineWidth: 0.5)
                 )
         }
     }
@@ -200,5 +200,5 @@ private extension View {
         )
     }
     .padding()
-    .background(Color(.secondarySystemBackground))
+    .background(Color.surfaceSecondary)
 }

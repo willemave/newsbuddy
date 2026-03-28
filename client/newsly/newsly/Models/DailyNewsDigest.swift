@@ -120,9 +120,7 @@ struct DailyNewsDigest: Codable, Identifiable {
         return formatter
     }()
 
-    private static let coverageParser = ISO8601DateFormatter()
-
-    private static let coverageLabelFormatter: DateFormatter = {
+    private static let timeLabelFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
         formatter.timeZone = TimeZone.current
@@ -154,17 +152,7 @@ struct DailyNewsDigest: Codable, Identifiable {
             date = parser.date(from: generatedAt)
         }
         guard let date else { return "" }
-        return Self.coverageLabelFormatter.string(from: date)
-    }
-
-    var displayCoverageLabel: String? {
-        guard let date = localDateValue, Calendar.current.isDateInToday(date) else {
-            return nil
-        }
-        guard let coverageEndAt, let parsed = Self.coverageParser.date(from: coverageEndAt) else {
-            return nil
-        }
-        return "Updated through \(Self.coverageLabelFormatter.string(from: parsed))"
+        return Self.timeLabelFormatter.string(from: date)
     }
 
     var cleanedSummary: String {

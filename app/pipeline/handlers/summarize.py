@@ -31,6 +31,10 @@ from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.dig_deeper import enqueue_dig_deeper_task
 from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.queue import TaskType
+from app.utils.summarization_inputs import (
+    build_summarization_payload,
+    compute_summarization_input_fingerprint,
+)
 
 logger = get_logger(__name__)
 
@@ -80,62 +84,6 @@ def _extract_share_and_chat_user_ids(metadata: dict[str, Any]) -> list[int]:
             user_ids = []
 
     return [user_id for user_id in user_ids if user_id > 0]
-
-
-def _build_news_context(metadata: dict[str, Any]) -> str:
-    """Build aggregator context string for news items."""
-    article = metadata.get("article", {})
-    aggregator = metadata.get("aggregator", {})
-    lines: list[str] = []
-
-    article_title = article.get("title") or ""
-    article_url = article.get("url") or ""
-
-    if article_title:
-        lines.append(f"Article Title: {article_title}")
-    if article_url:
-        lines.append(f"Article URL: {article_url}")
-
-    if aggregator:
-        name = aggregator.get("name") or metadata.get("platform")
-        agg_title = aggregator.get("title")
-        agg_url = metadata.get("discussion_url") or aggregator.get("url")
-        author = aggregator.get("author")
-
-        context_bits = []
-        if name:
-            context_bits.append(name)
-        if author:
-            context_bits.append(f"by {author}")
-        if agg_title and agg_title != article_title:
-            lines.append(f"Aggregator Headline: {agg_title}")
-        if context_bits:
-            lines.append("Aggregator Context: " + ", ".join(context_bits))
-        if agg_url:
-            lines.append(f"Discussion URL: {agg_url}")
-
-        extra = aggregator.get("metadata") or {}
-        highlights = []
-        for field in ["score", "comments_count", "likes", "retweets", "replies"]:
-            value = extra.get(field)
-            if value is not None:
-                highlights.append(f"{field}={value}")
-        if highlights:
-            lines.append("Signals: " + ", ".join(highlights))
-
-    summary_payload = metadata.get("summary") if isinstance(metadata, dict) else {}
-    excerpt = metadata.get("excerpt")
-    if not excerpt and isinstance(summary_payload, dict):
-        excerpt = (
-            summary_payload.get("overview")
-            or summary_payload.get("summary")
-            or summary_payload.get("hook")
-            or summary_payload.get("takeaway")
-        )
-    if excerpt:
-        lines.append(f"Aggregator Summary: {excerpt}")
-
-    return "\n".join(lines)
 
 
 class SummarizeHandler:
@@ -280,25 +228,11 @@ class SummarizeHandler:
                     content.error_message = reason[:500]
                     db.commit()
 
-                if content.content_type == "article":
-                    text_to_summarize = metadata.get("content") or metadata.get(
-                        "content_to_summarize", ""
-                    )
-                elif content.content_type == "news":
-                    text_to_summarize = metadata.get("content") or metadata.get(
-                        "content_to_summarize", ""
-                    )
-                    aggregator_context = _build_news_context(metadata)
-                    if aggregator_context and text_to_summarize:
-                        text_to_summarize = (
-                            f"Context:\n{aggregator_context}\n\n"
-                            f"Article Content:\n{text_to_summarize}"
-                        )
-                elif content.content_type == "podcast":
-                    text_to_summarize = metadata.get("transcript") or metadata.get(
-                        "content_to_summarize", ""
-                    )
-                else:
+                if content.content_type not in {
+                    ContentType.ARTICLE.value,
+                    ContentType.NEWS.value,
+                    ContentType.PODCAST.value,
+                }:
                     reason = f"Unknown content type for summarization: {content.content_type}"
                     logger.error(
                         "SUMMARIZE_TASK_ERROR: %s. Content %s, URL: %s",
@@ -318,6 +252,8 @@ class SummarizeHandler:
                     )
                     _persist_failure(reason)
                     return TaskResult.fail(reason, retryable=False)
+
+                text_to_summarize = build_summarization_payload(content.content_type, metadata)
 
                 if not text_to_summarize:
                     expected_field = (
@@ -353,6 +289,31 @@ class SummarizeHandler:
                     content_id,
                     len(text_to_summarize),
                 )
+                input_fingerprint = compute_summarization_input_fingerprint(
+                    content.content_type,
+                    text_to_summarize,
+                )
+                if (
+                    isinstance(metadata.get("summary"), dict)
+                    and metadata.get("summarization_input_fingerprint") == input_fingerprint
+                ):
+                    latest_metadata = _load_latest_metadata()
+                    merged_metadata = dict(latest_metadata)
+                    merged_metadata["summarization_input_fingerprint"] = input_fingerprint
+                    content.content_metadata = refresh_merge_content_metadata(
+                        db,
+                        content_id=content.id,
+                        base_metadata=latest_metadata,
+                        updated_metadata=merged_metadata,
+                    )
+                    content.status = ContentStatus.COMPLETED.value
+                    content.processed_at = datetime.now(UTC)
+                    db.commit()
+                    logger.info(
+                        "Skipping summarize task for content %s; summarization input unchanged",
+                        content_id,
+                    )
+                    return TaskResult.ok()
 
                 summarization_type = content.content_type
                 provider_override = None
@@ -478,6 +439,7 @@ class SummarizeHandler:
                         logger.info("Generated summary for content %s", content_id)
 
                     metadata["summarization_date"] = datetime.now(UTC).isoformat()
+                    metadata["summarization_input_fingerprint"] = input_fingerprint
                     if share_and_chat_user_ids:
                         metadata.pop("share_and_chat_user_ids", None)
 

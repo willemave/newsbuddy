@@ -169,6 +169,34 @@ class TestContentWorker:
 
         assert result is False
 
+    def test_should_reuse_existing_summary_when_payload_is_unchanged(self, mock_dependencies):
+        """Unchanged extracted payloads should reuse the existing summary."""
+        worker = ContentWorker()
+
+        content_data = ContentData(
+            id=123,
+            url="https://example.com/article",
+            content_type=ContentType.ARTICLE,
+            status=ContentStatus.PROCESSING,
+            metadata={"content_to_summarize": "Same article body"},
+            title="Test Article",
+            created_at=datetime.now(UTC),
+            processed_at=None,
+            retry_count=0,
+        )
+        starting_metadata = {
+            "content_to_summarize": "Same article body",
+            "summary": {
+                "title": "Existing Summary",
+                "overview": "Already summarized.",
+                "bullet_points": [],
+                "topics": [],
+                "classification": "to_read",
+            },
+        }
+
+        assert worker._should_reuse_existing_summary(content_data, starting_metadata) is True
+
     def test_process_article_sync_non_retryable_error(self, mock_dependencies):
         """Test article processing with non-retryable error."""
         worker = ContentWorker()

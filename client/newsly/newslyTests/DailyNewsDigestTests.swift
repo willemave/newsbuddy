@@ -83,13 +83,6 @@ final class DailyNewsDigestTests: XCTestCase {
 
         XCTAssertEqual(digest.cleanedSourceLabels, ["@swyx", "Hacker News"])
     }
-
-    func testDisplayCoverageLabelIsNilForOlderDigests() {
-        let digest = makeDigest(summary: "Summary text.", keyPoints: [], coverageEndAt: "2026-03-08T18:00:00Z")
-
-        XCTAssertNil(digest.displayCoverageLabel)
-    }
-
     private func makeDigest(
         summary: String,
         keyPoints: [String],

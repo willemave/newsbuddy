@@ -74,6 +74,80 @@ def test_duplicate_submission_reuses_existing_record(client, db_session):
     assert len(tasks) == 1
 
 
+def test_duplicate_completed_submission_does_not_reanalyze_without_new_inputs(
+    client,
+    db_session,
+):
+    """Completed content should not enqueue ANALYZE_URL again on a plain duplicate submit."""
+    existing = Content(
+        url="https://example.com/article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        source=SELF_SUBMISSION_SOURCE,
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    response = client.post(
+        "/api/content/submit",
+        json={"url": existing.url},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["already_exists"] is True
+    assert data["task_id"] is None
+
+    tasks = (
+        db_session.query(ProcessingTask)
+        .filter_by(content_id=existing.id)
+        .filter(
+            ProcessingTask.task_type.in_(
+                [TaskType.ANALYZE_URL.value, TaskType.PROCESS_CONTENT.value]
+            )
+        )
+        .all()
+    )
+    assert tasks == []
+
+
+def test_duplicate_processing_submission_does_not_reanalyze_without_new_inputs(
+    client,
+    db_session,
+):
+    """Processing content should keep its current work instead of restarting analysis."""
+    existing = Content(
+        url="https://example.com/article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.PROCESSING.value,
+        source=SELF_SUBMISSION_SOURCE,
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    response = client.post(
+        "/api/content/submit",
+        json={"url": existing.url},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["already_exists"] is True
+    assert data["task_id"] is None
+
+    tasks = (
+        db_session.query(ProcessingTask)
+        .filter_by(content_id=existing.id)
+        .filter(
+            ProcessingTask.task_type.in_(
+                [TaskType.ANALYZE_URL.value, TaskType.PROCESS_CONTENT.value]
+            )
+        )
+        .all()
+    )
+    assert tasks == []
+
+
 def test_submit_spotify_url_creates_unknown_type(client, db_session):
     """Spotify URLs are submitted with UNKNOWN type; type detection happens async."""
     response = client.post(
