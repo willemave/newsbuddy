@@ -89,7 +89,7 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
     assert tasks[image_task_id].queue_name == TaskQueue.IMAGE.value
     assert tasks[transcribe_task_id].queue_name == TaskQueue.TRANSCRIBE.value
     assert tasks[onboarding_task_id].queue_name == TaskQueue.ONBOARDING.value
-    assert tasks[integration_task_id].queue_name == TaskQueue.ONBOARDING.value
+    assert tasks[integration_task_id].queue_name == TaskQueue.TWITTER.value
     assert tasks[daily_digest_task_id].queue_name == TaskQueue.CONTENT.value
     assert tasks[chat_task_id].queue_name == TaskQueue.CHAT.value
 
@@ -157,6 +157,12 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
                 payload={"user_id": 1},
                 queue_name=TaskQueue.CHAT.value,
             ),
+            ProcessingTask(
+                task_type=TaskType.SYNC_INTEGRATION.value,
+                status=TaskStatus.PENDING.value,
+                payload={"user_id": 1, "provider": "x"},
+                queue_name=TaskQueue.TWITTER.value,
+            ),
         ]
     )
     db_session.commit()
@@ -189,6 +195,11 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
     assert chat_task is not None
     assert chat_task["task_type"] == TaskType.DIG_DEEPER.value
     assert chat_task["queue_name"] == TaskQueue.CHAT.value
+
+    twitter_task = queue.dequeue(worker_id="twitter-test", queue_name=TaskQueue.TWITTER)
+    assert twitter_task is not None
+    assert twitter_task["task_type"] == TaskType.SYNC_INTEGRATION.value
+    assert twitter_task["queue_name"] == TaskQueue.TWITTER.value
 
 
 def test_get_queue_stats_reports_pending_by_queue(db_session, monkeypatch):

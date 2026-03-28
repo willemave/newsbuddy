@@ -9,12 +9,14 @@ Supervisor manages:
 - `news_app_workers_image`
 - `news_app_workers_transcribe`
 - `news_app_workers_onboarding`
+- `news_app_workers_twitter`
 - `news_app_workers_chat`
 - optional `news_app_queue_watchdog`
 - optional `news_app_bgutil_provider`
 
 Cron manages:
 - `scripts/run_scrapers.py`
+- `scripts/run_twitter.py`
 - `scripts/run_daily_news_digest.py`
 - `scripts/run_feed_discovery.py`
 
@@ -82,6 +84,9 @@ command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_
 [program:news_app_workers_onboarding]
 command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue onboarding --worker-slot 1 --stats-interval 60"
 
+[program:news_app_workers_twitter]
+command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue twitter --worker-slot 1 --stats-interval 60"
+
 [program:news_app_workers_chat]
 command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue chat --worker-slot 1 --stats-interval 60"
 
@@ -106,6 +111,7 @@ sudo supervisorctl start news_app_workers_content
 sudo supervisorctl start news_app_workers_image
 sudo supervisorctl start news_app_workers_transcribe
 sudo supervisorctl start news_app_workers_onboarding
+sudo supervisorctl start news_app_workers_twitter
 sudo supervisorctl start news_app_workers_chat
 sudo supervisorctl status
 ```
@@ -136,12 +142,18 @@ sudo -u newsapp -H crontab -l
 Current production cadence:
 
 ```cron
+*/15 * * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_scrapers.py --show-stats --scrapers HackerNews Reddit Substack Techmeme Podcast Atom >> /var/log/news_app/scrapers-cron.log 2>&1
+*/15 * * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_twitter.py >> /var/log/news_app/twitter.log 2>&1
 0 */3 * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_daily_news_digest.py --lookback-hours 6 >> /var/log/news_app/daily-news-digest.log 2>&1
 ```
 
 The scheduler polls every 3 hours and enqueues users whose latest local digest
 checkpoint fell within the recent lookback window. Per-user checkpoint cadence
 comes from `news_digest_interval_hours` with supported values `3`, `6`, or `12`.
+
+The dedicated Twitter scheduler runs every 15 minutes. It runs the public
+Twitter list scraper and enqueues per-user bookmark/timeline/list refresh tasks when
+`X_BOOKMARK_SYNC_ENABLED=true`.
 
 ## 6) GitHub Actions deploy behavior
 
@@ -157,7 +169,7 @@ The workflow restarts only programs listed in `DEPLOY_PROGRAMS`. That variable m
 image worker after this queue split. Minimum value:
 
 ```text
-news_app_server news_app_workers_content news_app_workers_image news_app_workers_transcribe news_app_workers_onboarding news_app_workers_chat
+news_app_server news_app_workers_content news_app_workers_image news_app_workers_transcribe news_app_workers_onboarding news_app_workers_twitter news_app_workers_chat
 ```
 
 If the watchdog is enabled on the host, append `news_app_queue_watchdog`. If YouTube PO token support is enabled, also append `news_app_bgutil_provider`.

@@ -5,7 +5,10 @@ PATH=/opt/news_app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/
 0 2 * * * /opt/news_app/scripts/backup_database.sh >> /var/log/news_app/backup.log 2>&1
 
 # Run scrapers every 15 minutes
-*/15 * * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_scrapers.py --show-stats >> /var/log/news_app/scrapers-cron.log 2>&1
+*/15 * * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_scrapers.py --show-stats --scrapers HackerNews Reddit Substack Techmeme Podcast Atom >> /var/log/news_app/scrapers-cron.log 2>&1
+
+# Run all scheduled Twitter/X work every 15 minutes
+*/15 * * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_twitter.py >> /var/log/news_app/twitter.log 2>&1
 
 # Run daily news digest checkpoint enqueue every 3 hours (users catch local checkpoints within a 6h lookback)
 0 */3 * * * cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_daily_news_digest.py --lookback-hours 6 >> /var/log/news_app/daily-news-digest.log 2>&1

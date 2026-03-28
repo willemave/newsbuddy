@@ -24,7 +24,7 @@ TASK_QUEUE_BY_TYPE: dict[TaskType, TaskQueue] = {
     TaskType.DISCOVER_FEEDS: TaskQueue.CONTENT,
     TaskType.ONBOARDING_DISCOVER: TaskQueue.ONBOARDING,
     TaskType.DIG_DEEPER: TaskQueue.CHAT,
-    TaskType.SYNC_INTEGRATION: TaskQueue.ONBOARDING,
+    TaskType.SYNC_INTEGRATION: TaskQueue.TWITTER,
 }
 
 DEDUPABLE_CONTENT_TASK_TYPES: set[TaskType] = {

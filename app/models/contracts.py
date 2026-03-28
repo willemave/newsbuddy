@@ -57,6 +57,7 @@ class TaskQueue(StrEnum):
     IMAGE = "image"
     TRANSCRIBE = "transcribe"
     ONBOARDING = "onboarding"
+    TWITTER = "twitter"
     CHAT = "chat"
 
 

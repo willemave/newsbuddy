@@ -32,15 +32,14 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    setup_logging()
-    args = _parse_args()
+def enqueue_x_sync_tasks(*, user_id: int | None = None) -> int:
+    """Enqueue per-user X sync tasks for all active connections."""
     settings = get_settings()
     if not settings.x_bookmark_sync_enabled:
         logger.info(
             "X integration sync is disabled (X_BOOKMARK_SYNC_ENABLED=false); skipping enqueue."
         )
-        return
+        return 0
 
     queue = QueueService()
 
@@ -53,8 +52,8 @@ def main() -> None:
             .distinct()
             .order_by(UserIntegrationConnection.user_id.asc())
         )
-        if args.user_id:
-            query = query.filter(UserIntegrationConnection.user_id == args.user_id)
+        if user_id is not None:
+            query = query.filter(UserIntegrationConnection.user_id == user_id)
 
         for (user_id,) in query.yield_per(200):
             queue.enqueue(
@@ -67,6 +66,13 @@ def main() -> None:
             )
             enqueued += 1
 
+    return enqueued
+
+
+def main() -> None:
+    setup_logging()
+    args = _parse_args()
+    enqueued = enqueue_x_sync_tasks(user_id=args.user_id)
     logger.info("Enqueued %s X integration sync tasks", enqueued)
 
 

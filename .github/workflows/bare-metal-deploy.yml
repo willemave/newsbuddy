@@ -59,7 +59,7 @@ jobs:
           SSH_OPTS=(-p "$PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes)
           REMOTE_DIR="${DEPLOY_REMOTE_DIR:-/opt/news_app}"
           OWNER_GROUP="${DEPLOY_OWNER_GROUP:-newsapp:newsapp}"
-          PROGRAMS="${DEPLOY_PROGRAMS:-news_app_server news_app_workers_content news_app_workers_image news_app_workers_transcribe news_app_workers_onboarding news_app_workers_chat news_app_queue_watchdog news_app_bgutil_provider}"
+          PROGRAMS="${DEPLOY_PROGRAMS:-news_app_server news_app_workers_content news_app_workers_image news_app_workers_transcribe news_app_workers_onboarding news_app_workers_twitter news_app_workers_chat news_app_queue_watchdog news_app_bgutil_provider}"
 
           echo "→ Verifying SSH connectivity"
           ssh "${SSH_OPTS[@]}" "$REMOTE" "echo 'SSH ok: $(whoami)@$(hostname) on port $PORT'"
