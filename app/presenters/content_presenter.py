@@ -4,6 +4,7 @@ from typing import Any
 
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.domain.converters import content_to_domain
+from app.models.contracts import ContentClassification, ContentStatus
 from app.models.metadata import ContentData, ContentType
 from app.models.schema import Content
 from app.routers.api.models import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
@@ -96,7 +97,9 @@ def is_ready_for_list(domain_content: ContentData, image_url: str | None) -> boo
     _ = image_url
     if domain_content.content_type != ContentType.ARTICLE:
         return True
-    return bool(domain_content.structured_summary and domain_content.bullet_points)
+    if domain_content.structured_summary and domain_content.bullet_points:
+        return True
+    return bool(domain_content.short_summary or domain_content.summary)
 
 
 def build_content_summary_response(
@@ -186,6 +189,65 @@ def build_content_summary_response(
         primary_topic=primary_topic,
         top_comment=top_comment,
         comment_count=comment_count,
+    )
+
+
+def build_fallback_content_summary_response(
+    content: Content,
+    *,
+    is_read: bool,
+    is_favorited: bool,
+) -> ContentSummaryResponse | None:
+    """Build a minimal summary response when full metadata normalization fails."""
+    metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
+    short_summary = content.short_summary
+    if not short_summary:
+        return None
+    classification = None
+    if content.classification in {
+        ContentClassification.TO_READ.value,
+        ContentClassification.SKIP.value,
+    }:
+        classification = ContentClassification(content.classification)
+
+    image_url: str | None = None
+    thumbnail_url: str | None = None
+    if content.content_type == ContentType.ARTICLE.value and metadata.get("image_generated_at"):
+        image_url = build_content_image_url(content.id)
+        thumbnail_url = build_thumbnail_url(content.id)
+    elif content.content_type == ContentType.PODCAST.value:
+        raw_thumbnail = metadata.get("thumbnail_url")
+        if isinstance(raw_thumbnail, str) and raw_thumbnail.startswith("http"):
+            image_url = raw_thumbnail
+
+    return ContentSummaryResponse(
+        id=content.id,
+        content_type=ContentType(content.content_type),
+        url=content.url,
+        source_url=content.source_url,
+        title=content.title,
+        source=content.source,
+        platform=content.platform,
+        status=ContentStatus(content.status),
+        short_summary=short_summary,
+        created_at=content.created_at.isoformat() if content.created_at else "",
+        processed_at=content.processed_at.isoformat() if content.processed_at else None,
+        classification=classification,
+        publication_date=content.publication_date.isoformat() if content.publication_date else None,
+        is_read=is_read,
+        is_favorited=is_favorited,
+        news_article_url=None,
+        news_discussion_url=None,
+        news_key_points=None,
+        news_summary=None,
+        user_status="inbox"
+        if content.content_type in (ContentType.ARTICLE.value, ContentType.PODCAST.value)
+        else None,
+        image_url=image_url,
+        thumbnail_url=thumbnail_url,
+        primary_topic=None,
+        top_comment=None,
+        comment_count=None,
     )
 
 

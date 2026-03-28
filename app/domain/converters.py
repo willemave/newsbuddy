@@ -13,7 +13,21 @@ from app.utils.url_utils import is_http_url
 logger = get_logger(__name__)
 
 
+def _is_user_scoped_x_digest_url(raw_url: str, metadata: dict[str, Any], content_type: str) -> bool:
+    """Return True when the stored URL is an internal per-user X digest key."""
+    if content_type != ContentType.NEWS.value:
+        return False
+    if "#newsly-digest-user-" not in raw_url:
+        return False
+
+    source_type = str(metadata.get("source_type") or "").strip().lower()
+    return source_type in {"x_timeline", "x_list"} or bool(metadata.get("tweet_id"))
+
+
 def _select_http_url(raw_url: str, metadata: dict[str, Any], content_type: str) -> str:
+    if _is_user_scoped_x_digest_url(raw_url, metadata, content_type):
+        return raw_url
+
     candidates: list[str | None] = [raw_url]
 
     if content_type == ContentType.NEWS.value:

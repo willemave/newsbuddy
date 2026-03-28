@@ -361,3 +361,61 @@ def test_sync_x_sources_marks_missing_list_scopes_without_failing_bookmarks(
 
     assert summary.status == "success_with_warnings"
     assert summary.channels["lists"].status == "missing_scopes"
+
+
+def test_sync_x_sources_persists_bookmark_progress_when_timeline_fails(
+    db_session,
+    test_user,
+    monkeypatch,
+):
+    """Bookmark state should still persist when later channels fail."""
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],
+    )
+    db_session.add(connection)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_valid_access_token",
+        lambda *_args, **_kwargs: "token",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_provider_user_id",
+        lambda *_args, **_kwargs: "42",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration.fetch_bookmarks",
+        lambda **_kwargs: XTweetsPage(
+            tweets=[_tweet("101", "Bookmark me")],
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration.fetch_reverse_chronological_timeline",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("X API 401: Unauthorized: Unauthorized")
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration.fetch_owned_lists",
+        lambda **_kwargs: XListsPage(lists=[]),
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration.fetch_followed_lists",
+        lambda **_kwargs: XListsPage(lists=[]),
+    )
+
+    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    sync_state = (
+        db_session.query(UserIntegrationSyncState)
+        .filter_by(connection_id=connection.id)
+        .one()
+    )
+
+    assert summary.status == "failed"
+    assert summary.channels["bookmarks"].accepted == 1
+    assert summary.channels["timeline"].status == "failed"
+    assert sync_state.last_status == "failed"
+    assert sync_state.sync_metadata["bookmarks"]["last_synced_item_id"] == "101"
+    assert "timeline" in (sync_state.last_error or "")

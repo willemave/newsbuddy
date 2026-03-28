@@ -25,7 +25,7 @@ X_DEFAULT_SCOPES = [
 ]
 X_TWEET_FIELDS = (
     "created_at,author_id,public_metrics,entities,conversation_id,"
-    "in_reply_to_user_id,referenced_tweets"
+    "in_reply_to_user_id,referenced_tweets,text,article,note_tweet"
 )
 X_USER_FIELDS = "name,username"
 
@@ -54,6 +54,9 @@ class XTweet:
     conversation_id: str | None = None
     in_reply_to_user_id: str | None = None
     referenced_tweet_types: list[str] = field(default_factory=list)
+    article_title: str | None = None
+    article_text: str | None = None
+    note_tweet_text: str | None = None
     external_urls: list[str] = field(default_factory=list)
 
 
@@ -241,6 +244,26 @@ def fetch_tweet_by_url(*, url: str, access_token: str | None = None) -> XTweetFe
     if not tweet_id:
         return XTweetFetchResult(success=False, error="Invalid tweet URL")
     return fetch_tweet_by_id(tweet_id=tweet_id, access_token=access_token)
+
+
+def build_tweet_processing_text(tweet: XTweet) -> str:
+    """Return the richest available text payload for tweet processing."""
+    article_title = _optional_string(tweet.article_title)
+    article_text = _optional_string(tweet.article_text)
+    if article_text:
+        if (
+            article_title
+            and article_text != article_title
+            and not article_text.startswith(article_title)
+        ):
+            return f"{article_title}\n\n{article_text}"
+        return article_text
+
+    note_tweet_text = _optional_string(tweet.note_tweet_text)
+    if note_tweet_text:
+        return note_tweet_text
+
+    return tweet.text.strip()
 
 
 def fetch_bookmarks(
@@ -605,7 +628,14 @@ def _user_lookup(raw_users: Any) -> dict[str, dict[str, Any]]:
 
 def _map_tweet(tweet_data: dict[str, Any], users_by_id: dict[str, dict[str, Any]]) -> XTweet | None:
     tweet_id = _optional_string(tweet_data.get("id"))
-    text = _optional_string(tweet_data.get("text"))
+    article_title, article_text = _extract_article_parts(tweet_data.get("article"))
+    note_tweet_text = _extract_note_tweet_text(tweet_data.get("note_tweet"))
+    text = (
+        _optional_string(tweet_data.get("text"))
+        or note_tweet_text
+        or article_title
+        or article_text
+    )
     if not tweet_id or not text:
         return None
 
@@ -633,6 +663,9 @@ def _map_tweet(tweet_data: dict[str, Any], users_by_id: dict[str, dict[str, Any]
         conversation_id=_optional_string(tweet_data.get("conversation_id")),
         in_reply_to_user_id=_optional_string(tweet_data.get("in_reply_to_user_id")),
         referenced_tweet_types=_referenced_tweet_types(tweet_data.get("referenced_tweets")),
+        article_title=article_title,
+        article_text=article_text,
+        note_tweet_text=note_tweet_text,
         external_urls=_extract_external_urls(entities),
     )
 
@@ -724,6 +757,125 @@ def _normalize_external_url(raw_url: str) -> str | None:
     if normalized.startswith("http://"):
         normalized = "https://" + normalized[len("http://") :]
     return normalized
+
+
+def _first_text(*candidates: Any) -> str | None:
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            cleaned = candidate.strip()
+            if cleaned:
+                return cleaned
+    return None
+
+
+def _nested_text(node: Any, *path: str) -> str | None:
+    current = node
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return _first_text(current)
+
+
+def _collect_text_fields(node: Any, keys: set[str], output: list[str]) -> None:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in keys and isinstance(value, str):
+                cleaned = value.strip()
+                if cleaned:
+                    output.append(cleaned)
+                continue
+            _collect_text_fields(value, keys, output)
+        return
+
+    if isinstance(node, list):
+        for item in node:
+            _collect_text_fields(item, keys, output)
+
+
+def _extract_article_parts(article_data: Any) -> tuple[str | None, str | None]:
+    if not isinstance(article_data, dict):
+        return None, None
+
+    article_result = article_data.get("article_results", {}).get("result")
+    if not isinstance(article_result, dict):
+        result = article_data.get("result")
+        article_result = result if isinstance(result, dict) else article_data
+
+    title = _first_text(
+        article_result.get("title"),
+        article_result.get("headline"),
+        article_data.get("title"),
+        article_data.get("headline"),
+    )
+    body = _first_text(
+        article_result.get("plain_text"),
+        article_data.get("plain_text"),
+        _nested_text(article_result, "body", "text"),
+        _nested_text(article_result, "body", "richtext", "text"),
+        _nested_text(article_result, "body", "rich_text", "text"),
+        _nested_text(article_result, "content", "text"),
+        _nested_text(article_result, "content", "richtext", "text"),
+        _nested_text(article_result, "content", "rich_text", "text"),
+        article_result.get("text"),
+        _nested_text(article_result, "richtext", "text"),
+        _nested_text(article_result, "rich_text", "text"),
+        _nested_text(article_data, "body", "text"),
+        _nested_text(article_data, "body", "richtext", "text"),
+        _nested_text(article_data, "body", "rich_text", "text"),
+        _nested_text(article_data, "content", "text"),
+        _nested_text(article_data, "content", "richtext", "text"),
+        _nested_text(article_data, "content", "rich_text", "text"),
+        article_data.get("text"),
+        _nested_text(article_data, "richtext", "text"),
+        _nested_text(article_data, "rich_text", "text"),
+    )
+
+    if body and title and body == title:
+        body = None
+
+    if not body:
+        collected: list[str] = []
+        _collect_text_fields(article_result, {"plain_text", "text"}, collected)
+        _collect_text_fields(article_data, {"plain_text", "text"}, collected)
+        unique: list[str] = []
+        seen: set[str] = set()
+        for item in collected:
+            if title and item == title:
+                continue
+            if item in seen:
+                continue
+            seen.add(item)
+            unique.append(item)
+        if unique:
+            body = "\n\n".join(unique)
+
+    return title, body
+
+
+def _extract_note_tweet_text(note_data: Any) -> str | None:
+    if not isinstance(note_data, dict):
+        return None
+
+    note_result = note_data.get("note_tweet_results", {}).get("result")
+    if not isinstance(note_result, dict):
+        result = note_data.get("result")
+        note_result = result if isinstance(result, dict) else note_data
+
+    return _first_text(
+        note_result.get("text"),
+        _nested_text(note_result, "richtext", "text"),
+        _nested_text(note_result, "rich_text", "text"),
+        _nested_text(note_result, "content", "text"),
+        _nested_text(note_result, "content", "richtext", "text"),
+        _nested_text(note_result, "content", "rich_text", "text"),
+        note_data.get("text"),
+        _nested_text(note_data, "richtext", "text"),
+        _nested_text(note_data, "rich_text", "text"),
+        _nested_text(note_data, "content", "text"),
+        _nested_text(note_data, "content", "richtext", "text"),
+        _nested_text(note_data, "content", "rich_text", "text"),
+    )
 
 
 def _is_domain_or_subdomain(host: str, domain: str) -> bool:

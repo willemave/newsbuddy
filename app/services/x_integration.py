@@ -382,24 +382,53 @@ def sync_x_sources_for_user(db: Session, *, user_id: int) -> XSyncSummary:
             provider_user_id=provider_user_id,
             existing_sync_metadata=existing_sync_metadata,
         )
-        timeline_summary = _sync_timeline_channel(
-            db,
-            user=user,
-            access_token=access_token,
-            provider_user_id=provider_user_id,
-            connection=connection,
-            existing_sync_metadata=existing_sync_metadata,
-            filter_prompt=filter_prompt,
-        )
-        lists_summary, list_state_updates = _sync_lists_channel(
-            db,
-            user=user,
-            access_token=access_token,
-            provider_user_id=provider_user_id,
-            connection=connection,
-            existing_sync_metadata=existing_sync_metadata,
-            filter_prompt=filter_prompt,
-        )
+        channel_errors: list[str] = []
+        try:
+            timeline_summary = _sync_timeline_channel(
+                db,
+                user=user,
+                access_token=access_token,
+                provider_user_id=provider_user_id,
+                connection=connection,
+                existing_sync_metadata=existing_sync_metadata,
+                filter_prompt=filter_prompt,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "X timeline sync failed",
+                extra={
+                    "component": "x_integration",
+                    "operation": "sync_timeline",
+                    "item_id": user.id,
+                    "context_data": {"error": str(exc)},
+                },
+            )
+            channel_errors.append(f"{TIMELINE_CHANNEL}: {exc}")
+            timeline_summary = _failed_channel_summary()
+
+        try:
+            lists_summary, list_state_updates = _sync_lists_channel(
+                db,
+                user=user,
+                access_token=access_token,
+                provider_user_id=provider_user_id,
+                connection=connection,
+                existing_sync_metadata=existing_sync_metadata,
+                filter_prompt=filter_prompt,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "X list sync failed",
+                extra={
+                    "component": "x_integration",
+                    "operation": "sync_lists",
+                    "item_id": user.id,
+                    "context_data": {"error": str(exc)},
+                },
+            )
+            channel_errors.append(f"{LISTS_CHANNEL}: {exc}")
+            lists_summary = _failed_channel_summary()
+            list_state_updates = {}
 
         channel_summaries = {
             BOOKMARKS_CHANNEL: bookmark_summary,
@@ -416,7 +445,7 @@ def sync_x_sources_for_user(db: Session, *, user_id: int) -> XSyncSummary:
 
         sync_state.last_synced_at = _now_naive_utc()
         sync_state.last_status = overall_status
-        sync_state.last_error = None
+        sync_state.last_error = "; ".join(channel_errors)[:2000] if channel_errors else None
         bookmark_newest = (
             bookmark_summary.newest_item_id
             or timeline_summary.newest_item_id
@@ -1047,6 +1076,20 @@ def _resolve_channel_status(error_count: int) -> str:
     if error_count > 0:
         return "partial_failure"
     return "success"
+
+
+def _failed_channel_summary() -> XSyncChannelSummary:
+    """Return a summary for a channel-level failure without raising."""
+    return XSyncChannelSummary(
+        status="failed",
+        fetched=0,
+        accepted=0,
+        filtered_out=0,
+        errored=1,
+        created=0,
+        reused=0,
+        newest_item_id=None,
+    )
 
 
 def _digest_tweet_content_url(*, user_id: int, tweet_id: str) -> str:

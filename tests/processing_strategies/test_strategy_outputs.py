@@ -12,6 +12,7 @@ from app.processing_strategies.twitter_share_strategy import (
     TweetContent,
     TwitterShareProcessorStrategy,
 )
+from app.services.x_api import XTweet, XTweetFetchResult
 
 
 def test_twitter_share_extract_data_contains_text(mocker):
@@ -26,6 +27,31 @@ def test_twitter_share_extract_data_contains_text(mocker):
 
     assert data["text_content"] == "Hello world"
     assert data["content_type"] == "text"
+
+
+def test_twitter_share_download_content_prefers_native_article_text(mocker, monkeypatch):
+    strategy = TwitterShareProcessorStrategy(http_client=mocker.Mock())
+
+    monkeypatch.setattr(
+        "app.processing_strategies.twitter_share_strategy.fetch_tweet_by_url",
+        lambda **_kwargs: XTweetFetchResult(
+            success=True,
+            tweet=XTweet(
+                id="123",
+                text="Short teaser",
+                author_username="tester",
+                author_name="Tester",
+                created_at="2026-03-28T10:00:00Z",
+                article_title="Native Article Title",
+                article_text="Full native article body text.",
+            ),
+        ),
+    )
+
+    content = strategy.download_content("https://x.com/tester/status/123")
+
+    assert content.text == "Native Article Title\n\nFull native article body text."
+    assert content.author == "@tester"
 
 
 def test_hackernews_extract_data_contains_text(mocker, monkeypatch):

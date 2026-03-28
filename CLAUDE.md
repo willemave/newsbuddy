@@ -2,6 +2,42 @@
 
 > For comprehensive technical documentation (database schema, API endpoints, Pydantic schemas, project structure), see **[docs/architecture.md](docs/architecture.md)**.
 
+## Project Overview
+
+Newsly is a FastAPI-based content ingestion and summarization app. It accepts user-submitted URLs, classifies and processes articles, podcasts, and news digests through background workers, generates summaries and images, and also includes an iOS client/share extension.
+
+## Key Commands
+
+```bash
+uv sync && . .venv/bin/activate
+alembic upgrade head
+scripts/start_server.sh
+scripts/start_workers.sh
+scripts/start_scrapers.sh
+ruff check .
+ruff format .
+pytest tests/ -v
+```
+
+## Important Files
+
+| File | Purpose |
+|------|---------|
+| `app/main.py` | FastAPI app entry |
+| `app/core/settings.py` | Configuration |
+| `app/core/db.py` | Database setup |
+| `app/models/schema.py` | ORM models |
+| `app/services/content_analyzer.py` | URL analysis and content classification |
+| `app/services/feed_detection.py` | RSS/Atom feed detection and classification |
+| `app/services/image_generation.py` | AI image and thumbnail generation |
+| `scripts/run_workers.py` | Worker entry point |
+| `scripts/run_scrapers.py` | Scraper entry point |
+| `client/newsly/ShareExtension/ShareViewController.swift` | iOS share extension entry |
+
+## Architecture Docs
+
+See **[docs/architecture.md](docs/architecture.md)** for the full project structure, schema, API, and operational details.
+
 ---
 
 ## 1. Python / FastAPI Coding Rules

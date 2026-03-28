@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.models.contracts import TaskType
+from app.models.metadata import ContentStatus
 from app.models.schema import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
@@ -105,6 +106,7 @@ class AnalyzeUrlWorkflow:
             return TaskResult.fail("No content_id provided")
 
         content_id = int(content_id)
+        should_enqueue_process_content = True
         with context.db_factory() as db:
             content = db.query(Content).filter(Content.id == content_id).first()
             if not content:
@@ -160,6 +162,13 @@ class AnalyzeUrlWorkflow:
             if instruction and task.id:
                 self._payload_cleaner.run(db, task.id)
 
-        context.queue.enqueue(TaskType.PROCESS_CONTENT, content_id=content_id)
-        logger.info("Enqueued PROCESS_CONTENT for content %s", content_id)
+            should_enqueue_process_content = content.status not in {
+                ContentStatus.SKIPPED.value,
+                ContentStatus.FAILED.value,
+                ContentStatus.COMPLETED.value,
+            }
+
+        if should_enqueue_process_content:
+            context.queue.enqueue(TaskType.PROCESS_CONTENT, content_id=content_id)
+            logger.info("Enqueued PROCESS_CONTENT for content %s", content_id)
         return TaskResult.ok()

@@ -12,7 +12,7 @@ from app.core.logging import get_logger
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
 from app.services.http import NonRetryableError
 from app.services.twitter_share import extract_tweet_id
-from app.services.x_api import fetch_tweet_by_url
+from app.services.x_api import build_tweet_processing_text, fetch_tweet_by_url
 
 logger = get_logger(__name__)
 
@@ -58,7 +58,7 @@ class TwitterShareProcessorStrategy(UrlProcessorStrategy):
             raise NonRetryableError(fetch_result.error or "Tweet lookup failed")
 
         tweet = fetch_result.tweet
-        thread_text = _build_thread_text([tweet.text])
+        thread_text = _build_thread_text([build_tweet_processing_text(tweet)])
         if not thread_text:
             raise NonRetryableError("Tweet thread contained no text to summarize")
 

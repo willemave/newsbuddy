@@ -11,6 +11,7 @@ from app.models.pagination import PaginationMetadata
 from app.presenters.content_presenter import (
     build_content_summary_response,
     build_domain_content,
+    build_fallback_content_summary_response,
     is_ready_for_list,
     resolve_image_urls,
 )
@@ -79,6 +80,13 @@ def execute(
                     "item_id": content.id,
                 },
             )
+            fallback = build_fallback_content_summary_response(
+                content,
+                is_read=bool(is_read),
+                is_favorited=bool(is_favorited),
+            )
+            if fallback is not None:
+                contents.append(fallback)
             continue
         image_url, thumbnail_url = resolve_image_urls(domain_content)
         if not is_ready_for_list(domain_content, image_url):

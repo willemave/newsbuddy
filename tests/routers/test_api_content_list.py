@@ -109,6 +109,41 @@ def test_list_filters_articles_without_keypoints_or_summary(
     assert missing_image.id in ids
 
 
+def test_list_keeps_article_with_short_summary_even_without_bullet_points(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    bookmark_article = Content(
+        url="https://example.com/bookmark-article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={
+            "summary": {
+                "title": "Bookmark Article",
+                "overview": (
+                    "A valid long-form overview exists here even though the article does not "
+                    "yet have bullet points persisted in the newer structured format."
+                ),
+            },
+            "image_generated_at": "2025-12-31T00:00:00Z",
+        },
+    )
+
+    db_session.add(bookmark_article)
+    db_session.commit()
+    db_session.refresh(bookmark_article)
+
+    _add_inbox_status(db_session, test_user.id, bookmark_article.id)
+    db_session.commit()
+
+    response = client.get("/api/content/", params={"content_type": "article"})
+    assert response.status_code == 200
+    ids = {item["id"] for item in response.json()["contents"]}
+
+    assert bookmark_article.id in ids
+
+
 def test_list_hides_news_images_even_when_metadata_has_urls(
     client,
     db_session,

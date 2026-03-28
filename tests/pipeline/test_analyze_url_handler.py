@@ -8,12 +8,12 @@ from unittest.mock import Mock
 
 from app.constants import DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT, SELF_SUBMISSION_SOURCE
 from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, UserScraperConfig
+from app.models.schema import Content, ContentStatusEntry, UserScraperConfig
 from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
 from app.services.queue import TaskType
-from app.services.x_api import XTweetFetchResult
+from app.services.x_api import XTweet, XTweetFetchResult
 
 
 def _build_context(db_session, queue_gateway: Mock) -> TaskContext:
@@ -404,3 +404,173 @@ def test_subscribe_to_feed_records_initial_download_failure(
     assert initial_download["status"] == "failed"
     assert initial_download["requested_count"] == DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT
     assert initial_download["error"] == "scraper exploded"
+
+
+def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
+    db_session,
+    monkeypatch,
+) -> None:
+    existing_article = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://example.com/story",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+        },
+    )
+    bookmark_shell = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "x_bookmarks",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(existing_article)
+    db_session.add(bookmark_shell)
+    db_session.commit()
+    db_session.refresh(existing_article)
+    db_session.refresh(bookmark_shell)
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(
+            success=True,
+            tweet=XTweet(
+                id="123456789",
+                text="Story link https://t.co/story",
+                author_username="willem",
+                author_name="Willem",
+                created_at="2026-03-27T21:56:00Z",
+                like_count=12,
+                retweet_count=3,
+                reply_count=1,
+                external_urls=["https://example.com/story"],
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.enqueue_visible_long_form_image_if_needed",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    context = _build_context(db_session, queue_gateway=queue_gateway)
+    task = TaskEnvelope(
+        id=105,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=bookmark_shell.id,
+        payload={"content_id": bookmark_shell.id},
+    )
+
+    result = AnalyzeUrlHandler().handle(task, context)
+
+    db_session.refresh(existing_article)
+    db_session.refresh(bookmark_shell)
+    status_row = (
+        db_session.query(ContentStatusEntry)
+        .filter(
+            ContentStatusEntry.content_id == existing_article.id,
+            ContentStatusEntry.user_id == 1,
+        )
+        .first()
+    )
+
+    assert result.success is True
+    assert bookmark_shell.status == ContentStatus.SKIPPED.value
+    assert bookmark_shell.error_message == "Canonical URL conflicts with existing content"
+    assert bookmark_shell.content_metadata["canonical_content_id"] == existing_article.id
+    assert status_row is not None
+    assert status_row.status == "inbox"
+    assert (
+        db_session.query(Content)
+        .filter(Content.url == "https://example.com/story")
+        .count()
+        == 1
+    )
+    queue_gateway.enqueue.assert_not_called()
+
+
+def test_tweet_bookmark_records_native_x_article_metadata(
+    db_session,
+    monkeypatch,
+) -> None:
+    bookmark_shell = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "x_bookmarks",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(bookmark_shell)
+    db_session.commit()
+    db_session.refresh(bookmark_shell)
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(
+            success=True,
+            tweet=XTweet(
+                id="123456789",
+                text="Short teaser for the native article",
+                author_username="willem",
+                author_name="Willem",
+                created_at="2026-03-27T21:56:00Z",
+                like_count=12,
+                retweet_count=3,
+                reply_count=1,
+                article_title="Native X Article",
+                article_text="This is the full native X article body.",
+                external_urls=[],
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    context = _build_context(db_session, queue_gateway=queue_gateway)
+    task = TaskEnvelope(
+        id=106,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=bookmark_shell.id,
+        payload={"content_id": bookmark_shell.id},
+    )
+
+    result = AnalyzeUrlHandler().handle(task, context)
+
+    db_session.refresh(bookmark_shell)
+
+    assert result.success is True
+    assert bookmark_shell.url == "https://x.com/i/status/123456789"
+    assert bookmark_shell.title == "Native X Article"
+    assert bookmark_shell.content_metadata["tweet_article_title"] == "Native X Article"
+    assert (
+        bookmark_shell.content_metadata["tweet_article_text"]
+        == "This is the full native X article body."
+    )
+    assert (
+        bookmark_shell.content_metadata["tweet_processing_text"]
+        == "Native X Article\n\nThis is the full native X article body."
+    )
+    assert "tweet_only" not in bookmark_shell.content_metadata
+    queue_gateway.enqueue.assert_called_once_with(
+        TaskType.PROCESS_CONTENT,
+        content_id=bookmark_shell.id,
+    )

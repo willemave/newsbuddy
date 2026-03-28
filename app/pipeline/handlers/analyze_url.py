@@ -40,7 +40,7 @@ from app.services.url_detection import (
     infer_content_type_and_platform,
     should_use_llm_analysis,
 )
-from app.services.x_api import fetch_tweet_by_id
+from app.services.x_api import build_tweet_processing_text, fetch_tweet_by_id
 from app.services.x_integration import get_x_user_access_token
 
 logger = get_logger(__name__)
@@ -290,6 +290,27 @@ class FeedSubscriptionFlow:
 class TwitterShareFlow:
     """Handle tweet URL fanout and metadata enrichment."""
 
+    def _ensure_existing_article_visible(
+        self,
+        db,
+        *,
+        existing: Content,
+        submitter_id: int | None,
+    ) -> None:
+        """Attach an existing article row to the submitting user's inbox when possible."""
+        if not submitter_id:
+            return
+
+        status_created = ensure_inbox_status(
+            db,
+            submitter_id,
+            existing.id,
+            content_type=existing.content_type,
+        )
+        db.commit()
+        if status_created:
+            enqueue_visible_long_form_image_if_needed(db, existing)
+
     def run(
         self,
         db,
@@ -369,6 +390,7 @@ class TwitterShareFlow:
 
         tweet = fetch_result.tweet
         thread_text = _build_thread_text([tweet.text])
+        processing_text = build_tweet_processing_text(tweet)
         external_urls: list[str] = []
         for raw_url in tweet.external_urls:
             try:
@@ -398,22 +420,56 @@ class TwitterShareFlow:
                 "tweet_reply_count": tweet.reply_count,
                 "tweet_text": tweet.text,
                 "tweet_thread_text": thread_text,
+                "tweet_processing_text": processing_text,
                 "tweet_external_urls": external_urls,
             }
         )
+        if tweet.article_title:
+            metadata["tweet_article_title"] = tweet.article_title
+            if not content.title:
+                content.title = tweet.article_title[:500]
+        if tweet.article_text:
+            metadata["tweet_article_text"] = tweet.article_text
+        if tweet.note_tweet_text:
+            metadata["tweet_note_tweet_text"] = tweet.note_tweet_text
 
         content.content_type = ContentType.ARTICLE.value
         content.platform = "twitter"
         if not content.source_url:
             content.source_url = tweet_url
 
+        submitted_via = metadata.get("submitted_via") or "share_sheet"
         fanout_urls: list[str] = []
-        if external_urls:
-            content.url = external_urls[0]
-            fanout_urls = external_urls[1:]
+        primary_external_url = external_urls[0] if external_urls else None
+        existing_primary_article: Content | None = None
+        if primary_external_url:
+            existing_primary_article = (
+                db.query(Content)
+                .filter(
+                    Content.url == primary_external_url,
+                    Content.content_type == ContentType.ARTICLE.value,
+                )
+                .first()
+            )
+            if existing_primary_article:
+                self._ensure_existing_article_visible(
+                    db,
+                    existing=existing_primary_article,
+                    submitter_id=submitter_id if isinstance(submitter_id, int) else None,
+                )
+                metadata["canonical_content_id"] = existing_primary_article.id
+                content.url = tweet_url
+                content.status = ContentStatus.SKIPPED.value
+                content.error_message = "Canonical URL conflicts with existing content"
+                content.processed_at = datetime.now(UTC)
+                fanout_urls = external_urls[1:]
+            else:
+                content.url = primary_external_url
+                fanout_urls = external_urls[1:]
         else:
             content.url = tweet_url
-            metadata = update_processing_state(metadata, tweet_only=True)
+            if not tweet.article_text and not tweet.note_tweet_text:
+                metadata = update_processing_state(metadata, tweet_only=True)
 
         content.content_metadata = refresh_merge_content_metadata(
             db,
@@ -423,7 +479,6 @@ class TwitterShareFlow:
         )
         db.commit()
 
-        submitted_via = metadata.get("submitted_via") or "share_sheet"
         for normalized_url in fanout_urls:
             existing = (
                 db.query(Content)
@@ -434,16 +489,11 @@ class TwitterShareFlow:
                 .first()
             )
             if existing:
-                if submitter_id:
-                    status_created = ensure_inbox_status(
-                        db,
-                        submitter_id,
-                        existing.id,
-                        content_type=existing.content_type,
-                    )
-                    db.commit()
-                    if status_created:
-                        enqueue_visible_long_form_image_if_needed(db, existing)
+                self._ensure_existing_article_visible(
+                    db,
+                    existing=existing,
+                    submitter_id=submitter_id if isinstance(submitter_id, int) else None,
+                )
                 continue
 
             fanout_metadata = dict(metadata)
