@@ -8,6 +8,12 @@
 import Combine
 import Foundation
 import SwiftUI
+import os.log
+
+private let appSettingsLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "org.willemaw.newsly",
+    category: "AppSettings"
+)
 
 enum FastNewsMode: String, CaseIterable {
     case newsList = "news_list"
@@ -91,6 +97,10 @@ class AppSettings: ObservableObject {
     @AppStorage("longArticleDisplayMode", store: SharedContainer.userDefaults) var longArticleDisplayMode: String = LongArticleDisplayMode.both.rawValue
     @AppStorage("useLongFormCardStack", store: SharedContainer.userDefaults) var useLongFormCardStack: Bool = true
     @AppStorage("backendTranscriptionAvailable", store: SharedContainer.userDefaults) var backendTranscriptionAvailable: Bool = false
+    private var hasExplicitServerConfiguration: Bool {
+        SharedContainer.userDefaults.object(forKey: "serverHost") != nil
+            || SharedContainer.userDefaults.object(forKey: "serverPort") != nil
+    }
     private var normalizedHost: String {
 #if targetEnvironment(simulator)
         if serverHost.caseInsensitiveCompare("localhost") == .orderedSame {
@@ -101,6 +111,12 @@ class AppSettings: ObservableObject {
     }
 
     var baseURL: String {
+        if !hasExplicitServerConfiguration {
+            appSettingsLogger.fault("Using implicit default server configuration")
+#if DEBUG
+            preconditionFailure("Server host/port must be configured explicitly in debug builds")
+#endif
+        }
         let scheme = useHTTPS ? "https" : "http"
         return "\(scheme)://\(normalizedHost):\(serverPort)"
     }

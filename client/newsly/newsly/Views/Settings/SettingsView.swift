@@ -15,6 +15,11 @@ struct SettingsView: View {
     @State private var showingDebugMenu = false
     @State private var selectedDigestIntervalHours = NewsDigestIntervalOption.every6Hours.rawValue
     @State private var isSavingDigestInterval = false
+    @State private var digestPreferencePromptDraft = ""
+    @State private var serverDigestPreferencePrompt = ""
+    @State private var hasUnsavedDigestPreferencePromptEdits = false
+    @State private var isSavingDigestPreferencePrompt = false
+    @FocusState private var isDigestPreferencePromptFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -70,8 +75,12 @@ struct SettingsView: View {
         }
         .onChange(of: authViewModel.authState) { _, _ in
             syncDigestIntervalWithAuthenticatedUser()
+            syncDigestPreferencePromptWithAuthenticatedUser(force: true)
         }
-        .task { syncDigestIntervalWithAuthenticatedUser() }
+        .task {
+            syncDigestIntervalWithAuthenticatedUser()
+            syncDigestPreferencePromptWithAuthenticatedUser(force: true)
+        }
     }
 
     // MARK: - Account Section
@@ -116,7 +125,7 @@ struct SettingsView: View {
                         icon: "at",
                         iconColor: .blue,
                         title: "X / Twitter",
-                        subtitle: "Username, digest filter, and account connection"
+                        subtitle: "Username and account connection"
                     )
                 }
                 .buttonStyle(.plain)
@@ -184,8 +193,67 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, Spacing.rowHorizontal)
                 .padding(.vertical, Spacing.rowVertical)
+
+                RowDivider()
+
+                digestPreferencePromptRow
             }
         }
+    }
+
+    private var digestPreferencePromptRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: "text.badge.star")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.orange)
+                    .frame(width: Spacing.iconSize, height: Spacing.iconSize)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Digest Preferences")
+                        .font(.listTitle)
+                        .foregroundStyle(Color.textPrimary)
+                    Text("Used to curate digest bullets and filter X posts before they enter the digest.")
+                        .font(.listCaption)
+                        .foregroundStyle(Color.textTertiary)
+                }
+
+                Spacer(minLength: 8)
+            }
+
+            TextEditor(text: $digestPreferencePromptDraft)
+                .focused($isDigestPreferencePromptFocused)
+                .frame(minHeight: 140)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+                .background(Color.surfaceSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .onChange(of: digestPreferencePromptDraft) { _, newValue in
+                    hasUnsavedDigestPreferencePromptEdits =
+                        normalizedDigestPreferencePromptForComparison(newValue)
+                        != normalizedDigestPreferencePromptForComparison(serverDigestPreferencePrompt)
+                }
+
+            HStack {
+                Text("Clear the field and save to restore the default prompt.")
+                    .font(.caption)
+                    .foregroundStyle(Color.textTertiary)
+                Spacer()
+                Button {
+                    Task { await saveDigestPreferencePrompt() }
+                } label: {
+                    if isSavingDigestPreferencePrompt {
+                        ProgressView()
+                    } else {
+                        Text("Save Preferences")
+                            .font(.callout.weight(.semibold))
+                    }
+                }
+                .disabled(isSavingDigestPreferencePrompt || !hasUnsavedDigestPreferencePromptEdits)
+            }
+        }
+        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.vertical, Spacing.rowVertical)
     }
 
     private var textSizeRow: some View {
@@ -425,6 +493,27 @@ struct SettingsView: View {
     }
 
     @MainActor
+    private func syncDigestPreferencePromptWithAuthenticatedUser(force: Bool) {
+        guard !isSavingDigestPreferencePrompt else { return }
+        guard let user = authenticatedUser else {
+            serverDigestPreferencePrompt = ""
+            if force || !isDigestPreferencePromptFocused {
+                digestPreferencePromptDraft = ""
+            }
+            hasUnsavedDigestPreferencePromptEdits = false
+            return
+        }
+
+        serverDigestPreferencePrompt = user.newsDigestPreferencePrompt
+        if force || (!isDigestPreferencePromptFocused && !hasUnsavedDigestPreferencePromptEdits) {
+            digestPreferencePromptDraft = user.newsDigestPreferencePrompt
+        }
+        hasUnsavedDigestPreferencePromptEdits =
+            normalizedDigestPreferencePromptForComparison(digestPreferencePromptDraft)
+            != normalizedDigestPreferencePromptForComparison(serverDigestPreferencePrompt)
+    }
+
+    @MainActor
     private func saveDigestIntervalHours(_ intervalHours: Int) async {
         guard !isSavingDigestInterval, authenticatedUser != nil else { return }
         isSavingDigestInterval = true
@@ -443,6 +532,37 @@ struct SettingsView: View {
                 selectedDigestIntervalHours = user.newsDigestIntervalHours
             }
             alertMessage = "Failed to save digest frequency: \(error.localizedDescription)"
+            showingAlert = true
+        }
+    }
+
+    private func normalizedDigestPreferencePromptDraft() -> String? {
+        let trimmed = digestPreferencePromptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func normalizedDigestPreferencePromptForComparison(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @MainActor
+    private func saveDigestPreferencePrompt() async {
+        guard !isSavingDigestPreferencePrompt, authenticatedUser != nil else { return }
+        isSavingDigestPreferencePrompt = true
+        defer { isSavingDigestPreferencePrompt = false }
+
+        do {
+            let user = try await AuthenticationService.shared.updateCurrentUserProfile(
+                newsDigestPreferencePrompt: normalizedDigestPreferencePromptDraft()
+            )
+            authViewModel.updateUser(user)
+            serverDigestPreferencePrompt = user.newsDigestPreferencePrompt
+            digestPreferencePromptDraft = user.newsDigestPreferencePrompt
+            hasUnsavedDigestPreferencePromptEdits = false
+            alertMessage = "Digest preferences saved."
+            showingAlert = true
+        } catch {
+            alertMessage = "Failed to save digest preferences: \(error.localizedDescription)"
             showingAlert = true
         }
     }

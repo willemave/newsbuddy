@@ -221,7 +221,7 @@ struct OnboardingCompleteRequest: Codable {
     let profileSummary: String?
     let inferredTopics: [String]?
     let twitterUsername: String?
-    let xDigestFilterPrompt: String?
+    let newsDigestPreferencePrompt: String?
 
     enum CodingKeys: String, CodingKey {
         case selectedSources = "selected_sources"
@@ -229,7 +229,7 @@ struct OnboardingCompleteRequest: Codable {
         case profileSummary = "profile_summary"
         case inferredTopics = "inferred_topics"
         case twitterUsername = "twitter_username"
-        case xDigestFilterPrompt = "x_digest_filter_prompt"
+        case newsDigestPreferencePrompt = "news_digest_preference_prompt"
     }
 }
 

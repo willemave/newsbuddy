@@ -46,7 +46,7 @@ final class OnboardingViewModel: ObservableObject {
     @Published var topicSummary: String?
     @Published var inferredTopics: [String] = []
     @Published var twitterUsername: String = ""
-    @Published var xDigestFilterPrompt: String = ""
+    @Published var newsDigestPreferencePrompt: String = ""
 
     private let service = OnboardingService.shared
     private let dictationService = VoiceDictationService.shared
@@ -61,7 +61,7 @@ final class OnboardingViewModel: ObservableObject {
     init(user: User) {
         self.user = user
         self.twitterUsername = user.twitterUsername ?? ""
-        self.xDigestFilterPrompt = user.xDigestFilterPrompt
+        self.newsDigestPreferencePrompt = user.newsDigestPreferencePrompt
     }
 
     deinit {
@@ -184,7 +184,7 @@ final class OnboardingViewModel: ObservableObject {
                 profileSummary: isPersonalized ? topicSummary : nil,
                 inferredTopics: isPersonalized ? inferredTopics : nil,
                 twitterUsername: normalizedTwitterUsername(),
-                xDigestFilterPrompt: normalizedXDigestFilterPrompt()
+                newsDigestPreferencePrompt: normalizedNewsDigestPreferencePrompt()
             )
             let response = try await service.complete(request: request)
             completionResponse = response
@@ -301,8 +301,8 @@ final class OnboardingViewModel: ObservableObject {
         return trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
     }
 
-    private func normalizedXDigestFilterPrompt() -> String? {
-        let trimmed = xDigestFilterPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func normalizedNewsDigestPreferencePrompt() -> String? {
+        let trimmed = newsDigestPreferencePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 

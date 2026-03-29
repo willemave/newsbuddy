@@ -12,6 +12,8 @@ enum RealtimeTranscriptionError: LocalizedError {
     case audioSessionError(String)
     case connectionFailed
     case connectionTimeout
+    case finalTranscriptTimeout
+    case invalidModelConfiguration
     case tokenMissing
 
     var errorDescription: String? {
@@ -24,6 +26,10 @@ enum RealtimeTranscriptionError: LocalizedError {
             return "Realtime connection failed"
         case .connectionTimeout:
             return "Realtime connection timed out"
+        case .finalTranscriptTimeout:
+            return "Realtime transcript did not finalize in time"
+        case .invalidModelConfiguration:
+            return "Realtime model configuration is missing"
         case .tokenMissing:
             return "Realtime token unavailable"
         }
@@ -47,8 +53,6 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
 
     private let openAIService = OpenAIService.shared
     private let audioQueue = DispatchQueue(label: "com.newsly.realtime.audio")
-    private let defaultModel = "gpt-realtime"
-    private let transcriptionModel = "gpt-4o-mini-transcribe"
     private let targetSampleRate: Double = 24_000
     private let connectionTimeoutSeconds: TimeInterval = 5
 
@@ -97,9 +101,13 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
         try configureAudioSession()
         realtimeLogger.info("Fetching realtime token")
         let tokenResponse = try await openAIService.fetchRealtimeToken()
-        let resolvedModel = resolveModel(tokenResponse.model)
         activeSessionType = tokenResponse.sessionType
-        realtimeLogger.info("Realtime token fetched with model: \(resolvedModel, privacy: .public)")
+        let resolvedModel = try resolveModel(tokenResponse.model, sessionType: tokenResponse.sessionType)
+        if let resolvedModel {
+            realtimeLogger.info("Realtime token fetched with model: \(resolvedModel, privacy: .public)")
+        } else {
+            realtimeLogger.info("Realtime token fetched for transcription session")
+        }
         let token = tokenResponse.token
         guard !token.isEmpty else {
             realtimeLogger.error("Realtime token missing")
@@ -146,6 +154,7 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
             )
         }
 
+        var finalTranscriptError: Error?
         if shouldAwaitFinal {
             do {
                 _ = try await waitForFinalTranscript()
@@ -153,6 +162,8 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
                 realtimeLogger.error(
                     "Timed out waiting for final realtime transcript: \(error.localizedDescription, privacy: .public)"
                 )
+                onError?(error.localizedDescription)
+                finalTranscriptError = error
             }
         }
 
@@ -166,6 +177,10 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
         activeSessionType = nil
         hasFinalTranscript = false
         realtimeLogger.info("Realtime transcription stopped")
+        if let finalTranscriptError {
+            onStopReason?(.failure)
+            throw finalTranscriptError
+        }
         onStopReason?(.manual)
         return currentTranscript
     }
@@ -213,20 +228,33 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
         }
     }
 
-    private func resolveModel(_ model: String?) -> String {
+    private func resolveModel(_ model: String?, sessionType: String?) throws -> String? {
+        if sessionType == "transcription" {
+            return nil
+        }
         let trimmedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (trimmedModel?.isEmpty == false ? trimmedModel : nil) ?? defaultModel
+        guard let trimmedModel, !trimmedModel.isEmpty else {
+            realtimeLogger.error("Realtime model configuration is missing")
+            throw RealtimeTranscriptionError.invalidModelConfiguration
+        }
+        return trimmedModel
     }
 
     private func connect(token: String, model: String?) async throws {
         connectionState = .connecting
-        let modelValue = resolveModel(model)
-        realtimeLogger.info("Preparing websocket connection for model: \(modelValue, privacy: .public)")
+        if let model {
+            realtimeLogger.info("Preparing websocket connection for model: \(model, privacy: .public)")
+        } else {
+            realtimeLogger.info("Preparing websocket connection without model query parameter")
+        }
         guard var components = URLComponents(string: "wss://api.openai.com/v1/realtime") else {
             throw RealtimeTranscriptionError.connectionFailed
         }
         if activeSessionType != "transcription" {
-            components.queryItems = [URLQueryItem(name: "model", value: modelValue)]
+            guard let model else {
+                throw RealtimeTranscriptionError.invalidModelConfiguration
+            }
+            components.queryItems = [URLQueryItem(name: "model", value: model)]
         } else {
             realtimeLogger.info("Transcription session detected; omitting model query parameter")
         }
@@ -534,7 +562,9 @@ final class RealtimeTranscriptionService: SpeechTranscribing, @unchecked Sendabl
                 try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
                 guard let self else { return }
                 guard self.finalTranscriptContinuation != nil else { return }
-                self.finalTranscriptContinuation?.resume(returning: self.currentTranscript)
+                self.finalTranscriptContinuation?.resume(
+                    throwing: RealtimeTranscriptionError.finalTranscriptTimeout
+                )
                 self.finalTranscriptContinuation = nil
             }
         }

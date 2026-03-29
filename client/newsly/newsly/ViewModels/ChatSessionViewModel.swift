@@ -120,8 +120,8 @@ class ChatSessionViewModel: ObservableObject {
 
         do {
             // Use the polling sendMessage which handles the polling loop
-            let assistantMessage = try await pollUntilComplete(messageId: messageId)
-            await refreshTranscriptAfterPolling(fallbackAssistantMessage: assistantMessage)
+            _ = try await pollUntilComplete(messageId: messageId)
+            try await refreshTranscriptAfterPolling()
         } catch {
             logger.error("[ViewModel] pollForMessageCompletion error | error=\(error.localizedDescription)")
             errorMessage = error.localizedDescription
@@ -286,22 +286,15 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         }
     }
 
-    private func refreshTranscriptAfterPolling(fallbackAssistantMessage: ChatMessage) async {
-        do {
-            let detail = try await chatService.getSession(id: sessionId)
-            session = detail.session
-            let filteredMessages = detail.messages.filter { !$0.content.isEmpty }
-            if filteredMessages.isEmpty {
-                messages.append(fallbackAssistantMessage)
-            } else {
-                messages = filteredMessages
-            }
-        } catch {
-            logger.debug("[ViewModel] refreshTranscriptAfterPolling fallback | error=\(error.localizedDescription)")
-            if !messages.contains(where: { $0.uiIdentity == fallbackAssistantMessage.uiIdentity }) {
-                messages.append(fallbackAssistantMessage)
-            }
+    private func refreshTranscriptAfterPolling() async throws {
+        let detail = try await chatService.getSession(id: sessionId)
+        session = detail.session
+        let filteredMessages = detail.messages.filter { !$0.content.isEmpty }
+        guard !filteredMessages.isEmpty else {
+            logger.error("[ViewModel] refreshTranscriptAfterPolling failed | no transcript messages returned")
+            throw ChatServiceError.missingAssistantMessage
         }
+        messages = filteredMessages
     }
 
     // MARK: - Thinking Indicator

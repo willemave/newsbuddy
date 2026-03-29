@@ -16,19 +16,12 @@ struct TwitterSettingsView: View {
     @State private var hasUnsavedTwitterUsernameEdits = false
     @State private var xConnection: XConnectionResponse?
     @State private var hasLoadedAccountState = false
-    @State private var isSavingXDigestFilterPrompt = false
-    @State private var xDigestFilterPromptDraft = ""
-    @State private var serverXDigestFilterPrompt = ""
-    @State private var hasUnsavedXDigestFilterPromptEdits = false
     @FocusState private var isTwitterUsernameFieldFocused: Bool
-    @FocusState private var isXDigestFilterPromptFocused: Bool
 
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
                 identitySection
-                SectionDivider()
-                digestSection
                 SectionDivider()
                 connectionSection
                 Spacer(minLength: 40)
@@ -73,13 +66,6 @@ struct TwitterSettingsView: View {
             }
             .buttonStyle(.plain)
             .disabled(isSavingTwitterUsername || isUpdatingXConnection || !hasUnsavedTwitterUsernameEdits)
-        }
-    }
-
-    private var digestSection: some View {
-        VStack(spacing: 0) {
-            SectionHeader(title: "Digest")
-            xDigestFilterPromptRow
         }
     }
 
@@ -152,61 +138,6 @@ struct TwitterSettingsView: View {
         .padding(.vertical, Spacing.rowVertical)
     }
 
-    private var xDigestFilterPromptRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.orange)
-                    .frame(width: Spacing.iconSize, height: Spacing.iconSize)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("X Digest Filter")
-                        .font(.listTitle)
-                        .foregroundStyle(Color.textPrimary)
-                    Text("Edit what posts from your follows and lists should make the digest.")
-                        .font(.listCaption)
-                        .foregroundStyle(Color.textTertiary)
-                }
-
-                Spacer(minLength: 8)
-            }
-
-            TextEditor(text: $xDigestFilterPromptDraft)
-                .focused($isXDigestFilterPromptFocused)
-                .frame(minHeight: 120)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
-                .background(Color.surfaceSecondary)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .onChange(of: xDigestFilterPromptDraft) { _, newValue in
-                    hasUnsavedXDigestFilterPromptEdits =
-                        normalizedDigestFilterPromptForComparison(newValue)
-                        != normalizedDigestFilterPromptForComparison(serverXDigestFilterPrompt)
-                }
-
-            HStack {
-                Text("Clear the field and save to restore the default filter.")
-                    .font(.caption)
-                    .foregroundStyle(Color.textTertiary)
-                Spacer()
-                Button {
-                    Task { await saveXDigestFilterPrompt() }
-                } label: {
-                    if isSavingXDigestFilterPrompt {
-                        ProgressView()
-                    } else {
-                        Text("Save Filter")
-                            .font(.callout.weight(.semibold))
-                    }
-                }
-                .disabled(isSavingXDigestFilterPrompt || !hasUnsavedXDigestFilterPromptEdits)
-            }
-        }
-        .padding(.horizontal, Spacing.rowHorizontal)
-        .padding(.vertical, Spacing.rowVertical)
-    }
-
     private var authenticatedUser: User? {
         guard case .authenticated(let user) = authViewModel.authState else {
             return nil
@@ -243,15 +174,6 @@ struct TwitterSettingsView: View {
         return withoutPrefix.lowercased()
     }
 
-    private func normalizedXDigestFilterPromptDraft() -> String? {
-        let trimmed = xDigestFilterPromptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func normalizedDigestFilterPromptForComparison(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     @MainActor
     private func loadAccountState(force: Bool) async {
         guard let user = authenticatedUser else {
@@ -259,31 +181,20 @@ struct TwitterSettingsView: View {
             twitterUsernameDraft = ""
             serverTwitterUsername = ""
             hasUnsavedTwitterUsernameEdits = false
-            xDigestFilterPromptDraft = ""
-            serverXDigestFilterPrompt = ""
-            hasUnsavedXDigestFilterPromptEdits = false
             hasLoadedAccountState = false
             return
         }
 
         let userUsername = user.twitterUsername ?? ""
-        let userDigestPrompt = user.xDigestFilterPrompt
         if !hasLoadedAccountState {
             serverTwitterUsername = userUsername
             twitterUsernameDraft = userUsername
             hasUnsavedTwitterUsernameEdits = false
-            serverXDigestFilterPrompt = userDigestPrompt
-            xDigestFilterPromptDraft = userDigestPrompt
-            hasUnsavedXDigestFilterPromptEdits = false
             hasLoadedAccountState = true
         } else if force {
             serverTwitterUsername = userUsername
             if !isTwitterUsernameFieldFocused && !hasUnsavedTwitterUsernameEdits {
                 twitterUsernameDraft = userUsername
-            }
-            serverXDigestFilterPrompt = userDigestPrompt
-            if !isXDigestFilterPromptFocused && !hasUnsavedXDigestFilterPromptEdits {
-                xDigestFilterPromptDraft = userDigestPrompt
             }
         }
 
@@ -306,9 +217,6 @@ struct TwitterSettingsView: View {
         hasUnsavedTwitterUsernameEdits =
             normalizedTwitterUsernameForComparison(twitterUsernameDraft)
             != normalizedTwitterUsernameForComparison(serverTwitterUsername)
-        hasUnsavedXDigestFilterPromptEdits =
-            normalizedDigestFilterPromptForComparison(xDigestFilterPromptDraft)
-            != normalizedDigestFilterPromptForComparison(serverXDigestFilterPrompt)
     }
 
     @MainActor
@@ -330,28 +238,6 @@ struct TwitterSettingsView: View {
             await loadAccountState(force: true)
         } catch {
             alertMessage = "Failed to save username: \(error.localizedDescription)"
-            showingAlert = true
-        }
-    }
-
-    @MainActor
-    private func saveXDigestFilterPrompt() async {
-        guard !isSavingXDigestFilterPrompt, authenticatedUser != nil else { return }
-        isSavingXDigestFilterPrompt = true
-        defer { isSavingXDigestFilterPrompt = false }
-
-        do {
-            let user = try await AuthenticationService.shared.updateCurrentUserProfile(
-                xDigestFilterPrompt: normalizedXDigestFilterPromptDraft()
-            )
-            authViewModel.updateUser(user)
-            serverXDigestFilterPrompt = user.xDigestFilterPrompt
-            xDigestFilterPromptDraft = user.xDigestFilterPrompt
-            hasUnsavedXDigestFilterPromptEdits = false
-            alertMessage = "X digest filter saved."
-            showingAlert = true
-        } catch {
-            alertMessage = "Failed to save X digest filter: \(error.localizedDescription)"
             showingAlert = true
         }
     }
@@ -403,4 +289,3 @@ struct TwitterSettingsView: View {
         }
     }
 }
-
