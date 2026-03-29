@@ -24,7 +24,7 @@ from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
-from app.services.exa_client import exa_get_contents
+from app.services.exa_client import ExaClientError, exa_get_contents
 from app.utils.dates import parse_date_with_tz
 
 logger = get_logger(__name__)
@@ -498,11 +498,20 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
     def _exa_fallback_fetch(self, url: str, source: str) -> dict[str, Any] | None:
         """Use Exa contents as the first fallback after crawl4ai extraction fails."""
 
-        results = exa_get_contents(
-            [url],
-            max_characters=None,
-            livecrawl="always",
-        )
+        try:
+            results = exa_get_contents(
+                [url],
+                max_characters=None,
+                livecrawl="always",
+                raise_on_error=True,
+            )
+        except ExaClientError as exc:
+            logger.error(
+                "HtmlStrategy: Exa fallback request failed for %s: %s",
+                url,
+                exc,
+            )
+            return None
         if not results:
             return None
 

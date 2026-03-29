@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     max_retries: int = 3
 
     # News-native digest pipeline
-    news_embedding_model: str = "BAAI/bge-small-en-v1.5"
+    news_embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
     news_embedding_device: str = "auto"  # auto, cpu, cuda, mps
     news_group_model: str = "google:gemini-3.1-flash-lite-preview"
     news_header_model: str = "google:gemini-3.1-flash-lite-preview"

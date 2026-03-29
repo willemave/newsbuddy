@@ -3,25 +3,9 @@
 from __future__ import annotations
 
 from app.models.contracts import ContentType
-from app.models.metadata import (
-    BulletedSummary,
-    EditorialNarrativeSummary,
-    InterleavedSummary,
-    InterleavedSummaryV2,
-    NewsSummary,
-    StructuredSummary,
-)
+from app.models.metadata import SummaryPayload
 from app.services.content_analyzer import AnalysisError, ContentAnalysisOutput, get_content_analyzer
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
-
-SummaryPayload = (
-    StructuredSummary
-    | InterleavedSummary
-    | InterleavedSummaryV2
-    | BulletedSummary
-    | EditorialNarrativeSummary
-    | NewsSummary
-)
 
 
 class LlmGateway:

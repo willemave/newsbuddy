@@ -2,31 +2,43 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, cast
 
 from app.core.logging import get_logger
 from app.models.metadata import (
     BulletedSummary,
-    ContentQuote,
     ContentType,
-    DailyNewsRollupSummary,
     EditorialNarrativeSummary,
-    InterleavedSummary,
     InterleavedSummaryV2,
     NewsSummary,
     StructuredSummary,
+    SummaryPayload,
 )
-from app.services.llm_agents import get_summarization_agent
+from app.services.llm_agents import get_basic_agent
 from app.services.llm_models import resolve_model
 from app.services.llm_prompts import generate_summary_prompt
 
 logger = get_logger(__name__)
 
 MAX_SUMMARIZATION_PAYLOAD_CHARS = 220_000
-FALLBACK_SUMMARIZATION_PAYLOAD_CHARS = 120_000
+DEFAULT_ARTICLE_MODEL_SPEC = "openai:gpt-5.4-mini"
+
+SummarizationPromptType = Literal[
+    "structured",
+    "interleaved",
+    "long_bullets",
+    "news_digest",
+    "editorial_narrative",
+]
+SummarizationOutputType = (
+    type[StructuredSummary]
+    | type[InterleavedSummaryV2]
+    | type[BulletedSummary]
+    | type[EditorialNarrativeSummary]
+    | type[NewsSummary]
+)
 
 CONTEXT_LENGTH_ERROR_HINTS: tuple[str, ...] = (
     "context_length_exceeded",
@@ -48,59 +60,21 @@ PROVIDER_CONFIG_ERROR_HINTS: tuple[str, ...] = (
     "api key not configured",
 )
 
-EVENT_LOOP_BINDING_ERROR_HINTS: tuple[str, ...] = (
-    "bound to a different event loop",
-    "attached to a different loop",
-)
 
-
-@dataclass
-class SummarizationRequest:
-    """Request payload for summarizing content."""
-
-    content: str
-    content_type: str | ContentType
-    model_spec: str
-    title: str | None = None
-    max_bullet_points: int = 6
-    max_quotes: int = 8
-    content_id: str | int | None = None
-
-
-def _finalize_summary(
-    summary: StructuredSummary
-    | InterleavedSummary
-    | InterleavedSummaryV2
-    | BulletedSummary
-    | EditorialNarrativeSummary
-    | DailyNewsRollupSummary
-    | NewsSummary,
-    content_type: str | ContentType,
-) -> (
-    StructuredSummary
-    | InterleavedSummary
-    | InterleavedSummaryV2
-    | BulletedSummary
-    | EditorialNarrativeSummary
-    | DailyNewsRollupSummary
-    | NewsSummary
-):
+def _finalize_summary(summary: SummaryPayload) -> SummaryPayload:
     """Apply lightweight cleanup to keep summaries consistent."""
     if isinstance(summary, StructuredSummary) and summary.quotes:
-        filtered: list[ContentQuote] = [
+        summary.quotes = [
             quote for quote in summary.quotes if len((quote.text or "").strip()) >= 10
         ]
-        summary.quotes = filtered
     if isinstance(summary, InterleavedSummaryV2) and summary.quotes:
-        filtered_quotes: list[ContentQuote] = [
+        summary.quotes = [
             quote for quote in summary.quotes if len((quote.text or "").strip()) >= 10
         ]
-        summary.quotes = filtered_quotes
     if isinstance(summary, EditorialNarrativeSummary) and summary.quotes:
         summary.quotes = [
             quote for quote in summary.quotes if len((quote.text or "").strip()) >= 10
         ]
-
     return summary
 
 
@@ -108,12 +82,50 @@ def _normalize_content_type(content_type: str | ContentType) -> str:
     return content_type.value if isinstance(content_type, ContentType) else str(content_type)
 
 
-def _prompt_content_type(content_type: str) -> str:
-    if content_type in {"article", "podcast"}:
-        return "editorial_narrative"
-    if content_type == "news":
-        return "news_digest"
-    return content_type
+def resolve_summarization_output_type(
+    prompt_type: SummarizationPromptType,
+) -> SummarizationOutputType:
+    """Return the pydantic output type for a canonical summarization prompt type."""
+    if prompt_type == "news_digest":
+        return NewsSummary
+    if prompt_type == "editorial_narrative":
+        return EditorialNarrativeSummary
+    if prompt_type == "long_bullets":
+        return BulletedSummary
+    if prompt_type == "interleaved":
+        return InterleavedSummaryV2
+    return StructuredSummary
+
+
+def resolve_summarization_spec(
+    content_type: str | ContentType,
+    default_models: Mapping[str, str] | None = None,
+) -> tuple[SummarizationPromptType, SummarizationOutputType, str]:
+    """Resolve content type into prompt routing, output schema, and default model."""
+    models = default_models or DEFAULT_SUMMARIZATION_MODELS
+    normalized_type = _normalize_content_type(content_type)
+    default_article_model = models.get("article", DEFAULT_ARTICLE_MODEL_SPEC)
+
+    if normalized_type in {"article", "podcast"}:
+        prompt_type: SummarizationPromptType = "editorial_narrative"
+        default_model_spec = models.get(normalized_type, default_article_model)
+    elif normalized_type == "news":
+        prompt_type = "news_digest"
+        default_model_spec = models.get("news", models.get("news_digest", default_article_model))
+    elif normalized_type in {
+        "editorial_narrative",
+        "interleaved",
+        "long_bullets",
+        "news_digest",
+        "structured",
+    }:
+        prompt_type = cast(SummarizationPromptType, normalized_type)
+        default_model_spec = models.get(normalized_type, default_article_model)
+    else:
+        prompt_type = "structured"
+        default_model_spec = models.get(normalized_type, default_article_model)
+
+    return prompt_type, resolve_summarization_output_type(prompt_type), default_model_spec
 
 
 def _is_context_length_error(error: Exception) -> bool:
@@ -155,18 +167,12 @@ def _clip_payload(payload: str, max_chars: int) -> tuple[str, bool]:
 DEFAULT_SUMMARIZATION_MODELS: dict[str, str] = {
     "news": "google:gemini-3.1-flash-lite-preview",
     "news_digest": "google:gemini-3.1-flash-lite-preview",
-    "daily_news_rollup": "google:gemini-3.1-flash-lite-preview",
     "article": "openai:gpt-5.4-mini",
     "podcast": "openai:gpt-5.4-mini",
     "interleaved": "openai:gpt-5.4",
     "long_bullets": "openai:gpt-5.4",
     "editorial_narrative": "openai:gpt-5.4",
 }
-
-FALLBACK_SUMMARIZATION_MODEL = "google:gemini-3.1-flash-lite-preview"
-CROSS_PROVIDER_FALLBACK_MODELS: tuple[str, ...] = (
-    "openai:gpt-4o",
-)
 
 
 def _model_hint_from_spec(model_spec: str) -> tuple[str, str]:
@@ -186,9 +192,24 @@ def _is_provider_config_error(error: Exception) -> bool:
     return any(hint in message for hint in PROVIDER_CONFIG_ERROR_HINTS)
 
 
-def _is_event_loop_binding_error(error: Exception) -> bool:
-    message = str(error).lower()
-    return any(hint in message for hint in EVENT_LOOP_BINDING_ERROR_HINTS)
+def _build_user_message(user_template: str, content_payload: str, title: str | None) -> str:
+    """Build the user prompt for one summarization request."""
+    content_body = content_payload
+    if title:
+        content_body = f"Title: {title}\n\n{content_body}"
+    return user_template.format(content=content_body)
+
+
+def _run_summarization_agent(
+    *,
+    model_spec: str,
+    output_type: SummarizationOutputType,
+    system_prompt: str,
+    user_message: str,
+) -> Any:
+    """Run one typed summarization agent synchronously."""
+    agent = get_basic_agent(model_spec, output_type, system_prompt)
+    return agent.run_sync(user_message)
 
 
 @dataclass
@@ -202,7 +223,7 @@ class ContentSummarizer:
 
     def summarize(
         self,
-        content: str,
+        content: str | bytes,
         content_type: str | ContentType,
         *,
         title: str | None = None,
@@ -211,71 +232,98 @@ class ContentSummarizer:
         content_id: str | int | None = None,
         provider_override: str | None = None,
         model_hint: str | None = None,
-    ) -> (
-        StructuredSummary
-        | InterleavedSummary
-        | InterleavedSummaryV2
-        | BulletedSummary
-        | EditorialNarrativeSummary
-        | DailyNewsRollupSummary
-        | NewsSummary
-        | None
-    ):
+    ) -> SummaryPayload | None:
         """Summarize arbitrary content with sensible defaults per content type."""
         normalized_type = _normalize_content_type(content_type)
-        default_model_spec = self.default_models.get(
-            normalized_type, self.default_models.get("article", FALLBACK_SUMMARIZATION_MODEL)
-        )
-        default_provider_hint, default_model_hint = _model_hint_from_spec(default_model_spec)
+        content_length = len(content) if content else 0
 
-        provider_to_use = provider_override or self.provider_hint or default_provider_hint
-        model_hint_to_use = model_hint or self.model_hint or default_model_hint
+        try:
+            payload = (
+                content.decode("utf-8", errors="ignore")
+                if isinstance(content, bytes)
+                else content
+            )
+            if not payload:
+                logger.warning("Empty summarization payload provided")
+                return None
 
-        _, model_spec = self._model_resolver(provider_to_use, model_hint_to_use)
+            raw_payload = payload
+            payload, was_truncated = _clip_payload(payload, MAX_SUMMARIZATION_PAYLOAD_CHARS)
+            if was_truncated:
+                logger.warning(
+                    "Content length %s exceeds max %s; truncating (head+tail) for summarization",
+                    len(raw_payload),
+                    MAX_SUMMARIZATION_PAYLOAD_CHARS,
+                )
 
-        request = SummarizationRequest(
-            content=content,
-            content_type=normalized_type,
-            model_spec=model_spec,
-            title=title,
-            max_bullet_points=max_bullet_points,
-            max_quotes=max_quotes,
-            content_id=content_id,
-        )
-        return summarize_content(request)
+            prompt_type, output_type, default_model_spec = resolve_summarization_spec(
+                normalized_type,
+                self.default_models,
+            )
+            system_prompt, user_template = generate_summary_prompt(
+                prompt_type,
+                max_bullet_points,
+                max_quotes,
+            )
+            user_message = _build_user_message(user_template, payload, title)
 
-    def summarize_content(
-        self,
-        content: str,
-        max_bullet_points: int = 6,
-        max_quotes: int = 8,
-        content_type: str | ContentType = "article",
-        *,
-        title: str | None = None,
-        content_id: str | int | None = None,
-        provider_override: str | None = None,
-        model_hint: str | None = None,
-    ) -> (
-        StructuredSummary
-        | InterleavedSummary
-        | InterleavedSummaryV2
-        | BulletedSummary
-        | EditorialNarrativeSummary
-        | DailyNewsRollupSummary
-        | NewsSummary
-        | None
-    ):
-        """Compatibility wrapper mirroring legacy service API."""
-        return self.summarize(
-            content=content,
-            content_type=content_type,
-            title=title,
-            max_bullet_points=max_bullet_points,
-            max_quotes=max_quotes,
-            content_id=content_id,
-            provider_override=provider_override,
-            model_hint=model_hint,
-        )
+            default_provider_hint, default_model_hint = _model_hint_from_spec(default_model_spec)
+            provider_to_use = provider_override or self.provider_hint or default_provider_hint
+            model_hint_to_use = model_hint or self.model_hint or default_model_hint
+            _, model_spec = self._model_resolver(provider_to_use, model_hint_to_use)
+
+            try:
+                result = _run_summarization_agent(
+                    model_spec=model_spec,
+                    output_type=output_type,
+                    system_prompt=system_prompt,
+                    user_message=user_message,
+                )
+            except Exception as model_error:  # noqa: BLE001
+                if _is_context_length_error(model_error):
+                    logger.error(
+                        "Summarization context too long for content %s with model %s",
+                        content_id or "unknown",
+                        model_spec,
+                    )
+                elif _is_provider_precondition_error(model_error):
+                    logger.error(
+                        "Primary summarization model %s failed precondition for content %s",
+                        model_spec,
+                        content_id or "unknown",
+                    )
+                elif _is_provider_config_error(model_error):
+                    logger.error(
+                        "Summarization model %s is not configured for content %s",
+                        model_spec,
+                        content_id or "unknown",
+                    )
+                raise
+
+            summary = _extract_agent_output(result)
+            if summary is None:
+                raise ValueError("Summarization agent returned no output")
+            return _finalize_summary(cast(SummaryPayload, summary))
+        except Exception as error:  # noqa: BLE001
+            item_id = str(content_id or "unknown")
+            logger.exception(
+                "MISSING_SUMMARY: Summarization failed for content %s: %s. "
+                "Content type: %s, Payload length: %s",
+                item_id,
+                error,
+                normalized_type,
+                content_length,
+                extra={
+                    "component": "llm_summarization",
+                    "operation": "summarization",
+                    "item_id": item_id,
+                    "context_data": {
+                        "content_type": normalized_type,
+                        "payload_length": content_length,
+                    },
+                },
+            )
+            raise
 
 
 _content_summarizer: ContentSummarizer | None = None
@@ -287,180 +335,3 @@ def get_content_summarizer() -> ContentSummarizer:
     if _content_summarizer is None:
         _content_summarizer = ContentSummarizer()
     return _content_summarizer
-
-
-def summarize_content(
-    request: SummarizationRequest,
-) -> (
-    StructuredSummary
-    | InterleavedSummary
-    | InterleavedSummaryV2
-    | BulletedSummary
-    | EditorialNarrativeSummary
-    | DailyNewsRollupSummary
-    | NewsSummary
-    | None
-):
-    """Generate a structured summary via pydantic-ai.
-
-    Args:
-        request: SummarizationRequest containing content, model spec, and limits.
-
-    Returns:
-        Parsed summary payload (Bulleted/Structured/Interleaved/News), or None on failure.
-    """
-    try:
-        payload = (
-            request.content.decode("utf-8", errors="ignore")
-            if isinstance(request.content, bytes)
-            else request.content
-        )
-        if not payload:
-            logger.warning("Empty summarization payload provided")
-            return None
-
-        raw_payload = payload
-        payload, was_truncated = _clip_payload(payload, MAX_SUMMARIZATION_PAYLOAD_CHARS)
-        if was_truncated:
-            logger.warning(
-                "Content length %s exceeds max %s; truncating (head+tail) for summarization",
-                len(raw_payload),
-                MAX_SUMMARIZATION_PAYLOAD_CHARS,
-            )
-
-        ct = request.content_type
-        content_type_value = ct.value if isinstance(ct, ContentType) else str(ct)
-
-        prompt_content_type = _prompt_content_type(content_type_value)
-
-        system_prompt, user_template = generate_summary_prompt(
-            prompt_content_type, request.max_bullet_points, request.max_quotes
-        )
-
-        def _build_user_message(content_payload: str) -> str:
-            content_body = content_payload
-            if request.title:
-                content_body = f"Title: {request.title}\n\n{content_body}"
-            return user_template.format(content=content_body)
-
-        def _run_with_model(model_spec: str, content_payload: str) -> Any:
-            message = _build_user_message(content_payload)
-            agent = get_summarization_agent(model_spec, prompt_content_type, system_prompt)
-            try:
-                return agent.run_sync(message)
-            except RuntimeError as loop_error:
-                if not _is_event_loop_binding_error(loop_error):
-                    raise
-                logger.warning(
-                    "Event-loop binding error for content %s with model %s; retrying in isolated "
-                    "thread",
-                    request.content_id or "unknown",
-                    model_spec,
-                )
-
-                def _run_in_thread() -> Any:
-                    retry_agent = get_summarization_agent(
-                        model_spec,
-                        prompt_content_type,
-                        system_prompt,
-                    )
-                    return retry_agent.run_sync(message)
-
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    return executor.submit(_run_in_thread).result()
-
-        def _run_with_context_fallback(model_spec: str) -> Any:
-            try:
-                return _run_with_model(model_spec, payload)
-            except Exception as model_error:  # noqa: BLE001
-                if not _is_context_length_error(model_error):
-                    raise
-
-                if model_spec != FALLBACK_SUMMARIZATION_MODEL:
-                    logger.warning(
-                        "Summarization context too long for content %s with model %s; "
-                        "retrying with fallback model %s",
-                        request.content_id or "unknown",
-                        model_spec,
-                        FALLBACK_SUMMARIZATION_MODEL,
-                    )
-                    return _run_with_context_fallback(FALLBACK_SUMMARIZATION_MODEL)
-
-                fallback_payload, _ = _clip_payload(
-                    raw_payload,
-                    FALLBACK_SUMMARIZATION_PAYLOAD_CHARS,
-                )
-                logger.warning(
-                    "Fallback model %s exceeded context; clipping to %s chars",
-                    FALLBACK_SUMMARIZATION_MODEL,
-                    FALLBACK_SUMMARIZATION_PAYLOAD_CHARS,
-                )
-                return _run_with_model(model_spec, fallback_payload)
-
-        try:
-            result = _run_with_context_fallback(request.model_spec)
-        except Exception as primary_error:  # noqa: BLE001
-            if not _is_provider_precondition_error(primary_error):
-                raise
-
-            logger.warning(
-                "Primary summarization model %s failed precondition for content %s; "
-                "trying cross-provider fallbacks",
-                request.model_spec,
-                request.content_id or "unknown",
-            )
-            last_error: Exception = primary_error
-            attempted_specs = {request.model_spec}
-
-            for fallback_model_spec in CROSS_PROVIDER_FALLBACK_MODELS:
-                if fallback_model_spec in attempted_specs:
-                    continue
-                attempted_specs.add(fallback_model_spec)
-                try:
-                    result = _run_with_context_fallback(fallback_model_spec)
-                    break
-                except Exception as fallback_error:  # noqa: BLE001
-                    last_error = fallback_error
-                    if _is_provider_precondition_error(fallback_error):
-                        logger.warning(
-                            "Cross-provider fallback model %s also failed precondition",
-                            fallback_model_spec,
-                        )
-                        continue
-                    if _is_provider_config_error(fallback_error):
-                        logger.warning(
-                            "Skipping fallback model %s due to provider configuration: %s",
-                            fallback_model_spec,
-                            fallback_error,
-                        )
-                        continue
-                    raise
-            else:
-                raise last_error
-
-        summary = _extract_agent_output(result)
-        if summary is None:
-            return None
-        return _finalize_summary(summary, request.content_type)
-    except Exception as error:  # noqa: BLE001
-        item_id = str(request.content_id or "unknown")
-        logger.exception(
-            "MISSING_SUMMARY: Summarization failed for content %s: %s. "
-            "Model: %s, Content type: %s, Payload length: %s",
-            item_id,
-            error,
-            request.model_spec,
-            request.content_type,
-            len(request.content) if request.content else 0,
-            extra={
-                "component": "llm_summarization",
-                "operation": "summarization",
-                "item_id": item_id,
-                "context_data": {
-                    "model_spec": request.model_spec,
-                    "content_type": str(request.content_type),
-                    "payload_length": len(request.content) if request.content else 0,
-                },
-            },
-        )
-        return None

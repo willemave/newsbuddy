@@ -26,7 +26,7 @@ class User(Base):
         nullable=False,
         default=DEFAULT_NEWS_DIGEST_INTERVAL_HOURS,
     )
-    x_digest_filter_prompt = Column(Text, nullable=True)
+    news_digest_preference_prompt = Column(Text, nullable=True)
     is_admin = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     has_completed_new_user_tutorial = Column(Boolean, default=False, nullable=False)
@@ -62,7 +62,7 @@ class UserResponse(UserBase):
     twitter_username: str | None = None
     news_digest_timezone: str = "UTC"
     news_digest_interval_hours: int = DEFAULT_NEWS_DIGEST_INTERVAL_HOURS
-    x_digest_filter_prompt: str | None = None
+    news_digest_preference_prompt: str | None = None
     has_x_bookmark_sync: bool = False
     has_completed_onboarding: bool
     has_completed_new_user_tutorial: bool
@@ -145,4 +145,4 @@ class UpdateUserProfileRequest(BaseModel):
     twitter_username: str | None = Field(default=None, max_length=50)
     news_digest_timezone: str | None = Field(default=None, max_length=100)
     news_digest_interval_hours: int | None = Field(default=None)
-    x_digest_filter_prompt: str | None = Field(default=None, max_length=4000)
+    news_digest_preference_prompt: str | None = Field(default=None, max_length=4000)

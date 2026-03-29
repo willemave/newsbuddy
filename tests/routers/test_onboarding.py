@@ -48,7 +48,7 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
             "profile_summary": "AI researcher and writer",
             "inferred_topics": ["AI", "ML"],
             "twitter_username": "@willem_aw",
-            "x_digest_filter_prompt": (
+            "news_digest_preference_prompt": (
                 "Prefer semiconductors, AI infrastructure, and product launches."
             ),
         },
@@ -72,7 +72,7 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     assert any(call[0] == TaskType.ONBOARDING_DISCOVER.value for call in calls)
     db_session.refresh(test_user)
     assert test_user.twitter_username == "willem_aw"
-    assert test_user.x_digest_filter_prompt.startswith("Prefer semiconductors")
+    assert test_user.news_digest_preference_prompt.startswith("Prefer semiconductors")
     assert test_user.has_completed_onboarding is True
 
 
@@ -86,18 +86,18 @@ def test_onboarding_complete_rejects_invalid_twitter_username(client):
 
 
 def test_onboarding_complete_blank_prompt_resets_to_default(client, db_session, test_user):
-    test_user.x_digest_filter_prompt = "Only include chip foundry updates."
+    test_user.news_digest_preference_prompt = "Only include chip foundry updates."
     db_session.commit()
 
     response = client.post(
         "/api/onboarding/complete",
-        json={"x_digest_filter_prompt": "   "},
+        json={"news_digest_preference_prompt": "   "},
     )
 
     assert response.status_code == 200
 
     db_session.refresh(test_user)
-    assert test_user.x_digest_filter_prompt is None
+    assert test_user.news_digest_preference_prompt is None
 
 
 def test_onboarding_tutorial_complete(client, db_session, test_user):
@@ -109,7 +109,11 @@ def test_onboarding_tutorial_complete(client, db_session, test_user):
     assert test_user.has_completed_new_user_tutorial is True
 
 
-def test_onboarding_fast_discover_defaults(client):
+def test_onboarding_fast_discover_defaults(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.onboarding._run_discovery_exa_queries",
+        lambda *_args, **_kwargs: [],
+    )
     response = client.post(
         "/api/onboarding/fast-discover",
         json={"profile_summary": "AI engineer", "inferred_topics": ["AI", "ML"]},
@@ -122,7 +126,10 @@ def test_onboarding_fast_discover_defaults(client):
 
 
 def test_onboarding_fast_discover_defaults_have_rationale(client, monkeypatch):
-    monkeypatch.setattr("app.services.onboarding._run_exa_queries", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        "app.services.onboarding._run_discovery_exa_queries",
+        lambda *_args, **_kwargs: [],
+    )
     monkeypatch.setattr(
         "app.services.onboarding._load_curated_defaults",
         lambda: {

@@ -22,6 +22,7 @@ from app.pipeline.workflows.content_processing_workflow import ContentProcessing
 from app.processing_strategies.registry import get_strategy_registry
 from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
 from app.services.content_metadata_merge import refresh_merge_content_metadata
+from app.services.exa_client import ExaClientError, exa_get_contents
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.http import NonRetryableError, get_http_service
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
@@ -151,6 +152,30 @@ class ContentWorker:
 
         normalized = cls._normalize_rss_content_text(rss_content)
         return normalized if normalized else rss_content.strip()
+
+    @staticmethod
+    def _normalize_exa_fallback_text(raw_text: str) -> str:
+        return re.sub(r"\s+", " ", raw_text).strip()
+
+    def _get_exa_fallback_text(self, url: str) -> str:
+        """Return fallback article text from Exa when available."""
+        results = exa_get_contents(
+            [url],
+            max_characters=None,
+            livecrawl="always",
+            raise_on_error=True,
+        )
+        if not results:
+            return ""
+
+        primary = results[0]
+        for candidate in (primary.text, primary.summary):
+            if not isinstance(candidate, str) or not candidate.strip():
+                continue
+            normalized = self._normalize_exa_fallback_text(candidate)
+            if normalized:
+                return normalized
+        return ""
 
     def process_content(self, content_id: int, worker_id: str) -> bool:
         """
@@ -342,8 +367,48 @@ class ContentWorker:
             gate_page_detected = bool(extracted_data.get("gate_page_detected"))
             gate_page_reason = extracted_data.get("extraction_error")
             if gate_page_detected:
+                exa_fallback_text = ""
+                try:
+                    exa_fallback_text = self._get_exa_fallback_text(str(content.url))
+                except ExaClientError as exc:
+                    logger.error(
+                        "Access gate Exa fallback failed for content %s",
+                        content.id,
+                        extra={
+                            "component": "content_worker",
+                            "operation": "process_article",
+                            "item_id": str(content.id),
+                            "context_data": {
+                                "url": str(content.url),
+                                "gate_reason": gate_page_reason,
+                                "error": str(exc),
+                            },
+                        },
+                    )
+
+                if exa_fallback_text:
+                    logger.warning(
+                        "Access gate detected for content %s; using Exa fallback",
+                        content.id,
+                        extra={
+                            "component": "content_worker",
+                            "operation": "process_article",
+                            "item_id": str(content.id),
+                            "context_data": {
+                                "url": str(content.url),
+                                "fallback_text_len": len(exa_fallback_text),
+                                "gate_reason": gate_page_reason,
+                            },
+                        },
+                    )
+                    extracted_data["text_content"] = exa_fallback_text
+                    extracted_data["used_exa_fallback"] = True
+                    extracted_data["exa_fallback_length"] = len(exa_fallback_text)
+                    extracted_data["gate_page_reason"] = gate_page_reason
+                    extracted_data["extraction_error"] = None
+
                 rss_fallback_text = self._get_rss_fallback_text(existing_metadata)
-                if rss_fallback_text:
+                if not exa_fallback_text and rss_fallback_text:
                     logger.warning(
                         "Access gate detected for content %s; using rss_content fallback",
                         content.id,
@@ -363,7 +428,7 @@ class ContentWorker:
                     extracted_data["rss_fallback_length"] = len(rss_fallback_text)
                     extracted_data["gate_page_reason"] = gate_page_reason
                     extracted_data["extraction_error"] = None
-                else:
+                elif not exa_fallback_text:
                     logger.warning(
                         "Access gate detected for content %s and no rss fallback is available",
                         content.id,
@@ -440,6 +505,11 @@ class ContentWorker:
             if extracted_data.get("used_rss_fallback"):
                 metadata_update["used_rss_fallback"] = True
                 metadata_update["rss_fallback_length"] = extracted_data.get("rss_fallback_length")
+                if extracted_data.get("gate_page_reason"):
+                    metadata_update["gate_page_reason"] = extracted_data.get("gate_page_reason")
+            if extracted_data.get("used_exa_fallback"):
+                metadata_update["used_exa_fallback"] = True
+                metadata_update["exa_fallback_length"] = extracted_data.get("exa_fallback_length")
                 if extracted_data.get("gate_page_reason"):
                     metadata_update["gate_page_reason"] = extracted_data.get("gate_page_reason")
             if subscribe_to_feed:

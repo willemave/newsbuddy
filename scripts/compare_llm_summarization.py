@@ -23,9 +23,10 @@ from sqlalchemy.orm import Session
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from app.services.anthropic_llm import AnthropicSummarizationService
+
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.services.anthropic_llm import AnthropicSummarizationService
 from app.services.openai_llm import OpenAISummarizationService
 
 logger = get_logger(__name__)
@@ -208,7 +209,7 @@ def main():
         # Summarize with OpenAI
         console.print("[cyan]  → Running OpenAI summarization...[/cyan]")
         try:
-            openai_summary = openai_service.summarize_content(
+            openai_summary = openai_service.summarize(
                 content=content_text,
                 content_type=content_type,
             )
@@ -219,7 +220,7 @@ def main():
         # Summarize with Anthropic
         console.print("[cyan]  → Running Anthropic summarization...[/cyan]")
         try:
-            anthropic_summary = anthropic_service.summarize_content(
+            anthropic_summary = anthropic_service.summarize(
                 content=content_text,
                 content_type=content_type,
             )

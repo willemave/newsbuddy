@@ -9,6 +9,7 @@ from app.domain.converters import content_to_domain
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content
 from app.pipeline.worker import ContentWorker
+from app.services.exa_client import ExaContentResult
 
 
 def _patch_worker_db(monkeypatch, db_session) -> None:
@@ -76,6 +77,7 @@ def test_process_article_uses_rss_fallback_for_gate_page(monkeypatch, db_session
     _patch_worker_db(monkeypatch, db_session)
     strategy = _FakeHtmlStrategy(_build_gate_extracted_data())
     _patch_worker_dependencies(monkeypatch, strategy)
+    monkeypatch.setattr("app.pipeline.worker.exa_get_contents", lambda *_args, **_kwargs: [])
 
     db_content = Content(
         content_type=ContentType.ARTICLE.value,
@@ -104,10 +106,49 @@ def test_process_article_uses_rss_fallback_for_gate_page(monkeypatch, db_session
     assert "agent autonomy and model behavior" in content.metadata["content_to_summarize"].lower()
 
 
+def test_process_article_prefers_exa_fallback_for_gate_page(monkeypatch, db_session) -> None:
+    _patch_worker_db(monkeypatch, db_session)
+    strategy = _FakeHtmlStrategy(_build_gate_extracted_data())
+    _patch_worker_dependencies(monkeypatch, strategy)
+    monkeypatch.setattr(
+        "app.pipeline.worker.exa_get_contents",
+        lambda *_args, **_kwargs: [
+            ExaContentResult(
+                title="Latent Space",
+                url="https://www.latent.space/p/ainews-anthropics-agent-autonomy",
+                text="Exa recovered the full article body about agent autonomy and model behavior.",
+            )
+        ],
+    )
+
+    db_content = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://www.latent.space/p/ainews-anthropics-agent-autonomy",
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": "Latent Space",
+            "rss_content": "<p>RSS content should not win when Exa succeeds.</p>",
+        },
+    )
+    db_session.add(db_content)
+    db_session.commit()
+    db_session.refresh(db_content)
+
+    worker = ContentWorker()
+    content = content_to_domain(db_content)
+    success = worker._process_article(content)
+
+    assert success is True
+    assert content.metadata["used_exa_fallback"] is True
+    assert content.metadata.get("used_rss_fallback") is None
+    assert "exa recovered the full article body" in content.metadata["content_to_summarize"].lower()
+
+
 def test_process_article_fails_gate_page_without_rss_fallback(monkeypatch, db_session) -> None:
     _patch_worker_db(monkeypatch, db_session)
     strategy = _FakeHtmlStrategy(_build_gate_extracted_data())
     _patch_worker_dependencies(monkeypatch, strategy)
+    monkeypatch.setattr("app.pipeline.worker.exa_get_contents", lambda *_args, **_kwargs: [])
 
     db_content = Content(
         content_type=ContentType.ARTICLE.value,

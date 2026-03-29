@@ -25,7 +25,7 @@ def _override_get_db(db_session):
 class DummySummarizer:
     """Minimal summarizer stub for task routing tests."""
 
-    def summarize_content(
+    def summarize(
         self,
         content: str,
         content_type: str,
@@ -199,7 +199,7 @@ def test_summarize_article_falls_back_to_content_to_summarize(db_session) -> Non
 
     queue_service = Mock()
     llm_service = Mock()
-    llm_service.summarize_content.return_value = {
+    llm_service.summarize.return_value = {
         "title": "Article Title",
         "overview": "Summary",
         "bullet_points": [],
@@ -214,15 +214,15 @@ def test_summarize_article_falls_back_to_content_to_summarize(db_session) -> Non
     )
 
     assert handler.handle(task, context).success is True
-    llm_service.summarize_content.assert_called_once()
-    assert llm_service.summarize_content.call_args[0][0] == "Fallback content"
+    llm_service.summarize.assert_called_once()
+    assert llm_service.summarize.call_args[0][0] == "Fallback content"
 
 
 def test_summarize_preserves_top_comment_from_concurrent_discussion_update(db_session) -> None:
     content = _create_content(db_session, "article")
 
     class ConcurrentUpdatingSummarizer:
-        def summarize_content(
+        def summarize(
             self,
             content: str,
             content_type: str,
@@ -307,7 +307,7 @@ def test_summarize_no_text_marks_content_skipped_without_retry(db_session) -> No
     db_session.refresh(content)
     assert content.status == "skipped"
     queue_service.enqueue.assert_not_called()
-    llm_service.summarize_content.assert_not_called()
+    llm_service.summarize.assert_not_called()
 
 
 def test_summarize_skips_terminal_content_status(db_session) -> None:
@@ -336,14 +336,14 @@ def test_summarize_skips_terminal_content_status(db_session) -> None:
 
     assert result.success is True
     queue_service.enqueue.assert_not_called()
-    llm_service.summarize_content.assert_not_called()
+    llm_service.summarize.assert_not_called()
 
 
 def test_summarize_none_result_is_non_retryable_failure(db_session) -> None:
     content = _create_content(db_session, "article")
     queue_service = Mock()
     llm_service = Mock()
-    llm_service.summarize_content.return_value = None
+    llm_service.summarize.return_value = None
     handler = SummarizeHandler()
     context = _build_context(db_session, queue_service, llm_service)
 
@@ -363,7 +363,7 @@ def test_summarize_transient_exception_is_retryable(db_session) -> None:
     content = _create_content(db_session, "article")
     queue_service = Mock()
     llm_service = Mock()
-    llm_service.summarize_content.side_effect = TimeoutError("request timed out")
+    llm_service.summarize.side_effect = TimeoutError("request timed out")
     handler = SummarizeHandler()
     context = _build_context(db_session, queue_service, llm_service)
 
@@ -385,7 +385,7 @@ def test_summarize_non_retryable_exception_marks_failed(db_session) -> None:
     content = _create_content(db_session, "article")
     queue_service = Mock()
     llm_service = Mock()
-    llm_service.summarize_content.side_effect = ValueError("schema validation failed")
+    llm_service.summarize.side_effect = ValueError("schema validation failed")
     handler = SummarizeHandler()
     context = _build_context(db_session, queue_service, llm_service)
 

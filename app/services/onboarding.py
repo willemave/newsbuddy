@@ -51,9 +51,9 @@ from app.services.exa_client import ExaSearchResult, exa_search
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_agents import get_basic_agent
 from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
+from app.services.news_digest_preferences import normalize_news_digest_preference_prompt
 from app.services.queue import TaskType
 from app.services.scraper_configs import CreateUserScraperConfig, create_user_scraper_config
-from app.services.x_digest_filter import normalize_x_digest_filter_prompt
 from app.services.x_integration import normalize_twitter_username
 from app.utils.paths import resolve_config_path
 
@@ -65,12 +65,8 @@ FAST_DISCOVER_MODEL = ONBOARDING_PRIMARY_MODEL
 VOICE_PARSE_MODEL = ONBOARDING_PRIMARY_MODEL
 AUDIO_PLAN_MODEL = ONBOARDING_PRIMARY_MODEL
 DISCOVERY_FALLBACK_MODELS = (
-    "google:gemini-3.1-flash-lite-preview",
-    "openai:gpt-5.4-mini",
 )
 AUDIO_PLAN_FALLBACK_MODELS = (
-    "google:gemini-3.1-flash-lite-preview",
-    "openai:gpt-5.4-mini",
 )
 
 PROFILE_TIMEOUT_SECONDS = 8
@@ -256,14 +252,7 @@ def build_onboarding_profile(request: OnboardingProfileRequest) -> OnboardingPro
                 "context_data": {"error": str(exc)},
             },
         )
-        fallback_summary = _build_profile_fallback_summary(
-            request.first_name, request.interest_topics
-        )
-        return OnboardingProfileResponse(
-            profile_summary=fallback_summary,
-            inferred_topics=_merge_topics(request.interest_topics),
-            candidate_sources=[],
-        )
+        raise
 
 
 def parse_onboarding_voice(request: OnboardingVoiceParseRequest) -> OnboardingVoiceParseResponse:
@@ -517,14 +506,16 @@ def complete_onboarding(
         OnboardingCompleteResponse with status and inbox count.
     """
     normalized_username: str | None = None
-    normalized_x_digest_filter_prompt: str | None = None
+    normalized_news_digest_preference_prompt: str | None = None
     should_update_twitter_username = request.twitter_username is not None
     if should_update_twitter_username:
         normalized_username = normalize_twitter_username(request.twitter_username)
-    should_update_x_digest_filter_prompt = request.x_digest_filter_prompt is not None
-    if should_update_x_digest_filter_prompt:
-        normalized_x_digest_filter_prompt = normalize_x_digest_filter_prompt(
-            request.x_digest_filter_prompt
+    should_update_news_digest_preference_prompt = (
+        request.news_digest_preference_prompt is not None
+    )
+    if should_update_news_digest_preference_prompt:
+        normalized_news_digest_preference_prompt = normalize_news_digest_preference_prompt(
+            request.news_digest_preference_prompt
         )
 
     created_types: set[str] = set()
@@ -629,8 +620,8 @@ def complete_onboarding(
     if user:
         if should_update_twitter_username and user.twitter_username != normalized_username:
             user.twitter_username = normalized_username
-        if should_update_x_digest_filter_prompt:
-            user.x_digest_filter_prompt = normalized_x_digest_filter_prompt
+        if should_update_news_digest_preference_prompt:
+            user.news_digest_preference_prompt = normalized_news_digest_preference_prompt
         user.has_completed_onboarding = True
         db.commit()
 
@@ -1056,12 +1047,8 @@ def _format_audio_plan_prompt(transcript: str, locale: str | None) -> str:
 
 
 def _candidate_models(primary: str, fallbacks: tuple[str, ...]) -> list[str]:
-    models: list[str] = []
-    for model in (primary, *fallbacks):
-        if model in models:
-            continue
-        models.append(model)
-    return models
+    del fallbacks
+    return [primary]
 
 
 def _run_discover_output_with_fallback(
@@ -1186,6 +1173,9 @@ def _normalize_audio_lane_plan_with_metadata(
     topic_summary = (plan.topic_summary or "").strip()
     if not topic_summary:
         topic_summary = _fallback_topic_summary(transcript)
+        used_fallback = True
+    else:
+        used_fallback = False
 
     inferred_topics = _merge_topics(plan.inferred_topics, max_topics=6)
     lanes: list[_AudioLane] = []
@@ -1245,9 +1235,11 @@ def _normalize_audio_lane_plan_with_metadata(
             lanes[-1] = reddit_lane
         else:
             lanes.append(reddit_lane)
+        used_fallback = True
 
     if len(lanes) < 3:
         lanes.extend(_fallback_core_lanes(transcript, inferred_topics, existing=lanes))
+        used_fallback = True
 
     return (
         _AudioPlanOutput(
@@ -1255,7 +1247,7 @@ def _normalize_audio_lane_plan_with_metadata(
             inferred_topics=inferred_topics,
             lanes=lanes[:5],
         ),
-        False,
+        used_fallback,
     )
 
 

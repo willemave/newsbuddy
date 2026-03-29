@@ -241,7 +241,9 @@ def test_sync_x_sources_ingests_digest_only_timeline_content(db_session, test_us
 
 def test_sync_x_sources_filters_lists_and_merges_list_state(db_session, test_user, monkeypatch):
     """List sync should respect the filter result and persist per-list state."""
-    test_user.x_digest_filter_prompt = "Prefer semiconductor manufacturing and datacenter infra."
+    test_user.news_digest_preference_prompt = (
+        "Prefer semiconductor manufacturing and datacenter infra."
+    )
     connection = _build_connection(
         test_user,
         ["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],

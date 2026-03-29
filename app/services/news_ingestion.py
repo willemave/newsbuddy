@@ -458,6 +458,7 @@ def backfill_news_items_from_contents(
     *,
     limit: int | None = None,
     only_missing: bool = True,
+    content_ids: list[int] | None = None,
 ) -> NewsBackfillStats:
     """Backfill ``news_items`` from legacy ``contents`` news rows.
 
@@ -465,6 +466,7 @@ def backfill_news_items_from_contents(
         db: Active SQLAlchemy session.
         limit: Optional maximum number of rows to process.
         only_missing: When true, skip rows already linked by ``legacy_content_id``.
+        content_ids: Optional explicit legacy ``contents.id`` values to backfill.
 
     Returns:
         Aggregate counters for the pass.
@@ -474,6 +476,8 @@ def backfill_news_items_from_contents(
         .filter(Content.content_type == ContentType.NEWS.value)
         .order_by(Content.id.asc())
     )
+    if content_ids:
+        query = query.filter(Content.id.in_(content_ids))
     if limit is not None:
         query = query.limit(limit)
 

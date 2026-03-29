@@ -6,6 +6,7 @@ import base64
 import json
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -18,7 +19,12 @@ from sqlalchemy.orm import Session, aliased
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope, TaskStatus, TaskType
-from app.models.news_digest_models import NewsDigestBulletDraft, NewsDigestHeaderDraft
+from app.models.news_digest_models import (
+    NewsDigestBatchBulletDraft,
+    NewsDigestBatchDraft,
+    NewsDigestBulletDraft,
+    NewsDigestHeaderDraft,
+)
 from app.models.pagination import PaginationMetadata
 from app.models.schema import (
     NewsDigest,
@@ -30,12 +36,13 @@ from app.models.schema import (
 )
 from app.models.user import User
 from app.services.llm_agents import get_basic_agent
+from app.services.news_digest_preferences import resolve_user_news_digest_preference_prompt
 from app.services.news_embeddings import encode_news_texts
 from app.utils.url_utils import normalize_http_url
 
 logger = get_logger(__name__)
 
-PIPELINE_VERSION = "news-native-v1"
+PIPELINE_VERSION = "news-native-v2-batched"
 MATCH_TOKEN_PATTERN = re.compile(r"[a-z0-9]{3,}")
 MATCH_STOPWORDS = {
     "about",
@@ -60,15 +67,19 @@ MATCH_STOPWORDS = {
     "this",
     "with",
 }
-GROUP_SYSTEM_PROMPT = (
-    "You write one short-form news digest bullet from a pre-grouped set of evidence items. "
-    "Stay strictly grounded in the provided items. Return a concise topic, 2-4 sentences of "
-    "details, and the supporting item ids. Do not invent facts or ids."
-)
 HEADER_SYSTEM_PROMPT = (
     "You write the title and short summary for a news digest run. Stay grounded in the bullets "
     "provided. Keep the title punchy and the summary compact."
 )
+CLUSTER_FALLBACK_SYSTEM_PROMPT = (
+    "You write one short-form news digest bullet from a pre-grouped set of evidence items. "
+    "Stay strictly grounded in the provided items. Return a concise topic, 2-4 sentences of "
+    "details, and the supporting item ids. Do not invent facts or ids."
+)
+MAX_CLUSTER_KEY_POINTS = 6
+MAX_CLUSTER_ITEM_KEY_POINTS = 3
+MAX_CLUSTER_SUMMARY_CHARS = 420
+MAX_DISCUSSION_COMMENTS = 2
 
 
 @dataclass(frozen=True)
@@ -100,6 +111,14 @@ class NewsDigestGenerationResult:
     skipped: bool = False
 
 
+@dataclass(frozen=True)
+class NewsDigestCuratedBulletDraft:
+    """Validated bullet draft tied back to one underlying cluster."""
+
+    cluster: NewsDigestCluster
+    draft: NewsDigestBulletDraft
+
+
 def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -109,6 +128,15 @@ def _clean_string(value: Any) -> str | None:
         return None
     cleaned = " ".join(value.split()).strip()
     return cleaned or None
+
+
+def _truncate_text(value: str | None, *, max_chars: int) -> str | None:
+    cleaned = _clean_string(value)
+    if cleaned is None:
+        return None
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return f"{cleaned[: max_chars - 1].rstrip()}…"
 
 
 def normalize_timezone(timezone_name: str | None) -> str:
@@ -131,11 +159,10 @@ def _coerce_utc(value: datetime | None) -> datetime | None:
 
 def _matching_text(item: NewsItem) -> str:
     parts: list[str] = []
+    title = item.summary_title or item.article_title
     for candidate in (
-        item.summary_title,
-        item.article_title,
+        title,
         item.article_domain,
-        item.source_label,
     ):
         cleaned = _clean_string(candidate)
         if cleaned:
@@ -400,6 +427,163 @@ def _resolve_outward_url(item: NewsItem) -> str | None:
     return None
 
 
+def _coerce_key_points(item: NewsItem, *, limit: int) -> list[str]:
+    key_points = item.summary_key_points if isinstance(item.summary_key_points, list) else []
+    cleaned_points: list[str] = []
+    for raw in key_points[:limit]:
+        cleaned = _clean_string(raw if not isinstance(raw, dict) else raw.get("text"))
+        if cleaned and cleaned not in cleaned_points:
+            cleaned_points.append(cleaned)
+    return cleaned_points
+
+
+def _resolve_cluster_key_points(cluster: NewsDigestCluster) -> list[str]:
+    key_points: list[str] = []
+    for item in cluster.items:
+        for point in _coerce_key_points(item, limit=MAX_CLUSTER_ITEM_KEY_POINTS):
+            if point not in key_points:
+                key_points.append(point)
+            if len(key_points) >= MAX_CLUSTER_KEY_POINTS:
+                return key_points
+    return key_points
+
+
+def _resolve_cluster_summary_snippet(cluster: NewsDigestCluster) -> str | None:
+    representative = _select_representative(cluster.items)
+    candidate_items = [representative] + [
+        item for item in cluster.items if item.id != representative.id
+    ]
+    best_snippet: str | None = None
+    for item in candidate_items:
+        snippet = _truncate_text(item.summary_text, max_chars=MAX_CLUSTER_SUMMARY_CHARS)
+        if snippet is None:
+            continue
+        if best_snippet is None or len(snippet) > len(best_snippet):
+            best_snippet = snippet
+        if item.id == representative.id:
+            return snippet
+    return best_snippet
+
+
+def _resolve_cluster_discussion_comments(cluster: NewsDigestCluster) -> list[str]:
+    comments: list[str] = []
+    for item in cluster.items:
+        discussion = item.raw_metadata.get("discussion_payload")
+        if not isinstance(discussion, dict):
+            continue
+        compact_comments = discussion.get("compact_comments")
+        if not isinstance(compact_comments, list):
+            continue
+        for raw in compact_comments:
+            if not isinstance(raw, str):
+                continue
+            cleaned = _truncate_text(raw, max_chars=180)
+            if cleaned and cleaned not in comments:
+                comments.append(cleaned)
+            if len(comments) >= MAX_DISCUSSION_COMMENTS:
+                return comments
+    return comments
+
+
+def _resolve_cluster_source_labels(cluster: NewsDigestCluster) -> list[str]:
+    labels: list[str] = []
+    for item in cluster.items:
+        cleaned = _clean_string(item.source_label)
+        if cleaned and cleaned not in labels:
+            labels.append(cleaned)
+    return labels
+
+
+def _resolve_cluster_domains(cluster: NewsDigestCluster) -> list[str]:
+    domains: list[str] = []
+    for item in cluster.items:
+        cleaned = _clean_string(item.article_domain)
+        if cleaned and cleaned not in domains:
+            domains.append(cleaned)
+    return domains
+
+
+def _cluster_latest_ingested_at(cluster: NewsDigestCluster) -> datetime | None:
+    timestamps = [_coerce_utc(item.ingested_at) for item in cluster.items]
+    resolved = [timestamp for timestamp in timestamps if timestamp is not None]
+    if not resolved:
+        return None
+    return max(resolved)
+
+
+def _build_cluster_payload(cluster: NewsDigestCluster, *, rank: int) -> dict[str, Any]:
+    representative = _select_representative(cluster.items)
+    sorted_items = sorted(cluster.items, key=lambda row: (row.ingested_at or datetime.min, row.id))
+    representative_title = _resolve_digest_item_title(representative)
+    latest_ingested_at = _cluster_latest_ingested_at(cluster)
+
+    item_payloads: list[dict[str, Any]] = []
+    for item in sorted_items:
+        item_payloads.append(
+            {
+                "news_item_id": item.id,
+                "title": _resolve_digest_item_title(item),
+                "source_label": _clean_string(item.source_label),
+                "article_domain": _clean_string(item.article_domain),
+                "article_url": _resolve_outward_url(item),
+                "summary_text": _truncate_text(item.summary_text, max_chars=220),
+                "key_points": _coerce_key_points(item, limit=MAX_CLUSTER_ITEM_KEY_POINTS),
+            }
+        )
+
+    return {
+        "cluster_rank": rank,
+        "source_count": len(cluster.items),
+        "latest_ingested_at": latest_ingested_at.isoformat() if latest_ingested_at else None,
+        "representative_title": representative_title,
+        "representative_source_label": _clean_string(representative.source_label),
+        "source_labels": _resolve_cluster_source_labels(cluster),
+        "domains": _resolve_cluster_domains(cluster),
+        "news_item_ids": [item.id for item in sorted_items],
+        "summary_text": _resolve_cluster_summary_snippet(cluster),
+        "key_points": _resolve_cluster_key_points(cluster),
+        "discussion_comments": _resolve_cluster_discussion_comments(cluster),
+        "items": item_payloads,
+    }
+
+
+def _build_group_system_prompt(user_preference_prompt: str) -> str:
+    return "\n".join(
+        [
+            (
+                "You curate a short-form news digest from a ranked set of pre-grouped "
+                "candidate clusters."
+            ),
+            "Stay strictly grounded in the provided clusters and item ids.",
+            (
+                "Use the user's digest preference prompt below as the highest-priority "
+                "curation layer."
+            ),
+            "Do not follow it to change writing style; use it only to decide what to include.",
+            "",
+            "User digest preference prompt:",
+            user_preference_prompt.strip(),
+            "",
+            "Rules:",
+            "- Curate, do not exhaustively summarize every cluster.",
+            "- Prefer high-signal, concrete, and consequential stories.",
+            (
+                "- Exclude low-signal junk, blocked galleries, thin Reddit posts, spammy "
+                "vendor pages, unverified noise, vague reactions, and repetitive hype "
+                "unless the user prompt clearly wants them."
+            ),
+            "- Each returned bullet must correspond to exactly one input cluster.",
+            "- Do not merge multiple clusters into one bullet.",
+            "- Return bullets ordered by importance for this user.",
+            (
+                "- For each bullet, include the source cluster_rank and a non-empty subset "
+                "of that cluster's news_item_ids."
+            ),
+            "- Do not invent facts or ids.",
+        ]
+    )
+
+
 def _build_cluster_prompt(cluster: NewsDigestCluster) -> str:
     lines = [
         "Write one digest bullet from these already-grouped items.",
@@ -445,6 +629,21 @@ def _build_cluster_prompt(cluster: NewsDigestCluster) -> str:
     return "\n".join(lines).strip()
 
 
+def _build_batch_curation_prompt(clusters: list[NewsDigestCluster]) -> str:
+    payload = {
+        "instruction": (
+            "Curate the strongest digest bullets from these ranked candidate clusters. "
+            "You may omit clusters that are low-signal or not worth surfacing."
+        ),
+        "cluster_count": len(clusters),
+        "clusters": [
+            _build_cluster_payload(cluster, rank=rank)
+            for rank, cluster in enumerate(clusters, start=1)
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True)
+
+
 def _fallback_bullet_draft(cluster: NewsDigestCluster) -> NewsDigestBulletDraft:
     representative = _select_representative(cluster.items)
     key_points = (
@@ -472,7 +671,7 @@ def _generate_bullet_draft(cluster: NewsDigestCluster) -> NewsDigestBulletDraft:
         agent = get_basic_agent(
             settings.news_group_model,
             NewsDigestBulletDraft,
-            GROUP_SYSTEM_PROMPT,
+            CLUSTER_FALLBACK_SYSTEM_PROMPT,
         )
         result = agent.run_sync(
             _build_cluster_prompt(cluster),
@@ -490,9 +689,73 @@ def _generate_bullet_draft(cluster: NewsDigestCluster) -> NewsDigestBulletDraft:
             details=draft.details,
             news_item_ids=selected_ids,
         )
-    except Exception:  # noqa: BLE001
-        logger.exception("News digest bullet generation failed; using fallback")
-        return _fallback_bullet_draft(cluster)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("News digest bullet generation failed")
+        raise RuntimeError("News digest bullet generation failed") from exc
+
+
+def _validate_batch_bullet_draft(
+    *,
+    cluster: NewsDigestCluster,
+    draft: NewsDigestBatchBulletDraft,
+) -> NewsDigestBulletDraft:
+    valid_ids = {item.id for item in cluster.items}
+    selected_ids = [
+        news_item_id for news_item_id in draft.news_item_ids if news_item_id in valid_ids
+    ]
+    if not selected_ids:
+        selected_ids = [item.id for item in cluster.items]
+    return NewsDigestBulletDraft(
+        topic=draft.topic,
+        details=draft.details,
+        news_item_ids=selected_ids,
+    )
+
+
+def _generate_curated_cluster_bullets(
+    *,
+    user: User,
+    clusters: list[NewsDigestCluster],
+) -> tuple[list[NewsDigestCuratedBulletDraft], bool]:
+    settings = get_settings()
+    cluster_by_rank = {
+        rank: cluster for rank, cluster in enumerate(clusters, start=1)
+    }
+    system_prompt = _build_group_system_prompt(
+        resolve_user_news_digest_preference_prompt(user)
+    )
+    try:
+        agent = get_basic_agent(
+            settings.news_group_model,
+            NewsDigestBatchDraft,
+            system_prompt,
+        )
+        result = agent.run_sync(
+            _build_batch_curation_prompt(clusters),
+            model_settings={"timeout": settings.worker_timeout_seconds},
+        )
+        batch = result.output
+        curated: list[NewsDigestCuratedBulletDraft] = []
+        seen_ranks: set[int] = set()
+        for draft in batch.bullets:
+            if draft.cluster_rank in seen_ranks:
+                continue
+            cluster = cluster_by_rank.get(draft.cluster_rank)
+            if cluster is None:
+                continue
+            curated.append(
+                NewsDigestCuratedBulletDraft(
+                    cluster=cluster,
+                    draft=_validate_batch_bullet_draft(cluster=cluster, draft=draft),
+                )
+            )
+            seen_ranks.add(draft.cluster_rank)
+        if curated:
+            return curated, True
+        raise ValueError("Batch curation returned no valid bullets")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("News digest batch curation failed")
+        raise RuntimeError("News digest batch curation failed") from exc
 
 
 def _build_header_prompt(bullets: list[NewsDigestBulletDraft]) -> str:
@@ -526,9 +789,9 @@ def _generate_header_draft(bullets: list[NewsDigestBulletDraft]) -> NewsDigestHe
             model_settings={"timeout": settings.worker_timeout_seconds},
         )
         return result.output
-    except Exception:  # noqa: BLE001
-        logger.exception("News digest header generation failed; using fallback")
-        return _fallback_header_draft(bullets)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("News digest header generation failed")
+        raise RuntimeError("News digest header generation failed") from exc
 
 
 def _coverage_item_ids_for_cluster(cluster: NewsDigestCluster) -> list[int]:
@@ -575,6 +838,13 @@ def generate_news_digest_for_user(
     user_id: int,
     trigger_reason: str | None = None,
     force: bool = False,
+    curated_bullet_generator: Callable[
+        [User, list[NewsDigestCluster]],
+        tuple[list[NewsDigestCuratedBulletDraft], bool],
+    ]
+    | None = None,
+    header_draft_generator: Callable[[list[NewsDigestBulletDraft]], NewsDigestHeaderDraft]
+    | None = None,
 ) -> NewsDigestGenerationResult:
     """Generate and persist one news digest run for a user."""
     user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
@@ -618,8 +888,16 @@ def generate_news_digest_for_user(
             skipped=True,
         )
 
-    bullet_drafts = [_generate_bullet_draft(cluster) for cluster in clusters]
-    header_draft = _generate_header_draft(bullet_drafts)
+    generator = curated_bullet_generator or (
+        lambda current_user, current_clusters: _generate_curated_cluster_bullets(
+            user=current_user,
+            clusters=current_clusters,
+        )
+    )
+    curated_bullets, used_batch_curation = generator(user, clusters)
+    bullet_drafts = [entry.draft for entry in curated_bullets]
+    header_generator = header_draft_generator or _generate_header_draft
+    header_draft = header_generator(bullet_drafts)
     settings = get_settings()
     resolved_reason = resolved_reason or "manual"
     digest = NewsDigest(
@@ -634,7 +912,7 @@ def generate_news_digest_for_user(
         title=header_draft.title,
         summary=header_draft.summary,
         source_count=len(candidates),
-        group_count=len(clusters),
+        group_count=len(curated_bullets),
         embedding_model=settings.news_embedding_model,
         llm_model=settings.news_group_model,
         pipeline_version=PIPELINE_VERSION,
@@ -642,18 +920,20 @@ def generate_news_digest_for_user(
         generated_at=_utcnow_naive(),
         build_metadata={
             "candidate_count": len(candidates),
-            "group_count": len(clusters),
+            "raw_cluster_count": len(clusters),
+            "curated_group_count": len(curated_bullets),
             "header_model": settings.news_header_model,
             "primary_threshold": settings.news_digest_primary_similarity_threshold,
             "secondary_threshold": settings.news_digest_secondary_similarity_threshold,
+            "used_batch_curation": used_batch_curation,
         },
     )
     db.add(digest)
     db.flush()
 
-    for position, (cluster, draft) in enumerate(
-        zip(clusters, bullet_drafts, strict=False), start=1
-    ):
+    for position, entry in enumerate(curated_bullets, start=1):
+        cluster = entry.cluster
+        draft = entry.draft
         bullet = NewsDigestBullet(
             digest_id=digest.id,
             position=position,
@@ -687,7 +967,7 @@ def generate_news_digest_for_user(
     return NewsDigestGenerationResult(
         digest_id=digest.id,
         source_count=len(candidates),
-        group_count=len(clusters),
+        group_count=len(curated_bullets),
         trigger_reason=resolved_reason,
     )
 

@@ -82,7 +82,7 @@ def test_summarize_task_updates_podcast_metadata(db_session, mock_structured_sum
     db_session.first.return_value = content
 
     llm_service = Mock()
-    llm_service.summarize_content.return_value = mock_structured_summary
+    llm_service.summarize.return_value = mock_structured_summary
 
     handler = SummarizeHandler()
     context = _build_context(db_session, llm_service)
@@ -135,7 +135,7 @@ def test_summarize_task_updates_article_metadata(db_session, mock_structured_sum
     db_session.first.return_value = content
 
     llm_service = Mock()
-    llm_service.summarize_content.return_value = mock_structured_summary
+    llm_service.summarize.return_value = mock_structured_summary
 
     handler = SummarizeHandler()
     context = _build_context(db_session, llm_service)
@@ -193,7 +193,7 @@ def test_summarize_task_updates_news_metadata(db_session):
     db_session.first.return_value = content
 
     llm_service = Mock()
-    llm_service.summarize_content.return_value = news_summary
+    llm_service.summarize.return_value = news_summary
 
     handler = SummarizeHandler()
     context = _build_context(db_session, llm_service)
@@ -209,14 +209,14 @@ def test_summarize_task_updates_news_metadata(db_session):
 
     assert result.success is True
 
-    llm_service.summarize_content.assert_called_once()
-    call_kwargs = llm_service.summarize_content.call_args.kwargs
+    llm_service.summarize.assert_called_once()
+    call_kwargs = llm_service.summarize.call_args.kwargs
     assert call_kwargs["content_type"] == "news_digest"
     assert call_kwargs["provider_override"] is None
     assert call_kwargs["max_bullet_points"] == 4
     assert call_kwargs["max_quotes"] == 0
 
-    call_args = llm_service.summarize_content.call_args.args
+    call_args = llm_service.summarize.call_args.args
     assert "Context:" in call_args[0]
     assert "Article Title:" in call_args[0]
     assert "Aggregator Context:" in call_args[0]
@@ -318,6 +318,6 @@ def test_summarize_task_skips_llm_when_input_fingerprint_matches(db_session):
     result = handler.handle(task, context)
 
     assert result.success is True
-    llm_service.summarize_content.assert_not_called()
+    llm_service.summarize.assert_not_called()
     assert content.status == "completed"
     assert content.processed_at is not None

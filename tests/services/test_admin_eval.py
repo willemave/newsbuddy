@@ -157,8 +157,8 @@ def test_run_admin_eval_uses_news_title_focus_and_cost(db_session, monkeypatch):
             cerebras_api_key="test-cerebras",
         )
 
-    def fake_get_summarization_agent(model_spec: str, content_type: str, _system_prompt: str):
-        if content_type == "news_digest":
+    def fake_get_basic_agent(model_spec: str, output_type, _system_prompt: str):  # noqa: ANN001
+        if output_type.__name__ == "NewsSummary":
             return _FakeAgent({"title": f"News from {model_spec}", "summary": "digest"})
         return _FakeAgent(
             {
@@ -169,8 +169,8 @@ def test_run_admin_eval_uses_news_title_focus_and_cost(db_session, monkeypatch):
 
     monkeypatch.setattr("app.services.admin_eval.get_settings", fake_get_settings)
     monkeypatch.setattr(
-        "app.services.admin_eval.get_summarization_agent",
-        fake_get_summarization_agent,
+        "app.services.admin_eval.get_basic_agent",
+        fake_get_basic_agent,
     )
 
     request = AdminEvalRunRequest(
@@ -274,15 +274,15 @@ def test_run_admin_eval_disables_model_after_first_hard_error(db_session, monkey
             cerebras_api_key="test-cerebras",
         )
 
-    def fake_get_summarization_agent(model_spec: str, _content_type: str, _system_prompt: str):
+    def fake_get_basic_agent(model_spec: str, _output_type, _system_prompt: str):  # noqa: ANN001
         if "cerebras" in model_spec:
             return _BadAgent()
         return _GoodAgent()
 
     monkeypatch.setattr("app.services.admin_eval.get_settings", fake_get_settings)
     monkeypatch.setattr(
-        "app.services.admin_eval.get_summarization_agent",
-        fake_get_summarization_agent,
+        "app.services.admin_eval.get_basic_agent",
+        fake_get_basic_agent,
     )
 
     request = AdminEvalRunRequest(

@@ -49,7 +49,7 @@ def _create_news_fixture(db_session, user_id: int) -> tuple[NewsDigest, NewsDige
         summary="Fixture digest summary",
         source_count=1,
         group_count=1,
-        embedding_model="BAAI/bge-small-en-v1.5",
+        embedding_model="Qwen/Qwen3-Embedding-0.6B",
         llm_model="google:gemini-3.1-flash-lite-preview",
         pipeline_version="news-native-v1",
         trigger_reason="manual_test",

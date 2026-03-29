@@ -349,7 +349,7 @@ def test_unread_counts_require_inbox_for_news(client, db_session, test_user) -> 
             summary="Digest summary",
             source_count=0,
             group_count=0,
-            embedding_model="BAAI/bge-small-en-v1.5",
+            embedding_model="Qwen/Qwen3-Embedding-0.6B",
             llm_model="google:gemini-3.1-flash-lite-preview",
             pipeline_version="test",
             trigger_reason="test",

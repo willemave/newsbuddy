@@ -3,15 +3,17 @@
 from types import SimpleNamespace
 
 from app.models.user import User
+from app.services.news_digest_preferences import (
+    DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT,
+    normalize_news_digest_preference_prompt,
+    resolve_user_news_digest_preference_prompt,
+)
 from app.services.x_api import XTweet
 from app.services.x_digest_filter import (
-    DEFAULT_X_DIGEST_FILTER_PROMPT,
     X_DIGEST_FILTER_THRESHOLD,
     XDigestFilterDecision,
     XDigestFilterEvalCase,
     evaluate_x_digest_filter_cases,
-    normalize_x_digest_filter_prompt,
-    resolve_user_x_digest_filter_prompt,
     score_x_digest_candidate,
 )
 
@@ -29,12 +31,15 @@ def _tweet() -> XTweet:
     )
 
 
-def test_resolve_user_x_digest_filter_prompt_defaults_when_empty() -> None:
+def test_resolve_user_news_digest_preference_prompt_defaults_when_empty() -> None:
     """Missing or blank stored prompts should use the default instructions."""
-    user = User(apple_id="a", email="test@example.com", x_digest_filter_prompt="   ")
+    user = User(apple_id="a", email="test@example.com", news_digest_preference_prompt="   ")
 
-    assert normalize_x_digest_filter_prompt("   ") is None
-    assert resolve_user_x_digest_filter_prompt(user) == DEFAULT_X_DIGEST_FILTER_PROMPT
+    assert normalize_news_digest_preference_prompt("   ") is None
+    assert (
+        resolve_user_news_digest_preference_prompt(user)
+        == DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT
+    )
 
 
 def test_score_x_digest_candidate_accepts_at_threshold(monkeypatch) -> None:
@@ -56,7 +61,7 @@ def test_score_x_digest_candidate_accepts_at_threshold(monkeypatch) -> None:
 
     decision = score_x_digest_candidate(
         tweet=_tweet(),
-        user_prompt=DEFAULT_X_DIGEST_FILTER_PROMPT,
+        user_prompt=DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT,
         source_type="x_timeline",
         source_label="X Following",
     )
@@ -83,7 +88,7 @@ def test_score_x_digest_candidate_handles_invalid_agent_output(monkeypatch) -> N
 
     decision = score_x_digest_candidate(
         tweet=_tweet(),
-        user_prompt=DEFAULT_X_DIGEST_FILTER_PROMPT,
+        user_prompt=DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT,
         source_type="x_list",
         source_label="Semis",
     )
@@ -99,7 +104,7 @@ def test_evaluate_x_digest_filter_cases_reports_pass_and_fail(monkeypatch) -> No
         XDigestFilterEvalCase(
             name="include_concrete_update",
             tweet=XTweet(id="accept", text="Semiconductor capex is rising.", author_username="a"),
-            user_prompt=DEFAULT_X_DIGEST_FILTER_PROMPT,
+            user_prompt=DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT,
             source_type="x_timeline",
             source_label="X Following",
             expected_accept=True,
@@ -107,7 +112,7 @@ def test_evaluate_x_digest_filter_cases_reports_pass_and_fail(monkeypatch) -> No
         XDigestFilterEvalCase(
             name="exclude_low_signal_hype",
             tweet=XTweet(id="reject", text="gm this is so bullish lol", author_username="b"),
-            user_prompt=DEFAULT_X_DIGEST_FILTER_PROMPT,
+            user_prompt=DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT,
             source_type="x_timeline",
             source_label="X Following",
             expected_accept=False,
@@ -115,7 +120,7 @@ def test_evaluate_x_digest_filter_cases_reports_pass_and_fail(monkeypatch) -> No
     ]
 
     def fake_score_x_digest_candidate(*, tweet, user_prompt, source_type, source_label):  # noqa: ANN001
-        assert user_prompt == DEFAULT_X_DIGEST_FILTER_PROMPT
+        assert user_prompt == DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT
         assert source_type == "x_timeline"
         assert source_label == "X Following"
         if tweet.id == "accept":
@@ -159,7 +164,7 @@ def test_default_prompt_eval_examples_cover_include_and_exclude_cases(monkeypatc
                 like_count=120,
                 retweet_count=18,
             ),
-            user_prompt=DEFAULT_X_DIGEST_FILTER_PROMPT,
+            user_prompt=DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT,
             source_type="x_timeline",
             source_label="X Following",
             expected_accept=True,
@@ -175,7 +180,7 @@ def test_default_prompt_eval_examples_cover_include_and_exclude_cases(monkeypatc
                 author_username="builder",
                 author_name="Builder",
             ),
-            user_prompt=DEFAULT_X_DIGEST_FILTER_PROMPT,
+            user_prompt=DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT,
             source_type="x_list",
             source_label="Product",
             expected_accept=True,
@@ -187,7 +192,7 @@ def test_default_prompt_eval_examples_cover_include_and_exclude_cases(monkeypatc
                 text="gm if you're bullish on AI smash like and follow",
                 author_username="hypeposter",
             ),
-            user_prompt=DEFAULT_X_DIGEST_FILTER_PROMPT,
+            user_prompt=DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT,
             source_type="x_timeline",
             source_label="X Following",
             expected_accept=False,
@@ -199,7 +204,7 @@ def test_default_prompt_eval_examples_cover_include_and_exclude_cases(monkeypatc
                 text="My premium newsletter is 20% off today. Subscribe now for alpha.",
                 author_username="marketer",
             ),
-            user_prompt=DEFAULT_X_DIGEST_FILTER_PROMPT,
+            user_prompt=DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT,
             source_type="x_list",
             source_label="Markets",
             expected_accept=False,
@@ -209,7 +214,7 @@ def test_default_prompt_eval_examples_cover_include_and_exclude_cases(monkeypatc
     def fake_get_basic_agent(_model_spec, output_cls, _system_prompt):
         class _Agent:
             def run_sync(self, prompt, model_settings=None):  # noqa: ANN001
-                assert DEFAULT_X_DIGEST_FILTER_PROMPT in prompt
+                assert DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT in prompt
                 if "TSMC says CoWoS capacity will double" in prompt:
                     return SimpleNamespace(
                         output=output_cls(

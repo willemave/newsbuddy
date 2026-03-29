@@ -29,8 +29,9 @@ from app.services.admin_eval import (
     build_eval_source_payload,
     select_eval_samples,
 )
-from app.services.llm_agents import get_basic_agent, get_summarization_agent
+from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt
+from app.services.llm_summarization import resolve_summarization_output_type
 
 logger = get_logger(__name__)
 
@@ -718,7 +719,8 @@ def get_agent_for_prompt_type(model_spec: str, prompt_type: PromptType, system_p
     """
     if prompt_type == "editorial_narrative":
         return get_basic_agent(model_spec, EditorialNarrativeSummary, system_prompt)
-    return get_summarization_agent(model_spec, prompt_type, system_prompt)
+    output_type = resolve_summarization_output_type(prompt_type)
+    return get_basic_agent(model_spec, output_type, system_prompt)
 
 
 def run_single_model_call(

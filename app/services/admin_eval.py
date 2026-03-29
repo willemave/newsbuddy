@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.models.schema import Content
-from app.services.llm_agents import get_summarization_agent
+from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt
+from app.services.llm_summarization import resolve_summarization_output_type
 
 logger = logging.getLogger(__name__)
 
@@ -474,7 +475,8 @@ def _run_single_model_eval(
     )
 
     try:
-        agent = get_summarization_agent(model_spec, prompt_type, system_prompt)
+        output_type = resolve_summarization_output_type(prompt_type)
+        agent = get_basic_agent(model_spec, output_type, system_prompt)
         result = agent.run_sync(
             user_message,
             model_settings={"timeout": EVAL_CALL_TIMEOUT_SECONDS},

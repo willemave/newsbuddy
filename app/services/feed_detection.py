@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.core.logging import get_logger
 from app.models.metadata import ContentType
-from app.services.exa_client import exa_search
+from app.services.exa_client import ExaClientError, exa_search
 from app.services.http import HttpService
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_usage import record_usage
@@ -648,11 +648,28 @@ class FeedDetector:
             return []
 
         query = f"site:{domain} rss feed"
-        results = exa_search(
-            query,
-            num_results=MAX_EXA_RESULTS,
-            include_domains=[domain],
-        )
+        try:
+            results = exa_search(
+                query,
+                num_results=MAX_EXA_RESULTS,
+                include_domains=[domain],
+                raise_on_error=True,
+            )
+        except ExaClientError as exc:
+            logger.warning(
+                "Feed candidate Exa search failed for %s",
+                page_url,
+                extra={
+                    "component": "feed_detection",
+                    "operation": "find_feed_candidates_via_exa",
+                    "context_data": {
+                        "page_url": page_url,
+                        "query": query,
+                        "error": str(exc),
+                    },
+                },
+            )
+            return []
 
         candidates: list[str] = []
         for result in results:

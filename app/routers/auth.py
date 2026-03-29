@@ -34,9 +34,9 @@ from app.models.user import (
     User,
     UserResponse,
 )
-from app.services.x_digest_filter import (
-    normalize_x_digest_filter_prompt,
-    resolve_user_x_digest_filter_prompt,
+from app.services.news_digest_preferences import (
+    normalize_news_digest_preference_prompt,
+    resolve_user_news_digest_preference_prompt,
 )
 from app.services.x_integration import has_active_x_connection, normalize_twitter_username
 from app.templates import templates
@@ -77,7 +77,7 @@ def _build_user_response(db: Session, user: User) -> UserResponse:
     return response.model_copy(
         update={
             "has_x_bookmark_sync": has_sync,
-            "x_digest_filter_prompt": resolve_user_x_digest_filter_prompt(user),
+            "news_digest_preference_prompt": resolve_user_news_digest_preference_prompt(user),
         }
     )
 
@@ -413,9 +413,9 @@ def update_current_user_info(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    if payload.x_digest_filter_prompt is not None:
-        current_user.x_digest_filter_prompt = normalize_x_digest_filter_prompt(
-            payload.x_digest_filter_prompt
+    if payload.news_digest_preference_prompt is not None:
+        current_user.news_digest_preference_prompt = normalize_news_digest_preference_prompt(
+            payload.news_digest_preference_prompt
         )
 
     db.commit()

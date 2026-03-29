@@ -83,3 +83,64 @@ def test_backfill_news_items_from_contents_is_idempotent(db_session) -> None:
     assert news_items[0].legacy_content_id == content.id
     assert first.created == 1
     assert second.skipped == 1
+
+
+def test_backfill_news_items_from_contents_can_target_specific_content_ids(db_session) -> None:
+    first_content = Content(
+        content_type="news",
+        url="https://example.com/story-1",
+        source_url="https://news.ycombinator.com/item?id=1",
+        title="Example story one",
+        source="example.com",
+        platform="hackernews",
+        status="completed",
+        content_metadata={
+            "discussion_url": "https://news.ycombinator.com/item?id=1",
+            "article": {
+                "url": "https://example.com/story-1",
+                "title": "Example story one",
+                "source_domain": "example.com",
+            },
+            "summary": {
+                "title": "Example story one",
+                "article_url": "https://example.com/story-1",
+                "key_points": ["Point one."],
+                "summary": "Summary one.",
+            },
+        },
+    )
+    second_content = Content(
+        content_type="news",
+        url="https://example.com/story-2",
+        source_url="https://news.ycombinator.com/item?id=2",
+        title="Example story two",
+        source="example.com",
+        platform="hackernews",
+        status="completed",
+        content_metadata={
+            "discussion_url": "https://news.ycombinator.com/item?id=2",
+            "article": {
+                "url": "https://example.com/story-2",
+                "title": "Example story two",
+                "source_domain": "example.com",
+            },
+            "summary": {
+                "title": "Example story two",
+                "article_url": "https://example.com/story-2",
+                "key_points": ["Point two."],
+                "summary": "Summary two.",
+            },
+        },
+    )
+    db_session.add_all([first_content, second_content])
+    db_session.commit()
+
+    result = backfill_news_items_from_contents(
+        db_session,
+        content_ids=[second_content.id],
+    )
+    db_session.commit()
+
+    news_items = db_session.query(NewsItem).order_by(NewsItem.legacy_content_id.asc()).all()
+    assert result.created == 1
+    assert [item.legacy_content_id for item in news_items] == [second_content.id]

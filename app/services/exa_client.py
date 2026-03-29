@@ -12,6 +12,18 @@ logger = get_logger(__name__)
 _exa_client: Exa | None = None
 
 
+class ExaClientError(RuntimeError):
+    """Base exception for Exa client failures."""
+
+
+class ExaUnavailableError(ExaClientError):
+    """Raised when Exa is required but not configured."""
+
+
+class ExaRequestError(ExaClientError):
+    """Raised when an Exa request fails."""
+
+
 def get_exa_client() -> Exa | None:
     """Get singleton Exa client instance.
 
@@ -150,6 +162,7 @@ def exa_search(
     category: str | None = None,
     include_domains: list[str] | None = None,
     exclude_domains: list[str] | None = None,
+    raise_on_error: bool = False,
 ) -> list[ExaSearchResult]:
     """Search the web using Exa and return results with full content.
 
@@ -165,13 +178,22 @@ def exa_search(
         category: Optional category filter (e.g., 'news', 'research paper', 'company').
         include_domains: List of domains to include (overrides excludes if set).
         exclude_domains: List of domains to exclude (defaults to social media).
+        raise_on_error: When True, raise Exa-specific exceptions instead of returning [].
 
     Returns:
         List of ExaSearchResult objects with title, url, and snippet.
+
+    Raises:
+        ExaUnavailableError: When Exa is not configured and ``raise_on_error=True``.
+        ExaRequestError: When the Exa API request fails and ``raise_on_error=True``.
     """
     client = get_exa_client()
     if client is None:
-        logger.warning("Exa client not available, returning empty results")
+        message = "Exa client not available"
+        if raise_on_error:
+            logger.error(message)
+            raise ExaUnavailableError(message)
+        logger.warning("%s; returning empty results", message)
         return []
 
     # Build exclude list - use provided or default
@@ -265,6 +287,8 @@ def exa_search(
 
     except Exception as e:
         logger.error(f"[Exa] Search failed | query='{query[:50]}' error={e}", exc_info=True)
+        if raise_on_error:
+            raise ExaRequestError(f"Exa search failed for query '{query[:50]}'") from e
         return []
 
 
@@ -274,12 +298,17 @@ def exa_get_contents(
     max_characters: int | None = 4000,
     livecrawl: str | None = None,
     max_age_hours: int | None = None,
+    raise_on_error: bool = False,
 ) -> list[ExaContentResult]:
     """Fetch content for already-selected URLs via Exa's contents API."""
 
     client = get_exa_client()
     if client is None:
-        logger.warning("Exa client not available, returning empty content results")
+        message = "Exa client not available"
+        if raise_on_error:
+            logger.error(message)
+            raise ExaUnavailableError(message)
+        logger.warning("%s; returning empty content results", message)
         return []
 
     clean_urls = [url.strip() for url in urls if isinstance(url, str) and url.strip()]
@@ -325,6 +354,8 @@ def exa_get_contents(
             exc,
             exc_info=True,
         )
+        if raise_on_error:
+            raise ExaRequestError(f"Exa content fetch failed for {len(clean_urls)} URL(s)") from exc
         return []
 
 

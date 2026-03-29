@@ -30,6 +30,8 @@ class NewsItemProcessingResult:
     status: str
     error_message: str | None = None
     retryable: bool = True
+    used_existing_summary: bool = False
+    generated_summary: bool = False
 
 
 def _utcnow_naive() -> datetime:
@@ -212,22 +214,33 @@ def process_news_item(
         ):
             _persist_summary(item, existing_summary, raw_metadata)
             db.flush()
-            return NewsItemProcessingResult(success=True, status=item.status)
+            return NewsItemProcessingResult(
+                success=True,
+                status=item.status,
+                used_existing_summary=True,
+            )
 
         prompt = _build_processing_prompt(item, raw_metadata)
         content_summarizer = summarizer or get_content_summarizer()
-        generated = content_summarizer.summarize_content(
+        generated = content_summarizer.summarize(
             prompt,
             content_type="news",
             title=item.article_title or item.summary_title,
             content_id=item.id,
         )
         if not isinstance(generated, NewsSummary):
-            generated = _fallback_summary(item, raw_metadata)
+            raise TypeError(
+                "Short-form news summarizer returned an invalid payload: "
+                f"{type(generated).__name__}"
+            )
 
         _persist_summary(item, generated, raw_metadata)
         db.flush()
-        return NewsItemProcessingResult(success=True, status=item.status)
+        return NewsItemProcessingResult(
+            success=True,
+            status=item.status,
+            generated_summary=True,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "News item processing failed",

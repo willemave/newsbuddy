@@ -24,6 +24,7 @@ from app.models.schema import UserIntegrationConnection, UserIntegrationSyncStat
 from app.models.user import User
 from app.services.content_submission import submit_user_content
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
+from app.services.news_digest_preferences import resolve_user_news_digest_preference_prompt
 from app.services.news_ingestion import (
     build_news_item_upsert_input_from_scraped_item,
     upsert_news_item,
@@ -47,7 +48,6 @@ from app.services.x_api import (
 from app.services.x_digest_filter import (
     X_DIGEST_FILTER_THRESHOLD,
     XDigestFilterDecision,
-    resolve_user_x_digest_filter_prompt,
     score_x_digest_candidate,
 )
 
@@ -360,7 +360,7 @@ def sync_x_sources_for_user(db: Session, *, user_id: int) -> XSyncSummary:
     existing_sync_metadata = (
         dict(sync_state.sync_metadata) if isinstance(sync_state.sync_metadata, dict) else {}
     )
-    filter_prompt = resolve_user_x_digest_filter_prompt(user)
+    filter_prompt = resolve_user_news_digest_preference_prompt(user)
 
     try:
         access_token = _ensure_valid_access_token(db, connection)

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy.orm import sessionmaker
 
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content
 from app.services.content_metadata_merge import (
+    ContentMetadataMergeError,
     compute_metadata_patch,
     refresh_merge_content_metadata,
 )
@@ -122,3 +124,13 @@ def test_refresh_merge_content_metadata_can_preserve_latest_keys(db_session) -> 
 
     assert merged["top_comment"] == {"author": "new", "text": "new"}
     assert merged["x"] == 2
+
+
+def test_refresh_merge_content_metadata_raises_when_row_is_missing(db_session) -> None:
+    with pytest.raises(ContentMetadataMergeError, match="Missing content metadata row"):
+        refresh_merge_content_metadata(
+            db_session,
+            999_999,
+            base_metadata={"a": 1},
+            updated_metadata={"a": 2},
+        )

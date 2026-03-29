@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.user import User
 from app.services.llm_agents import get_basic_agent
 from app.services.x_api import XTweet
 
@@ -17,14 +16,6 @@ logger = get_logger(__name__)
 X_DIGEST_FILTER_MODEL = "google:gemini-3.1-flash-lite-preview"
 X_DIGEST_FILTER_THRESHOLD = 0.65
 X_DIGEST_FILTER_REASON_MAX_CHARS = 240
-
-DEFAULT_X_DIGEST_FILTER_PROMPT = (
-    "Include high-signal posts that are likely to improve a daily digest: original reporting, "
-    "firsthand product or company updates, technical insight, market structure changes, "
-    "meaningful data points, strong analysis, or unusually clear synthesis. Exclude memes, "
-    "engagement bait, vague reactions, low-context commentary, repetitive hype, and pure "
-    "self-promotion unless the post adds concrete new information."
-)
 
 X_DIGEST_FILTER_SYSTEM_PROMPT = """You score whether an X post should be included in a user's
 daily digest input pool.
@@ -41,7 +32,8 @@ Scoring rules:
 - Reward concrete new information, expertise, data, important announcements, and strong synthesis.
 - Penalize memes, jokes, hype, engagement bait, repetitive commentary, vague takes, and pure
   promotion.
-- Base the score on the user's custom filter instructions as the highest-priority preference layer.
+- Base the score on the user's shared digest preference instructions as the
+  highest-priority preference layer.
 - Keep the reason short, factual, and specific.
 """
 
@@ -83,22 +75,6 @@ class XDigestFilterEvalResult:
     expected_accept: bool
     decision: XDigestFilterDecision
     passed: bool
-
-
-def normalize_x_digest_filter_prompt(prompt: str | None) -> str | None:
-    """Normalize a stored user X digest filter prompt."""
-    if prompt is None:
-        return None
-    cleaned = prompt.strip()
-    return cleaned or None
-
-
-def resolve_user_x_digest_filter_prompt(user: User) -> str:
-    """Resolve the active X digest filter prompt for a user."""
-    stored_prompt = normalize_x_digest_filter_prompt(user.x_digest_filter_prompt)
-    if stored_prompt:
-        return stored_prompt
-    return DEFAULT_X_DIGEST_FILTER_PROMPT
 
 
 def score_x_digest_candidate(
@@ -188,7 +164,7 @@ def _build_filter_prompt(
         or (f"@{tweet.author_username}" if tweet.author_username else "Unknown")
     )
     lines = [
-        "User filter instructions:",
+        "User digest preference instructions:",
         user_prompt.strip(),
         "",
         "Source context:",

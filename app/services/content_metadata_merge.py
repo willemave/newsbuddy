@@ -7,7 +7,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger
 from app.models.schema import Content
+
+logger = get_logger(__name__)
+
+
+class ContentMetadataMergeError(RuntimeError):
+    """Raised when content metadata cannot be refreshed safely."""
 
 
 def compute_metadata_patch(
@@ -91,7 +98,7 @@ def _load_latest_content_metadata(
     *,
     fallback: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Return latest content metadata from DB (or fallback when unavailable)."""
+    """Return latest content metadata from DB."""
     if not content_id:
         return _coerce_metadata(fallback)
 
@@ -101,14 +108,33 @@ def _load_latest_content_metadata(
         .first()
     )
     if row is None:
-        return _coerce_metadata(fallback)
+        logger.error("Content metadata row missing for content %s", content_id)
+        raise ContentMetadataMergeError(f"Missing content metadata row for content {content_id}")
     if isinstance(row, (tuple, list)):
         if not row:
-            return _coerce_metadata(fallback)
-        return _coerce_metadata(row[0])
+            logger.error("Content metadata row payload empty for content %s", content_id)
+            raise ContentMetadataMergeError(f"Empty content metadata row for content {content_id}")
+        return _coerce_persisted_metadata(row[0], content_id=content_id)
     if hasattr(row, "content_metadata"):
-        return _coerce_metadata(row.content_metadata)
-    return _coerce_metadata(row)
+        return _coerce_persisted_metadata(row.content_metadata, content_id=content_id)
+    return _coerce_persisted_metadata(row, content_id=content_id)
+
+
+def _coerce_persisted_metadata(raw_metadata: Any, *, content_id: int) -> dict[str, Any]:
+    """Return persisted metadata or raise when the DB payload is invalid."""
+    if raw_metadata is None:
+        return {}
+    if isinstance(raw_metadata, dict):
+        return dict(raw_metadata)
+    logger.error(
+        "Unexpected content metadata payload type for content %s: %s",
+        content_id,
+        type(raw_metadata).__name__,
+    )
+    raise ContentMetadataMergeError(
+        f"Invalid content metadata payload for content {content_id}: "
+        f"{type(raw_metadata).__name__}"
+    )
 
 
 def _coerce_metadata(raw_metadata: Mapping[str, Any] | None | Any) -> dict[str, Any]:

@@ -22,8 +22,9 @@ from app.services.admin_eval import (
     build_eval_source_payload,
     select_eval_samples,
 )
-from app.services.llm_agents import get_summarization_agent
+from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt
+from app.services.llm_summarization import resolve_summarization_output_type
 
 logger = get_logger(__name__)
 
@@ -377,7 +378,8 @@ def run_probe_for_source(
     request_chars = len(system_prompt) + len(user_message)
     request_tokens_estimate = estimate_tokens_from_chars(request_chars)
 
-    agent = get_summarization_agent(model_spec, prompt_type, system_prompt)
+    output_type = resolve_summarization_output_type(prompt_type)
+    agent = get_basic_agent(model_spec, output_type, system_prompt)
 
     last_error: Exception | None = None
     for attempt in range(1, retries + 2):

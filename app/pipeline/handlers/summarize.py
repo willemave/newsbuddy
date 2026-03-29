@@ -340,7 +340,7 @@ class SummarizeHandler:
                 )
 
                 try:
-                    summary = context.llm_service.summarize_content(
+                    summary = context.llm_service.summarize(
                         text_to_summarize,
                         content_type=summarization_type,
                         content_id=content.id,
