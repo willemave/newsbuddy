@@ -18,7 +18,7 @@ from app.application.queries import list_api_keys
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import ADMIN_SESSION_COOKIE, require_admin
 from app.core.settings import get_settings
-from app.models.schema import Content, EventLog, OnboardingDiscoveryRun, ProcessingTask
+from app.models.schema import Content, OnboardingDiscoveryRun, ProcessingTask
 from app.models.user import User
 from app.routers.admin_conversational_models import AdminConversationalHealthResponse
 from app.routers.api.models import (
@@ -114,15 +114,6 @@ def _normalize_task_error_type(error_message: str | None) -> str:
     if first_token and first_token[0].isalpha():
         return first_token[:80]
     return "unknown"
-
-
-def _coerce_event_metric(data: dict[str, Any], key: str) -> int:
-    """Read integer metrics from EventLog JSON payload."""
-    value = data.get(key)
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _build_queue_status_rows(db: Session) -> list[dict[str, Any]]:
@@ -223,178 +214,27 @@ def _build_recent_failure_rows(
 
 
 def _build_scraper_health(db: Session, recent_cutoff: datetime) -> dict[str, Any]:
-    """Build scraper run/error aggregates for the dashboard."""
-    total_events_24h = (
-        db.query(func.count(EventLog.id))
-        .filter(EventLog.event_type.like("scraper%"))
-        .filter(EventLog.created_at >= recent_cutoff)
-        .scalar()
-        or 0
-    )
-    error_events_24h = (
-        db.query(func.count(EventLog.id))
-        .filter(EventLog.event_type == "scraper_error")
-        .filter(EventLog.created_at >= recent_cutoff)
-        .scalar()
-        or 0
-    )
-    run_status_rows = (
-        db.query(EventLog.status, func.count(EventLog.id).label("count"))
-        .filter(EventLog.event_type == "scraper_run")
-        .filter(EventLog.created_at >= recent_cutoff)
-        .group_by(EventLog.status)
-        .all()
-    )
-    run_status_counts = {
-        str(status or "unknown"): int(count or 0) for status, count in run_status_rows
-    }
-
-    latest_stats_events = (
-        db.query(EventLog)
-        .filter(EventLog.event_type == "scraper_stats")
-        .filter(EventLog.created_at >= recent_cutoff)
-        .order_by(desc(EventLog.created_at))
-        .limit(500)
-        .all()
-    )
-    latest_stats_by_name: dict[str, EventLog] = {}
-    for event in latest_stats_events:
-        scraper_name = str(event.event_name or "unknown")
-        if scraper_name not in latest_stats_by_name:
-            latest_stats_by_name[scraper_name] = event
-
-    latest_stats_rows = []
-    for scraper_name, event in sorted(latest_stats_by_name.items()):
-        data = event.data if isinstance(event.data, dict) else {}
-        latest_stats_rows.append(
-            {
-                "scraper_name": scraper_name,
-                "scraped": _coerce_event_metric(data, "scraped"),
-                "saved": _coerce_event_metric(data, "saved"),
-                "duplicates": _coerce_event_metric(data, "duplicates"),
-                "errors": _coerce_event_metric(data, "errors"),
-                "updated_at": event.created_at,
-            }
-        )
-
-    error_rows = (
-        db.query(EventLog.event_name, func.count(EventLog.id).label("count"))
-        .filter(EventLog.event_type == "scraper_error")
-        .filter(EventLog.created_at >= recent_cutoff)
-        .group_by(EventLog.event_name)
-        .order_by(desc(func.count(EventLog.id)))
-        .all()
-    )
-    error_counts = [
-        {"scraper_name": str(name or "unknown"), "count": int(count or 0)}
-        for name, count in error_rows
-    ]
-
+    """Return empty scraper event aggregates after EventLog removal."""
     return {
-        "total_events_24h": int(total_events_24h),
-        "error_events_24h": int(error_events_24h),
-        "run_status_counts": run_status_counts,
-        "latest_stats_rows": latest_stats_rows,
-        "error_counts": error_counts,
+        "total_events_24h": 0,
+        "error_events_24h": 0,
+        "run_status_counts": {},
+        "latest_stats_rows": [],
+        "error_counts": [],
     }
 
 
 def _build_queue_watchdog_health(db: Session, recent_cutoff: datetime) -> dict[str, Any]:
-    """Build queue watchdog run/action/alert aggregates for dashboard display."""
-    run_events = (
-        db.query(EventLog)
-        .filter(EventLog.event_type == "queue_watchdog_run")
-        .filter(EventLog.created_at >= recent_cutoff)
-        .order_by(desc(EventLog.created_at))
-        .all()
-    )
-    total_runs_24h = len(run_events)
-    total_touched_24h = 0
-    runs_touching_tasks_24h = 0
-    failed_runs_24h = 0
-    latest_run_at: datetime | None = None
-
-    for event in run_events:
-        data = event.data if isinstance(event.data, dict) else {}
-        touched = _coerce_event_metric(data, "total_touched")
-        total_touched_24h += touched
-        if touched > 0:
-            runs_touching_tasks_24h += 1
-        if str(event.status or "") == "failed":
-            failed_runs_24h += 1
-        if latest_run_at is None:
-            latest_run_at = event.created_at
-
-    action_rows = (
-        db.query(
-            EventLog.event_name,
-            func.count(EventLog.id).label("runs"),
-        )
-        .filter(EventLog.event_type == "queue_watchdog_action")
-        .filter(EventLog.created_at >= recent_cutoff)
-        .group_by(EventLog.event_name)
-        .order_by(desc(func.count(EventLog.id)))
-        .all()
-    )
-    action_stats = []
-    for event_name, runs in action_rows:
-        total_touched = (
-            db.query(EventLog)
-            .filter(EventLog.event_type == "queue_watchdog_action")
-            .filter(EventLog.event_name == event_name)
-            .filter(EventLog.created_at >= recent_cutoff)
-            .all()
-        )
-        touched_sum = 0
-        for event in total_touched:
-            data = event.data if isinstance(event.data, dict) else {}
-            touched_sum += _coerce_event_metric(data, "touched_count")
-
-        action_stats.append(
-            {
-                "action_name": str(event_name or "unknown"),
-                "runs": int(runs or 0),
-                "touched_total": int(touched_sum),
-            }
-        )
-
-    alert_rows = (
-        db.query(EventLog.status, func.count(EventLog.id).label("count"))
-        .filter(EventLog.event_type == "queue_watchdog_alert")
-        .filter(EventLog.created_at >= recent_cutoff)
-        .group_by(EventLog.status)
-        .all()
-    )
-    alert_counts = {str(status or "unknown"): int(count or 0) for status, count in alert_rows}
-
-    recent_action_events = (
-        db.query(EventLog)
-        .filter(EventLog.event_type == "queue_watchdog_action")
-        .order_by(desc(EventLog.created_at))
-        .limit(12)
-        .all()
-    )
-    recent_actions = []
-    for event in recent_action_events:
-        data = event.data if isinstance(event.data, dict) else {}
-        recent_actions.append(
-            {
-                "action_name": str(event.event_name or "unknown"),
-                "status": str(event.status or "unknown"),
-                "created_at": event.created_at,
-                "touched_count": _coerce_event_metric(data, "touched_count"),
-            }
-        )
-
+    """Return empty queue watchdog event aggregates after EventLog removal."""
     return {
-        "total_runs_24h": int(total_runs_24h),
-        "total_touched_24h": int(total_touched_24h),
-        "runs_touching_tasks_24h": int(runs_touching_tasks_24h),
-        "failed_runs_24h": int(failed_runs_24h),
-        "latest_run_at": latest_run_at,
-        "action_stats": action_stats,
-        "alert_counts": alert_counts,
-        "recent_actions": recent_actions,
+        "total_runs_24h": 0,
+        "total_touched_24h": 0,
+        "runs_touching_tasks_24h": 0,
+        "failed_runs_24h": 0,
+        "latest_run_at": None,
+        "action_stats": [],
+        "alert_counts": {},
+        "recent_actions": [],
     }
 
 
@@ -507,14 +347,9 @@ def admin_dashboard(
     watchdog_health = _build_queue_watchdog_health(db, recent_cutoff)
     user_stats, onboarding_latest_status_counts = _build_user_lifecycle(db, recent_cutoff)
 
-    # Event logs with optional filtering
-    event_logs_query = db.query(EventLog).order_by(desc(EventLog.created_at))
-    if event_type:
-        event_logs_query = event_logs_query.filter(EventLog.event_type == event_type)
-    event_logs = event_logs_query.limit(limit).all()
-
-    event_types_result = db.query(EventLog.event_type).distinct().all()
-    event_types = [row[0] for row in event_types_result if row[0]]
+    # EventLog has been removed; keep template context stable with empty values.
+    event_logs: list[Any] = []
+    event_types: list[str] = []
 
     # Content with missing summary and explicit errors
     content_without_summary = (

@@ -30,6 +30,15 @@ class CommandResult:
     warnings: list[str]
 
 
+class AdminArgumentParser(argparse.ArgumentParser):
+    """Argument parser with action-oriented error messages."""
+
+    def error(self, message: str) -> None:
+        hint = _build_parser_hint(self.prog, message)
+        formatted = message if hint is None else f"{message}\n\n{hint}"
+        super().error(formatted)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the local operator CLI."""
     parser = build_parser()
@@ -67,7 +76,18 @@ def main(argv: list[str] | None = None) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level parser."""
-    parser = argparse.ArgumentParser(prog="admin", description="Production operator CLI")
+    parser = AdminArgumentParser(
+        prog="admin",
+        description="Production operator CLI for Newsly operations.",
+        epilog=(
+            "Examples:\n"
+            "  admin health snapshot\n"
+            "  admin logs list\n"
+            "  admin logs tail --source structured --limit 20\n"
+            "  admin db query --sql 'select count(*) from content'"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--env-file", default=None, help="Override admin/.env path")
     parser.add_argument("--remote", default=None, help="Remote SSH target")
     parser.add_argument("--app-dir", default=None, help="Remote app checkout directory")
@@ -85,8 +105,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         choices=("json", "text"),
-        default="json",
-        help="Output format",
+        default="text",
+        help="Output format. Use 'text' for terminal-friendly summaries or 'json' for automation.",
     )
     parser.add_argument(
         "--unsafe-raw",
@@ -461,7 +481,11 @@ def _parse_datetime_arg(raw: str | None, *, end_of_day: bool) -> datetime | None
 
 
 def _build_db_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    db_parser = subparsers.add_parser("db", help="Read-only production DB access")
+    db_parser = subparsers.add_parser(
+        "db",
+        help="Read-only production DB access",
+        description="Inspect the production database without mutating it.",
+    )
     db_subparsers = db_parser.add_subparsers(dest="db_command", required=True)
 
     db_subparsers.add_parser("tables", help="List database tables")
@@ -478,23 +502,46 @@ def _build_db_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
 
 
 def _build_logs_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    logs_parser = subparsers.add_parser("logs", help="Inspect production logs")
+    logs_parser = subparsers.add_parser(
+        "logs",
+        help="Inspect production logs",
+        description=(
+            "List, tail, search, or sync production logs.\n\n"
+            "Sources are either:\n"
+            "  structured, errors\n"
+            "  or a service log stem such as server, worker, scraper\n\n"
+            "Run `admin logs list` first to see the sources available on the remote host."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     logs_subparsers = logs_parser.add_subparsers(dest="logs_command", required=True)
 
     logs_subparsers.add_parser("list", help="List log files by source")
 
     tail_parser = logs_subparsers.add_parser("tail", help="Tail one log source")
-    tail_parser.add_argument("--source", required=True)
+    tail_parser.add_argument(
+        "--source",
+        required=True,
+        help="Log source to read, for example structured, errors, server, worker, or scraper.",
+    )
     tail_parser.add_argument("--limit", type=int, default=50)
 
     range_parser = logs_subparsers.add_parser("range", help="Query logs by time range")
-    range_parser.add_argument("--source", required=True)
+    range_parser.add_argument(
+        "--source",
+        required=True,
+        help="Log source to read. Discover valid values with `admin logs list`.",
+    )
     range_parser.add_argument("--since", default=None)
     range_parser.add_argument("--until", default=None)
     range_parser.add_argument("--limit", type=int, default=100)
 
     search_parser = logs_subparsers.add_parser("search", help="Search logs")
-    search_parser.add_argument("--source", required=True)
+    search_parser.add_argument(
+        "--source",
+        required=True,
+        help="Log source to search. Discover valid values with `admin logs list`.",
+    )
     search_parser.add_argument("--query", default=None)
     search_parser.add_argument("--component", default=None)
     search_parser.add_argument("--operation", default=None)
@@ -510,7 +557,11 @@ def _build_logs_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
 
 
 def _build_usage_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    usage_parser = subparsers.add_parser("usage", help="Query persisted LLM usage")
+    usage_parser = subparsers.add_parser(
+        "usage",
+        help="Query persisted LLM usage",
+        description="Summarize or inspect persisted LLM usage rows.",
+    )
     usage_subparsers = usage_parser.add_subparsers(dest="usage_command", required=True)
 
     summary_parser = usage_subparsers.add_parser("summary", help="Summarize usage totals")
@@ -537,7 +588,11 @@ def _build_usage_parser(subparsers: argparse._SubParsersAction[argparse.Argument
 
 
 def _build_fix_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    fix_parser = subparsers.add_parser("fix", help="Allowlisted production fixes")
+    fix_parser = subparsers.add_parser(
+        "fix",
+        help="Allowlisted production fixes",
+        description="Preview or apply a small set of allowlisted repair operations.",
+    )
     fix_parser.add_argument("--apply", action="store_true", help="Apply the requested fix")
     fix_parser.add_argument("--yes", action="store_true", help="Acknowledge mutation intent")
     fix_subparsers = fix_parser.add_subparsers(dest="fix_command", required=True)
@@ -571,7 +626,11 @@ def _build_fix_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
 
 
 def _build_events_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    events_parser = subparsers.add_parser("events", help="Query event logs")
+    events_parser = subparsers.add_parser(
+        "events",
+        help="Query event logs",
+        description="Inspect rows from the event_log table with optional filters.",
+    )
     events_subparsers = events_parser.add_subparsers(dest="events_command", required=True)
     list_parser = events_subparsers.add_parser("list", help="List event-log rows")
     list_parser.add_argument("--event-type", default=None)
@@ -583,13 +642,21 @@ def _build_events_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
 
 
 def _build_health_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    health_parser = subparsers.add_parser("health", help="Coarse operational health snapshot")
+    health_parser = subparsers.add_parser(
+        "health",
+        help="Coarse operational health snapshot",
+        description="Summarize content, task, event, and usage counts.",
+    )
     health_subparsers = health_parser.add_subparsers(dest="health_command", required=True)
     health_subparsers.add_parser("snapshot", help="Snapshot current operational counts")
 
 
 def _build_debug_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    debug_parser = subparsers.add_parser("debug", help="Local debug artifacts from production data")
+    debug_parser = subparsers.add_parser(
+        "debug",
+        help="Local debug artifacts from production data",
+        description="Pull production data locally and build debug artifacts.",
+    )
     debug_subparsers = debug_parser.add_subparsers(dest="debug_command", required=True)
     prompt_parser = debug_subparsers.add_parser("prompt-report", help="Build prompt debug report")
     prompt_parser.add_argument("--skip-sync-logs", action="store_true")
@@ -608,3 +675,49 @@ def _build_debug_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     )
     prompt_parser.add_argument("--include-json", action="store_true")
     prompt_parser.add_argument("--output-dir", default=None)
+
+
+def _build_parser_hint(prog: str, message: str) -> str | None:
+    normalized = message.lower()
+    if "the following arguments are required: logs_command" in normalized:
+        return (
+            "Pick a logs subcommand:\n"
+            "  admin logs list\n"
+            "  admin logs tail --source structured --limit 20\n"
+            "  admin logs search --source errors --query timeout"
+        )
+    if (
+        "the following arguments are required: --source" in normalized
+        and prog.endswith("logs tail")
+    ):
+        return (
+            "Choose one log source with `--source`.\n"
+            "Run `admin logs list` to discover valid values, then retry with one of:\n"
+            "  admin logs tail --source structured --limit 20\n"
+            "  admin logs tail --source errors --limit 20\n"
+            "  admin logs tail --source server --limit 50"
+        )
+    if (
+        "the following arguments are required: --source" in normalized
+        and prog.endswith("logs range")
+    ):
+        return (
+            "Choose one log source with `--source`, for example:\n"
+            "  admin logs range --source structured --since 2026-03-29T00:00:00Z"
+        )
+    if (
+        "the following arguments are required: --source" in normalized
+        and prog.endswith("logs search")
+    ):
+        return (
+            "Choose one log source with `--source`, for example:\n"
+            "  admin logs search --source errors --query permission"
+        )
+    if "the following arguments are required: group" in normalized:
+        return (
+            "Pick a top-level command group:\n"
+            "  admin health snapshot\n"
+            "  admin logs list\n"
+            "  admin db tables"
+        )
+    return None

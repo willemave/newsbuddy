@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 from io import StringIO
 
+import pytest
+
+from admin.cli import build_parser
 from admin.config import resolve_config
 from admin.output import Envelope, EnvelopeError, emit
 
@@ -84,3 +87,76 @@ def test_emit_text_error_envelope():
     rendered = stream.getvalue()
     assert "error: bad query" in rendered
     assert '"sql": "delete from users"' in rendered
+
+
+def test_emit_text_logs_list_envelope_is_human_readable():
+    stream = StringIO()
+    emit(
+        Envelope(
+            ok=True,
+            command="logs.list",
+            data={
+                "sources": {
+                    "structured": [{"path": "/tmp/structured.jsonl"}],
+                    "worker": [{"path": "/tmp/worker.log"}],
+                }
+            },
+        ),
+        "text",
+        stream,
+    )
+
+    rendered = stream.getvalue()
+    assert "Available log sources:" in rendered
+    assert "- structured (1 file)" in rendered
+    assert "- worker (1 file)" in rendered
+    assert "admin logs tail --source structured --limit 20" in rendered
+
+
+def test_emit_text_permission_error_envelope_is_actionable():
+    stream = StringIO()
+    emit(
+        Envelope(
+            ok=False,
+            command="logs.list",
+            error=EnvelopeError(
+                "Remote command failed for action 'logs.list'",
+                details={
+                    "stderr": (
+                        "PermissionError: [Errno 13] Permission denied: "
+                        "'/opt/news_app/.env'"
+                    )
+                },
+            ),
+        ),
+        "text",
+        stream,
+    )
+
+    rendered = stream.getvalue()
+    assert "could not read `/opt/news_app/.env`" in rendered
+    assert "ADMIN_REMOTE" in rendered
+
+
+def test_build_parser_defaults_to_text_output():
+    args = build_parser().parse_args(["health", "snapshot"])
+
+    assert args.output == "text"
+
+
+def test_logs_group_error_includes_next_steps(capsys):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["logs"])
+
+    captured = capsys.readouterr()
+    assert "Pick a logs subcommand:" in captured.err
+    assert "admin logs list" in captured.err
+
+
+def test_logs_tail_error_includes_source_examples(capsys):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["logs", "tail"])
+
+    captured = capsys.readouterr()
+    assert "Choose one log source with `--source`." in captured.err
+    assert "admin logs list" in captured.err

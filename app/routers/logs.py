@@ -12,7 +12,7 @@ from app.core.db import get_db
 from app.core.deps import require_admin
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.schema import EventLog, LlmUsageRecord
+from app.models.schema import LlmUsageRecord
 from app.templates import templates
 
 router = APIRouter(prefix="/admin")
@@ -288,8 +288,7 @@ async def llm_usage_dashboard(
 
 @router.post("/errors/reset")
 async def reset_error_logs(_: None = Depends(require_admin)):
-    """Reset all error logs by deleting all log files in the errors directory
-    and removing failed EventLog entries from the database.
+    """Reset all error logs by deleting all log files in the errors directory.
 
     Returns:
         Redirect to errors dashboard
@@ -298,7 +297,6 @@ async def reset_error_logs(_: None = Depends(require_admin)):
         HTTPException: If there's an error during deletion
     """
     deleted_files_count = 0
-    deleted_db_count = 0
     errors = []
 
     if not ERRORS_DIR.exists():
@@ -330,14 +328,7 @@ async def reset_error_logs(_: None = Depends(require_admin)):
                 except Exception as e:
                     errors.append(f"Failed to delete {file_path.name}: {str(e)}")
 
-        # Delete failed EventLog entries from database
-        with get_db() as db:
-            deleted_db_count = db.query(EventLog).filter(EventLog.status == "failed").delete()
-            db.commit()
-
-        logger.info(
-            f"Reset error logs: deleted {deleted_files_count} files, {deleted_db_count} DB records"
-        )
+        logger.info("Reset error logs: deleted %s files", deleted_files_count)
 
         # Redirect back to errors page
         return RedirectResponse(url="/admin/errors", status_code=303)
