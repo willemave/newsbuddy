@@ -73,6 +73,9 @@ jobs:
             ".github/"
             ".worktrees/"
             ".venv/"
+            ".uv-cache/"
+            ".mypy_cache/"
+            ".deriveddata/"
             "ai-memory/"
             "archive/"
             "client/"
@@ -80,10 +83,13 @@ jobs:
             "env/"
             "logs/"
             "node_modules/"
+            "test-results/"
             "__pycache__/"
             ".ruff_cache/"
             ".pytest_cache/"
             ".benchmarks/"
+            ".coverage"
+            ".hypothesis/"
             "*.pyc"
             "*.pyo"
             "*.db"
@@ -91,9 +97,13 @@ jobs:
             ".DS_Store"
             ".env"
             ".env.*"
+            "tmp_*.png"
+            "tmp_*.mp4"
           )
           PROTECTED_PATHS=(
             ".venv/"
+            ".uv-cache/"
+            ".mypy_cache/"
             ".env"
             ".env.racknerd"
             "archive/"
@@ -131,26 +141,8 @@ jobs:
             sudo chmod 644 \"\$TARGET_CONF\"
           '"
 
-          echo "→ Resolving supervisor programs to stop/start"
-          RESOLVED_PROGRAMS=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
-            set -euo pipefail
-            existing=\$(sudo supervisorctl status | sed -E \"s/[[:space:]].*$//\")
-            resolved=\"\"
-            for p in $PROGRAMS; do
-              if echo \"\$existing\" | grep -qx \"\$p\"; then
-                resolved+=\"\$p \"
-              fi
-            done
-            echo \"\${resolved}\" | xargs
-          '")
-          if [[ -z "${RESOLVED_PROGRAMS:-}" ]]; then
-            echo "No matching supervisor programs found for: $PROGRAMS" >&2
-            exit 1
-          fi
-          echo "→ Supervisor programs: $RESOLVED_PROGRAMS"
-
           echo "→ Stopping supervisor programs"
-          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo supervisorctl stop $RESOLVED_PROGRAMS || true"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo supervisorctl stop $PROGRAMS || true"
 
           echo "→ Setting up Python environment on remote (uv venv, deps, playwright)"
           ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo -u $SERVICE_USER -H bash -lc 'cd $REMOTE_DIR && ./scripts/setup_uv_env.sh --python-version $PY_VERSION --recreate'"
@@ -170,4 +162,41 @@ jobs:
           '"
 
           echo "→ Restarting supervisor programs"
-          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl start $RESOLVED_PROGRAMS && sudo supervisorctl status"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "PROGRAMS='$PROGRAMS' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          sudo supervisorctl reread
+          sudo supervisorctl update
+          sudo supervisorctl start $PROGRAMS || true
+
+          attempts=60
+          for ((i=1; i<=attempts; i++)); do
+            status_output="$(sudo supervisorctl status || true)"
+            all_running=true
+
+            for program in $PROGRAMS; do
+              matches="$(printf '%s\n' "$status_output" | awk -v p="$program" '$1 == p || index($1, p ":") == 1' || true)"
+              if [[ -z "$matches" ]]; then
+                all_running=false
+                break
+              fi
+              if ! printf '%s\n' "$matches" | awk '$2 == "RUNNING" {found=1} END {exit found ? 0 : 1}'; then
+                all_running=false
+                break
+              fi
+            done
+
+            if [[ "$all_running" == "true" ]]; then
+              printf '%s\n' "$status_output"
+              exit 0
+            fi
+
+            if [[ "$i" -eq "$attempts" ]]; then
+              echo "Supervisor programs did not all reach RUNNING within ${attempts}s" >&2
+              printf '%s\n' "$status_output"
+              exit 1
+            fi
+
+            sleep 1
+          done
+          REMOTE
