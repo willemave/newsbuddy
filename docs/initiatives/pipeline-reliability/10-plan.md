@@ -36,7 +36,7 @@ Recent incidents showed systemic reliability gaps:
 
 ### Deliverables
 
-- Update `scripts/deploy/push_app.sh` defaults so `news_app_workers_transcribe` is always part of managed programs.
+- Update the production GitHub deploy workflow defaults so `news_app_workers_transcribe` is always part of managed programs.
 - Add a strict post-deploy supervisor validation gate that fails deploy if:
   - required groups are missing, or
   - required groups are present but not `RUNNING`, or
@@ -121,7 +121,7 @@ Retryable when error indicates one of:
 
 ## Files Planned
 
-- `scripts/deploy/push_app.sh`
+- `.github/workflows/bare-metal-deploy.yml`
 - `scripts/watchdog_queue_recovery.py` (new)
 - `app/routers/admin.py`
 - `templates/admin_dashboard.html`

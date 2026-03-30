@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Lightweight helper to push local `.env.racknerd` to remote, then mirror to `.env`.
-# Defaults mirror push_app.sh.
+# This is env-sync only. Production app deploys are handled by GitHub Actions.
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # shellcheck source=/dev/null

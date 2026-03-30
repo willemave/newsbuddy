@@ -64,7 +64,7 @@ Ensure `/opt/news_app/.env` exists. In production the deploy copies `.env.rackne
 ## 4) Supervisor programs
 
 Create `/etc/supervisor/conf.d/news_app.conf` using the repo sample in
-[`supervisor.conf`](../../../supervisor.conf). The deploy scripts now install this file from the repo before `supervisorctl reread`.
+[`supervisor.conf`](../../../supervisor.conf). The GitHub deploy workflow installs this file from the repo before `supervisorctl reread`.
 
 Key programs:
 
@@ -129,7 +129,7 @@ sudo tail -n 100 -f \
 
 ## 5) Cron-managed schedulers
 
-The deploy workflow syncs the repo [`crontab`](../../../crontab) onto the
+The GitHub deploy workflow syncs the repo [`crontab`](../../../crontab) onto the
 `newsapp` user every deploy.
 
 Install manually if needed:
@@ -167,14 +167,14 @@ Twitter list scraper and enqueues per-user bookmark/timeline/list refresh tasks 
 
 SQLite defaults shipped in the repo:
 - `SQLITE_BUSY_TIMEOUT_MS=30000`
-- `SQLITE_ENABLE_WAL=false`
+- `SQLITE_ENABLE_WAL=true`
 - `SQLITE_WRITE_RETRY_ATTEMPTS=3`
 - `QUEUE_BACKPRESSURE_MAX_PENDING_CONTENT=150`
 - `QUEUE_BACKPRESSURE_MAX_PENDING_PROCESS_NEWS_ITEM=75`
 - `QUEUE_BACKPRESSURE_MAX_PENDING_GENERATE_NEWS_DIGEST=5`
 
-Leave `SQLITE_ENABLE_WAL=false` until the host SQLite runtime is on a fixed
-release for the current WAL advisory.
+Production should keep `SQLITE_ENABLE_WAL=true` so SQLite-backed queues use WAL
+mode when the runtime allows it.
 
 ## 6) GitHub Actions deploy behavior
 
@@ -185,6 +185,9 @@ The bare-metal deploy workflow:
 4. runs Alembic migrations
 5. syncs the repo `crontab`
 6. runs `supervisorctl reread`, `update`, `start`
+
+Do not use `scripts/deploy/push_app.sh` for production deploys. That local rsync
+helper is not part of the supported path; GitHub Actions is.
 
 The workflow restarts only programs listed in `DEPLOY_PROGRAMS`. That variable must include the
 image worker after this queue split. Minimum value:

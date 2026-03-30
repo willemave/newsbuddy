@@ -78,6 +78,12 @@ ruff format .           # Format
 alembic revision -m "description"  # New migration
 ```
 
+### Production Deploys
+
+- Production app deploys are handled by GitHub Actions via [`.github/workflows/bare-metal-deploy.yml`](.github/workflows/bare-metal-deploy.yml).
+- Do not use `scripts/deploy/push_app.sh` for production deploys.
+- `scripts/deploy/push_envs.sh` is env-sync only when you need to refresh remote secrets outside the normal deploy workflow.
+
 ## Built With
 
 Python 3.13 / FastAPI / SQLAlchemy 2 / pydantic-ai / SwiftUI / ElevenLabs / Tailwind CSS v4
