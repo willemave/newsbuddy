@@ -13,6 +13,7 @@ client/newsly/newsly.xcodeproj/project.xcworkspace/xcuserdata/willem.xcuserdatad
 news_app.db
 logs/
 logs_from_server/
+.tmp/
 .worktrees/
 
 static/*
@@ -40,6 +41,8 @@ logs/
 *.pyd
 
 build/
+.deriveddata/
+*.png
 
 # Mac/Linux system files
 .DS_Store
@@ -67,3 +70,4 @@ certs/
 
 # Generated eval/report artifacts
 outputs/
+test-results/
