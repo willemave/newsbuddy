@@ -11,6 +11,7 @@ import Combine
 @MainActor
 class PodcastDetailViewModel: ObservableObject {
     @Published var podcast: ContentDetail?
+    @Published var contentBody: ContentBody?
     @Published var podcastMetadata: PodcastMetadata?
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -28,6 +29,9 @@ class PodcastDetailViewModel: ObservableObject {
             if content.apiContentType == .podcast {
                 self.podcast = content
                 self.podcastMetadata = content.podcastMetadata
+                if content.bodyAvailable {
+                    self.contentBody = try? await contentService.fetchContentBody(id: id)
+                }
             } else {
                 errorMessage = "Content is not a podcast"
             }
@@ -118,7 +122,7 @@ class PodcastDetailViewModel: ObservableObject {
     }
     
     var transcript: String? {
-        podcastMetadata?.transcript
+        contentBody?.text ?? podcastMetadata?.transcript
     }
     
     var hasTranscript: Bool {

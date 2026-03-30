@@ -11,6 +11,7 @@ import Combine
 @MainActor
 class ArticleDetailViewModel: ObservableObject {
     @Published var article: ContentDetail?
+    @Published var contentBody: ContentBody?
     @Published var articleMetadata: ArticleMetadata?
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -27,6 +28,9 @@ class ArticleDetailViewModel: ObservableObject {
             if content.apiContentType == .article {
                 self.article = content
                 self.articleMetadata = content.articleMetadata
+                if content.bodyAvailable {
+                    self.contentBody = try? await contentService.fetchContentBody(id: id)
+                }
             } else {
                 errorMessage = "Content is not an article"
             }
@@ -94,7 +98,7 @@ class ArticleDetailViewModel: ObservableObject {
     }
     
     var contentMarkdown: String? {
-        articleMetadata?.fullMarkdown ?? articleMetadata?.content
+        contentBody?.text ?? articleMetadata?.fullMarkdown ?? articleMetadata?.content
     }
     
     var structuredSummary: StructuredSummary? {

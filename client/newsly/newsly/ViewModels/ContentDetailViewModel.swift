@@ -21,6 +21,7 @@ enum ShareContentOption {
 @MainActor
 class ContentDetailViewModel: ObservableObject {
     @Published var content: ContentDetail?
+    @Published var contentBody: ContentBody?
     @Published var isLoading = false
     @Published var errorMessage: String?
     // Indicates if the item was already marked as read when it was fetched
@@ -44,6 +45,7 @@ class ContentDetailViewModel: ObservableObject {
         self.contentId = newId
         // Clear previous content to show loading state
         self.content = nil
+        self.contentBody = nil
     }
     
     func loadContent() async {
@@ -55,7 +57,16 @@ class ContentDetailViewModel: ObservableObject {
             logger.debug("[ContentDetail] Fetching content detail | contentId=\(self.contentId)")
             let fetched = try await contentService.fetchContentDetail(id: contentId)
             content = fetched
+            contentBody = nil
             logger.info("[ContentDetail] Content fetched | contentId=\(self.contentId) type=\(fetched.contentType, privacy: .public) isRead=\(fetched.isRead) title=\(fetched.displayTitle, privacy: .public)")
+
+            if fetched.bodyAvailable {
+                do {
+                    contentBody = try await contentService.fetchContentBody(id: fetched.id)
+                } catch {
+                    logger.error("[ContentDetail] Failed to fetch content body | contentId=\(self.contentId) error=\(error.localizedDescription)")
+                }
+            }
 
             // Capture read state as returned by the server BEFORE any auto-marking
             wasAlreadyReadWhenLoaded = fetched.isRead
@@ -422,7 +433,10 @@ class ContentDetailViewModel: ObservableObject {
         }
 
         // Full content / transcript
-        if content.apiContentType == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
+        if let contentBody {
+            fullText += content.apiContentType == .podcast ? "## Full Transcript\n\n" : "## Full Article\n\n"
+            fullText += contentBody.text
+        } else if content.apiContentType == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
             fullText += "## Full Transcript\n\n" + transcript
         } else if let fullMarkdown = content.fullMarkdown {
             fullText += (content.apiContentType == .podcast ? "## Transcript\n\n" : "## Full Article\n\n")

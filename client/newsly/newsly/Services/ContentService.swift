@@ -227,6 +227,12 @@ class ContentService {
         return try await client.request(endpoint)
     }
 
+    func fetchContentBody(id: Int, variant: String = "source") async throws -> ContentBody {
+        let endpoint = APIRequestDescriptor<ContentBody>(path: APIEndpoints.contentBody(id: id))
+        let queryItems = [URLQueryItem(name: "variant", value: variant)]
+        return try await client.request(endpoint, queryItems: queryItems)
+    }
+
     func fetchContentDiscussion(id: Int) async throws -> ContentDiscussion {
         let endpoint = APIRequestDescriptor<ContentDiscussion>(
             path: APIEndpoints.contentDiscussion(id: id)

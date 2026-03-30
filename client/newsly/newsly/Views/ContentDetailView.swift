@@ -254,7 +254,18 @@ struct ContentDetailView: View {
                         }
 
                         // Full Content Section (collapsible, modern style)
-                        if content.contentTypeEnum == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
+                        if let bodyText = viewModel.contentBody?.text {
+                            modernExpandableSection(
+                                title: content.contentTypeEnum == .podcast ? "Transcript" : "Full Article",
+                                icon: content.contentTypeEnum == .podcast ? "text.alignleft" : "doc.text",
+                                isExpanded: $isTranscriptExpanded
+                            ) {
+                                Markdown(bodyText)
+                                    .markdownTheme(.gitHub)
+                            }
+                            .padding(.horizontal, DetailDesign.horizontalPadding)
+                            .padding(.top, DetailDesign.sectionSpacing)
+                        } else if content.contentTypeEnum == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
                             modernExpandableSection(
                                 title: "Transcript",
                                 icon: "text.alignleft",

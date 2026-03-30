@@ -35,6 +35,9 @@ struct ContentDetail: Codable, Identifiable {
     let quotes: [Quote]
     let topics: [String]
     let fullMarkdown: String?
+    let bodyAvailable: Bool
+    let bodyKind: String?
+    let bodyFormat: String?
     let imageUrl: String?
     let thumbnailUrl: String?
     let detectedFeed: DetectedFeed?
@@ -68,6 +71,9 @@ struct ContentDetail: Codable, Identifiable {
         case quotes
         case topics
         case fullMarkdown = "full_markdown"
+        case bodyAvailable = "body_available"
+        case bodyKind = "body_kind"
+        case bodyFormat = "body_format"
         case imageUrl = "image_url"
         case thumbnailUrl = "thumbnail_url"
         case detectedFeed = "detected_feed"
