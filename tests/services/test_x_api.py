@@ -1,6 +1,7 @@
 """Tests for X API helpers."""
 
 from app.services.x_api import (
+    _extract_linked_tweet_ids,
     _extract_next_token,
     _map_list,
     _map_tweet,
@@ -43,9 +44,49 @@ def test_map_tweet_includes_reply_and_reference_metadata() -> None:
 
     assert tweet is not None
     assert tweet.author_username == "willem"
+    assert tweet.author_id == "u1"
     assert tweet.in_reply_to_user_id == "u2"
     assert tweet.referenced_tweet_types == ["retweeted"]
+    assert tweet.linked_tweet_ids == ["99"]
     assert tweet.like_count == 10
+
+
+def test_extract_linked_tweet_ids_includes_status_urls_from_entities() -> None:
+    """Entity URLs pointing at X posts should be treated as linked tweets."""
+    linked_ids = _extract_linked_tweet_ids(
+        {"referenced_tweets": [{"type": "quoted", "id": "99"}]},
+        {
+            "urls": [
+                {"expanded_url": "https://x.com/alice/status/123"},
+                {"expanded_url": "https://twitter.com/bob/status/456"},
+                {"expanded_url": "https://example.com/story"},
+            ]
+        },
+    )
+
+    assert linked_ids == ["99", "123", "456"]
+
+
+def test_map_tweet_keeps_external_article_urls_and_linked_tweet_ids() -> None:
+    """Non-X URLs should remain scrape targets while linked statuses are recorded separately."""
+    tweet = _map_tweet(
+        {
+            "id": "123",
+            "text": "Read this",
+            "author_id": "u1",
+            "entities": {
+                "urls": [
+                    {"expanded_url": "https://example.com/story"},
+                    {"expanded_url": "https://x.com/alice/status/456"},
+                ]
+            },
+        },
+        {"u1": {"id": "u1", "username": "willem", "name": "Willem"}},
+    )
+
+    assert tweet is not None
+    assert tweet.external_urls == ["https://example.com/story"]
+    assert tweet.linked_tweet_ids == ["456"]
 
 
 def test_map_tweet_extracts_native_article_content() -> None:

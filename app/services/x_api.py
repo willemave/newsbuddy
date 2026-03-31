@@ -26,6 +26,7 @@ X_TWEET_FIELDS = (
     "in_reply_to_user_id,referenced_tweets,text,article,note_tweet"
 )
 X_USER_FIELDS = "name,username"
+X_TWEET_EXPANSIONS = "author_id,referenced_tweets.id,referenced_tweets.id.author_id"
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class XTweet:
 
     id: str
     text: str
+    author_id: str | None = None
     author_username: str | None = None
     author_name: str | None = None
     created_at: str | None = None
@@ -56,6 +58,7 @@ class XTweet:
     article_text: str | None = None
     note_tweet_text: str | None = None
     external_urls: list[str] = field(default_factory=list)
+    linked_tweet_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -216,7 +219,7 @@ def fetch_tweet_by_id(
             access_token=access_token,
             allow_app_bearer=True,
             params={
-                "expansions": "author_id",
+                "expansions": X_TWEET_EXPANSIONS,
                 "tweet.fields": X_TWEET_FIELDS,
                 "user.fields": X_USER_FIELDS,
             },
@@ -242,6 +245,54 @@ def fetch_tweet_by_url(*, url: str, access_token: str | None = None) -> XTweetFe
     if not tweet_id:
         return XTweetFetchResult(success=False, error="Invalid tweet URL")
     return fetch_tweet_by_id(tweet_id=tweet_id, access_token=access_token)
+
+
+def fetch_tweets_by_ids(
+    *,
+    tweet_ids: list[str],
+    access_token: str | None = None,
+) -> list[XTweet]:
+    """Fetch multiple tweets by id while preserving request order."""
+    cleaned_ids: list[str] = []
+    seen: set[str] = set()
+    for tweet_id in tweet_ids:
+        cleaned = tweet_id.strip()
+        if not cleaned.isdigit() or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        cleaned_ids.append(cleaned)
+
+    if not cleaned_ids:
+        return []
+
+    payload = _request_json(
+        "GET",
+        f"{X_API_BASE}/tweets",
+        access_token=access_token,
+        allow_app_bearer=True,
+        params={
+            "ids": ",".join(cleaned_ids),
+            "expansions": X_TWEET_EXPANSIONS,
+            "tweet.fields": X_TWEET_FIELDS,
+            "user.fields": X_USER_FIELDS,
+        },
+    )
+
+    data = payload.get("data")
+    includes = payload.get("includes") if isinstance(payload.get("includes"), dict) else {}
+    users = includes.get("users") if isinstance(includes, dict) else []
+    lookup = _user_lookup(users)
+
+    mapped_by_id: dict[str, XTweet] = {}
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            mapped = _map_tweet(item, lookup)
+            if mapped:
+                mapped_by_id[mapped.id] = mapped
+
+    return [mapped_by_id[tweet_id] for tweet_id in cleaned_ids if tweet_id in mapped_by_id]
 
 
 def build_tweet_processing_text(tweet: XTweet) -> str:
@@ -347,6 +398,68 @@ def fetch_list_tweets(
 
     return _fetch_tweets_page(
         url=f"{X_API_BASE}/lists/{cleaned}/tweets",
+        access_token=access_token,
+        allow_app_bearer=True,
+        params=params,
+    )
+
+
+def fetch_user_tweets(
+    *,
+    user_id: str,
+    access_token: str | None = None,
+    pagination_token: str | None = None,
+    max_results: int = 100,
+    exclude: list[str] | None = None,
+) -> XTweetsPage:
+    """Fetch one page of tweets for a user."""
+    cleaned = user_id.strip()
+    if not cleaned:
+        raise ValueError("User id is required")
+    clamped = max(5, min(max_results, 100))
+    params: dict[str, Any] = {
+        "max_results": clamped,
+        "expansions": X_TWEET_EXPANSIONS,
+        "tweet.fields": X_TWEET_FIELDS,
+        "user.fields": X_USER_FIELDS,
+    }
+    if pagination_token:
+        params["pagination_token"] = pagination_token
+    if exclude:
+        params["exclude"] = ",".join(value for value in exclude if value)
+
+    return _fetch_tweets_page(
+        url=f"{X_API_BASE}/users/{cleaned}/tweets",
+        access_token=access_token,
+        allow_app_bearer=True,
+        params=params,
+    )
+
+
+def search_recent_tweets(
+    *,
+    query: str,
+    access_token: str | None = None,
+    next_token: str | None = None,
+    max_results: int = 100,
+) -> XTweetsPage:
+    """Search recent tweets."""
+    cleaned_query = query.strip()
+    if not cleaned_query:
+        raise ValueError("Search query is required")
+    clamped = max(10, min(max_results, 100))
+    params: dict[str, Any] = {
+        "query": cleaned_query,
+        "max_results": clamped,
+        "expansions": X_TWEET_EXPANSIONS,
+        "tweet.fields": X_TWEET_FIELDS,
+        "user.fields": X_USER_FIELDS,
+    }
+    if next_token:
+        params["next_token"] = next_token
+
+    return _fetch_tweets_page(
+        url=f"{X_API_BASE}/tweets/search/recent",
         access_token=access_token,
         allow_app_bearer=True,
         params=params,
@@ -652,6 +765,7 @@ def _map_tweet(tweet_data: dict[str, Any], users_by_id: dict[str, dict[str, Any]
     return XTweet(
         id=tweet_id,
         text=text,
+        author_id=author_id,
         author_username=username,
         author_name=name,
         created_at=_optional_string(tweet_data.get("created_at")),
@@ -665,6 +779,7 @@ def _map_tweet(tweet_data: dict[str, Any], users_by_id: dict[str, dict[str, Any]
         article_text=article_text,
         note_tweet_text=note_tweet_text,
         external_urls=_extract_external_urls(entities),
+        linked_tweet_ids=_extract_linked_tweet_ids(tweet_data, entities),
     )
 
 
@@ -700,6 +815,22 @@ def _referenced_tweet_types(raw_references: Any) -> list[str]:
     return values
 
 
+def _referenced_tweet_ids(raw_references: Any) -> list[str]:
+    if not isinstance(raw_references, list):
+        return []
+    seen: set[str] = set()
+    values: list[str] = []
+    for reference in raw_references:
+        if not isinstance(reference, dict):
+            continue
+        tweet_id = _optional_string(reference.get("id"))
+        if not tweet_id or not tweet_id.isdigit() or tweet_id in seen:
+            continue
+        seen.add(tweet_id)
+        values.append(tweet_id)
+    return values
+
+
 def _extract_next_token(meta: Any) -> str | None:
     if not isinstance(meta, dict):
         return None
@@ -725,6 +856,35 @@ def _extract_external_urls(entities: dict[str, Any]) -> list[str]:
         seen.add(normalized)
         urls.append(normalized)
     return urls
+
+
+def _extract_linked_tweet_ids(tweet_data: dict[str, Any], entities: dict[str, Any]) -> list[str]:
+    seen: set[str] = set()
+    linked_ids: list[str] = []
+
+    for tweet_id in _referenced_tweet_ids(tweet_data.get("referenced_tweets")):
+        if tweet_id in seen:
+            continue
+        seen.add(tweet_id)
+        linked_ids.append(tweet_id)
+
+    raw_urls = entities.get("urls")
+    if not isinstance(raw_urls, list):
+        return linked_ids
+
+    for item in raw_urls:
+        if not isinstance(item, dict):
+            continue
+        raw_url = item.get("expanded_url") or item.get("unwound_url") or item.get("url")
+        if not isinstance(raw_url, str):
+            continue
+        tweet_id = extract_tweet_id(raw_url)
+        if not tweet_id or tweet_id in seen:
+            continue
+        seen.add(tweet_id)
+        linked_ids.append(tweet_id)
+
+    return linked_ids
 
 
 def _normalize_external_url(raw_url: str) -> str | None:

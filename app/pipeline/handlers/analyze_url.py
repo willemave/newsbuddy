@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
-
-from sqlalchemy.exc import IntegrityError
 
 from app.constants import (
     DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
     SELF_SUBMISSION_SOURCE,
 )
 from app.core.logging import get_logger
-from app.models.metadata import ContentClassification, ContentStatus, ContentType
+from app.models.metadata import ContentStatus, ContentType
 from app.models.metadata_state import normalize_metadata_shape, update_processing_state
 from app.models.schema import Content, ProcessingTask
 from app.pipeline.task_context import TaskContext
@@ -40,7 +38,14 @@ from app.services.url_detection import (
     infer_content_type_and_platform,
     should_use_llm_analysis,
 )
-from app.services.x_api import build_tweet_processing_text, fetch_tweet_by_id
+from app.services.x_api import (
+    XTweet,
+    build_tweet_processing_text,
+    fetch_tweet_by_id,
+    fetch_tweets_by_ids,
+    fetch_user_tweets,
+    search_recent_tweets,
+)
 from app.services.x_integration import get_x_user_access_token
 
 logger = get_logger(__name__)
@@ -63,6 +68,16 @@ def _build_thread_text(tweet_texts: list[str]) -> str:
     """Join tweet/thread text into a single body."""
     cleaned = [text.strip() for text in tweet_texts if isinstance(text, str) and text.strip()]
     return "\n\n".join(cleaned)
+
+
+def _parse_x_created_at(value: str | None) -> datetime | None:
+    """Parse X API timestamps into timezone-aware datetimes."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 def _is_nonfatal_tweet_lookup_error(error_message: str) -> bool:
@@ -88,6 +103,18 @@ class FlowOutcome:
     success: bool
     error_message: str | None = None
     retryable: bool = True
+
+
+@dataclass(frozen=True)
+class TweetArticleResolution:
+    """Resolved article target and thread context for an X share."""
+
+    selected_article_url: str | None
+    resolution_source: str
+    resolution_tweet_id: str
+    thread_text: str
+    linked_tweet_ids: list[str]
+    thread_lookup_status: str
 
 
 class FeedSubscriptionFlow:
@@ -290,6 +317,9 @@ class FeedSubscriptionFlow:
 class TwitterShareFlow:
     """Handle tweet URL fanout and metadata enrichment."""
 
+    _THREAD_PAGE_LIMIT = 10
+    _THREAD_TWEET_LIMIT = 1000
+
     def _ensure_existing_article_visible(
         self,
         db,
@@ -311,6 +341,207 @@ class TwitterShareFlow:
         if status_created:
             enqueue_visible_long_form_image_if_needed(db, existing)
 
+    def _normalize_candidate_urls(self, urls: list[str], *, content_id: int) -> list[str]:
+        normalized_urls: list[str] = []
+        seen: set[str] = set()
+        for raw_url in urls:
+            try:
+                normalized = normalize_url(raw_url)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Skipping invalid tweet external URL: %s",
+                    raw_url,
+                    extra={
+                        "component": "twitter_share",
+                        "operation": "normalize_external_url",
+                        "item_id": content_id,
+                    },
+                )
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            normalized_urls.append(normalized)
+        return normalized_urls
+
+    def _build_same_author_thread(self, root_tweet: XTweet, tweets: list[XTweet]) -> list[XTweet]:
+        by_id: dict[str, XTweet] = {root_tweet.id: root_tweet}
+        for tweet in tweets:
+            if tweet.id == root_tweet.id:
+                continue
+            if tweet.author_id and root_tweet.author_id and tweet.author_id != root_tweet.author_id:
+                continue
+            if tweet.conversation_id != root_tweet.conversation_id:
+                continue
+            by_id[tweet.id] = tweet
+
+        def _sort_key(tweet: XTweet) -> tuple[datetime, str]:
+            created_at = _parse_x_created_at(tweet.created_at) or datetime.min.replace(tzinfo=UTC)
+            return created_at, tweet.id
+
+        return sorted(by_id.values(), key=_sort_key)
+
+    def _resolve_from_thread(
+        self,
+        *,
+        root_tweet: XTweet,
+        access_token: str | None,
+    ) -> tuple[str | None, str, str, list[XTweet]]:
+        if not root_tweet.author_id or not root_tweet.conversation_id:
+            return None, "unavailable", root_tweet.id, [root_tweet]
+
+        cutoff = datetime.now(UTC) - timedelta(days=7)
+        root_created_at = _parse_x_created_at(root_tweet.created_at)
+        can_use_recent_search = bool(
+            root_created_at and root_created_at >= cutoff and root_tweet.author_username
+        )
+        collected: list[XTweet] = [root_tweet]
+
+        if can_use_recent_search:
+            query = (
+                f"conversation_id:{root_tweet.conversation_id} "
+                f"from:{root_tweet.author_username}"
+            )
+            try:
+                page = search_recent_tweets(query=query, access_token=access_token, max_results=100)
+                collected.extend(page.tweets)
+                thread_tweets = self._build_same_author_thread(root_tweet, collected)
+                for tweet in thread_tweets:
+                    normalized_urls = self._normalize_candidate_urls(
+                        tweet.external_urls,
+                        content_id=0,
+                    )
+                    if normalized_urls:
+                        return normalized_urls[0], "found", tweet.id, thread_tweets
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Recent search thread lookup failed for tweet %s",
+                    root_tweet.id,
+                    extra={
+                        "component": "twitter_share",
+                        "operation": "recent_search_thread_lookup",
+                    },
+                )
+
+        scanned = len([tweet for tweet in collected if tweet.id != root_tweet.id])
+        pages = 0
+        pagination_token: str | None = None
+        while pages < self._THREAD_PAGE_LIMIT and scanned < self._THREAD_TWEET_LIMIT:
+            page = fetch_user_tweets(
+                user_id=root_tweet.author_id,
+                access_token=access_token,
+                pagination_token=pagination_token,
+                max_results=min(100, self._THREAD_TWEET_LIMIT - scanned),
+            )
+            pages += 1
+            scanned += len(page.tweets)
+            collected.extend(page.tweets)
+            thread_tweets = self._build_same_author_thread(root_tweet, collected)
+            for tweet in thread_tweets:
+                normalized_urls = self._normalize_candidate_urls(
+                    tweet.external_urls,
+                    content_id=0,
+                )
+                if normalized_urls:
+                    return normalized_urls[0], "found", tweet.id, thread_tweets
+            if not page.next_token:
+                return None, "not_found", root_tweet.id, thread_tweets
+            pagination_token = page.next_token
+
+        thread_tweets = self._build_same_author_thread(root_tweet, collected)
+        return None, "capped", root_tweet.id, thread_tweets
+
+    def _resolve_article_target(
+        self,
+        *,
+        root_tweet: XTweet,
+        access_token: str | None,
+        content_id: int,
+    ) -> TweetArticleResolution:
+        root_urls = self._normalize_candidate_urls(root_tweet.external_urls, content_id=content_id)
+        linked_tweet_ids = list(root_tweet.linked_tweet_ids)
+        if root_urls:
+            return TweetArticleResolution(
+                selected_article_url=root_urls[0],
+                resolution_source="root_tweet",
+                resolution_tweet_id=root_tweet.id,
+                thread_text=_build_thread_text([build_tweet_processing_text(root_tweet)]),
+                linked_tweet_ids=linked_tweet_ids,
+                thread_lookup_status="not_needed",
+            )
+
+        if linked_tweet_ids:
+            try:
+                linked_tweets = fetch_tweets_by_ids(
+                    tweet_ids=linked_tweet_ids,
+                    access_token=access_token,
+                )
+                for linked_tweet in linked_tweets:
+                    linked_urls = self._normalize_candidate_urls(
+                        linked_tweet.external_urls,
+                        content_id=content_id,
+                    )
+                    if linked_urls:
+                        return TweetArticleResolution(
+                            selected_article_url=linked_urls[0],
+                            resolution_source="linked_tweet",
+                            resolution_tweet_id=linked_tweet.id,
+                            thread_text=_build_thread_text([build_tweet_processing_text(root_tweet)]),
+                            linked_tweet_ids=linked_tweet_ids,
+                            thread_lookup_status="not_needed",
+                        )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Linked tweet lookup failed for tweet %s",
+                    root_tweet.id,
+                    extra={
+                        "component": "twitter_share",
+                        "operation": "linked_tweet_lookup",
+                        "item_id": content_id,
+                    },
+                )
+
+        try:
+            selected_article_url, thread_lookup_status, resolution_tweet_id, thread_tweets = (
+                self._resolve_from_thread(root_tweet=root_tweet, access_token=access_token)
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Thread lookup failed for tweet %s",
+                root_tweet.id,
+                extra={
+                    "component": "twitter_share",
+                    "operation": "thread_lookup",
+                    "item_id": content_id,
+                },
+            )
+            selected_article_url = None
+            thread_lookup_status = "unavailable"
+            resolution_tweet_id = root_tweet.id
+            thread_tweets = [root_tweet]
+        thread_text = _build_thread_text(
+            [build_tweet_processing_text(tweet) for tweet in thread_tweets]
+        )
+        if selected_article_url:
+            return TweetArticleResolution(
+                selected_article_url=selected_article_url,
+                resolution_source="thread_reply",
+                resolution_tweet_id=resolution_tweet_id,
+                thread_text=thread_text,
+                linked_tweet_ids=linked_tweet_ids,
+                thread_lookup_status=thread_lookup_status,
+            )
+
+        return TweetArticleResolution(
+            selected_article_url=None,
+            resolution_source="tweet_only",
+            resolution_tweet_id=root_tweet.id,
+            thread_text=thread_text
+            or _build_thread_text([build_tweet_processing_text(root_tweet)]),
+            linked_tweet_ids=linked_tweet_ids,
+            thread_lookup_status=thread_lookup_status,
+        )
+
     def run(
         self,
         db,
@@ -319,7 +550,7 @@ class TwitterShareFlow:
         url: str,
         task_queue_gateway,
     ) -> FlowOutcome:
-        """Process tweet URLs and enqueue follow-up tasks."""
+        """Process tweet URLs and enrich the original content row."""
         base_metadata = normalize_metadata_shape(metadata)
         metadata = dict(base_metadata)
         tweet_id = extract_tweet_id(str(url))
@@ -389,22 +620,13 @@ class TwitterShareFlow:
             return FlowOutcome(handled=True, success=False, error_message=error_message)
 
         tweet = fetch_result.tweet
-        thread_text = _build_thread_text([tweet.text])
         processing_text = build_tweet_processing_text(tweet)
-        external_urls: list[str] = []
-        for raw_url in tweet.external_urls:
-            try:
-                external_urls.append(normalize_url(raw_url))
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Skipping invalid tweet external URL: %s",
-                    raw_url,
-                    extra={
-                        "component": "twitter_share",
-                        "operation": "normalize_external_url",
-                        "item_id": content.id,
-                    },
-                )
+        resolution = self._resolve_article_target(
+            root_tweet=tweet,
+            access_token=access_token,
+            content_id=content.id,
+        )
+        external_urls = self._normalize_candidate_urls(tweet.external_urls, content_id=content.id)
 
         metadata.update(
             {
@@ -419,9 +641,13 @@ class TwitterShareFlow:
                 "tweet_retweet_count": tweet.retweet_count,
                 "tweet_reply_count": tweet.reply_count,
                 "tweet_text": tweet.text,
-                "tweet_thread_text": thread_text,
+                "tweet_thread_text": resolution.thread_text,
                 "tweet_processing_text": processing_text,
                 "tweet_external_urls": external_urls,
+                "tweet_linked_tweet_ids": resolution.linked_tweet_ids,
+                "tweet_resolution_source": resolution.resolution_source,
+                "tweet_resolution_tweet_id": resolution.resolution_tweet_id,
+                "tweet_thread_lookup_status": resolution.thread_lookup_status,
             }
         )
         if tweet.article_title:
@@ -438,9 +664,7 @@ class TwitterShareFlow:
         if not content.source_url:
             content.source_url = tweet_url
 
-        submitted_via = metadata.get("submitted_via") or "share_sheet"
-        fanout_urls: list[str] = []
-        primary_external_url = external_urls[0] if external_urls else None
+        primary_external_url = resolution.selected_article_url
         existing_primary_article: Content | None = None
         if primary_external_url:
             existing_primary_article = (
@@ -462,10 +686,8 @@ class TwitterShareFlow:
                 content.status = ContentStatus.SKIPPED.value
                 content.error_message = "Canonical URL conflicts with existing content"
                 content.processed_at = datetime.now(UTC)
-                fanout_urls = external_urls[1:]
             else:
                 content.url = primary_external_url
-                fanout_urls = external_urls[1:]
         else:
             content.url = tweet_url
             if not tweet.article_text and not tweet.note_tweet_text:
@@ -478,62 +700,6 @@ class TwitterShareFlow:
             updated_metadata=metadata,
         )
         db.commit()
-
-        for normalized_url in fanout_urls:
-            existing = (
-                db.query(Content)
-                .filter(
-                    Content.url == normalized_url,
-                    Content.content_type == ContentType.ARTICLE.value,
-                )
-                .first()
-            )
-            if existing:
-                self._ensure_existing_article_visible(
-                    db,
-                    existing=existing,
-                    submitter_id=submitter_id if isinstance(submitter_id, int) else None,
-                )
-                continue
-
-            fanout_metadata = dict(metadata)
-            fanout_metadata["source"] = SELF_SUBMISSION_SOURCE
-            if submitter_id:
-                fanout_metadata["submitted_by_user_id"] = submitter_id
-            fanout_metadata["submitted_via"] = f"{submitted_via}_tweet_fanout"
-
-            new_content = Content(
-                url=normalized_url,
-                source_url=tweet_url,
-                content_type=ContentType.ARTICLE.value,
-                title=None,
-                source=SELF_SUBMISSION_SOURCE,
-                platform="twitter",
-                is_aggregate=False,
-                status=ContentStatus.NEW.value,
-                classification=ContentClassification.TO_READ.value,
-                content_metadata=fanout_metadata,
-            )
-            db.add(new_content)
-            try:
-                db.commit()
-            except IntegrityError:
-                db.rollback()
-                continue
-            db.refresh(new_content)
-
-            if submitter_id:
-                status_created = ensure_inbox_status(
-                    db,
-                    submitter_id,
-                    new_content.id,
-                    content_type=new_content.content_type,
-                )
-                db.commit()
-                if status_created:
-                    enqueue_visible_long_form_image_if_needed(db, new_content)
-
-            task_queue_gateway.enqueue(TaskType.ANALYZE_URL, content_id=new_content.id)
 
         logger.info(
             "Twitter share processed for content %s (external_urls=%s)",

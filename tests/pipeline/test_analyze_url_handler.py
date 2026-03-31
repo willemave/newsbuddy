@@ -13,7 +13,7 @@ from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
 from app.services.queue import TaskType
-from app.services.x_api import XTweet, XTweetFetchResult
+from app.services.x_api import XTweet, XTweetFetchResult, XTweetsPage
 
 
 def _build_context(db_session, queue_gateway: Mock) -> TaskContext:
@@ -574,3 +574,442 @@ def test_tweet_bookmark_records_native_x_article_metadata(
         TaskType.PROCESS_CONTENT,
         content_id=bookmark_shell.id,
     )
+
+
+def test_tweet_share_uses_root_article_url_without_fanout(db_session, monkeypatch) -> None:
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_sheet",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(
+            success=True,
+            tweet=XTweet(
+                id="123456789",
+                text="Root tweet body",
+                author_id="u1",
+                author_username="willem",
+                author_name="Willem",
+                created_at="2026-03-29T10:00:00Z",
+                conversation_id="123456789",
+                external_urls=["https://example.com/root-story", "https://example.com/extra-story"],
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    context = _build_context(db_session, queue_gateway=queue_gateway)
+    task = TaskEnvelope(
+        id=107,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=content.id,
+        payload={"content_id": content.id},
+    )
+
+    result = AnalyzeUrlHandler().handle(task, context)
+
+    db_session.refresh(content)
+
+    assert result.success is True
+    assert content.url == "https://example.com/root-story"
+    assert content.content_metadata["tweet_text"] == "Root tweet body"
+    assert content.content_metadata["tweet_resolution_source"] == "root_tweet"
+    assert content.content_metadata["tweet_resolution_tweet_id"] == "123456789"
+    assert content.content_metadata["tweet_thread_lookup_status"] == "not_needed"
+    assert db_session.query(Content).count() == 1
+    queue_gateway.enqueue.assert_called_once_with(TaskType.PROCESS_CONTENT, content_id=content.id)
+
+
+def test_tweet_share_resolves_article_from_linked_tweet(db_session, monkeypatch) -> None:
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_sheet",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    root_tweet = XTweet(
+        id="123456789",
+        text="Root tweet body",
+        author_id="u1",
+        author_username="willem",
+        author_name="Willem",
+        created_at="2026-03-29T10:00:00Z",
+        conversation_id="123456789",
+        linked_tweet_ids=["987654321"],
+        external_urls=[],
+    )
+    linked_tweet = XTweet(
+        id="987654321",
+        text="Quoted post",
+        author_id="u2",
+        author_username="alice",
+        author_name="Alice",
+        created_at="2026-03-29T10:01:00Z",
+        conversation_id="987654321",
+        external_urls=["https://example.com/linked-story"],
+    )
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        lambda **_kwargs: [linked_tweet],
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    context = _build_context(db_session, queue_gateway=queue_gateway)
+    task = TaskEnvelope(
+        id=108,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=content.id,
+        payload={"content_id": content.id},
+    )
+
+    result = AnalyzeUrlHandler().handle(task, context)
+
+    db_session.refresh(content)
+
+    assert result.success is True
+    assert content.url == "https://example.com/linked-story"
+    assert content.content_metadata["tweet_text"] == "Root tweet body"
+    assert content.content_metadata["tweet_linked_tweet_ids"] == ["987654321"]
+    assert content.content_metadata["tweet_resolution_source"] == "linked_tweet"
+    assert content.content_metadata["tweet_resolution_tweet_id"] == "987654321"
+    assert content.content_metadata["tweet_thread_lookup_status"] == "not_needed"
+
+
+def test_tweet_share_resolves_article_from_same_author_thread_reply(
+    db_session,
+    monkeypatch,
+) -> None:
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_sheet",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    root_tweet = XTweet(
+        id="123456789",
+        text="Thread root",
+        author_id="u1",
+        author_username="willem",
+        author_name="Willem",
+        created_at="2026-03-29T10:00:00Z",
+        conversation_id="123456789",
+        external_urls=[],
+    )
+    reply_tweet = XTweet(
+        id="123456790",
+        text="Here is the link",
+        author_id="u1",
+        author_username="willem",
+        author_name="Willem",
+        created_at="2026-03-29T10:01:00Z",
+        conversation_id="123456789",
+        external_urls=["https://example.com/thread-story"],
+    )
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.search_recent_tweets",
+        lambda **_kwargs: XTweetsPage(tweets=[root_tweet, reply_tweet], next_token=None),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_user_tweets",
+        lambda **_kwargs: XTweetsPage(tweets=[root_tweet], next_token=None),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    context = _build_context(db_session, queue_gateway=queue_gateway)
+    task = TaskEnvelope(
+        id=109,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=content.id,
+        payload={"content_id": content.id},
+    )
+
+    result = AnalyzeUrlHandler().handle(task, context)
+
+    db_session.refresh(content)
+
+    assert result.success is True
+    assert content.url == "https://example.com/thread-story"
+    assert content.content_metadata["tweet_resolution_source"] == "thread_reply"
+    assert content.content_metadata["tweet_resolution_tweet_id"] == "123456790"
+    assert content.content_metadata["tweet_thread_lookup_status"] == "found"
+    assert content.content_metadata["tweet_thread_text"] == "Thread root\n\nHere is the link"
+
+
+def test_tweet_share_falls_back_to_tweet_only_when_no_article_found(
+    db_session,
+    monkeypatch,
+) -> None:
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_sheet",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    root_tweet = XTweet(
+        id="123456789",
+        text="Tweet only",
+        author_id="u1",
+        author_username="willem",
+        author_name="Willem",
+        created_at="2026-03-29T10:00:00Z",
+        conversation_id="123456789",
+        external_urls=[],
+    )
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.search_recent_tweets",
+        lambda **_kwargs: XTweetsPage(tweets=[root_tweet], next_token=None),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_user_tweets",
+        lambda **_kwargs: XTweetsPage(tweets=[root_tweet], next_token=None),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    context = _build_context(db_session, queue_gateway=queue_gateway)
+    task = TaskEnvelope(
+        id=110,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=content.id,
+        payload={"content_id": content.id},
+    )
+
+    result = AnalyzeUrlHandler().handle(task, context)
+
+    db_session.refresh(content)
+
+    assert result.success is True
+    assert content.url == "https://x.com/i/status/123456789"
+    assert content.content_metadata["tweet_resolution_source"] == "tweet_only"
+    assert content.content_metadata["tweet_thread_lookup_status"] == "not_found"
+    assert content.content_metadata["tweet_only"] is True
+
+
+def test_tweet_share_uses_user_timeline_for_older_threads(db_session, monkeypatch) -> None:
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_sheet",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    root_tweet = XTweet(
+        id="123456789",
+        text="Old thread root",
+        author_id="u1",
+        author_username="willem",
+        author_name="Willem",
+        created_at="2026-03-01T10:00:00Z",
+        conversation_id="123456789",
+        external_urls=[],
+    )
+    reply_tweet = XTweet(
+        id="123456790",
+        text="Old thread reply",
+        author_id="u1",
+        author_username="willem",
+        author_name="Willem",
+        created_at="2026-03-01T10:02:00Z",
+        conversation_id="123456789",
+        external_urls=["https://example.com/old-thread-story"],
+    )
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_user_tweets",
+        lambda **_kwargs: XTweetsPage(tweets=[reply_tweet], next_token=None),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    context = _build_context(db_session, queue_gateway=queue_gateway)
+    task = TaskEnvelope(
+        id=111,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=content.id,
+        payload={"content_id": content.id},
+    )
+
+    result = AnalyzeUrlHandler().handle(task, context)
+
+    db_session.refresh(content)
+
+    assert result.success is True
+    assert content.url == "https://example.com/old-thread-story"
+    assert content.content_metadata["tweet_resolution_source"] == "thread_reply"
+    assert content.content_metadata["tweet_resolution_tweet_id"] == "123456790"
+    assert content.content_metadata["tweet_thread_lookup_status"] == "found"
+
+
+def test_tweet_share_records_capped_thread_lookup_and_degrades_gracefully(
+    db_session,
+    monkeypatch,
+) -> None:
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_sheet",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    root_tweet = XTweet(
+        id="123456789",
+        text="Old thread root",
+        author_id="u1",
+        author_username="willem",
+        author_name="Willem",
+        created_at="2026-03-01T10:00:00Z",
+        conversation_id="123456789",
+        external_urls=[],
+    )
+    call_counter = {"count": 0}
+
+    def _fetch_user_tweets(**_kwargs):
+        call_counter["count"] += 1
+        return XTweetsPage(tweets=[], next_token="next")
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_user_tweets",
+        _fetch_user_tweets,
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    context = _build_context(db_session, queue_gateway=queue_gateway)
+    task = TaskEnvelope(
+        id=112,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=content.id,
+        payload={"content_id": content.id},
+    )
+
+    result = AnalyzeUrlHandler().handle(task, context)
+
+    db_session.refresh(content)
+
+    assert result.success is True
+    assert call_counter["count"] == 10
+    assert content.url == "https://x.com/i/status/123456789"
+    assert content.content_metadata["tweet_resolution_source"] == "tweet_only"
+    assert content.content_metadata["tweet_thread_lookup_status"] == "capped"
+    assert content.content_metadata["tweet_only"] is True
