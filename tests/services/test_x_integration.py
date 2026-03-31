@@ -1,6 +1,7 @@
 """Tests for X integration sync flows."""
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.exc import OperationalError
 
@@ -474,3 +475,85 @@ def test_upsert_x_digest_tweet_content_retries_sqlite_lock_without_dirtying_sess
     assert attempts["count"] == 2
     assert db_session.query(NewsItem).count() == 1
     assert queue_gateway.calls
+
+
+def test_sync_x_sources_skips_recent_scheduled_runs(db_session, test_user, monkeypatch):
+    """Scheduled sync should no-op when the last run is still within the cooldown window."""
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],
+    )
+    db_session.add(connection)
+    db_session.flush()
+    db_session.add(
+        UserIntegrationSyncState(
+            connection_id=connection.id,
+            last_status="success",
+            last_synced_at=(datetime.now(UTC) - timedelta(minutes=5)).replace(tzinfo=None),
+            sync_metadata={"timeline": {"last_synced_item_id": "123"}},
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(get_settings(), "x_sync_min_interval_minutes", 60)
+    ensure_token_mock = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("skip"))  # noqa: E731
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_valid_access_token",
+        ensure_token_mock,
+    )
+
+    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    assert summary.status == "skipped_recently"
+    assert summary.fetched == 0
+    assert summary.channels == {}
+
+
+def test_build_sync_metadata_payload_preserves_last_ids_when_run_is_empty() -> None:
+    """Empty channel runs should not clear stored X cursors."""
+    metadata = x_integration._build_sync_metadata_payload(
+        existing_sync_metadata={
+            "bookmarks": {"last_synced_item_id": "bookmark-1"},
+            "timeline": {"last_synced_item_id": "timeline-1"},
+            "lists": {
+                "last_synced_item_id": "list-1",
+                "list_states": {"55": {"name": "Semis", "last_synced_item_id": "201"}},
+            },
+        },
+        bookmark_summary=x_integration.XSyncChannelSummary(
+            status="success",
+            fetched=0,
+            accepted=0,
+            filtered_out=0,
+            errored=0,
+            created=0,
+            reused=0,
+            newest_item_id=None,
+        ),
+        timeline_summary=x_integration.XSyncChannelSummary(
+            status="success",
+            fetched=0,
+            accepted=0,
+            filtered_out=0,
+            errored=0,
+            created=0,
+            reused=0,
+            newest_item_id=None,
+        ),
+        lists_summary=x_integration.XSyncChannelSummary(
+            status="failed",
+            fetched=0,
+            accepted=0,
+            filtered_out=0,
+            errored=1,
+            created=0,
+            reused=0,
+            newest_item_id=None,
+        ),
+        list_state_updates={},
+    )
+
+    assert metadata["bookmarks"]["last_synced_item_id"] == "bookmark-1"
+    assert metadata["timeline"]["last_synced_item_id"] == "timeline-1"
+    assert metadata["lists"]["last_synced_item_id"] == "list-1"
+    assert metadata["lists"]["list_states"]["55"]["last_synced_item_id"] == "201"

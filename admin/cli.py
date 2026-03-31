@@ -83,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  admin health snapshot\n"
             "  admin logs list\n"
+            "  admin logs exceptions --limit 10\n"
             "  admin logs tail --source structured --limit 20\n"
             "  admin db query --sql 'select count(*) from content'"
         ),
@@ -95,6 +96,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--service-log-dir", default=None, help="Remote service log directory")
     parser.add_argument("--remote-db-path", default=None, help="Remote SQLite database path")
     parser.add_argument("--remote-python", default=None, help="Remote Python executable path")
+    parser.add_argument(
+        "--remote-context-source",
+        choices=("direct", "app-settings"),
+        default=None,
+        help=(
+            "How remote read-only commands resolve DB/log paths. "
+            "'direct' uses configured paths and avoids reading remote .env."
+        ),
+    )
     parser.add_argument("--local-logs-dir", default=None, help="Local synced log directory")
     parser.add_argument("--local-db-path", default=None, help="Local synced DB path")
     parser.add_argument(
@@ -174,18 +184,22 @@ def _handle_logs(args: argparse.Namespace, *, config: AdminConfig) -> CommandRes
 
     action_map = {
         "list": "logs.list",
+        "exceptions": "logs.exceptions",
         "tail": "logs.tail",
         "range": "logs.range",
         "search": "logs.search",
     }
     payload: dict[str, Any] = {"unsafe_raw": bool(args.unsafe_raw)}
-    if args.logs_command != "list":
-        payload["source"] = args.source
     if args.logs_command in {"tail", "range", "search"}:
+        payload["source"] = args.source
+    if args.logs_command in {"exceptions", "tail", "range", "search"}:
         payload["limit"] = args.limit
-    if args.logs_command in {"range", "search"}:
+    if args.logs_command in {"exceptions", "range", "search"}:
         payload["since"] = args.since
         payload["until"] = args.until
+    if args.logs_command == "exceptions":
+        payload["component"] = args.component
+        payload["operation"] = args.operation
     if args.logs_command == "search":
         payload["query"] = args.query
         payload["filters"] = {
@@ -518,6 +532,16 @@ def _build_logs_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
 
     logs_subparsers.add_parser("list", help="List log files by source")
 
+    exceptions_parser = logs_subparsers.add_parser(
+        "exceptions",
+        help="Show the most recent exception/error records",
+    )
+    exceptions_parser.add_argument("--component", default=None)
+    exceptions_parser.add_argument("--operation", default=None)
+    exceptions_parser.add_argument("--since", default=None)
+    exceptions_parser.add_argument("--until", default=None)
+    exceptions_parser.add_argument("--limit", type=int, default=20)
+
     tail_parser = logs_subparsers.add_parser("tail", help="Tail one log source")
     tail_parser.add_argument(
         "--source",
@@ -683,6 +707,7 @@ def _build_parser_hint(prog: str, message: str) -> str | None:
         return (
             "Pick a logs subcommand:\n"
             "  admin logs list\n"
+            "  admin logs exceptions --limit 10\n"
             "  admin logs tail --source structured --limit 20\n"
             "  admin logs search --source errors --query timeout"
         )

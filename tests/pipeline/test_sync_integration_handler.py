@@ -92,4 +92,48 @@ def test_sync_integration_runs_when_feature_enabled(monkeypatch):
     result = handler.handle(task, _build_context())
 
     assert result.success is True
-    sync_mock.assert_called_once_with(fake_db, user_id=42)
+    sync_mock.assert_called_once_with(fake_db, user_id=42, force=False)
+
+
+def test_sync_integration_forces_manual_runs(monkeypatch):
+    """Manual sync tasks should bypass the scheduled throttle."""
+    monkeypatch.setattr(
+        "app.pipeline.handlers.sync_integration.get_settings",
+        lambda: SimpleNamespace(x_bookmark_sync_enabled=True),
+    )
+
+    fake_db = object()
+
+    @contextmanager
+    def _fake_get_db():
+        yield fake_db
+
+    monkeypatch.setattr("app.pipeline.handlers.sync_integration.get_db", _fake_get_db)
+    sync_mock = Mock(
+        return_value=SimpleNamespace(
+            status="success",
+            fetched=0,
+            accepted=0,
+            filtered_out=0,
+            errored=0,
+            created=0,
+            reused=0,
+            channels={},
+        )
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.sync_integration.sync_x_sources_for_user",
+        sync_mock,
+    )
+
+    handler = SyncIntegrationHandler()
+    task = TaskEnvelope(
+        id=3,
+        task_type=TaskType.SYNC_INTEGRATION,
+        payload={"user_id": 42, "provider": "x", "trigger": "manual"},
+    )
+
+    result = handler.handle(task, _build_context())
+
+    assert result.success is True
+    sync_mock.assert_called_once_with(fake_db, user_id=42, force=True)

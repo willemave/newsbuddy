@@ -19,6 +19,7 @@ def _config(tmp_path: Path) -> AdminConfig:
         service_log_dir="/var/log/news_app",
         remote_db_path="/data/news_app.db",
         remote_python=".venv/bin/python",
+        remote_context_source="direct",
         local_logs_dir=tmp_path / "logs",
         local_db_path=tmp_path / "news_app.db",
         prompt_report_output_dir=tmp_path / "outputs",

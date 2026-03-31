@@ -32,7 +32,12 @@ def run_remote_module(
     )
     completed = subprocess.run(
         ["ssh", config.remote, remote_command],
-        input=json.dumps(payload or {}),
+        input=json.dumps(
+            {
+                "payload": payload or {},
+                "context_override": _build_remote_context_override(config),
+            }
+        ),
         text=True,
         capture_output=True,
         check=False,
@@ -50,6 +55,18 @@ def run_remote_module(
             "Remote command returned invalid JSON",
             stderr=completed.stdout,
         ) from exc
+
+
+def _build_remote_context_override(config: AdminConfig) -> dict[str, str] | None:
+    """Return explicit remote paths when the CLI should avoid reading remote .env."""
+    if config.remote_context_source != "direct":
+        return None
+
+    return {
+        "database_url": f"sqlite:///{config.remote_db_path}",
+        "logs_dir": config.logs_dir,
+        "service_log_dir": config.service_log_dir,
+    }
 
 
 def run_remote_script(config: AdminConfig, script_args: list[str]) -> dict[str, Any]:

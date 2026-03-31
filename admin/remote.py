@@ -16,6 +16,7 @@ from admin.remote_ops import (
     db_tables,
     events_list,
     health_snapshot,
+    logs_exceptions,
     logs_list,
     logs_range,
     logs_search,
@@ -36,13 +37,9 @@ def main(argv: list[str] | None = None) -> int:
             _print_payload({"ok": False, "error": {"message": "Remote action is required"}})
             return 1
 
-        payload = _load_stdin_payload()
-        settings = get_settings()
-        context = RemoteContext(
-            database_url=str(settings.database_url),
-            logs_dir=Path(settings.logs_dir),
-            service_log_dir=Path("/var/log/news_app"),
-        )
+        request = _load_stdin_payload()
+        payload = _extract_payload(request)
+        context = _resolve_context(request)
 
         action = args[0]
         result = _dispatch(action, context=context, payload=payload)
@@ -74,6 +71,16 @@ def _dispatch(action: str, *, context: RemoteContext, payload: dict[str, Any]) -
             context,
             source=str(payload["source"]),
             limit=int(payload.get("limit", 50)),
+            unsafe_raw=bool(payload.get("unsafe_raw")),
+        )
+    if action == "logs.exceptions":
+        return logs_exceptions(
+            context,
+            since=_parse_datetime(payload.get("since")),
+            until=_parse_datetime(payload.get("until")),
+            component=payload.get("component"),
+            operation=payload.get("operation"),
+            limit=int(payload.get("limit", 20)),
             unsafe_raw=bool(payload.get("unsafe_raw")),
         )
     if action == "logs.range":
@@ -147,6 +154,30 @@ def _load_stdin_payload() -> dict[str, Any]:
     if not raw:
         return {}
     return dict(json.loads(raw))
+
+
+def _extract_payload(request: dict[str, Any]) -> dict[str, Any]:
+    payload = request.get("payload")
+    if isinstance(payload, dict):
+        return payload
+    return request
+
+
+def _resolve_context(request: dict[str, Any]) -> RemoteContext:
+    context_override = request.get("context_override")
+    if isinstance(context_override, dict):
+        return RemoteContext(
+            database_url=str(context_override["database_url"]),
+            logs_dir=Path(str(context_override["logs_dir"])),
+            service_log_dir=Path(str(context_override["service_log_dir"])),
+        )
+
+    settings = get_settings()
+    return RemoteContext(
+        database_url=str(settings.database_url),
+        logs_dir=Path(settings.logs_dir),
+        service_log_dir=Path("/var/log/news_app"),
+    )
 
 
 def _parse_datetime(raw: Any) -> datetime | None:

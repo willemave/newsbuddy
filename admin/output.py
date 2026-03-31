@@ -85,6 +85,8 @@ def _format_success_text(command: str, data: Any) -> str:
         return _format_logs_list(data)
     if command in {"logs.tail", "logs.range", "logs.search"}:
         return _format_log_records(data)
+    if command == "logs.exceptions":
+        return _format_exceptions(data)
     if command == "logs.sync":
         return _format_sync_result(data)
     if command == "health.snapshot":
@@ -105,8 +107,9 @@ def _format_error_details(details: dict[str, Any]) -> str:
         return (
             "The remote command reached the host, but the remote process could not read "
             "`/opt/news_app/.env`.\n"
-            "Check the SSH user in `ADMIN_REMOTE`, or fix the remote file permissions so that "
-            "user can read the deployed `.env`."
+            "Retry with `--remote-context-source direct` (or set "
+            "`ADMIN_REMOTE_CONTEXT_SOURCE=direct`) to avoid reading remote app settings, or "
+            "check the SSH user in `ADMIN_REMOTE`."
         )
     return json.dumps(details, ensure_ascii=False, indent=2, default=str)
 
@@ -133,6 +136,28 @@ def _format_log_records(data: dict[str, Any]) -> str:
     lines = [f"Showing {len(records)} log record{'s' if len(records) != 1 else ''}:"]
     for record in records:
         lines.append(_format_log_record(record))
+    return "\n".join(lines)
+
+
+def _format_exceptions(data: dict[str, Any]) -> str:
+    exceptions = data.get("exceptions") or []
+    if not exceptions:
+        return "No exception records matched."
+
+    count = len(exceptions)
+    label = "records" if count != 1 else "record"
+    lines = [f"Showing {count} recent exception {label}:"]
+    for record in exceptions:
+        timestamp = _coerce_text(record.get("timestamp") or "unknown-time")
+        component = _coerce_text(record.get("component") or "unknown-component")
+        operation = _coerce_text(record.get("operation") or "unknown-operation")
+        error_type = _coerce_text(record.get("error_type") or "LogError")
+        error_message = _coerce_text(
+            record.get("error_message") or record.get("message") or "Unknown error"
+        ).strip()
+        lines.append(
+            f"- [{timestamp}] {component}/{operation} {error_type}: {error_message}"
+        )
     return "\n".join(lines)
 
 

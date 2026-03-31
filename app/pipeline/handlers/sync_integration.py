@@ -23,6 +23,7 @@ class SyncIntegrationHandler:
         payload = task.payload or {}
         user_id = payload.get("user_id")
         provider = str(payload.get("provider") or "x").strip().lower()
+        trigger = str(payload.get("trigger") or "cron").strip().lower()
 
         if not isinstance(user_id, int):
             return TaskResult.fail("Missing user_id in sync_integration payload", retryable=False)
@@ -45,7 +46,11 @@ class SyncIntegrationHandler:
 
         try:
             with get_db() as db:
-                summary = sync_x_sources_for_user(db, user_id=user_id)
+                summary = sync_x_sources_for_user(
+                    db,
+                    user_id=user_id,
+                    force=trigger != "cron",
+                )
             logger.info(
                 "Integration sync completed",
                 extra={

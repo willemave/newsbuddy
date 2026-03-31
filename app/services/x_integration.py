@@ -338,7 +338,7 @@ def disconnect_x_connection(db: Session, *, user: User) -> XConnectionView:
     return get_x_connection_view(db, user)
 
 
-def sync_x_sources_for_user(db: Session, *, user_id: int) -> XSyncSummary:
+def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -> XSyncSummary:
     """Sync bookmarks plus digest-source X content for a connected user."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -358,6 +358,17 @@ def sync_x_sources_for_user(db: Session, *, user_id: int) -> XSyncSummary:
         )
 
     sync_state = _get_or_create_sync_state(db, connection_id=connection.id)
+    if not force and _should_skip_scheduled_sync(sync_state):
+        return XSyncSummary(
+            status="skipped_recently",
+            fetched=0,
+            accepted=0,
+            filtered_out=0,
+            errored=0,
+            created=0,
+            reused=0,
+            channels={},
+        )
     existing_sync_metadata = (
         dict(sync_state.sync_metadata) if isinstance(sync_state.sync_metadata, dict) else {}
     )
@@ -1002,6 +1013,24 @@ def _get_channel_state(sync_metadata: dict[str, Any], channel: str) -> dict[str,
     return state if isinstance(state, dict) else {}
 
 
+def _should_skip_scheduled_sync(sync_state: UserIntegrationSyncState) -> bool:
+    last_synced_at = sync_state.last_synced_at
+    if last_synced_at is None:
+        return False
+    min_interval_minutes = get_settings().x_sync_min_interval_minutes
+    elapsed_seconds = (_now_naive_utc() - last_synced_at).total_seconds()
+    return elapsed_seconds < min_interval_minutes * 60
+
+
+def _resolve_last_synced_item_id(
+    previous_state: dict[str, Any],
+    newest_item_id: str | None,
+) -> str | None:
+    if newest_item_id:
+        return newest_item_id
+    return _clean_optional_string(previous_state.get("last_synced_item_id"))
+
+
 def _build_sync_metadata_payload(
     *,
     existing_sync_metadata: dict[str, Any],
@@ -1010,6 +1039,8 @@ def _build_sync_metadata_payload(
     lists_summary: XSyncChannelSummary,
     list_state_updates: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
+    previous_bookmark_state = _get_channel_state(existing_sync_metadata, BOOKMARKS_CHANNEL)
+    previous_timeline_state = _get_channel_state(existing_sync_metadata, TIMELINE_CHANNEL)
     previous_lists_state = _get_channel_state(existing_sync_metadata, LISTS_CHANNEL)
     return {
         BOOKMARKS_CHANNEL: {
@@ -1020,7 +1051,10 @@ def _build_sync_metadata_payload(
             "errored": bookmark_summary.errored,
             "created": bookmark_summary.created,
             "reused": bookmark_summary.reused,
-            "last_synced_item_id": bookmark_summary.newest_item_id,
+            "last_synced_item_id": _resolve_last_synced_item_id(
+                previous_bookmark_state,
+                bookmark_summary.newest_item_id,
+            ),
         },
         TIMELINE_CHANNEL: {
             "status": timeline_summary.status,
@@ -1030,7 +1064,10 @@ def _build_sync_metadata_payload(
             "errored": timeline_summary.errored,
             "created": timeline_summary.created,
             "reused": timeline_summary.reused,
-            "last_synced_item_id": timeline_summary.newest_item_id,
+            "last_synced_item_id": _resolve_last_synced_item_id(
+                previous_timeline_state,
+                timeline_summary.newest_item_id,
+            ),
         },
         LISTS_CHANNEL: {
             "status": lists_summary.status,
@@ -1040,7 +1077,10 @@ def _build_sync_metadata_payload(
             "errored": lists_summary.errored,
             "created": lists_summary.created,
             "reused": lists_summary.reused,
-            "last_synced_item_id": lists_summary.newest_item_id,
+            "last_synced_item_id": _resolve_last_synced_item_id(
+                previous_lists_state,
+                lists_summary.newest_item_id,
+            ),
             "list_states": _merge_list_state_payload(previous_lists_state, list_state_updates),
         },
     }

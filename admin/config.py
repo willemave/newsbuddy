@@ -14,6 +14,7 @@ DEFAULT_LOGS_DIR = "/data/logs"
 DEFAULT_SERVICE_LOG_DIR = "/var/log/news_app"
 DEFAULT_REMOTE_DB_PATH = "/data/news_app.db"
 DEFAULT_REMOTE_PYTHON = ".venv/bin/python"
+DEFAULT_REMOTE_CONTEXT_SOURCE = "direct"
 DEFAULT_LOCAL_LOGS_DIR = "logs_from_server"
 DEFAULT_LOCAL_DB_PATH = "admin/news_app.remote.db"
 DEFAULT_PROMPT_REPORT_OUTPUT_DIR = "outputs"
@@ -30,6 +31,7 @@ class AdminConfig:
     service_log_dir: str
     remote_db_path: str
     remote_python: str
+    remote_context_source: str
     local_logs_dir: Path
     local_db_path: Path
     prompt_report_output_dir: Path
@@ -70,6 +72,13 @@ def resolve_config(args: Any) -> AdminConfig:
             "remote_python",
             "ADMIN_REMOTE_PYTHON",
             DEFAULT_REMOTE_PYTHON,
+        ),
+        remote_context_source=_resolve_value(
+            args,
+            env_values,
+            "remote_context_source",
+            "ADMIN_REMOTE_CONTEXT_SOURCE",
+            DEFAULT_REMOTE_CONTEXT_SOURCE,
         ),
         local_logs_dir=Path(
             _resolve_value(

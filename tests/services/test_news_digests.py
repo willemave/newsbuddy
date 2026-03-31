@@ -400,3 +400,135 @@ def test_get_news_digest_trigger_decision_flushes_day_rollover(db_session, monke
 
     assert decision.should_generate is True
     assert decision.trigger_reason == "day_rollover_flush"
+
+
+def test_get_news_digest_trigger_decision_day_rollover_only_flushes_once_per_day(
+    db_session,
+    monkeypatch,
+) -> None:
+    user = User(
+        apple_id="rollover-once-user",
+        email="rollover-once@example.com",
+        full_name="Rollover Once User",
+        is_active=True,
+        news_digest_timezone="America/Los_Angeles",
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    stale_item = NewsItem(
+        ingest_key="rollover-once-item",
+        visibility_scope="global",
+        platform="techmeme",
+        source_type="techmeme",
+        source_label="Techmeme",
+        source_external_id="rollover-once",
+        canonical_item_url="https://www.techmeme.com/240101/p2",
+        canonical_story_url="https://example.com/rollover-once",
+        article_url="https://example.com/rollover-once",
+        article_title="Backlog story",
+        article_domain="example.com",
+        discussion_url="https://www.techmeme.com/240101/p2",
+        summary_title="Backlog story",
+        summary_key_points=["Backlog point"],
+        summary_text="Backlog summary",
+        raw_metadata={},
+        status="ready",
+        ingested_at=datetime(2026, 3, 30, 6, 30),
+    )
+    db_session.add(stale_item)
+    db_session.flush()
+    db_session.add(
+        NewsDigest(
+            user_id=user.id,
+            timezone="America/Los_Angeles",
+            title="Earlier digest",
+            summary="Already flushed today.",
+            source_count=1,
+            group_count=1,
+            embedding_model="embed",
+            llm_model="llm",
+            pipeline_version="test",
+            trigger_reason="day_rollover_flush",
+            generated_at=datetime(2026, 3, 31, 7, 15),
+            build_metadata={},
+            window_start_at=datetime(2026, 3, 30, 6, 30),
+            window_end_at=datetime(2026, 3, 30, 6, 30),
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        news_digests,
+        "cluster_news_items",
+        lambda items: [news_digests.NewsDigestCluster(items=items)],
+    )
+
+    decision = news_digests.get_news_digest_trigger_decision(
+        db_session,
+        user=user,
+        now_utc=datetime(2026, 3, 31, 8, 0, tzinfo=UTC),
+    )
+
+    assert decision.flush_required is False
+    assert decision.should_generate is False
+
+
+def test_get_news_digest_trigger_decision_respects_user_interval_hours(
+    db_session,
+    monkeypatch,
+) -> None:
+    user = User(
+        apple_id="interval-user",
+        email="interval@example.com",
+        full_name="Interval User",
+        is_active=True,
+        news_digest_interval_hours=3,
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    item = _build_news_item(
+        61,
+        story_url="https://example.com/story-interval",
+        item_url="https://news.ycombinator.com/item?id=61",
+        title="Interval story",
+        source_label="Hacker News",
+    )
+    db_session.add(item)
+    db_session.flush()
+    db_session.add(
+        NewsDigest(
+            user_id=user.id,
+            timezone="UTC",
+            title="Recent digest",
+            summary="Generated recently.",
+            source_count=1,
+            group_count=1,
+            embedding_model="embed",
+            llm_model="llm",
+            pipeline_version="test",
+            trigger_reason="uncovered_item_threshold",
+            generated_at=datetime(2026, 3, 31, 10, 0),
+            build_metadata={},
+            window_start_at=datetime(2026, 3, 31, 9, 0),
+            window_end_at=datetime(2026, 3, 31, 9, 0),
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(news_digests.get_settings(), "news_digest_min_uncovered_items", 1)
+    monkeypatch.setattr(
+        news_digests,
+        "cluster_news_items",
+        lambda items: [news_digests.NewsDigestCluster(items=items)],
+    )
+
+    decision = news_digests.get_news_digest_trigger_decision(
+        db_session,
+        user=user,
+        now_utc=datetime(2026, 3, 31, 12, 0, tzinfo=UTC),
+    )
+
+    assert decision.trigger_reason == "uncovered_item_threshold"
+    assert decision.should_generate is False

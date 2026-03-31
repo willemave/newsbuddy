@@ -17,6 +17,7 @@ def _config() -> AdminConfig:
         service_log_dir="/var/log/news_app",
         remote_db_path="/data/news_app.db",
         remote_python=".venv/bin/python",
+        remote_context_source="direct",
         local_logs_dir=None,  # type: ignore[arg-type]
         local_db_path=None,  # type: ignore[arg-type]
         prompt_report_output_dir=None,  # type: ignore[arg-type]
@@ -46,4 +47,8 @@ def test_run_remote_module_builds_expected_ssh_command(monkeypatch):
         "willem@host",
         "cd /opt/news_app && .venv/bin/python -m admin.remote db.tables",
     ]
-    assert captured["input"] == '{"limit": 10}'
+    assert captured["input"] == (
+        '{"payload": {"limit": 10}, "context_override": {"database_url": '
+        '"sqlite:////data/news_app.db", "logs_dir": "/data/logs", '
+        '"service_log_dir": "/var/log/news_app"}}'
+    )

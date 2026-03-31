@@ -342,9 +342,16 @@ def _has_day_rollover_flush(
     *,
     timezone_name: str,
     now_utc: datetime,
+    last_digest_generated_at: datetime | None,
 ) -> bool:
     timezone = ZoneInfo(normalize_timezone(timezone_name))
     local_today = now_utc.replace(tzinfo=UTC).astimezone(timezone).date()
+    if last_digest_generated_at is not None:
+        last_generated = _coerce_utc(last_digest_generated_at)
+        if last_generated is not None:
+            last_local_day = last_generated.replace(tzinfo=UTC).astimezone(timezone).date()
+            if last_local_day >= local_today:
+                return False
     for item in items:
         ingested_at = _coerce_utc(item.ingested_at)
         if ingested_at is None:
@@ -374,23 +381,28 @@ def get_news_digest_trigger_decision(
             flush_required=False,
         )
 
-    flush_required = _has_day_rollover_flush(
-        candidates,
-        timezone_name=user.news_digest_timezone,
-        now_utc=resolved_now,
-    )
-    clusters = cluster_news_items(candidates)
     last_digest = (
         db.query(NewsDigest)
         .filter(NewsDigest.user_id == user.id)
         .order_by(NewsDigest.generated_at.desc(), NewsDigest.id.desc())
         .first()
     )
+    flush_required = _has_day_rollover_flush(
+        candidates,
+        timezone_name=user.news_digest_timezone,
+        now_utc=resolved_now,
+        last_digest_generated_at=last_digest.generated_at if last_digest else None,
+    )
+    clusters = cluster_news_items(candidates)
     min_interval_elapsed = True
+    min_interval_minutes = max(
+        settings.news_digest_min_interval_minutes,
+        max(1, int(user.news_digest_interval_hours or 0)) * 60,
+    )
     if last_digest and last_digest.generated_at:
         last_generated = _coerce_utc(last_digest.generated_at) or resolved_now
         elapsed_seconds = (resolved_now - last_generated).total_seconds()
-        min_interval_elapsed = elapsed_seconds >= settings.news_digest_min_interval_minutes * 60
+        min_interval_elapsed = elapsed_seconds >= min_interval_minutes * 60
 
     trigger_reason: str | None = None
     if flush_required:

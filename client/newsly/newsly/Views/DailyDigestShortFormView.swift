@@ -257,25 +257,35 @@ private struct DailyDigestCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Date + time with extending rule
-            HStack(spacing: 10) {
-                HStack(spacing: 5) {
-                    Text(shortDateLabel.uppercased())
-                        .foregroundStyle(isToday ? Color.terracottaPrimary : Color.onSurfaceSecondary)
+            VStack(alignment: .leading, spacing: 8) {
+                // Date + time with extending rule
+                HStack(spacing: 10) {
+                    HStack(spacing: 5) {
+                        Text(shortDateLabel.uppercased())
+                            .foregroundStyle(isToday ? Color.terracottaPrimary : Color.onSurfaceSecondary)
 
-                    if !digest.displayTimeLabel.isEmpty {
-                        Text("·")
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                        Text(digest.displayTimeLabel.uppercased())
-                            .foregroundStyle(Color.onSurfaceSecondary)
+                        if !digest.displayTimeLabel.isEmpty {
+                            Text("·")
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                            Text(digest.displayTimeLabel.uppercased())
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                        }
                     }
-                }
-                .font(.terracottaCategoryPill)
-                .tracking(1.2)
+                    .font(.terracottaCategoryPill)
+                    .tracking(1.2)
 
-                Rectangle()
-                    .fill(Color.outlineVariant.opacity(0.5))
-                    .frame(height: 1)
+                    Rectangle()
+                        .fill(Color.outlineVariant.opacity(0.5))
+                        .frame(height: 1)
+                }
+
+                if !headerTitle.isEmpty {
+                    Text(headerTitle)
+                        .font(.terracottaBodyMedium.weight(.semibold))
+                        .foregroundStyle(digest.isRead ? Color.onSurfaceSecondary : Color.onSurface)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             // Key points
@@ -359,6 +369,10 @@ private struct DailyDigestCard: View {
         if cal.isDateInToday(date) { return "Today" }
         if cal.isDateInYesterday(date) { return "Yesterday" }
         return Self.shortFormatter.string(from: date)
+    }
+
+    private var headerTitle: String {
+        digest.title.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var voiceSummaryButtonTitle: String {

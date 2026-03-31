@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,6 @@ from admin.log_parsing import (
 )
 from admin.sql_guard import validate_readonly_sql
 from app.core.redaction import redact_value
-from app.models.schema import Content, EventLog, LlmUsageRecord, ProcessingTask
-from app.models.user import User
 
 DEFAULT_ROW_LIMIT = 200
 MAX_ROW_LIMIT = 1000
@@ -34,6 +33,27 @@ class RemoteContext:
     database_url: str
     logs_dir: Path
     service_log_dir: Path
+
+
+@lru_cache(maxsize=1)
+def _load_schema_models() -> tuple[Any, Any, Any, Any]:
+    """Load schema models only for DB-backed commands."""
+    from app.models.schema import Content, LlmUsageRecord, ProcessingTask
+
+    try:
+        from app.models.schema import EventLog
+    except ImportError:  # pragma: no cover - legacy compatibility when EventLog is absent
+        EventLog = None
+
+    return Content, LlmUsageRecord, ProcessingTask, EventLog
+
+
+@lru_cache(maxsize=1)
+def _load_user_model() -> Any:
+    """Load the user model only when needed."""
+    from app.models.user import User
+
+    return User
 
 
 def db_tables(context: RemoteContext) -> dict[str, Any]:
@@ -116,12 +136,14 @@ def usage_summary(
     group_by: str = "feature",
 ) -> dict[str, Any]:
     """Return grouped usage totals from persisted LLM usage rows."""
+    _, usage_record_model, _, _ = _load_schema_models()
     engine = create_engine(context.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     try:
         with session_factory() as session:
             rows = _apply_usage_window(
-                session.query(LlmUsageRecord),
+                session.query(usage_record_model),
+                usage_record_model=usage_record_model,
                 since=since,
                 until=until,
             ).all()
@@ -153,17 +175,20 @@ def usage_by_user(
 ) -> dict[str, Any]:
     """Return detailed usage rows and totals for one user."""
     bounded_limit = _bounded_limit(limit)
+    _, usage_record_model, _, _ = _load_schema_models()
+    user_model = _load_user_model()
     engine = create_engine(context.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     try:
         with session_factory() as session:
-            user = session.query(User).filter(User.id == user_id).first()
+            user = session.query(user_model).filter(user_model.id == user_id).first()
             query = _apply_usage_window(
-                session.query(LlmUsageRecord).filter(LlmUsageRecord.user_id == user_id),
+                session.query(usage_record_model).filter(usage_record_model.user_id == user_id),
+                usage_record_model=usage_record_model,
                 since=since,
                 until=until,
             )
-            rows = query.order_by(LlmUsageRecord.created_at.desc()).limit(bounded_limit).all()
+            rows = query.order_by(usage_record_model.created_at.desc()).limit(bounded_limit).all()
             serialized = [_serialize_usage_row(row, unsafe_raw=unsafe_raw) for row in rows]
             return {
                 "user": {
@@ -188,15 +213,16 @@ def usage_by_content(
 ) -> dict[str, Any]:
     """Return detailed usage rows for one content item."""
     bounded_limit = _bounded_limit(limit)
+    content_model, usage_record_model, _, _ = _load_schema_models()
     engine = create_engine(context.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     try:
         with session_factory() as session:
-            content = session.query(Content).filter(Content.id == content_id).first()
+            content = session.query(content_model).filter(content_model.id == content_id).first()
             rows = (
-                session.query(LlmUsageRecord)
-                .filter(LlmUsageRecord.content_id == content_id)
-                .order_by(LlmUsageRecord.created_at.desc())
+                session.query(usage_record_model)
+                .filter(usage_record_model.content_id == content_id)
+                .order_by(usage_record_model.created_at.desc())
                 .limit(bounded_limit)
                 .all()
             )
@@ -228,22 +254,26 @@ def events_list(
 ) -> dict[str, Any]:
     """Return recent event-log rows with optional filters."""
     bounded_limit = _bounded_limit(limit)
+    _, _, _, event_log_model = _load_schema_models()
+    if event_log_model is None:
+        return {"limit": bounded_limit, "rows": [], "redacted": not unsafe_raw}
+
     engine = create_engine(context.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     try:
         with session_factory() as session:
-            query = session.query(EventLog)
+            query = session.query(event_log_model)
             if event_type:
-                query = query.filter(EventLog.event_type == event_type)
+                query = query.filter(event_log_model.event_type == event_type)
             if event_name:
-                query = query.filter(EventLog.event_name == event_name)
+                query = query.filter(event_log_model.event_name == event_name)
             if status:
-                query = query.filter(EventLog.status == status)
+                query = query.filter(event_log_model.status == status)
             if since is not None:
-                query = query.filter(EventLog.created_at >= _naive_utc(since))
+                query = query.filter(event_log_model.created_at >= _naive_utc(since))
             if until is not None:
-                query = query.filter(EventLog.created_at <= _naive_utc(until))
-            rows = query.order_by(EventLog.created_at.desc()).limit(bounded_limit).all()
+                query = query.filter(event_log_model.created_at <= _naive_utc(until))
+            rows = query.order_by(event_log_model.created_at.desc()).limit(bounded_limit).all()
             serialized = []
             for row in rows:
                 data = row.data if unsafe_raw else redact_value(row.data)
@@ -264,25 +294,35 @@ def events_list(
 
 def health_snapshot(context: RemoteContext) -> dict[str, Any]:
     """Return a coarse operational snapshot."""
+    (
+        content_model,
+        usage_record_model,
+        processing_task_model,
+        event_log_model,
+    ) = _load_schema_models()
     engine = create_engine(context.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     try:
         with session_factory() as session:
-            content_total = int(session.query(func.count(Content.id)).scalar() or 0)
-            task_total = int(session.query(func.count(ProcessingTask.id)).scalar() or 0)
-            event_total = int(session.query(func.count(EventLog.id)).scalar() or 0)
+            content_total = int(session.query(func.count(content_model.id)).scalar() or 0)
+            task_total = int(session.query(func.count(processing_task_model.id)).scalar() or 0)
+            event_total = (
+                int(session.query(func.count(event_log_model.id)).scalar() or 0)
+                if event_log_model is not None
+                else 0
+            )
 
             content_by_status = dict(
-                session.query(Content.status, func.count(Content.id))
-                .group_by(Content.status)
+                session.query(content_model.status, func.count(content_model.id))
+                .group_by(content_model.status)
                 .all()
             )
             task_by_status = dict(
-                session.query(ProcessingTask.status, func.count(ProcessingTask.id))
-                .group_by(ProcessingTask.status)
+                session.query(processing_task_model.status, func.count(processing_task_model.id))
+                .group_by(processing_task_model.status)
                 .all()
             )
-            latest_usage_at = session.query(func.max(LlmUsageRecord.created_at)).scalar()
+            latest_usage_at = session.query(func.max(usage_record_model.created_at)).scalar()
 
             return {
                 "content": {
@@ -308,17 +348,22 @@ def preview_reset_content(
     content_type: str | None,
 ) -> dict[str, Any]:
     """Preview the effect of `scripts/reset_content_processing.py`."""
+    content_model, _, processing_task_model, _ = _load_schema_models()
     engine = create_engine(context.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     try:
         with session_factory() as session:
-            content_query = session.query(Content)
+            content_query = session.query(content_model)
             if content_type:
-                content_query = content_query.filter(Content.content_type == content_type)
+                content_query = content_query.filter(content_model.content_type == content_type)
             if hours is not None:
                 cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
                 content_query = content_query.filter(
-                    func.coalesce(Content.processed_at, Content.updated_at, Content.created_at)
+                    func.coalesce(
+                        content_model.processed_at,
+                        content_model.updated_at,
+                        content_model.created_at,
+                    )
                     >= cutoff
                 )
             content_rows = content_query.all()
@@ -328,10 +373,12 @@ def preview_reset_content(
                 else None
             )
 
-            task_query = session.query(ProcessingTask)
+            task_query = session.query(processing_task_model)
             if content_ids is not None:
                 if content_ids:
-                    task_query = task_query.filter(ProcessingTask.content_id.in_(content_ids))
+                    task_query = task_query.filter(
+                        processing_task_model.content_id.in_(content_ids)
+                    )
                 else:
                     task_query = task_query.filter(text("1 = 0"))
 
@@ -341,7 +388,7 @@ def preview_reset_content(
             elif content_ids is not None:
                 reset_contents = len(content_rows)
             else:
-                reset_contents = int(session.query(func.count(Content.id)).scalar() or 0)
+                reset_contents = int(session.query(func.count(content_model.id)).scalar() or 0)
             created_tasks = 0 if cancel_only else reset_contents
             return {
                 "cancel_only": cancel_only,
@@ -402,6 +449,46 @@ def logs_tail(
     )
     tail_records = ordered[-bounded_limit:]
     return _render_logs(tail_records, unsafe_raw=unsafe_raw, limit=bounded_limit)
+
+
+def logs_exceptions(
+    context: RemoteContext,
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    component: str | None = None,
+    operation: str | None = None,
+    limit: int = 20,
+    unsafe_raw: bool = False,
+) -> dict[str, Any]:
+    """Return the most recent error records from the structured exception logs."""
+    bounded_limit = _bounded_limit(limit)
+    records = _collect_logs(context, source="errors", limit=None)
+    filtered = _filter_log_records(records, since=since, until=until)
+    ordered = sorted(
+        filtered,
+        key=lambda record: parse_record_timestamp(record) or datetime.min.replace(tzinfo=UTC),
+        reverse=True,
+    )
+
+    matched: list[dict[str, Any]] = []
+    for record in ordered:
+        if component and str(record.get("component")) != str(component):
+            continue
+        if operation and str(record.get("operation")) != str(operation):
+            continue
+        matched.append(record)
+        if len(matched) >= bounded_limit:
+            break
+
+    rendered = matched if unsafe_raw else [redact_value(record) for record in matched]
+    return {
+        "limit": bounded_limit,
+        "available": len(ordered),
+        "returned": len(rendered),
+        "exceptions": rendered,
+        "redacted": not unsafe_raw,
+    }
 
 
 def logs_range(
@@ -525,21 +612,27 @@ def _render_logs(records: list[dict[str, Any]], *, unsafe_raw: bool, limit: int)
     }
 
 
-def _apply_usage_window(query: Any, *, since: datetime | None, until: datetime | None) -> Any:
+def _apply_usage_window(
+    query: Any,
+    *,
+    usage_record_model: Any,
+    since: datetime | None,
+    until: datetime | None,
+) -> Any:
     if since is not None:
-        query = query.filter(LlmUsageRecord.created_at >= _naive_utc(since))
+        query = query.filter(usage_record_model.created_at >= _naive_utc(since))
     if until is not None:
-        query = query.filter(LlmUsageRecord.created_at <= _naive_utc(until))
+        query = query.filter(usage_record_model.created_at <= _naive_utc(until))
     return query
 
 
-def _usage_group_key(row: LlmUsageRecord, *, group_by: str) -> str:
+def _usage_group_key(row: Any, *, group_by: str) -> str:
     if group_by == "user":
         return str(row.user_id) if row.user_id is not None else "unknown"
     return str(getattr(row, group_by, None) or "unknown")
 
 
-def _serialize_usage_row(row: LlmUsageRecord, *, unsafe_raw: bool) -> dict[str, Any]:
+def _serialize_usage_row(row: Any, *, unsafe_raw: bool) -> dict[str, Any]:
     payload = {
         "id": row.id,
         "provider": row.provider,
@@ -565,7 +658,7 @@ def _serialize_usage_row(row: LlmUsageRecord, *, unsafe_raw: bool) -> dict[str, 
     return payload if unsafe_raw else redact_value(payload)
 
 
-def _summarize_usage_rows(rows: list[LlmUsageRecord]) -> dict[str, Any]:
+def _summarize_usage_rows(rows: list[Any]) -> dict[str, Any]:
     totals = _usage_totals()
     providers = Counter()
     models = Counter()
@@ -588,7 +681,7 @@ def _usage_totals() -> dict[str, Any]:
     }
 
 
-def _accumulate_usage(bucket: dict[str, Any], row: LlmUsageRecord) -> None:
+def _accumulate_usage(bucket: dict[str, Any], row: Any) -> None:
     bucket["call_count"] += 1
     bucket["input_tokens"] += int(row.input_tokens or 0)
     bucket["output_tokens"] += int(row.output_tokens or 0)

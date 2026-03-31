@@ -21,6 +21,7 @@ def _namespace(**overrides: object) -> argparse.Namespace:
         "service_log_dir": None,
         "remote_db_path": None,
         "remote_python": None,
+        "remote_context_source": None,
         "local_logs_dir": None,
         "local_db_path": None,
         "prompt_report_output_dir": None,
@@ -40,6 +41,7 @@ def test_resolve_config_loads_admin_env_file(tmp_path):
                 "ADMIN_SERVICE_LOG_DIR=/srv/service-logs",
                 "ADMIN_REMOTE_DB_PATH=/srv/news.db",
                 "ADMIN_REMOTE_PYTHON=/venv/bin/python",
+                "ADMIN_REMOTE_CONTEXT_SOURCE=app-settings",
             ]
         )
     )
@@ -52,6 +54,7 @@ def test_resolve_config_loads_admin_env_file(tmp_path):
     assert config.service_log_dir == "/srv/service-logs"
     assert config.remote_db_path == "/srv/news.db"
     assert config.remote_python == "/venv/bin/python"
+    assert config.remote_context_source == "app-settings"
 
 
 def test_resolve_config_prefers_flags_over_env(tmp_path):
@@ -135,13 +138,47 @@ def test_emit_text_permission_error_envelope_is_actionable():
 
     rendered = stream.getvalue()
     assert "could not read `/opt/news_app/.env`" in rendered
-    assert "ADMIN_REMOTE" in rendered
+    assert "ADMIN_REMOTE_CONTEXT_SOURCE=direct" in rendered
 
 
 def test_build_parser_defaults_to_text_output():
     args = build_parser().parse_args(["health", "snapshot"])
 
     assert args.output == "text"
+
+
+def test_build_parser_supports_logs_exceptions():
+    args = build_parser().parse_args(["logs", "exceptions", "--limit", "7"])
+
+    assert args.logs_command == "exceptions"
+    assert args.limit == 7
+
+
+def test_emit_text_logs_exceptions_is_human_readable():
+    stream = StringIO()
+    emit(
+        Envelope(
+            ok=True,
+            command="logs.exceptions",
+            data={
+                "exceptions": [
+                    {
+                        "timestamp": "2026-03-30T12:00:00Z",
+                        "component": "worker",
+                        "operation": "summarize",
+                        "error_type": "ValueError",
+                        "error_message": "boom",
+                    }
+                ]
+            },
+        ),
+        "text",
+        stream,
+    )
+
+    rendered = stream.getvalue()
+    assert "recent exception record" in rendered
+    assert "worker/summarize ValueError: boom" in rendered
 
 
 def test_logs_group_error_includes_next_steps(capsys):

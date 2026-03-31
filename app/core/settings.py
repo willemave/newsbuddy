@@ -178,6 +178,7 @@ class Settings(BaseSettings):
     x_oauth_token_url: str = "https://api.x.com/2/oauth2/token"
     x_token_encryption_key: str | None = None
     x_bookmark_sync_enabled: bool = False
+    x_sync_min_interval_minutes: int = Field(default=60, ge=1)
 
     # PDF extraction (Gemini)
     pdf_gemini_model: str = Field(

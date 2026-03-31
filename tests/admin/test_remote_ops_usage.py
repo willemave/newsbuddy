@@ -1,4 +1,4 @@
-"""Tests for usage aggregation helpers."""
+"""Tests for usage aggregation and remote log helpers."""
 
 from __future__ import annotations
 
@@ -7,9 +7,15 @@ from datetime import UTC, datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from admin.remote_ops import RemoteContext, usage_by_content, usage_by_user, usage_summary
+from admin.remote_ops import (
+    RemoteContext,
+    logs_exceptions,
+    usage_by_content,
+    usage_by_user,
+    usage_summary,
+)
 from app.core.db import Base
-from app.models.schema import Content, EventLog, LlmUsageRecord, ProcessingTask
+from app.models.schema import Content, LlmUsageRecord, ProcessingTask
 from app.models.user import User
 
 
@@ -22,7 +28,6 @@ def _build_context(tmp_path) -> RemoteContext:
             User.__table__,
             Content.__table__,
             ProcessingTask.__table__,
-            EventLog.__table__,
             LlmUsageRecord.__table__,
         ],
     )
@@ -87,6 +92,26 @@ def _build_context(tmp_path) -> RemoteContext:
         )
         session.commit()
     engine.dispose()
+    logs_dir = tmp_path / "logs" / "errors"
+    logs_dir.mkdir(parents=True)
+    (logs_dir / "worker_errors_1.jsonl").write_text(
+        "\n".join(
+            [
+                (
+                    '{"timestamp":"2026-03-30T12:00:00Z","component":"worker",'
+                    '"operation":"summarize","error_type":"ValueError",'
+                    '"error_message":"new failure"}'
+                ),
+                (
+                    '{"timestamp":"2026-03-29T12:00:00Z","component":"worker",'
+                    '"operation":"classify","error_type":"RuntimeError",'
+                    '"error_message":"older failure"}'
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return RemoteContext(
         database_url=f"sqlite:///{db_path}",
         logs_dir=tmp_path / "logs",
@@ -132,3 +157,35 @@ def test_usage_by_content_includes_content_metadata(tmp_path):
 
     assert result["content"]["url"] == "https://example.com/article"
     assert result["totals"]["total_tokens"] == 25
+
+
+def test_logs_exceptions_returns_most_recent_error_records(tmp_path):
+    context = _build_context(tmp_path)
+
+    result = logs_exceptions(context, limit=1)
+
+    assert result["available"] == 2
+    assert result["returned"] == 1
+    assert result["exceptions"][0]["error_message"] == "new failure"
+
+
+def test_logs_exceptions_filters_by_operation(tmp_path):
+    context = _build_context(tmp_path)
+
+    result = logs_exceptions(context, operation="classify", limit=10)
+
+    assert result["returned"] == 1
+    assert result["exceptions"][0]["operation"] == "classify"
+
+
+def test_logs_exceptions_does_not_require_schema_models(tmp_path, monkeypatch):
+    context = _build_context(tmp_path)
+
+    def _unexpected_schema_load():
+        raise AssertionError("schema models should not load for log-only commands")
+
+    monkeypatch.setattr("admin.remote_ops._load_schema_models", _unexpected_schema_load)
+
+    result = logs_exceptions(context, limit=1)
+
+    assert result["returned"] == 1
