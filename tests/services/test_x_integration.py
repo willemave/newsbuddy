@@ -14,7 +14,7 @@ from app.models.schema import (
     UserIntegrationSyncState,
 )
 from app.services.token_crypto import decrypt_token
-from app.services.x_api import XList, XListsPage, XTokenResponse, XTweet, XTweetsPage, XUser
+from app.services.x_api import XTokenResponse, XTweet, XTweetsPage, XUser
 from app.services.x_digest_filter import XDigestFilterDecision
 from app.services.x_integration import (
     _upsert_x_digest_tweet_content,
@@ -66,7 +66,7 @@ def _tweet(
     )
 
 
-def test_start_x_oauth_persists_pending_state_and_expanded_scopes(
+def test_start_x_oauth_persists_pending_state_and_sync_scopes(
     db_session,
     test_user,
     monkeypatch,
@@ -102,8 +102,9 @@ def test_start_x_oauth_persists_pending_state_and_expanded_scopes(
     assert authorize_url.startswith("https://x.com/i/oauth2/authorize")
     assert state == captured["state"]
     assert "bookmark.read" in scopes
-    assert "follows.read" in scopes
-    assert "list.read" in scopes
+    assert "tweet.read" in scopes
+    assert "users.read" in scopes
+    assert "offline.access" in scopes
     assert test_user.twitter_username == "willem_aw"
     assert connection.scopes == scopes
     assert connection.connection_metadata["oauth_pending"]["state"] == state
@@ -123,7 +124,7 @@ def test_exchange_x_oauth_stores_encrypted_tokens_and_profile(
         user_id=test_user.id,
         provider="x",
         is_active=False,
-        scopes=["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],
+        scopes=["tweet.read", "users.read", "bookmark.read", "offline.access"],
         connection_metadata={
             "oauth_pending": {
                 "state": "oauth-state",
@@ -145,7 +146,7 @@ def test_exchange_x_oauth_stores_encrypted_tokens_and_profile(
             access_token="access-token",
             refresh_token="refresh-token",
             expires_in=7200,
-            scopes=["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],
+            scopes=["tweet.read", "users.read", "bookmark.read", "offline.access"],
         ),
     )
     monkeypatch.setattr(
@@ -175,7 +176,7 @@ def test_sync_x_sources_ingests_digest_only_timeline_content(db_session, test_us
     """Timeline sync should create user-scoped news items and processing tasks."""
     connection = _build_connection(
         test_user,
-        ["tweet.read", "users.read", "bookmark.read", "list.read"],
+        ["tweet.read", "users.read", "bookmark.read"],
     )
     db_session.add(connection)
     db_session.commit()
@@ -204,15 +205,6 @@ def test_sync_x_sources_ingests_digest_only_timeline_content(db_session, test_us
             ]
         ),
     )
-    monkeypatch.setattr(
-        "app.services.x_integration.fetch_owned_lists",
-        lambda **_kwargs: XListsPage(lists=[]),
-    )
-    monkeypatch.setattr(
-        "app.services.x_integration.fetch_followed_lists",
-        lambda **_kwargs: XListsPage(lists=[]),
-    )
-
     def fake_score_x_digest_candidate(*, tweet, user_prompt, source_type, source_label):  # noqa: ANN001
         recorded_prompts.append(user_prompt)
         return XDigestFilterDecision(
@@ -249,29 +241,28 @@ def test_sync_x_sources_ingests_digest_only_timeline_content(db_session, test_us
     ]
 
 
-def test_sync_x_sources_filters_lists_and_merges_list_state(db_session, test_user, monkeypatch):
-    """List sync should respect the filter result and persist per-list state."""
-    test_user.news_digest_preference_prompt = (
-        "Prefer semiconductor manufacturing and datacenter infra."
-    )
-    connection = _build_connection(
-        test_user,
-        ["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],
-    )
+def test_sync_x_sources_skips_bookmarks_when_bookmark_channel_is_recent(
+    db_session,
+    test_user,
+    monkeypatch,
+):
+    """Bookmark channel should be independently throttled from timeline sync."""
+    connection = _build_connection(test_user, ["tweet.read", "users.read", "bookmark.read"])
     db_session.add(connection)
     db_session.flush()
     db_session.add(
         UserIntegrationSyncState(
             connection_id=connection.id,
             last_status="success",
-            sync_metadata={"lists": {"list_states": {"legacy": {"name": "Legacy"}}}},
+            sync_metadata={
+                "bookmarks": {"last_synced_at": datetime.now(UTC).isoformat()},
+                "timeline": {"last_synced_item_id": "123"},
+            },
         )
     )
     db_session.commit()
 
-    queue_gateway = _FakeQueueGateway()
-    seen_prompts: list[str] = []
-
+    monkeypatch.setattr(get_settings(), "x_bookmark_sync_min_interval_minutes", 360)
     monkeypatch.setattr(
         "app.services.x_integration._ensure_valid_access_token",
         lambda *_args, **_kwargs: "token",
@@ -282,83 +273,15 @@ def test_sync_x_sources_filters_lists_and_merges_list_state(db_session, test_use
     )
     monkeypatch.setattr(
         "app.services.x_integration.fetch_bookmarks",
-        lambda **_kwargs: XTweetsPage(tweets=[]),
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("bookmark fetch should skip")),
     )
     monkeypatch.setattr(
         "app.services.x_integration.fetch_reverse_chronological_timeline",
-        lambda **_kwargs: XTweetsPage(tweets=[]),
+        lambda **_kwargs: XTweetsPage(tweets=[_tweet("101", "fresh timeline post")]),
     )
-    monkeypatch.setattr(
-        "app.services.x_integration.fetch_owned_lists",
-        lambda **_kwargs: XListsPage(lists=[XList(id="55", name="Semis")]),
-    )
-    monkeypatch.setattr(
-        "app.services.x_integration.fetch_followed_lists",
-        lambda **_kwargs: XListsPage(lists=[]),
-    )
-    monkeypatch.setattr(
-        "app.services.x_integration.fetch_list_tweets",
-        lambda **_kwargs: XTweetsPage(
-            tweets=[
-                _tweet("201", "ASML order visibility improved again this quarter."),
-                _tweet("202", "random joke tweet"),
-            ]
-        ),
-    )
-
-    def fake_score_x_digest_candidate(*, tweet, user_prompt, source_type, source_label):  # noqa: ANN001
-        seen_prompts.append(user_prompt)
-        if tweet.id == "202":
-            return XDigestFilterDecision(score=0.2, reason="Low-signal joke.", accepted=False)
-        return XDigestFilterDecision(score=0.88, reason="Matches infra filter.", accepted=True)
-
     monkeypatch.setattr(
         "app.services.x_integration.score_x_digest_candidate",
-        fake_score_x_digest_candidate,
-    )
-    monkeypatch.setattr("app.services.x_integration.get_task_queue_gateway", lambda: queue_gateway)
-
-    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
-
-    assert summary.channels["lists"].accepted == 1
-    assert summary.channels["lists"].filtered_out == 1
-    assert any("semiconductor manufacturing" in prompt for prompt in seen_prompts)
-
-    sync_state = (
-        db_session.query(UserIntegrationSyncState)
-        .filter_by(connection_id=connection.id)
-        .one()
-    )
-    list_states = sync_state.sync_metadata["lists"]["list_states"]
-    assert "legacy" in list_states
-    assert list_states["55"]["last_synced_item_id"] == "201"
-
-
-def test_sync_x_sources_marks_missing_list_scopes_without_failing_bookmarks(
-    db_session,
-    test_user,
-    monkeypatch,
-):
-    """Missing list scopes should degrade only the list channel."""
-    connection = _build_connection(test_user, ["tweet.read", "users.read", "bookmark.read"])
-    db_session.add(connection)
-    db_session.commit()
-
-    monkeypatch.setattr(
-        "app.services.x_integration._ensure_valid_access_token",
-        lambda *_args, **_kwargs: "token",
-    )
-    monkeypatch.setattr(
-        "app.services.x_integration._ensure_provider_user_id",
-        lambda *_args, **_kwargs: "42",
-    )
-    monkeypatch.setattr(
-        "app.services.x_integration.fetch_bookmarks",
-        lambda **_kwargs: XTweetsPage(tweets=[]),
-    )
-    monkeypatch.setattr(
-        "app.services.x_integration.fetch_reverse_chronological_timeline",
-        lambda **_kwargs: XTweetsPage(tweets=[]),
+        lambda **_kwargs: XDigestFilterDecision(score=0.9, reason="keep", accepted=True),
     )
     monkeypatch.setattr(
         "app.services.x_integration.get_task_queue_gateway",
@@ -367,8 +290,9 @@ def test_sync_x_sources_marks_missing_list_scopes_without_failing_bookmarks(
 
     summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
 
-    assert summary.status == "success_with_warnings"
-    assert summary.channels["lists"].status == "missing_scopes"
+    assert summary.status == "success"
+    assert summary.channels["bookmarks"].status == "skipped_recently"
+    assert summary.channels["timeline"].accepted == 1
 
 
 def test_sync_x_sources_persists_bookmark_progress_when_timeline_fails(
@@ -379,7 +303,7 @@ def test_sync_x_sources_persists_bookmark_progress_when_timeline_fails(
     """Bookmark state should still persist when later channels fail."""
     connection = _build_connection(
         test_user,
-        ["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],
+        ["tweet.read", "users.read", "bookmark.read"],
     )
     db_session.add(connection)
     db_session.commit()
@@ -404,15 +328,6 @@ def test_sync_x_sources_persists_bookmark_progress_when_timeline_fails(
             RuntimeError("X API 401: Unauthorized: Unauthorized")
         ),
     )
-    monkeypatch.setattr(
-        "app.services.x_integration.fetch_owned_lists",
-        lambda **_kwargs: XListsPage(lists=[]),
-    )
-    monkeypatch.setattr(
-        "app.services.x_integration.fetch_followed_lists",
-        lambda **_kwargs: XListsPage(lists=[]),
-    )
-
     summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
 
     sync_state = (
@@ -481,7 +396,7 @@ def test_sync_x_sources_skips_recent_scheduled_runs(db_session, test_user, monke
     """Scheduled sync should no-op when the last run is still within the cooldown window."""
     connection = _build_connection(
         test_user,
-        ["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],
+        ["tweet.read", "users.read", "bookmark.read"],
     )
     db_session.add(connection)
     db_session.flush()
@@ -515,10 +430,6 @@ def test_build_sync_metadata_payload_preserves_last_ids_when_run_is_empty() -> N
         existing_sync_metadata={
             "bookmarks": {"last_synced_item_id": "bookmark-1"},
             "timeline": {"last_synced_item_id": "timeline-1"},
-            "lists": {
-                "last_synced_item_id": "list-1",
-                "list_states": {"55": {"name": "Semis", "last_synced_item_id": "201"}},
-            },
         },
         bookmark_summary=x_integration.XSyncChannelSummary(
             status="success",
@@ -540,20 +451,8 @@ def test_build_sync_metadata_payload_preserves_last_ids_when_run_is_empty() -> N
             reused=0,
             newest_item_id=None,
         ),
-        lists_summary=x_integration.XSyncChannelSummary(
-            status="failed",
-            fetched=0,
-            accepted=0,
-            filtered_out=0,
-            errored=1,
-            created=0,
-            reused=0,
-            newest_item_id=None,
-        ),
-        list_state_updates={},
     )
 
     assert metadata["bookmarks"]["last_synced_item_id"] == "bookmark-1"
     assert metadata["timeline"]["last_synced_item_id"] == "timeline-1"
-    assert metadata["lists"]["last_synced_item_id"] == "list-1"
-    assert metadata["lists"]["list_states"]["55"]["last_synced_item_id"] == "201"
+    assert "lists" not in metadata

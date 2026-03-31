@@ -34,14 +34,10 @@ from app.services.token_crypto import decrypt_token, encrypt_token
 from app.services.twitter_share import canonical_tweet_url
 from app.services.x_api import (
     X_DEFAULT_SCOPES,
-    XList,
     XTweet,
     build_oauth_authorize_url,
     exchange_oauth_code,
     fetch_bookmarks,
-    fetch_followed_lists,
-    fetch_list_tweets,
-    fetch_owned_lists,
     fetch_reverse_chronological_timeline,
     get_authenticated_user,
     refresh_oauth_token,
@@ -62,16 +58,10 @@ BOOKMARK_SYNC_MAX_PAGES = 5
 BOOKMARK_SYNC_PAGE_SIZE = 100
 TIMELINE_SYNC_MAX_PAGES = 5
 TIMELINE_SYNC_PAGE_SIZE = 100
-LIST_DISCOVERY_MAX_PAGES = 5
-LIST_DISCOVERY_PAGE_SIZE = 100
-LIST_SYNC_MAX_PAGES = 5
-LIST_SYNC_PAGE_SIZE = 100
 TIMELINE_EXCLUDE_TYPES = ("replies", "retweets")
 TIMELINE_CHANNEL = "timeline"
-LISTS_CHANNEL = "lists"
 BOOKMARKS_CHANNEL = "bookmarks"
 REQUIRED_TIMELINE_SCOPES = frozenset({"tweet.read", "users.read"})
-REQUIRED_LIST_SCOPES = frozenset({"tweet.read", "users.read", "list.read"})
 USERNAME_REGEX = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 
@@ -382,14 +372,21 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
             connection=connection,
             access_token=access_token,
         )
-        bookmark_summary = _sync_bookmark_channel(
-            db,
-            user=user,
-            access_token=access_token,
-            provider_user_id=provider_user_id,
-            existing_sync_metadata=existing_sync_metadata,
-        )
         channel_errors: list[str] = []
+        bookmark_state = _get_channel_state(existing_sync_metadata, BOOKMARKS_CHANNEL)
+        if _should_skip_channel_sync(
+            bookmark_state,
+            min_interval_minutes=get_settings().x_bookmark_sync_min_interval_minutes,
+        ):
+            bookmark_summary = _skipped_channel_summary()
+        else:
+            bookmark_summary = _sync_bookmark_channel(
+                db,
+                user=user,
+                access_token=access_token,
+                provider_user_id=provider_user_id,
+                existing_sync_metadata=existing_sync_metadata,
+            )
         try:
             timeline_summary = _sync_timeline_channel(
                 db,
@@ -413,34 +410,9 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
             channel_errors.append(f"{TIMELINE_CHANNEL}: {exc}")
             timeline_summary = _failed_channel_summary()
 
-        try:
-            lists_summary, list_state_updates = _sync_lists_channel(
-                db,
-                user=user,
-                access_token=access_token,
-                provider_user_id=provider_user_id,
-                connection=connection,
-                existing_sync_metadata=existing_sync_metadata,
-                filter_prompt=filter_prompt,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "X list sync failed",
-                extra={
-                    "component": "x_integration",
-                    "operation": "sync_lists",
-                    "item_id": user.id,
-                    "context_data": {"error": str(exc)},
-                },
-            )
-            channel_errors.append(f"{LISTS_CHANNEL}: {exc}")
-            lists_summary = _failed_channel_summary()
-            list_state_updates = {}
-
         channel_summaries = {
             BOOKMARKS_CHANNEL: bookmark_summary,
             TIMELINE_CHANNEL: timeline_summary,
-            LISTS_CHANNEL: lists_summary,
         }
         total_fetched = sum(channel.fetched for channel in channel_summaries.values())
         total_accepted = sum(channel.accepted for channel in channel_summaries.values())
@@ -453,11 +425,7 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
         sync_state.last_synced_at = _now_naive_utc()
         sync_state.last_status = overall_status
         sync_state.last_error = "; ".join(channel_errors)[:2000] if channel_errors else None
-        bookmark_newest = (
-            bookmark_summary.newest_item_id
-            or timeline_summary.newest_item_id
-            or lists_summary.newest_item_id
-        )
+        bookmark_newest = bookmark_summary.newest_item_id or timeline_summary.newest_item_id
         if bookmark_newest:
             sync_state.last_synced_item_id = bookmark_newest
         sync_state.cursor = None
@@ -465,8 +433,6 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
             existing_sync_metadata=existing_sync_metadata,
             bookmark_summary=bookmark_summary,
             timeline_summary=timeline_summary,
-            lists_summary=lists_summary,
-            list_state_updates=list_state_updates,
         )
         db.commit()
 
@@ -678,189 +644,6 @@ def _sync_timeline_channel(
     )
 
 
-def _sync_lists_channel(
-    db: Session,
-    *,
-    user: User,
-    access_token: str,
-    provider_user_id: str,
-    connection: UserIntegrationConnection,
-    existing_sync_metadata: dict[str, Any],
-    filter_prompt: str,
-) -> tuple[XSyncChannelSummary, dict[str, dict[str, Any]]]:
-    if _missing_required_scopes(connection, REQUIRED_LIST_SCOPES):
-        return XSyncChannelSummary(
-            status="missing_scopes",
-            fetched=0,
-            accepted=0,
-            filtered_out=0,
-            errored=0,
-            created=0,
-            reused=0,
-            newest_item_id=None,
-        ), {}
-
-    discovered_lists = _fetch_all_user_lists(
-        access_token=access_token,
-        provider_user_id=provider_user_id,
-    )
-    if not discovered_lists:
-        return XSyncChannelSummary(
-            status="success",
-            fetched=0,
-            accepted=0,
-            filtered_out=0,
-            errored=0,
-            created=0,
-            reused=0,
-            newest_item_id=None,
-        ), {}
-
-    lists_state = _get_channel_state(existing_sync_metadata, LISTS_CHANNEL)
-    list_states = lists_state.get("list_states")
-    list_states = list_states if isinstance(list_states, dict) else {}
-    list_state_updates: dict[str, dict[str, Any]] = {}
-
-    total_fetched = 0
-    total_accepted = 0
-    total_filtered_out = 0
-    total_errored = 0
-    total_created = 0
-    total_reused = 0
-    newest_seen_id: str | None = None
-    seen_tweet_ids: set[str] = set()
-
-    for x_list in discovered_lists:
-        state = list_states.get(x_list.id)
-        state = state if isinstance(state, dict) else {}
-        last_synced_id = _clean_optional_string(state.get("last_synced_item_id"))
-        newest_for_list: str | None = None
-        next_token: str | None = None
-        reached_previous_sync = False
-
-        for _ in range(LIST_SYNC_MAX_PAGES):
-            page = fetch_list_tweets(
-                list_id=x_list.id,
-                access_token=access_token,
-                pagination_token=next_token,
-                max_results=LIST_SYNC_PAGE_SIZE,
-            )
-            if page.tweets and newest_for_list is None:
-                newest_for_list = page.tweets[0].id
-            if newest_seen_id is None and page.tweets:
-                newest_seen_id = page.tweets[0].id
-
-            total_fetched += len(page.tweets)
-            if not page.tweets:
-                break
-
-            fresh_tweets: list[XTweet] = []
-            for tweet in page.tweets:
-                if last_synced_id and tweet.id == last_synced_id:
-                    reached_previous_sync = True
-                    break
-                if tweet.id in seen_tweet_ids:
-                    continue
-                if not _should_ingest_digest_tweet(tweet):
-                    total_filtered_out += 1
-                    continue
-                fresh_tweets.append(tweet)
-
-            for tweet in fresh_tweets:
-                seen_tweet_ids.add(tweet.id)
-            for tweet in reversed(fresh_tweets):
-                decision = score_x_digest_candidate(
-                    tweet=tweet,
-                    user_prompt=filter_prompt,
-                    source_type="x_list",
-                    source_label=x_list.name,
-                )
-                if decision.errored:
-                    total_errored += 1
-                if not decision.accepted:
-                    total_filtered_out += 1
-                    continue
-                try:
-                    was_created = _upsert_x_digest_tweet_content(
-                        db,
-                        user=user,
-                        tweet=tweet,
-                        source_type="x_list",
-                        source_label=x_list.name,
-                        submitted_via="x_list",
-                        filter_decision=decision,
-                        aggregator_metadata={
-                            "list_id": x_list.id,
-                            "list_name": x_list.name,
-                        },
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    total_errored += 1
-                    logger.exception(
-                        "List digest tweet upsert failed",
-                        extra={
-                            "component": "x_integration",
-                            "operation": "sync_lists",
-                            "item_id": tweet.id,
-                            "context_data": {
-                                "list_id": x_list.id,
-                                "error": str(exc),
-                            },
-                        },
-                    )
-                    continue
-                total_accepted += 1
-                if was_created:
-                    total_created += 1
-                else:
-                    total_reused += 1
-
-            if reached_previous_sync or not page.next_token:
-                break
-            next_token = page.next_token
-
-        list_state_updates[x_list.id] = {
-            "name": x_list.name,
-            "last_synced_item_id": newest_for_list or last_synced_id,
-        }
-
-    return XSyncChannelSummary(
-        status=_resolve_channel_status(total_errored),
-        fetched=total_fetched,
-        accepted=total_accepted,
-        filtered_out=total_filtered_out,
-        errored=total_errored,
-        created=total_created,
-        reused=total_reused,
-        newest_item_id=newest_seen_id,
-    ), list_state_updates
-
-
-def _fetch_all_user_lists(*, access_token: str, provider_user_id: str) -> list[XList]:
-    seen_ids: set[str] = set()
-    ordered_lists: list[XList] = []
-
-    for fetcher in (fetch_owned_lists, fetch_followed_lists):
-        next_token: str | None = None
-        for _ in range(LIST_DISCOVERY_MAX_PAGES):
-            page = fetcher(
-                access_token=access_token,
-                user_id=provider_user_id,
-                pagination_token=next_token,
-                max_results=LIST_DISCOVERY_PAGE_SIZE,
-            )
-            for x_list in page.lists:
-                if x_list.id in seen_ids:
-                    continue
-                seen_ids.add(x_list.id)
-                ordered_lists.append(x_list)
-            if not page.next_token:
-                break
-            next_token = page.next_token
-
-    return ordered_lists
-
-
 def _upsert_x_digest_tweet_content(
     db: Session,
     *,
@@ -1013,11 +796,36 @@ def _get_channel_state(sync_metadata: dict[str, Any], channel: str) -> dict[str,
     return state if isinstance(state, dict) else {}
 
 
+def _parse_channel_last_synced_at(state: dict[str, Any]) -> datetime | None:
+    raw_value = state.get("last_synced_at")
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
 def _should_skip_scheduled_sync(sync_state: UserIntegrationSyncState) -> bool:
     last_synced_at = sync_state.last_synced_at
     if last_synced_at is None:
         return False
     min_interval_minutes = get_settings().x_sync_min_interval_minutes
+    elapsed_seconds = (_now_naive_utc() - last_synced_at).total_seconds()
+    return elapsed_seconds < min_interval_minutes * 60
+
+
+def _should_skip_channel_sync(
+    previous_state: dict[str, Any],
+    *,
+    min_interval_minutes: int,
+) -> bool:
+    last_synced_at = _parse_channel_last_synced_at(previous_state)
+    if last_synced_at is None:
+        return False
     elapsed_seconds = (_now_naive_utc() - last_synced_at).total_seconds()
     return elapsed_seconds < min_interval_minutes * 60
 
@@ -1036,12 +844,9 @@ def _build_sync_metadata_payload(
     existing_sync_metadata: dict[str, Any],
     bookmark_summary: XSyncChannelSummary,
     timeline_summary: XSyncChannelSummary,
-    lists_summary: XSyncChannelSummary,
-    list_state_updates: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     previous_bookmark_state = _get_channel_state(existing_sync_metadata, BOOKMARKS_CHANNEL)
     previous_timeline_state = _get_channel_state(existing_sync_metadata, TIMELINE_CHANNEL)
-    previous_lists_state = _get_channel_state(existing_sync_metadata, LISTS_CHANNEL)
     return {
         BOOKMARKS_CHANNEL: {
             "status": bookmark_summary.status,
@@ -1054,6 +859,10 @@ def _build_sync_metadata_payload(
             "last_synced_item_id": _resolve_last_synced_item_id(
                 previous_bookmark_state,
                 bookmark_summary.newest_item_id,
+            ),
+            "last_synced_at": _resolve_channel_last_synced_at(
+                previous_bookmark_state,
+                bookmark_summary.status,
             ),
         },
         TIMELINE_CHANNEL: {
@@ -1068,32 +877,24 @@ def _build_sync_metadata_payload(
                 previous_timeline_state,
                 timeline_summary.newest_item_id,
             ),
-        },
-        LISTS_CHANNEL: {
-            "status": lists_summary.status,
-            "fetched": lists_summary.fetched,
-            "accepted": lists_summary.accepted,
-            "filtered_out": lists_summary.filtered_out,
-            "errored": lists_summary.errored,
-            "created": lists_summary.created,
-            "reused": lists_summary.reused,
-            "last_synced_item_id": _resolve_last_synced_item_id(
-                previous_lists_state,
-                lists_summary.newest_item_id,
+            "last_synced_at": _resolve_channel_last_synced_at(
+                previous_timeline_state,
+                timeline_summary.status,
             ),
-            "list_states": _merge_list_state_payload(previous_lists_state, list_state_updates),
         },
     }
 
 
-def _merge_list_state_payload(
-    previous_lists_state: dict[str, Any],
-    list_state_updates: dict[str, dict[str, Any]],
-) -> dict[str, Any]:
-    list_states = previous_lists_state.get("list_states")
-    merged = list_states.copy() if isinstance(list_states, dict) else {}
-    merged.update(list_state_updates)
-    return merged
+def _resolve_channel_last_synced_at(
+    previous_state: dict[str, Any],
+    status: str,
+) -> str | None:
+    if status == "skipped_recently":
+        previous_value = previous_state.get("last_synced_at")
+        if isinstance(previous_value, str) and previous_value.strip():
+            return previous_value
+        return None
+    return _now_utc_iso()
 
 
 def _resolve_combined_sync_status(
@@ -1121,6 +922,19 @@ def _failed_channel_summary() -> XSyncChannelSummary:
         accepted=0,
         filtered_out=0,
         errored=1,
+        created=0,
+        reused=0,
+        newest_item_id=None,
+    )
+
+
+def _skipped_channel_summary() -> XSyncChannelSummary:
+    return XSyncChannelSummary(
+        status="skipped_recently",
+        fetched=0,
+        accepted=0,
+        filtered_out=0,
+        errored=0,
         created=0,
         reused=0,
         newest_item_id=None,

@@ -179,6 +179,7 @@ class Settings(BaseSettings):
     x_token_encryption_key: str | None = None
     x_bookmark_sync_enabled: bool = False
     x_sync_min_interval_minutes: int = Field(default=60, ge=1)
+    x_bookmark_sync_min_interval_minutes: int = Field(default=360, ge=1)
 
     # PDF extraction (Gemini)
     pdf_gemini_model: str = Field(

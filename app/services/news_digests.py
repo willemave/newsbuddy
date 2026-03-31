@@ -227,6 +227,59 @@ def _cluster_exact_groups(items: list[NewsItem]) -> list[list[NewsItem]]:
     return list(grouped.values())
 
 
+def _citation_group_key(item: NewsItem) -> tuple[str, str]:
+    normalized_item_url = normalize_http_url(item.canonical_item_url or item.discussion_url)
+    if normalized_item_url:
+        return "item", normalized_item_url
+    if item.platform and item.source_external_id:
+        return "external", f"{item.platform}:{item.source_external_id}"
+    normalized_story_url = normalize_http_url(item.canonical_story_url or item.article_url)
+    if normalized_story_url:
+        return "story", normalized_story_url
+    return "id", str(item.id)
+
+
+def _dedupe_exact_cluster_items(cluster: NewsDigestCluster) -> list[NewsItem]:
+    grouped: dict[tuple[str, str], list[NewsItem]] = {}
+    for item in cluster.items:
+        grouped.setdefault(_citation_group_key(item), []).append(item)
+
+    deduped_items: list[NewsItem] = []
+    for group in grouped.values():
+        deduped_items.append(_select_representative(group))
+    return sorted(deduped_items, key=lambda row: (row.ingested_at or datetime.min, row.id))
+
+
+def _dedupe_selected_cluster_item_ids(
+    cluster: NewsDigestCluster,
+    *,
+    selected_ids: list[int],
+) -> list[int]:
+    representative_items = _dedupe_exact_cluster_items(cluster)
+    representative_id_by_key = {
+        _citation_group_key(item): item.id for item in representative_items
+    }
+    group_key_by_item_id = {
+        item.id: _citation_group_key(item) for item in cluster.items
+    }
+
+    deduped_ids: list[int] = []
+    seen_group_keys: set[tuple[str, str]] = set()
+    for news_item_id in selected_ids:
+        group_key = group_key_by_item_id.get(news_item_id)
+        if group_key is None or group_key in seen_group_keys:
+            continue
+        representative_id = representative_id_by_key.get(group_key)
+        if representative_id is None:
+            continue
+        deduped_ids.append(representative_id)
+        seen_group_keys.add(group_key)
+
+    if deduped_ids:
+        return deduped_ids
+    return [item.id for item in _dedupe_exact_cluster_items(cluster)]
+
+
 def _cluster_semantic(exact_groups: list[list[NewsItem]]) -> list[NewsDigestCluster]:
     if not exact_groups:
         return []
@@ -525,7 +578,7 @@ def _cluster_latest_ingested_at(cluster: NewsDigestCluster) -> datetime | None:
 
 def _build_cluster_payload(cluster: NewsDigestCluster, *, rank: int) -> dict[str, Any]:
     representative = _select_representative(cluster.items)
-    sorted_items = sorted(cluster.items, key=lambda row: (row.ingested_at or datetime.min, row.id))
+    sorted_items = _dedupe_exact_cluster_items(cluster)
     representative_title = _resolve_digest_item_title(representative)
     latest_ingested_at = _cluster_latest_ingested_at(cluster)
 
@@ -607,7 +660,7 @@ def _build_cluster_prompt(cluster: NewsDigestCluster) -> str:
         "",
         "Items:",
     ]
-    for item in sorted(cluster.items, key=lambda row: (row.ingested_at or datetime.min, row.id)):
+    for item in _dedupe_exact_cluster_items(cluster):
         lines.append(f"[{item.id}] {_resolve_digest_item_title(item)}")
         if item.source_label:
             lines.append(f"Source label: {item.source_label}")
@@ -946,17 +999,19 @@ def generate_news_digest_for_user(
     for position, entry in enumerate(curated_bullets, start=1):
         cluster = entry.cluster
         draft = entry.draft
+        cited_ids = _dedupe_selected_cluster_item_ids(
+            cluster,
+            selected_ids=draft.news_item_ids or [item.id for item in cluster.items],
+        )
         bullet = NewsDigestBullet(
             digest_id=digest.id,
             position=position,
             topic=draft.topic,
             details=draft.details,
-            source_count=len(draft.news_item_ids),
+            source_count=len(cited_ids),
         )
         db.add(bullet)
         db.flush()
-
-        cited_ids = draft.news_item_ids or [item.id for item in cluster.items]
         for source_position, news_item_id in enumerate(cited_ids, start=1):
             db.add(
                 NewsDigestBulletSource(

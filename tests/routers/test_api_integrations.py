@@ -26,7 +26,7 @@ def test_start_x_oauth_returns_authorize_url(client, monkeypatch):
         lambda db, user, twitter_username=None: (
             "https://x.com/i/oauth2/authorize?state=test-state",
             "test-state",
-            ["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"],
+            ["tweet.read", "users.read", "bookmark.read", "offline.access"],
         ),
     )
 
@@ -39,8 +39,7 @@ def test_start_x_oauth_returns_authorize_url(client, monkeypatch):
     assert data["state"] == "test-state"
     assert data["authorize_url"].startswith("https://x.com/i/oauth2/authorize")
     assert "bookmark.read" in data["scopes"]
-    assert "follows.read" in data["scopes"]
-    assert "list.read" in data["scopes"]
+    assert "offline.access" in data["scopes"]
 
 
 def test_start_x_oauth_returns_400_for_validation_error(client, monkeypatch):

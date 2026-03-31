@@ -13,7 +13,13 @@ from app.models.news_digest_models import (
     NewsDigestBulletDraft,
     NewsDigestHeaderDraft,
 )
-from app.models.schema import NewsDigest, NewsDigestBullet, NewsItem, NewsItemDigestCoverage
+from app.models.schema import (
+    NewsDigest,
+    NewsDigestBullet,
+    NewsDigestBulletSource,
+    NewsItem,
+    NewsItemDigestCoverage,
+)
 from app.models.user import User
 from app.services import news_digests
 
@@ -106,6 +112,49 @@ def test_matching_text_prefers_one_title_and_excludes_source_label() -> None:
     assert "Body summary text." in matching_text
 
 
+def test_build_cluster_payload_dedupes_repeated_post_identity_but_keeps_distinct_discussions(
+) -> None:
+    first = _build_news_item(
+        101,
+        story_url="https://example.com/story-shared",
+        item_url="https://www.reddit.com/r/test/comments/abc123/shared_post/",
+        title="Shared post",
+        source_label="Reddit",
+    )
+    first.platform = "reddit"
+    first.source_external_id = "abc123"
+
+    duplicate = _build_news_item(
+        102,
+        story_url="https://example.com/story-shared",
+        item_url="https://www.reddit.com/r/test/comments/abc123/shared_post/",
+        title="Shared post",
+        source_label="Reddit",
+    )
+    duplicate.platform = "reddit"
+    duplicate.source_external_id = "abc123"
+    duplicate.summary_text = "Longer duplicate summary should win as the representative."
+
+    distinct_discussion = _build_news_item(
+        103,
+        story_url="https://example.com/story-shared",
+        item_url="https://www.reddit.com/r/other/comments/xyz789/shared_story_new_thread/",
+        title="Shared story from a different thread",
+        source_label="Reddit",
+    )
+    distinct_discussion.platform = "reddit"
+    distinct_discussion.source_external_id = "xyz789"
+
+    payload = news_digests._build_cluster_payload(
+        news_digests.NewsDigestCluster(items=[first, duplicate, distinct_discussion]),
+        rank=1,
+    )
+
+    assert payload["source_count"] == 3
+    assert payload["news_item_ids"] == [102, 103]
+    assert [item["news_item_id"] for item in payload["items"]] == [102, 103]
+
+
 def test_generate_news_digest_for_user_persists_bullets_and_coverage(
     db_session,
     monkeypatch,
@@ -183,6 +232,93 @@ def test_generate_news_digest_for_user_persists_bullets_and_coverage(
     assert db_session.query(NewsDigest).count() == 1
     assert db_session.query(NewsDigestBullet).count() == 2
     assert db_session.query(NewsItemDigestCoverage).count() == 2
+
+
+def test_generate_news_digest_for_user_dedupes_bullet_sources_but_covers_all_cluster_items(
+    db_session,
+    monkeypatch,
+) -> None:
+    user = User(
+        apple_id="dedupe-user",
+        email="dedupe@example.com",
+        full_name="Dedupe User",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    first = _build_news_item(
+        201,
+        story_url="https://example.com/story-dedupe",
+        item_url="https://www.reddit.com/r/test/comments/dup111/story/",
+        title="Duplicated Reddit post",
+        source_label="Reddit",
+    )
+    first.platform = "reddit"
+    first.source_external_id = "dup111"
+
+    duplicate = _build_news_item(
+        202,
+        story_url="https://example.com/story-dedupe",
+        item_url="https://www.reddit.com/r/test/comments/dup111/story/",
+        title="Duplicated Reddit post",
+        source_label="Reddit",
+    )
+    duplicate.platform = "reddit"
+    duplicate.source_external_id = "dup111"
+    duplicate.summary_text = "This duplicate has richer text and should become the cited source."
+
+    db_session.add_all([first, duplicate])
+    db_session.commit()
+
+    cluster = news_digests.NewsDigestCluster(items=[first, duplicate])
+    monkeypatch.setattr(news_digests, "cluster_news_items", lambda items: [cluster])
+    monkeypatch.setattr(
+        news_digests,
+        "_generate_curated_cluster_bullets",
+        lambda **kwargs: (
+            [
+                news_digests.NewsDigestCuratedBulletDraft(
+                    cluster=kwargs["clusters"][0],
+                    draft=NewsDigestBulletDraft(
+                        topic="One Reddit thread should remain",
+                        details="Duplicate rows should collapse to one cited source.",
+                        news_item_ids=[201, 202],
+                    ),
+                )
+            ],
+            True,
+        ),
+    )
+    monkeypatch.setattr(
+        news_digests,
+        "_generate_header_draft",
+        lambda bullets: NewsDigestHeaderDraft(
+            title="Deduped digest",
+            summary="Duplicate evidence rows were collapsed before persistence.",
+        ),
+    )
+
+    result = news_digests.generate_news_digest_for_user(
+        db_session,
+        user_id=user.id,
+        trigger_reason="manual_test",
+        force=True,
+    )
+    db_session.commit()
+
+    bullet = db_session.query(NewsDigestBullet).one()
+    bullet_sources = db_session.query(NewsDigestBulletSource).all()
+    coverage_rows = (
+        db_session.query(NewsItemDigestCoverage)
+        .order_by(NewsItemDigestCoverage.news_item_id.asc())
+        .all()
+    )
+
+    assert result.group_count == 1
+    assert bullet.source_count == 1
+    assert [row.news_item_id for row in bullet_sources] == [202]
+    assert [row.news_item_id for row in coverage_rows] == [201, 202]
 
 
 def test_generate_curated_cluster_bullets_uses_user_prompt_and_sanitizes_ids(monkeypatch) -> None:

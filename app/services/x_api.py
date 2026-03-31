@@ -19,8 +19,6 @@ X_DEFAULT_SCOPES = [
     "tweet.read",
     "users.read",
     "bookmark.read",
-    "follows.read",
-    "list.read",
     "offline.access",
 ]
 X_TWEET_FIELDS = (
