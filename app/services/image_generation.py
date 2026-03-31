@@ -38,6 +38,9 @@ IMAGE_GENERATION_MODEL = "gemini-3.1-flash-image-preview"
 NEWS_THUMBNAIL_MODEL = IMAGE_GENERATION_MODEL
 INFOGRAPHIC_MODEL = IMAGE_GENERATION_MODEL
 
+# Image size settings
+INFOGRAPHIC_IMAGE_SIZE = "512"
+
 # Thumbnail settings
 THUMBNAIL_SIZE = (200, 200)  # Max dimensions for thumbnails
 
@@ -357,9 +360,11 @@ class ImageGenerationService:
         get_thumbnails_dir().mkdir(parents=True, exist_ok=True)
 
         logger.info(
-            "Initialized Vertex image generation service with models: news=%s, infographic=%s",
+            "Initialized Vertex image generation service "
+            "with models: news=%s, infographic=%s size=%s",
             NEWS_THUMBNAIL_MODEL,
             INFOGRAPHIC_MODEL,
+            INFOGRAPHIC_IMAGE_SIZE,
         )
 
     def generate_thumbnail(self, source_path: Path, content_id: int) -> Path | None:
@@ -554,7 +559,7 @@ class ImageGenerationService:
                         response_modalities=["IMAGE"],
                         image_config=ImageConfig(
                             aspect_ratio="16:9",
-                            image_size="1K",
+                            image_size=INFOGRAPHIC_IMAGE_SIZE,
                         ),
                     ),
                 )
@@ -575,7 +580,10 @@ class ImageGenerationService:
                             source="queue",
                             usage=usage_details,
                             content_id=content_id,
-                            metadata={"image_type": "infographic"},
+                            metadata={
+                                "image_type": "infographic",
+                                "image_size": INFOGRAPHIC_IMAGE_SIZE,
+                            },
                         )
 
             image_path = get_content_images_dir() / f"{content_id}.png"
