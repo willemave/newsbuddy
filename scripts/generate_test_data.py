@@ -76,7 +76,6 @@ from app.models.metadata import (
     ContentClassification,
     ContentStatus,
     ContentType,
-    EditorialArchetypeReaction,
     EditorialKeyPoint,
     EditorialNarrativeSummary,
     EditorialQuote,
@@ -593,51 +592,6 @@ def generate_editorial_key_points(count: int = 5) -> list[EditorialKeyPoint]:
     return [EditorialKeyPoint(point=point) for point in selected]
 
 
-def generate_editorial_archetype_reactions() -> list[EditorialArchetypeReaction]:
-    """Generate a complete editorial archetype set."""
-    return [
-        EditorialArchetypeReaction(
-            archetype="Paul Graham",
-            paragraphs=[
-                (
-                    "The interesting opportunity is not generic infrastructure but the "
-                    "specific workflow pain that teams feel before incumbents productize it."
-                ),
-                (
-                    "Whoever makes the operational burden feel simpler and more native to "
-                    "daily work will have room to build a durable product wedge."
-                ),
-            ],
-        ),
-        EditorialArchetypeReaction(
-            archetype="Andy Grove",
-            paragraphs=[
-                (
-                    "This looks like a strategic inflection point where reliability and "
-                    "governance stop being support functions and start shaping the product."
-                ),
-                (
-                    "The chokepoints are clear: approval latency, tooling sprawl, and weak "
-                    "observability. Teams that manage those well will move first."
-                ),
-            ],
-        ),
-        EditorialArchetypeReaction(
-            archetype="Charlie Munger",
-            paragraphs=[
-                (
-                    "The deeper story is incentives. Budget owners and operators now care more "
-                    "about predictability than demo quality, and behavior follows incentives."
-                ),
-                (
-                    "That shift changes vendor selection, process discipline, and who actually "
-                    "captures the long-term economics of the market."
-                ),
-            ],
-        ),
-    ]
-
-
 def generate_editorial_narrative(title: str, topic: str) -> EditorialNarrativeSummary:
     """Generate an editorial narrative summary for long-form content."""
     paragraphs = [
@@ -664,7 +618,6 @@ def generate_editorial_narrative(title: str, topic: str) -> EditorialNarrativeSu
         title=title,
         editorial_narrative="\n\n".join(paragraphs),
         quotes=generate_editorial_quotes(random.randint(2, 3)),
-        archetype_reactions=generate_editorial_archetype_reactions(),
         key_points=generate_editorial_key_points(random.randint(4, 6)),
         classification="to_read" if random.random() > 0.15 else "skip",
         summarization_date=random_datetime(7),
