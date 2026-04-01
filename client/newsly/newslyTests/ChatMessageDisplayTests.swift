@@ -137,6 +137,116 @@ final class ChatMessageDisplayTests: XCTestCase {
         XCTAssertEqual(message.feedOptions[0].feedTypeLabel, "Atom")
     }
 
+    func testChatMessageDecodesCouncilCandidates() throws {
+        let data = Data(
+            """
+            {
+              "id": 12,
+              "session_id": 21,
+              "role": "assistant",
+              "content": "Analyst branch",
+              "timestamp": "2026-03-30T18:00:00Z",
+              "status": "completed",
+              "error": null,
+              "active_council_child_session_id": 201,
+              "council_candidates": [
+                {
+                  "persona_id": "analyst",
+                  "persona_name": "Analyst",
+                  "child_session_id": 201,
+                  "content": "Analyst branch",
+                  "status": "completed",
+                  "order": 0
+                },
+                {
+                  "persona_id": "skeptic",
+                  "persona_name": "Skeptic",
+                  "child_session_id": 202,
+                  "content": "Skeptic branch",
+                  "status": "completed",
+                  "order": 1
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let message = try JSONDecoder().decode(ChatMessage.self, from: data)
+
+        XCTAssertTrue(message.hasCouncilCandidates)
+        XCTAssertEqual(message.activeCouncilChildSessionId, 201)
+        XCTAssertEqual(message.councilCandidates.map(\.personaName), ["Analyst", "Skeptic"])
+    }
+
+    func testChatSessionDetailDecodesCouncilModeSummaryAndMessages() throws {
+        let data = Data(
+            """
+            {
+              "session": {
+                "id": 42,
+                "content_id": null,
+                "title": "Council Chat",
+                "session_type": "knowledge_chat",
+                "topic": null,
+                "llm_provider": "openai",
+                "llm_model": "openai:gpt-5.4",
+                "created_at": "2026-03-30T18:00:00Z",
+                "updated_at": "2026-03-30T18:02:00Z",
+                "last_message_at": "2026-03-30T18:02:00Z",
+                "is_archived": false,
+                "article_title": null,
+                "article_url": null,
+                "article_summary": null,
+                "article_source": null,
+                "has_pending_message": false,
+                "is_favorite": false,
+                "has_messages": true,
+                "last_message_preview": "Analyst branch",
+                "last_message_role": "assistant",
+                "council_mode": true,
+                "active_child_session_id": 201
+              },
+              "messages": [
+                {
+                  "id": 1,
+                  "session_id": 42,
+                  "role": "assistant",
+                  "content": "Analyst branch",
+                  "timestamp": "2026-03-30T18:01:00Z",
+                  "status": "completed",
+                  "error": null,
+                  "active_council_child_session_id": 201,
+                  "council_candidates": [
+                    {
+                      "persona_id": "analyst",
+                      "persona_name": "Analyst",
+                      "child_session_id": 201,
+                      "content": "Analyst branch",
+                      "status": "completed",
+                      "order": 0
+                    },
+                    {
+                      "persona_id": "skeptic",
+                      "persona_name": "Skeptic",
+                      "child_session_id": 202,
+                      "content": "Skeptic branch",
+                      "status": "completed",
+                      "order": 1
+                    }
+                  ]
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let detail = try JSONDecoder().decode(ChatSessionDetail.self, from: data)
+
+        XCTAssertTrue(detail.session.isCouncilMode)
+        XCTAssertEqual(detail.session.activeChildSessionId, 201)
+        XCTAssertEqual(detail.messages.first?.councilCandidates.count, 2)
+    }
+
     @MainActor
     func testAssistantFeedOptionActionModelMarksHttp400AsSubscribed() async {
         let option = AssistantFeedOption(

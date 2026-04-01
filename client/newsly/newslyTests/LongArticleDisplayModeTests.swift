@@ -16,15 +16,15 @@ final class LongArticleDisplayModeTests: XCTestCase {
     func testDetailsDescribeEachModeClearly() {
         XCTAssertEqual(
             LongArticleDisplayMode.narrative.detail,
-            "Show the narrative with notable quotes and expert perspectives"
+            "Show the narrative with notable quotes"
         )
         XCTAssertEqual(
             LongArticleDisplayMode.keyPoints.detail,
-            "Show key points with notable quotes and expert perspectives"
+            "Show key points with notable quotes"
         )
         XCTAssertEqual(
             LongArticleDisplayMode.both.detail,
-            "Show narrative, key points, quotes, and expert perspectives"
+            "Show narrative, key points, and quotes"
         )
     }
 }
