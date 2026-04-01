@@ -33,7 +33,10 @@ class DummySummarizer:
         max_bullet_points: int,
         max_quotes: int,
         provider_override: str | None = None,
+        db=None,
+        usage_persist=None,
     ):
+        del content, content_id, max_bullet_points, max_quotes, provider_override, db, usage_persist
         if content_type == "news_digest":
             return NewsSummary(
                 title="News Title",
@@ -53,35 +56,6 @@ class DummySummarizer:
             quotes=[
                 {"text": "Quote one with enough detail for validation.", "attribution": "Source A"},
                 {"text": "Quote two with enough detail for validation.", "attribution": "Source B"},
-            ],
-            archetype_reactions=[
-                {
-                    "archetype": "Paul Graham",
-                    "paragraphs": [
-                        (
-                            "Paragraph one about user pull, founder leverage, and "
-                            "overlooked opportunity."
-                        ),
-                        (
-                            "Paragraph two about what a small team could build faster "
-                            "than incumbents."
-                        ),
-                    ],
-                },
-                {
-                    "archetype": "Andy Grove",
-                    "paragraphs": [
-                        "Paragraph one about strategic inflection points and chokepoints.",
-                        "Paragraph two about execution risk and what leaders should monitor next.",
-                    ],
-                },
-                {
-                    "archetype": "Charlie Munger",
-                    "paragraphs": [
-                        "Paragraph one about incentives and misjudgment shaping behavior.",
-                        "Paragraph two about second-order effects, moats, and misunderstanding.",
-                    ],
-                },
             ],
             key_points=[
                 {"point": "Key point one with concrete detail and consequence."},
@@ -230,7 +204,11 @@ def test_summarize_preserves_top_comment_from_concurrent_discussion_update(db_se
             max_bullet_points: int,
             max_quotes: int,
             provider_override: str | None = None,
+            db=None,
+            usage_persist=None,
         ) -> dict[str, object]:
+            del content, content_type, max_bullet_points, max_quotes, provider_override, db
+            del usage_persist
             external_session_factory = sessionmaker(
                 autocommit=False,
                 autoflush=False,

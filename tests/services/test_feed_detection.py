@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from app.models.schema import LlmUsageRecord
 from app.services import feed_detection
 
 
@@ -76,3 +77,43 @@ def test_validate_feed_candidate_rejects_html_article() -> None:
     result = detector._validate_feed_candidate("https://example.com/articles/post")
 
     assert result is None
+
+
+def test_classify_feed_type_with_llm_persists_usage(db_session, monkeypatch) -> None:
+    class _Agent:
+        def run_sync(self, _prompt, model_settings=None):  # noqa: ANN001
+            del model_settings
+            return SimpleNamespace(
+                output=feed_detection.FeedClassificationResult(
+                    feed_type="atom",
+                    confidence=0.9,
+                    reasoning="Looks like a standard blog feed.",
+                ),
+                usage=lambda: SimpleNamespace(
+                    input_tokens=40,
+                    output_tokens=12,
+                    total_tokens=52,
+                ),
+            )
+
+    monkeypatch.setattr(feed_detection, "get_basic_agent", lambda *args, **kwargs: _Agent())
+
+    result = feed_detection.classify_feed_type_with_llm(
+        "https://example.com/feed.xml",
+        "https://example.com",
+        "Example Feed",
+        db=db_session,
+        usage_persist={
+            "feature": "feed_detection",
+            "operation": "feed_detection.classify_feed_type",
+            "source": "queue",
+            "content_id": 99,
+        },
+    )
+
+    assert result is not None
+    row = db_session.query(LlmUsageRecord).one()
+    assert row.feature == "feed_detection"
+    assert row.operation == "feed_detection.classify_feed_type"
+    assert row.content_id == 99
+    assert row.total_tokens == 52

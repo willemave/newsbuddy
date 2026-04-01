@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.models.metadata import NewsSummary
 from app.models.schema import Base, NewsItem
 from app.services.news_processing import process_news_item
 
@@ -96,3 +97,56 @@ def test_process_news_item_commits_processing_state_before_summarization(
         read_session.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_process_news_item_passes_usage_persistence_context(db_session) -> None:
+    item = NewsItem(
+        ingest_key="news-item-usage-context",
+        visibility_scope="global",
+        owner_user_id=77,
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="125",
+        article_url="https://example.com/story-3",
+        article_title="Example story 3",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=125",
+        raw_metadata={"excerpt": "Example excerpt"},
+        status="pending",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    captured: dict[str, object] = {}
+
+    def _summarize(*_args, **kwargs):
+        captured.update(kwargs)
+        return NewsSummary(
+            title="Compact title",
+            article_url=item.article_url,
+            key_points=["Point one"],
+            summary="Short summary.",
+        )
+
+    summarizer = SimpleNamespace(summarize=_summarize)
+
+    result = process_news_item(
+        db_session,
+        news_item_id=item.id,
+        summarizer=summarizer,
+    )
+
+    assert result.success is True
+    assert captured["db"] is db_session
+    assert captured["usage_persist"] == {
+        "feature": "news_processing",
+        "operation": "news_processing.summarize_short_form",
+        "source": "queue",
+        "user_id": 77,
+        "metadata": {
+            "news_item_id": item.id,
+            "source_type": "hackernews",
+        },
+    }

@@ -128,6 +128,14 @@ def test_subscribe_to_feed_accepts_direct_feed_url(db_session, monkeypatch) -> N
             errors=0,
         ),
     )
+    monkeypatch.setattr(
+        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        lambda feed_url: {
+            "feed_url": feed_url,
+            "feed_format": "rss",
+            "title": "Register Spill",
+        },
+    )
 
     queue_gateway = Mock()
     context = _build_context(db_session, queue_gateway=queue_gateway)
@@ -203,11 +211,19 @@ def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_tit
         "app.pipeline.handlers.analyze_url.detect_feeds_from_html",
         lambda *_args, **_kwargs: {
             "detected_feed": {
-                "url": "https://registerspill.thorstenball.com/feed",
+                "url": "https://registerspill.thorstenball.com/feed.xml",
                 "type": "substack",
                 "title": None,
                 "format": "rss",
             }
+        },
+    )
+    monkeypatch.setattr(
+        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        lambda feed_url: {
+            "feed_url": feed_url,
+            "feed_format": "rss",
+            "title": "Register Spill",
         },
     )
     monkeypatch.setattr(
@@ -238,13 +254,13 @@ def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_tit
     assert result.success is True
     assert content.status == ContentStatus.SKIPPED.value
     assert content.content_metadata["detected_feed"] == {
-        "url": "https://registerspill.thorstenball.com/feed",
+        "url": "https://registerspill.thorstenball.com/feed.xml",
         "type": "substack",
         "title": None,
         "format": "rss",
     }
     assert content.content_metadata["feed_subscription"]["feed_url"] == (
-        "https://registerspill.thorstenball.com/feed"
+        "https://registerspill.thorstenball.com/feed.xml"
     )
     assert content.content_metadata["feed_subscription"]["feed_type"] == "substack"
     assert content.content_metadata["feed_subscription"]["created"] is True
@@ -258,7 +274,7 @@ def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_tit
         db_session.query(UserScraperConfig)
         .filter(
             UserScraperConfig.user_id == 1,
-            UserScraperConfig.feed_url == "https://registerspill.thorstenball.com/feed",
+            UserScraperConfig.feed_url == "https://registerspill.thorstenball.com/feed.xml",
         )
         .first()
     )
@@ -316,6 +332,14 @@ def test_subscribe_to_feed_existing_subscription_skips_initial_download(
     monkeypatch.setattr(
         "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
         _unexpected_backfill,
+    )
+    monkeypatch.setattr(
+        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        lambda feed_url: {
+            "feed_url": feed_url,
+            "feed_format": "rss",
+            "title": "Example Feed",
+        },
     )
 
     queue_gateway = Mock()
@@ -381,6 +405,14 @@ def test_subscribe_to_feed_records_initial_download_failure(
     monkeypatch.setattr(
         "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
         _failing_backfill,
+    )
+    monkeypatch.setattr(
+        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        lambda feed_url: {
+            "feed_url": feed_url,
+            "feed_format": "rss",
+            "title": "Failing Feed",
+        },
     )
 
     queue_gateway = Mock()

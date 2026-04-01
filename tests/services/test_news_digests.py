@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,6 +14,7 @@ from app.models.news_digest_models import (
     NewsDigestHeaderDraft,
 )
 from app.models.schema import (
+    LlmUsageRecord,
     NewsDigest,
     NewsDigestBullet,
     NewsDigestBulletSource,
@@ -214,7 +215,7 @@ def test_generate_news_digest_for_user_persists_bullets_and_coverage(
     monkeypatch.setattr(
         news_digests,
         "_generate_header_draft",
-        lambda bullets: NewsDigestHeaderDraft(
+        lambda bullets, **_kwargs: NewsDigestHeaderDraft(
             title="Morning digest",
             summary="Two distinct stories landed in this run.",
         ),
@@ -293,7 +294,7 @@ def test_generate_news_digest_for_user_dedupes_bullet_sources_but_covers_all_clu
     monkeypatch.setattr(
         news_digests,
         "_generate_header_draft",
-        lambda bullets: NewsDigestHeaderDraft(
+        lambda bullets, **_kwargs: NewsDigestHeaderDraft(
             title="Deduped digest",
             summary="Duplicate evidence rows were collapsed before persistence.",
         ),
@@ -370,6 +371,7 @@ def test_generate_curated_cluster_bullets_uses_user_prompt_and_sanitizes_ids(mon
 
     assert used_batch is True
     assert "Prefer semiconductor supply chain and AI infra." in captured["system_prompt"]
+    assert "prefer one very short headline" in captured["system_prompt"]
     assert "\"cluster_rank\": 1" in captured["prompt"]
     assert curated[0].draft.news_item_ids == [21]
 
@@ -408,6 +410,103 @@ def test_generate_curated_cluster_bullets_raises_when_batch_generation_fails(mon
             user=user,
             clusters=[cluster],
         )
+
+
+def test_generate_curated_cluster_bullets_persists_usage(db_session, monkeypatch) -> None:
+    user = User(apple_id="digest-usage-user", email="digest-usage@example.com")
+    cluster = news_digests.NewsDigestCluster(
+        items=[
+            _build_news_item(
+                41,
+                story_url="https://example.com/story-e",
+                item_url="https://news.ycombinator.com/item?id=41",
+                title="Story E",
+                source_label="Hacker News",
+            )
+        ]
+    )
+
+    def fake_get_basic_agent(_model_spec, output_cls, _system_prompt):
+        class _Agent:
+            def run_sync(self, _prompt, model_settings=None):  # noqa: ANN001
+                del model_settings
+                return SimpleNamespace(
+                    output=output_cls(
+                        bullets=[
+                            NewsDigestBatchBulletDraft(
+                                cluster_rank=1,
+                                topic="Supply chain pressure stays elevated",
+                                details="Packaging constraints remain the limiting factor.",
+                                news_item_ids=[41],
+                            )
+                        ]
+                    ),
+                    usage=lambda: SimpleNamespace(
+                        input_tokens=55,
+                        output_tokens=20,
+                        total_tokens=75,
+                    ),
+                )
+
+        return _Agent()
+
+    monkeypatch.setattr(news_digests, "get_basic_agent", fake_get_basic_agent)
+
+    curated, used_batch = news_digests._generate_curated_cluster_bullets(
+        user=user,
+        clusters=[cluster],
+        db=db_session,
+    )
+
+    assert used_batch is True
+    assert len(curated) == 1
+    row = db_session.query(LlmUsageRecord).one()
+    assert row.feature == "news_digests"
+    assert row.operation == "news_digests.curate_clusters"
+    assert row.total_tokens == 75
+
+
+def test_generate_header_draft_persists_usage(db_session, monkeypatch) -> None:
+    bullets = [
+        NewsDigestBulletDraft(
+            topic="Chip packaging bottlenecks",
+            details="Advanced packaging remains the core capacity constraint.",
+            news_item_ids=[1],
+        )
+    ]
+
+    def fake_get_basic_agent(_model_spec, output_cls, _system_prompt):
+        class _Agent:
+            def run_sync(self, _prompt, model_settings=None):  # noqa: ANN001
+                del model_settings
+                return SimpleNamespace(
+                    output=output_cls(
+                        title="Morning infra digest",
+                        summary="Packaging and inference economics led the cycle.",
+                    ),
+                    usage=lambda: SimpleNamespace(
+                        input_tokens=22,
+                        output_tokens=11,
+                        total_tokens=33,
+                    ),
+                )
+
+        return _Agent()
+
+    monkeypatch.setattr(news_digests, "get_basic_agent", fake_get_basic_agent)
+
+    draft = news_digests._generate_header_draft(
+        bullets,
+        db=db_session,
+        user_id=12,
+    )
+
+    assert draft.title == "Morning infra digest"
+    row = db_session.query(LlmUsageRecord).one()
+    assert row.feature == "news_digests"
+    assert row.operation == "news_digests.generate_header"
+    assert row.user_id == 12
+    assert row.total_tokens == 33
 
 
 def test_generate_news_digest_for_user_only_covers_curated_clusters(
@@ -465,7 +564,7 @@ def test_generate_news_digest_for_user_only_covers_curated_clusters(
     monkeypatch.setattr(
         news_digests,
         "_generate_header_draft",
-        lambda bullets: NewsDigestHeaderDraft(
+        lambda bullets, **_kwargs: NewsDigestHeaderDraft(
             title="Curated digest",
             summary="Only the selected cluster made it into this run.",
         ),
@@ -486,118 +585,46 @@ def test_generate_news_digest_for_user_only_covers_curated_clusters(
     assert [row.news_item_id for row in coverage_rows] == [41]
 
 
-def test_get_news_digest_trigger_decision_flushes_day_rollover(db_session, monkeypatch) -> None:
-    user = User(
-        apple_id="rollover-user",
-        email="rollover@example.com",
-        full_name="Rollover User",
-        is_active=True,
-        news_digest_timezone="US/Pacific",
-    )
-    db_session.add(user)
-    db_session.flush()
-
-    stale_item = NewsItem(
-        ingest_key="stale-item",
-        visibility_scope="global",
-        platform="techmeme",
-        source_type="techmeme",
-        source_label="Techmeme",
-        source_external_id="stale",
-        canonical_item_url="https://www.techmeme.com/240101/p1",
-        canonical_story_url="https://example.com/stale",
-        article_url="https://example.com/stale",
-        article_title="Older story",
-        article_domain="example.com",
-        discussion_url="https://www.techmeme.com/240101/p1",
-        summary_title="Older story",
-        summary_key_points=["Older point"],
-        summary_text="Older summary",
-        raw_metadata={},
-        status="ready",
-        ingested_at=(datetime(2026, 3, 27, 23, 0, tzinfo=UTC) - timedelta(hours=24)).replace(
-            tzinfo=None
-        ),
-    )
-    db_session.add(stale_item)
-    db_session.commit()
-
-    monkeypatch.setattr(
-        news_digests,
-        "cluster_news_items",
-        lambda items: [news_digests.NewsDigestCluster(items=items)],
-    )
-
-    decision = news_digests.get_news_digest_trigger_decision(
-        db_session,
-        user=user,
-        now_utc=datetime(2026, 3, 28, 10, 0, tzinfo=UTC),
-    )
-
-    assert decision.should_generate is True
-    assert decision.trigger_reason == "day_rollover_flush"
-
-
-def test_get_news_digest_trigger_decision_day_rollover_only_flushes_once_per_day(
+def test_get_news_digest_trigger_decision_ignores_day_boundaries_when_threshold_not_met(
     db_session,
     monkeypatch,
 ) -> None:
     user = User(
-        apple_id="rollover-once-user",
-        email="rollover-once@example.com",
-        full_name="Rollover Once User",
+        apple_id="threshold-only-user",
+        email="threshold-only@example.com",
+        full_name="Threshold Only User",
         is_active=True,
         news_digest_timezone="America/Los_Angeles",
     )
     db_session.add(user)
     db_session.flush()
 
-    stale_item = NewsItem(
-        ingest_key="rollover-once-item",
-        visibility_scope="global",
-        platform="techmeme",
-        source_type="techmeme",
-        source_label="Techmeme",
-        source_external_id="rollover-once",
-        canonical_item_url="https://www.techmeme.com/240101/p2",
-        canonical_story_url="https://example.com/rollover-once",
-        article_url="https://example.com/rollover-once",
-        article_title="Backlog story",
-        article_domain="example.com",
-        discussion_url="https://www.techmeme.com/240101/p2",
-        summary_title="Backlog story",
-        summary_key_points=["Backlog point"],
-        summary_text="Backlog summary",
-        raw_metadata={},
-        status="ready",
-        ingested_at=datetime(2026, 3, 30, 6, 30),
-    )
-    db_session.add(stale_item)
-    db_session.flush()
-    db_session.add(
-        NewsDigest(
-            user_id=user.id,
-            timezone="America/Los_Angeles",
-            title="Earlier digest",
-            summary="Already flushed today.",
-            source_count=1,
-            group_count=1,
-            embedding_model="embed",
-            llm_model="llm",
-            pipeline_version="test",
-            trigger_reason="day_rollover_flush",
-            generated_at=datetime(2026, 3, 31, 7, 15),
-            build_metadata={},
-            window_start_at=datetime(2026, 3, 30, 6, 30),
-            window_end_at=datetime(2026, 3, 30, 6, 30),
-        )
+    db_session.add_all(
+        [
+            _build_news_item(
+                501,
+                story_url="https://example.com/old-story-a",
+                item_url="https://news.ycombinator.com/item?id=501",
+                title="Old story A",
+                source_label="Hacker News",
+            ),
+            _build_news_item(
+                502,
+                story_url="https://example.com/old-story-b",
+                item_url="https://news.ycombinator.com/item?id=502",
+                title="Old story B",
+                source_label="Hacker News",
+            ),
+        ]
     )
     db_session.commit()
 
+    monkeypatch.setattr(news_digests.get_settings(), "news_digest_min_uncovered_items", 25)
+    monkeypatch.setattr(news_digests.get_settings(), "news_digest_min_provisional_groups", 6)
     monkeypatch.setattr(
         news_digests,
         "cluster_news_items",
-        lambda items: [news_digests.NewsDigestCluster(items=items)],
+        lambda items: [news_digests.NewsDigestCluster(items=[item]) for item in items[:2]],
     )
 
     decision = news_digests.get_news_digest_trigger_decision(
@@ -607,7 +634,53 @@ def test_get_news_digest_trigger_decision_day_rollover_only_flushes_once_per_day
     )
 
     assert decision.flush_required is False
+    assert decision.trigger_reason is None
     assert decision.should_generate is False
+
+
+def test_get_news_digest_trigger_decision_uses_provisional_group_threshold(
+    db_session,
+    monkeypatch,
+) -> None:
+    user = User(
+        apple_id="group-threshold-user",
+        email="group-threshold@example.com",
+        full_name="Group Threshold User",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    items = [
+        _build_news_item(
+            item_id=610 + idx,
+            story_url=f"https://example.com/group-story-{idx}",
+            item_url=f"https://news.ycombinator.com/item?id={610 + idx}",
+            title=f"Story {idx}",
+            source_label="Hacker News",
+        )
+        for idx in range(5)
+    ]
+    db_session.add_all(items)
+    db_session.commit()
+
+    monkeypatch.setattr(news_digests.get_settings(), "news_digest_min_uncovered_items", 25)
+    monkeypatch.setattr(news_digests.get_settings(), "news_digest_min_provisional_groups", 5)
+    monkeypatch.setattr(
+        news_digests,
+        "cluster_news_items",
+        lambda rows: [news_digests.NewsDigestCluster(items=[item]) for item in rows],
+    )
+
+    decision = news_digests.get_news_digest_trigger_decision(
+        db_session,
+        user=user,
+        now_utc=datetime(2026, 3, 31, 12, 0, tzinfo=UTC),
+    )
+
+    assert decision.flush_required is False
+    assert decision.trigger_reason == "provisional_group_threshold"
+    assert decision.should_generate is True
 
 
 def test_get_news_digest_trigger_decision_respects_user_interval_hours(

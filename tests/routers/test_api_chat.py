@@ -1,12 +1,15 @@
 """Tests for chat session API endpoints."""
 
+import asyncio
 import json
 
 from fastapi.testclient import TestClient
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from sqlalchemy.orm import Session
 
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import ChatMessage, ChatSession, Content
+from app.services.chat_agent import ChatRunResult, save_messages
 
 
 def test_create_chat_session_with_content(
@@ -165,6 +168,331 @@ def test_list_chat_sessions(
 
     sessions = response.json()
     assert len(sessions) == 3
+
+
+def _seed_turn(
+    db_session: Session,
+    session_id: int,
+    user_prompt: str,
+    assistant_text: str,
+) -> ChatMessage:
+    return save_messages(
+        db_session,
+        session_id,
+        [
+            ModelRequest(parts=[UserPromptPart(content=user_prompt)]),
+            ModelResponse(parts=[TextPart(content=assistant_text)]),
+        ],
+        display_user_prompt=user_prompt,
+    )
+
+
+def test_start_council_chat_creates_hidden_child_sessions_and_hides_them_from_history(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Council start should fork hidden branches and expose only the parent session."""
+    parent = ChatSession(
+        user_id=test_user.id,
+        title="Council Parent",
+        session_type="knowledge_chat",
+        context_snapshot="Parent context",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add(parent)
+    db_session.commit()
+    db_session.refresh(parent)
+    _seed_turn(db_session, parent.id, "What happened?", "Initial answer.")
+
+    async def _fake_run_chat_turn(db, session, user_prompt, source="chat"):
+        del source
+        assistant_text = f"{session.council_persona_name} branch on: {user_prompt}"
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content=user_prompt)]),
+            ModelResponse(parts=[TextPart(content=assistant_text)]),
+        ]
+        save_messages(db, session.id, messages, display_user_prompt=user_prompt)
+        return ChatRunResult(
+            output_text=assistant_text,
+            new_messages=messages,
+            all_messages=messages,
+            tool_calls=[],
+        )
+
+    monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
+
+    response = client.post(
+        f"/api/content/chat/sessions/{parent.id}/council/start",
+        json={"message": "Give me four different perspectives."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session"]["id"] == parent.id
+    assert payload["session"]["council_mode"] is True
+    assert payload["session"]["active_child_session_id"] is not None
+
+    db_session.refresh(parent)
+    assert parent.council_mode is True
+    assert parent.active_child_session_id is not None
+    assert parent.council_message_id is not None
+
+    db_session.expire_all()
+    child_sessions = (
+        db_session.query(ChatSession)
+        .filter(ChatSession.parent_session_id == parent.id)
+        .order_by(ChatSession.id)
+        .all()
+    )
+    assert len(child_sessions) == 4
+    assert all(child.is_hidden_from_history is True for child in child_sessions)
+    assert all(child.branch_start_message_id is not None for child in child_sessions)
+    assert all(
+        "Council Response Style:" in (child.context_snapshot or "")
+        for child in child_sessions
+    )
+    assert all(
+        "Keep responses concise by default." in (child.context_snapshot or "")
+        for child in child_sessions
+    )
+
+    council_rows = [
+        message
+        for message in payload["messages"]
+        if message["role"] == "assistant" and message["council_candidates"]
+    ]
+    assert len(council_rows) == 1
+    assert len(council_rows[0]["council_candidates"]) == 4
+
+    history_response = client.get("/api/content/chat/sessions")
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert [session["id"] for session in history_payload] == [parent.id]
+
+
+def test_council_branch_selection_switches_visible_transcript_and_send_targets_active_child(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Selecting a council branch should swap downstream transcript and follow-up routing."""
+    parent = ChatSession(
+        user_id=test_user.id,
+        title="Switchable Council",
+        session_type="knowledge_chat",
+        context_snapshot="Parent context",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add(parent)
+    db_session.commit()
+    db_session.refresh(parent)
+    _seed_turn(db_session, parent.id, "Summarize this.", "Base answer.")
+
+    async def _fake_run_chat_turn(db, session, user_prompt, source="chat"):
+        del source
+        assistant_text = f"{session.council_persona_name} initial council reply"
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content=user_prompt)]),
+            ModelResponse(parts=[TextPart(content=assistant_text)]),
+        ]
+        save_messages(db, session.id, messages, display_user_prompt=user_prompt)
+        return ChatRunResult(
+            output_text=assistant_text,
+            new_messages=messages,
+            all_messages=messages,
+            tool_calls=[],
+        )
+
+    monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
+
+    start_response = client.post(
+        f"/api/content/chat/sessions/{parent.id}/council/start",
+        json={"message": "Open a council."},
+    )
+    assert start_response.status_code == 200
+    start_payload = start_response.json()
+    council_row = next(
+        message
+        for message in start_payload["messages"]
+        if message["role"] == "assistant" and message["council_candidates"]
+    )
+    candidates = council_row["council_candidates"]
+    first_child_id = candidates[0]["child_session_id"]
+    second_child_id = candidates[1]["child_session_id"]
+
+    _seed_turn(db_session, first_child_id, "First branch follow-up", "First branch answer")
+    _seed_turn(db_session, second_child_id, "Second branch follow-up", "Second branch answer")
+
+    routed_calls: list[tuple[int, int, str]] = []
+
+    async def _fake_process_assistant_turn_async(
+        session_id: int,
+        message_id: int,
+        prompt: str,
+        *,
+        screen_context,
+        source: str = "assistant",
+    ) -> None:
+        del screen_context, source
+        routed_calls.append((session_id, message_id, prompt))
+
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+
+    send_response = client.post(
+        f"/api/content/chat/sessions/{parent.id}/messages",
+        json={"message": "Stay on the default branch."},
+    )
+    assert send_response.status_code == 200
+    assert routed_calls[0][0] == first_child_id
+
+    second_select_response = client.post(
+        f"/api/content/chat/sessions/{parent.id}/council/select",
+        json={"child_session_id": second_child_id},
+    )
+    assert second_select_response.status_code == 200
+    second_payload = second_select_response.json()
+    assert second_payload["session"]["active_child_session_id"] == second_child_id
+    visible_texts = [message["content"] for message in second_payload["messages"]]
+    assert "Second branch answer" in visible_texts
+    assert "First branch answer" not in visible_texts
+
+    send_after_switch_response = client.post(
+        f"/api/content/chat/sessions/{parent.id}/messages",
+        json={"message": "Route this to the second branch."},
+    )
+    assert send_after_switch_response.status_code == 200
+    assert routed_calls[1][0] == second_child_id
+
+    first_select_response = client.post(
+        f"/api/content/chat/sessions/{parent.id}/council/select",
+        json={"child_session_id": first_child_id},
+    )
+    assert first_select_response.status_code == 200
+    first_payload = first_select_response.json()
+    assert first_payload["session"]["active_child_session_id"] == first_child_id
+    visible_texts = [message["content"] for message in first_payload["messages"]]
+    assert "First branch answer" in visible_texts
+    assert "Second branch answer" not in visible_texts
+
+
+def test_start_council_chat_runs_branches_in_parallel(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Council start should launch all four branch turns before awaiting completion."""
+    parent = ChatSession(
+        user_id=test_user.id,
+        title="Parallel Council",
+        session_type="knowledge_chat",
+        context_snapshot="Parent context",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add(parent)
+    db_session.commit()
+    db_session.refresh(parent)
+
+    release_all = asyncio.Event()
+    branch_started = 0
+
+    async def _fake_run_chat_turn(db, session, user_prompt, source="chat"):
+        del source
+        nonlocal branch_started
+        branch_started += 1
+        if branch_started == 4:
+            release_all.set()
+        await asyncio.wait_for(release_all.wait(), timeout=0.2)
+        assistant_text = f"{session.council_persona_name} parallel reply"
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content=user_prompt)]),
+            ModelResponse(parts=[TextPart(content=assistant_text)]),
+        ]
+        save_messages(db, session.id, messages, display_user_prompt=user_prompt)
+        return ChatRunResult(
+            output_text=assistant_text,
+            new_messages=messages,
+            all_messages=messages,
+            tool_calls=[],
+        )
+
+    monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
+
+    response = client.post(
+        f"/api/content/chat/sessions/{parent.id}/council/start",
+        json={"message": "Compare the tradeoffs."},
+    )
+
+    assert response.status_code == 200
+    assert branch_started == 4
+
+
+def test_delete_chat_session_archives_council_children(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Deleting a council parent should archive all hidden child branches."""
+    parent = ChatSession(
+        user_id=test_user.id,
+        title="Council Delete",
+        session_type="knowledge_chat",
+        context_snapshot="Parent context",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add(parent)
+    db_session.commit()
+    db_session.refresh(parent)
+    _seed_turn(db_session, parent.id, "Question", "Answer")
+
+    async def _fake_run_chat_turn(db, session, user_prompt, source="chat"):
+        del source
+        assistant_text = f"{session.council_persona_name} says {user_prompt}"
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content=user_prompt)]),
+            ModelResponse(parts=[TextPart(content=assistant_text)]),
+        ]
+        save_messages(db, session.id, messages, display_user_prompt=user_prompt)
+        return ChatRunResult(
+            output_text=assistant_text,
+            new_messages=messages,
+            all_messages=messages,
+            tool_calls=[],
+        )
+
+    monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
+
+    start_response = client.post(
+        f"/api/content/chat/sessions/{parent.id}/council/start",
+        json={"message": "Start council."},
+    )
+    assert start_response.status_code == 200
+
+    delete_response = client.delete(f"/api/content/chat/sessions/{parent.id}")
+    assert delete_response.status_code == 204
+
+    db_session.refresh(parent)
+    assert parent.is_archived is True
+
+    child_sessions = (
+        db_session.query(ChatSession)
+        .filter(ChatSession.parent_session_id == parent.id)
+        .order_by(ChatSession.id)
+        .all()
+    )
+    assert len(child_sessions) == 4
+    assert all(child.is_archived is True for child in child_sessions)
 
 
 def test_list_chat_sessions_filter_by_content(

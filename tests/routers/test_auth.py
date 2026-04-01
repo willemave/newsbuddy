@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.security import create_access_token, create_refresh_token
 from app.main import app
 from app.models.schema import UserIntegrationConnection
-from app.models.user import User
+from app.models.user import User, build_default_council_personas
 from app.services.news_digest_preferences import DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT
 
 client = TestClient(app)
@@ -362,6 +362,7 @@ def test_get_current_user_info(db: Session, monkeypatch):
         assert data["news_digest_timezone"] == "UTC"
         assert data["news_digest_interval_hours"] == 6
         assert data["news_digest_preference_prompt"] == DEFAULT_NEWS_DIGEST_PREFERENCE_PROMPT
+        assert data["council_personas"] == build_default_council_personas()
         assert data["has_x_bookmark_sync"] is False
     finally:
         app.dependency_overrides.clear()
@@ -447,6 +448,32 @@ def test_update_current_user_info(db: Session, monkeypatch):
             json={
                 "full_name": "Updated Name",
                 "twitter_username": "@Willem_AW",
+                "council_personas": [
+                    {
+                        "id": "einstein",
+                        "display_name": "Albert Einstein",
+                        "instruction_prompt": "Reduce the topic to first principles.",
+                        "sort_order": 0,
+                    },
+                    {
+                        "id": "turing",
+                        "display_name": "Alan Turing",
+                        "instruction_prompt": "Focus on computation, systems, and limits.",
+                        "sort_order": 1,
+                    },
+                    {
+                        "id": "hopper",
+                        "display_name": "Grace Hopper",
+                        "instruction_prompt": "Prefer practical engineering tradeoffs and clarity.",
+                        "sort_order": 2,
+                    },
+                    {
+                        "id": "munger",
+                        "display_name": "Charlie Munger",
+                        "instruction_prompt": "Stress incentives and second-order effects.",
+                        "sort_order": 3,
+                    },
+                ],
                 "news_digest_timezone": "America/New_York",
                 "news_digest_interval_hours": 3,
                 "news_digest_preference_prompt": (
@@ -461,6 +488,12 @@ def test_update_current_user_info(db: Session, monkeypatch):
         assert data["news_digest_timezone"] == "America/New_York"
         assert data["news_digest_interval_hours"] == 3
         assert data["news_digest_preference_prompt"].startswith("Prefer semiconductors")
+        assert [persona["display_name"] for persona in data["council_personas"]] == [
+            "Albert Einstein",
+            "Alan Turing",
+            "Grace Hopper",
+            "Charlie Munger",
+        ]
 
         db.refresh(test_user)
         assert test_user.full_name == "Updated Name"
@@ -468,6 +501,69 @@ def test_update_current_user_info(db: Session, monkeypatch):
         assert test_user.news_digest_timezone == "America/New_York"
         assert test_user.news_digest_interval_hours == 3
         assert test_user.news_digest_preference_prompt.startswith("Prefer semiconductors")
+        assert test_user.council_personas[0]["id"] == "einstein"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_update_current_user_info_rejects_invalid_council_persona_count(
+    db: Session, monkeypatch
+):
+    """PATCH /auth/me should require exactly four council personas."""
+    from app.core.db import get_db_session, get_readonly_db_session
+    from app.core.settings import get_settings
+
+    monkeypatch.setattr(get_settings(), "debug", False)
+
+    def override_get_db_session():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    app.dependency_overrides[get_readonly_db_session] = override_get_db_session
+
+    test_user = User(
+        apple_id="001234.test.invalidcouncil",
+        email="invalidcouncil@icloud.com",
+        full_name="Invalid Council",
+    )
+    db.add(test_user)
+    db.commit()
+    db.refresh(test_user)
+
+    access_token = create_access_token(test_user.id)
+
+    try:
+        response = client.patch(
+            "/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "council_personas": [
+                    {
+                        "id": "one",
+                        "display_name": "One",
+                        "instruction_prompt": "First",
+                        "sort_order": 0,
+                    },
+                    {
+                        "id": "two",
+                        "display_name": "Two",
+                        "instruction_prompt": "Second",
+                        "sort_order": 1,
+                    },
+                    {
+                        "id": "three",
+                        "display_name": "Three",
+                        "instruction_prompt": "Third",
+                        "sort_order": 2,
+                    },
+                ]
+            },
+        )
+        assert response.status_code == 422
+        assert "at least 4 items" in str(response.json()).lower()
     finally:
         app.dependency_overrides.clear()
 

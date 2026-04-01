@@ -9,6 +9,8 @@ from app.routers.api.chat_models import (
     ChatMessageDisplayType,
     ChatMessageDto,
     ChatMessageRole,
+    CouncilSelectRequest,
+    CouncilStartRequest,
 )
 
 
@@ -34,6 +36,42 @@ def test_chat_message_dto_defaults_to_standard_display_type() -> None:
 
     assert message.display_type is ChatMessageDisplayType.MESSAGE
     assert message.process_label is None
+
+
+def test_chat_message_dto_accepts_council_candidates() -> None:
+    """ChatMessageDto should preserve council candidate metadata."""
+    message = ChatMessageDto.model_validate(
+        {
+            "id": 9,
+            "session_id": 2,
+            "role": "assistant",
+            "content": "Analyst branch",
+            "timestamp": datetime.now(UTC),
+            "council_candidates": [
+                {
+                    "persona_id": "analyst",
+                    "persona_name": "Analyst",
+                    "child_session_id": 11,
+                    "content": "Candidate reply",
+                    "status": "completed",
+                    "order": 0,
+                }
+            ],
+            "active_council_child_session_id": 11,
+        }
+    )
+
+    assert message.council_candidates[0].persona_name == "Analyst"
+    assert message.active_council_child_session_id == 11
+
+
+def test_council_request_models_validate_basic_payloads() -> None:
+    """Council request DTOs should accept the expected payload shape."""
+    start_request = CouncilStartRequest.model_validate({"message": "Debate this topic."})
+    select_request = CouncilSelectRequest.model_validate({"child_session_id": 12})
+
+    assert start_request.message == "Debate this topic."
+    assert select_request.child_session_id == 12
 
 
 def test_assistant_screen_context_truncates_visible_content_ids() -> None:

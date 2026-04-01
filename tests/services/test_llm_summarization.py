@@ -3,23 +3,29 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.metadata import ContentType, EditorialNarrativeSummary, NewsSummary
+from app.models.schema import LlmUsageRecord
 from app.services import llm_summarization
 
 
 class FakeResult:
-    def __init__(self, output):
+    def __init__(self, output, usage=None):
         self.output = output
         self.data = output
+        self._usage = usage
+
+    def usage(self):  # noqa: ANN001
+        return self._usage
 
 
 class FakeAgent:
-    def __init__(self, data):
+    def __init__(self, data, *, usage=None):
         self._data = data
+        self._usage = usage
         self.last_prompt: str | None = None
 
     def run_sync(self, prompt: str):
         self.last_prompt = prompt
-        return FakeResult(self._data)
+        return FakeResult(self._data, usage=self._usage)
 
 
 def _editorial_summary(
@@ -218,3 +224,36 @@ def test_summarize_prunes_short_editorial_quotes(monkeypatch: pytest.MonkeyPatch
 def test_summarize_returns_none_for_empty_payload() -> None:
     summarizer = llm_summarization.ContentSummarizer()
     assert summarizer.summarize("", content_type=ContentType.ARTICLE) is None
+
+
+def test_summarize_persists_usage_when_db_and_metadata_provided(
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary = _editorial_summary()
+    fake_agent = FakeAgent(
+        summary,
+        usage=SimpleNamespace(input_tokens=120, output_tokens=30, total_tokens=150),
+    )
+    monkeypatch.setattr(llm_summarization, "get_basic_agent", lambda *args, **kwargs: fake_agent)
+
+    summarizer = llm_summarization.ContentSummarizer()
+    result = summarizer.summarize(
+        "Body",
+        content_type=ContentType.ARTICLE,
+        db=db_session,
+        usage_persist={
+            "feature": "summarization",
+            "operation": "summarization.llm_summarization",
+            "source": "queue",
+            "content_id": 42,
+        },
+    )
+
+    assert result == summary
+    row = db_session.query(LlmUsageRecord).one()
+    assert row.feature == "summarization"
+    assert row.operation == "summarization.llm_summarization"
+    assert row.source == "queue"
+    assert row.content_id == 42
+    assert row.total_tokens == 150
