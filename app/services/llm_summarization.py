@@ -6,6 +6,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
+from sqlalchemy.orm import Session
+
 from app.core.logging import get_logger
 from app.models.metadata import (
     BulletedSummary,
@@ -19,6 +21,7 @@ from app.models.metadata import (
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_models import resolve_model
 from app.services.llm_prompts import generate_summary_prompt
+from app.services.llm_usage import record_usage
 
 logger = get_logger(__name__)
 
@@ -232,6 +235,8 @@ class ContentSummarizer:
         content_id: str | int | None = None,
         provider_override: str | None = None,
         model_hint: str | None = None,
+        db: Session | None = None,
+        usage_persist: dict[str, Any] | None = None,
     ) -> SummaryPayload | None:
         """Summarize arbitrary content with sensible defaults per content type."""
         normalized_type = _normalize_content_type(content_type)
@@ -278,6 +283,13 @@ class ContentSummarizer:
                     output_type=output_type,
                     system_prompt=system_prompt,
                     user_message=user_message,
+                )
+                record_usage(
+                    "summarize",
+                    result,
+                    model_spec=model_spec,
+                    db=db,
+                    persist=usage_persist,
                 )
             except Exception as model_error:  # noqa: BLE001
                 if _is_context_length_error(model_error):

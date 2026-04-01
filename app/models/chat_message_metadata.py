@@ -34,10 +34,23 @@ class AssistantFeedOption(BaseModel):
         return value
 
 
+class CouncilCandidate(BaseModel):
+    """One council reply candidate rendered inside the parent transcript."""
+
+    persona_id: str = Field(..., min_length=1, max_length=50)
+    persona_name: str = Field(..., min_length=1, max_length=80)
+    child_session_id: int = Field(..., ge=1)
+    content: str = Field(..., min_length=1)
+    status: str = Field(default="completed", min_length=1, max_length=32)
+    order: int = Field(..., ge=0, le=3)
+
+
 class ChatMessageRenderMetadata(BaseModel):
     """Structured UI metadata stored alongside a chat message."""
 
     feed_options: list[AssistantFeedOption] = Field(default_factory=list)
+    council_candidates: list[CouncilCandidate] = Field(default_factory=list)
+    active_council_child_session_id: int | None = Field(default=None, ge=1)
 
 
 class AssistantFeedOptionsResult(BaseModel):

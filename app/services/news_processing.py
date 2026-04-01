@@ -229,6 +229,17 @@ def process_news_item(
             content_type="news",
             title=item.article_title or item.summary_title,
             content_id=item.id,
+            db=db,
+            usage_persist={
+                "feature": "news_processing",
+                "operation": "news_processing.summarize_short_form",
+                "source": "queue",
+                "user_id": item.owner_user_id,
+                "metadata": {
+                    "news_item_id": item.id,
+                    "source_type": item.source_type,
+                },
+            },
         )
         if not isinstance(generated, NewsSummary):
             raise TypeError(

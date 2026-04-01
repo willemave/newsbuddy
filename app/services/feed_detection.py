@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import feedparser
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.core.logging import get_logger
@@ -358,6 +359,9 @@ def classify_feed_type_with_llm(
     page_url: str,
     page_title: str | None,
     model_spec: str | None = None,
+    *,
+    db: Session | None = None,
+    usage_persist: dict[str, Any] | None = None,
 ) -> FeedClassificationResult | None:
     """Use LLM to classify the feed type.
 
@@ -384,6 +388,8 @@ def classify_feed_type_with_llm(
             "feed_classification",
             run_result,
             model_spec=model_spec or FEED_CLASSIFICATION_MODEL,
+            db=db,
+            persist=usage_persist,
         )
         result = run_result.output
 
@@ -539,6 +545,8 @@ class FeedDetector:
         html_content: str | None = None,
         *,
         model_spec: str | None = None,
+        db: Session | None = None,
+        usage_persist: dict[str, Any] | None = None,
     ) -> FeedClassificationResult:
         heuristic = _classify_feed_type_heuristic(
             feed_url,
@@ -554,6 +562,8 @@ class FeedDetector:
             page_url=page_url,
             page_title=page_title,
             model_spec=model_spec,
+            db=db,
+            usage_persist=usage_persist,
         )
         return llm_result or heuristic
 
@@ -771,6 +781,8 @@ class FeedDetector:
         content_type: ContentType | str | None = None,
         model_spec: str | None = None,
         force_detect: bool = False,
+        db: Session | None = None,
+        usage_persist: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         if not force_detect and not _should_detect_feed(source, content_type):
             return None
@@ -785,6 +797,8 @@ class FeedDetector:
             content_type=content_type,
             model_spec=model_spec,
             force_detect=force_detect,
+            db=db,
+            usage_persist=usage_persist,
         )
 
     def detect_from_links(
@@ -798,6 +812,8 @@ class FeedDetector:
         content_type: ContentType | str | None = None,
         model_spec: str | None = None,
         force_detect: bool = False,
+        db: Session | None = None,
+        usage_persist: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         if not force_detect and not _should_detect_feed(source, content_type):
             return None
@@ -814,6 +830,8 @@ class FeedDetector:
             page_title=page_title,
             html_content=html_content,
             model_spec=model_spec,
+            db=db,
+            usage_persist=usage_persist,
         )
         feed_type = classification.feed_type
 
@@ -834,6 +852,9 @@ def detect_feeds_from_html(
     page_title: str | None = None,
     source: str | None = None,
     content_type: ContentType | str | None = None,
+    *,
+    db: Session | None = None,
+    usage_persist: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Detect feeds from HTML and return metadata for storage.
 
@@ -856,4 +877,6 @@ def detect_feeds_from_html(
         page_title=page_title,
         source=source,
         content_type=content_type,
+        db=db,
+        usage_persist=usage_persist,
     )

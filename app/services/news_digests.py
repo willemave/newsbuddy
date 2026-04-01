@@ -36,6 +36,7 @@ from app.models.schema import (
 )
 from app.models.user import User
 from app.services.llm_agents import get_basic_agent
+from app.services.llm_usage import record_usage
 from app.services.news_digest_preferences import resolve_user_news_digest_preference_prompt
 from app.services.news_embeddings import encode_news_texts
 from app.utils.url_utils import normalize_http_url
@@ -73,8 +74,8 @@ HEADER_SYSTEM_PROMPT = (
 )
 CLUSTER_FALLBACK_SYSTEM_PROMPT = (
     "You write one short-form news digest bullet from a pre-grouped set of evidence items. "
-    "Stay strictly grounded in the provided items. Return a concise topic, 2-4 sentences of "
-    "details, and the supporting item ids. Do not invent facts or ids."
+    "Stay strictly grounded in the provided items. Return a concise topic, 1-2 short sentences "
+    "of details, and the supporting item ids. Do not invent facts or ids."
 )
 MAX_CLUSTER_KEY_POINTS = 6
 MAX_CLUSTER_ITEM_KEY_POINTS = 3
@@ -390,31 +391,6 @@ def get_visible_news_item(db: Session, *, user_id: int, news_item_id: int) -> Ne
     )
 
 
-def _has_day_rollover_flush(
-    items: list[NewsItem],
-    *,
-    timezone_name: str,
-    now_utc: datetime,
-    last_digest_generated_at: datetime | None,
-) -> bool:
-    timezone = ZoneInfo(normalize_timezone(timezone_name))
-    local_today = now_utc.replace(tzinfo=UTC).astimezone(timezone).date()
-    if last_digest_generated_at is not None:
-        last_generated = _coerce_utc(last_digest_generated_at)
-        if last_generated is not None:
-            last_local_day = last_generated.replace(tzinfo=UTC).astimezone(timezone).date()
-            if last_local_day >= local_today:
-                return False
-    for item in items:
-        ingested_at = _coerce_utc(item.ingested_at)
-        if ingested_at is None:
-            continue
-        local_date = ingested_at.replace(tzinfo=UTC).astimezone(timezone).date()
-        if local_date < local_today:
-            return True
-    return False
-
-
 def get_news_digest_trigger_decision(
     db: Session,
     *,
@@ -440,12 +416,6 @@ def get_news_digest_trigger_decision(
         .order_by(NewsDigest.generated_at.desc(), NewsDigest.id.desc())
         .first()
     )
-    flush_required = _has_day_rollover_flush(
-        candidates,
-        timezone_name=user.news_digest_timezone,
-        now_utc=resolved_now,
-        last_digest_generated_at=last_digest.generated_at if last_digest else None,
-    )
     clusters = cluster_news_items(candidates)
     min_interval_elapsed = True
     min_interval_minutes = max(
@@ -458,20 +428,18 @@ def get_news_digest_trigger_decision(
         min_interval_elapsed = elapsed_seconds >= min_interval_minutes * 60
 
     trigger_reason: str | None = None
-    if flush_required:
-        trigger_reason = "day_rollover_flush"
-    elif len(candidates) >= settings.news_digest_min_uncovered_items:
+    if len(candidates) >= settings.news_digest_min_uncovered_items:
         trigger_reason = "uncovered_item_threshold"
     elif len(clusters) >= settings.news_digest_min_provisional_groups:
         trigger_reason = "provisional_group_threshold"
 
-    should_generate = trigger_reason is not None and (min_interval_elapsed or flush_required)
+    should_generate = trigger_reason is not None and min_interval_elapsed
     return NewsDigestTriggerDecision(
         should_generate=should_generate,
         trigger_reason=trigger_reason,
         candidate_count=len(candidates),
         provisional_group_count=len(clusters),
-        flush_required=flush_required,
+        flush_required=False,
     )
 
 
@@ -640,6 +608,7 @@ def _build_group_system_prompt(user_preference_prompt: str) -> str:
             "- Each returned bullet must correspond to exactly one input cluster.",
             "- Do not merge multiple clusters into one bullet.",
             "- Return bullets ordered by importance for this user.",
+            "- Keep each bullet's details tight: prefer one very short headline",
             (
                 "- For each bullet, include the source cluster_rank and a non-empty subset "
                 "of that cluster's news_item_ids."
@@ -730,7 +699,12 @@ def _fallback_bullet_draft(cluster: NewsDigestCluster) -> NewsDigestBulletDraft:
     )
 
 
-def _generate_bullet_draft(cluster: NewsDigestCluster) -> NewsDigestBulletDraft:
+def _generate_bullet_draft(
+    cluster: NewsDigestCluster,
+    *,
+    db: Session | None = None,
+    user_id: int | None = None,
+) -> NewsDigestBulletDraft:
     settings = get_settings()
     try:
         agent = get_basic_agent(
@@ -741,6 +715,19 @@ def _generate_bullet_draft(cluster: NewsDigestCluster) -> NewsDigestBulletDraft:
         result = agent.run_sync(
             _build_cluster_prompt(cluster),
             model_settings={"timeout": settings.worker_timeout_seconds},
+        )
+        record_usage(
+            "news_digest_bullet",
+            result,
+            model_spec=settings.news_group_model,
+            db=db,
+            persist={
+                "feature": "news_digests",
+                "operation": "news_digests.generate_bullet",
+                "source": "queue",
+                "user_id": user_id,
+                "metadata": {"cluster_size": len(cluster.items)},
+            },
         )
         draft = result.output
         valid_ids = {item.id for item in cluster.items}
@@ -781,6 +768,7 @@ def _generate_curated_cluster_bullets(
     *,
     user: User,
     clusters: list[NewsDigestCluster],
+    db: Session | None = None,
 ) -> tuple[list[NewsDigestCuratedBulletDraft], bool]:
     settings = get_settings()
     cluster_by_rank = {
@@ -798,6 +786,19 @@ def _generate_curated_cluster_bullets(
         result = agent.run_sync(
             _build_batch_curation_prompt(clusters),
             model_settings={"timeout": settings.worker_timeout_seconds},
+        )
+        record_usage(
+            "news_digest_curate",
+            result,
+            model_spec=settings.news_group_model,
+            db=db,
+            persist={
+                "feature": "news_digests",
+                "operation": "news_digests.curate_clusters",
+                "source": "queue",
+                "user_id": user.id,
+                "metadata": {"cluster_count": len(clusters)},
+            },
         )
         batch = result.output
         curated: list[NewsDigestCuratedBulletDraft] = []
@@ -841,7 +842,12 @@ def _fallback_header_draft(bullets: list[NewsDigestBulletDraft]) -> NewsDigestHe
     return NewsDigestHeaderDraft(title=title[:240], summary=summary[:800])
 
 
-def _generate_header_draft(bullets: list[NewsDigestBulletDraft]) -> NewsDigestHeaderDraft:
+def _generate_header_draft(
+    bullets: list[NewsDigestBulletDraft],
+    *,
+    db: Session | None = None,
+    user_id: int | None = None,
+) -> NewsDigestHeaderDraft:
     settings = get_settings()
     try:
         agent = get_basic_agent(
@@ -852,6 +858,19 @@ def _generate_header_draft(bullets: list[NewsDigestBulletDraft]) -> NewsDigestHe
         result = agent.run_sync(
             _build_header_prompt(bullets),
             model_settings={"timeout": settings.worker_timeout_seconds},
+        )
+        record_usage(
+            "news_digest_header",
+            result,
+            model_spec=settings.news_header_model,
+            db=db,
+            persist={
+                "feature": "news_digests",
+                "operation": "news_digests.generate_header",
+                "source": "queue",
+                "user_id": user_id,
+                "metadata": {"bullet_count": len(bullets)},
+            },
         )
         return result.output
     except Exception as exc:  # noqa: BLE001
@@ -957,12 +976,19 @@ def generate_news_digest_for_user(
         lambda current_user, current_clusters: _generate_curated_cluster_bullets(
             user=current_user,
             clusters=current_clusters,
+            db=db,
         )
     )
     curated_bullets, used_batch_curation = generator(user, clusters)
     bullet_drafts = [entry.draft for entry in curated_bullets]
-    header_generator = header_draft_generator or _generate_header_draft
-    header_draft = header_generator(bullet_drafts)
+    if header_draft_generator is None:
+        header_draft = _generate_header_draft(
+            bullet_drafts,
+            db=db,
+            user_id=user.id,
+        )
+    else:
+        header_draft = header_draft_generator(bullet_drafts)
     settings = get_settings()
     resolved_reason = resolved_reason or "manual"
     digest = NewsDigest(

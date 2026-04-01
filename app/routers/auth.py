@@ -28,11 +28,13 @@ from app.models.user import (
     AdminLoginRequest,
     AdminLoginResponse,
     AppleSignInRequest,
+    CouncilPersonaConfig,
     RefreshTokenRequest,
     TokenResponse,
     UpdateUserProfileRequest,
     User,
     UserResponse,
+    resolve_user_council_personas,
 )
 from app.services.news_digest_preferences import (
     normalize_news_digest_preference_prompt,
@@ -78,6 +80,7 @@ def _build_user_response(db: Session, user: User) -> UserResponse:
         update={
             "has_x_bookmark_sync": has_sync,
             "news_digest_preference_prompt": resolve_user_news_digest_preference_prompt(user),
+            "council_personas": resolve_user_council_personas(user),
         }
     )
 
@@ -417,6 +420,12 @@ def update_current_user_info(
         current_user.news_digest_preference_prompt = normalize_news_digest_preference_prompt(
             payload.news_digest_preference_prompt
         )
+
+    if payload.council_personas is not None:
+        current_user.council_personas = [
+            CouncilPersonaConfig.model_validate(persona).model_dump(mode="json")
+            for persona in payload.council_personas
+        ]
 
     db.commit()
     db.refresh(current_user)

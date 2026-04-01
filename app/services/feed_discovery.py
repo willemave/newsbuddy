@@ -879,6 +879,14 @@ def _validate_and_filter_candidates(
                 page_url=site_url or feed_url,
                 page_title=normalized.title,
                 model_spec=model_spec,
+                db=db,
+                usage_persist={
+                    "feature": "feed_detection",
+                    "operation": "feed_detection.classify_feed_type",
+                    "source": "queue",
+                    "user_id": user_id,
+                    "metadata": {"page_url": site_url or feed_url},
+                },
             )
             normalized.feed_url = validated_feed["feed_url"]
             normalized.title = normalized.title or validated_feed.get("title")
@@ -894,6 +902,14 @@ def _validate_and_filter_candidates(
                 content_type="article",
                 model_spec=model_spec,
                 force_detect=True,
+                db=db,
+                usage_persist={
+                    "feature": "feed_detection",
+                    "operation": "feed_detection.classify_feed_type",
+                    "source": "queue",
+                    "user_id": user_id,
+                    "metadata": {"page_url": site_url},
+                },
             )
             if not detection:
                 if domain:

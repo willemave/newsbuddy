@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.chat_message_metadata import AssistantFeedOption
+from app.models.chat_message_metadata import AssistantFeedOption, CouncilCandidate
 from app.services.llm_models import LLMProvider as ChatModelProvider
 
 MAX_VISIBLE_CONTENT_IDS = 12
@@ -43,7 +43,7 @@ class CreateChatSessionRequest(BaseModel):
     content_id: int | None = Field(None, description="Content ID to chat about")
     topic: str | None = Field(None, max_length=500, description="Specific topic to discuss")
     llm_provider: ChatModelProvider | None = Field(
-        None, description="LLM provider (defaults to anthropic)"
+        None, description="LLM provider (defaults to openai)"
     )
     llm_model_hint: str | None = Field(
         None, max_length=100, description="Optional specific model to use"
@@ -57,7 +57,7 @@ class CreateChatSessionRequest(BaseModel):
             "example": {
                 "content_id": 123,
                 "topic": None,
-                "llm_provider": "anthropic",
+                "llm_provider": "openai",
                 "llm_model_hint": None,
                 "initial_message": "What are the key insights from this article?",
             }
@@ -78,7 +78,7 @@ class UpdateChatSessionRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "llm_provider": "anthropic",
+                "llm_provider": "openai",
                 "llm_model_hint": None,
             }
         }
@@ -93,6 +93,18 @@ class SendChatMessageRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": {"message": "Can you explain that in more detail?"}}
     )
+
+
+class CouncilStartRequest(BaseModel):
+    """Request to start council mode from an existing parent session."""
+
+    message: str = Field(..., min_length=1, max_length=10000)
+
+
+class CouncilSelectRequest(BaseModel):
+    """Request to switch the active branch for a council chat."""
+
+    child_session_id: int = Field(..., ge=1)
 
 
 class AssistantScreenContextDto(BaseModel):
@@ -156,6 +168,14 @@ class ChatMessageDto(BaseModel):
         default_factory=list,
         description="Optional validated feed options attached to the assistant message",
     )
+    council_candidates: list[CouncilCandidate] = Field(
+        default_factory=list,
+        description="Optional council reply candidates attached to the assistant message",
+    )
+    active_council_child_session_id: int | None = Field(
+        default=None,
+        description="Currently selected council branch for council candidate rows",
+    )
 
 
 class ChatSessionSummaryDto(BaseModel):
@@ -201,6 +221,14 @@ class ChatSessionSummaryDto(BaseModel):
     last_message_role: str | None = Field(
         default=None,
         description="Role of the last message (user or assistant)",
+    )
+    council_mode: bool = Field(
+        default=False,
+        description="True when this visible session is using council chat mode",
+    )
+    active_child_session_id: int | None = Field(
+        default=None,
+        description="Currently selected hidden branch session for council chat",
     )
 
 

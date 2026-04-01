@@ -709,10 +709,19 @@ class ChatSession(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, nullable=False, index=True)
     content_id = Column(Integer, nullable=True, index=True)  # soft ref to contents.id
+    parent_session_id = Column(Integer, nullable=True, index=True)
     title = Column(String(500), nullable=True)
     session_type = Column(String(50), nullable=True)  # article_brain, topic, ad_hoc
     topic = Column(String(500), nullable=True)
     context_snapshot = Column(Text, nullable=True)
+    council_persona_id = Column(String(64), nullable=True, index=True)
+    council_persona_name = Column(String(120), nullable=True)
+    council_persona_prompt = Column(Text, nullable=True)
+    council_mode = Column(Boolean, default=False, nullable=False)
+    active_child_session_id = Column(Integer, nullable=True, index=True)
+    branch_start_message_id = Column(Integer, nullable=True, index=True)
+    council_message_id = Column(Integer, nullable=True, index=True)
+    is_hidden_from_history = Column(Boolean, default=False, nullable=False)
     llm_model = Column(String(100), nullable=False, default="openai:gpt-5.4")
     llm_provider = Column(String(50), nullable=False, default="openai")
     created_at = Column(DateTime, default=_utcnow, nullable=False)
@@ -723,6 +732,7 @@ class ChatSession(Base):
     __table_args__ = (
         Index("idx_chat_sessions_user_time", "user_id", "last_message_at"),
         Index("idx_chat_sessions_content", "user_id", "content_id"),
+        Index("idx_chat_sessions_parent_hidden", "parent_session_id", "is_hidden_from_history"),
     )
 
 

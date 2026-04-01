@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import feedparser
 import httpx
@@ -17,12 +17,14 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.builtin_tools import WebSearchTool
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.services.feed_detection import extract_feed_links
 from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_models import build_pydantic_model
+from app.services.llm_usage import record_usage
 
 logger = get_logger(__name__)
 
@@ -314,7 +316,12 @@ class ContentAnalyzer:
         return self._agent
 
     def analyze_url(
-        self, url: str, instruction: str | None = None
+        self,
+        url: str,
+        instruction: str | None = None,
+        *,
+        db: Session | None = None,
+        usage_persist: dict[str, Any] | None = None,
     ) -> ContentAnalysisOutput | AnalysisError:
         """Analyze a URL to determine content type and extract media URL.
 
@@ -409,6 +416,13 @@ PAGE CONTENT (truncated):
                     tags=["queue", "content_analyzer"],
                 ):
                     result = agent.run_sync(prompt)
+                record_usage(
+                    "analyze_url",
+                    result,
+                    model_spec=f"openai:{CONTENT_ANALYSIS_MODEL}",
+                    db=db,
+                    persist=usage_persist,
+                )
             except ModelHTTPError as exc:
                 logger.error(
                     "Content analysis request failed: %s",

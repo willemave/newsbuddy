@@ -38,6 +38,8 @@ from app.routers.api.chat_models import (
     ChatMessageRole,
     ChatSessionDetailDto,
     ChatSessionSummaryDto,
+    CouncilSelectRequest,
+    CouncilStartRequest,
     CreateChatSessionRequest,
     CreateChatSessionResponse,
     MessageStatusResponse,
@@ -60,6 +62,10 @@ from app.services.chat_agent import (
     create_processing_message,
     generate_initial_suggestions,
     process_message_async,
+)
+from app.services.council_chat import (
+    select_council_branch,
+    start_council_chat,
 )
 from app.services.llm_models import is_deep_research_provider, resolve_model
 
@@ -145,6 +151,8 @@ def _session_to_summary(
         has_messages=has_messages,
         last_message_preview=last_message_preview,
         last_message_role=last_message_role,
+        council_mode=session.council_mode,
+        active_child_session_id=session.active_child_session_id,
     )
 
 
@@ -162,6 +170,22 @@ def _build_processing_user_message(
         content=content,
         timestamp=db_message.created_at,
         status=MessageProcessingStatusDto.PROCESSING,
+    )
+
+
+def _resolve_active_child_session(db: Session, session: ChatSession) -> ChatSession | None:
+    """Return the active council child session for a parent session."""
+
+    if not session.council_mode or not session.active_child_session_id:
+        return None
+    return (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.id == session.active_child_session_id,
+            ChatSession.parent_session_id == session.id,
+            ChatSession.is_hidden_from_history == True,  # noqa: E712
+        )
+        .first()
     )
 
 
@@ -262,6 +286,9 @@ def _extract_last_message_preview(
 def _extract_messages_for_display(
     db: Session,
     session_id: int,
+    *,
+    session_id_override: int | None = None,
+    min_message_id_exclusive: int | None = None,
 ) -> list[ChatMessageDto]:
     """Load messages from DB and convert to display format.
 
@@ -281,12 +308,10 @@ def _extract_messages_for_display(
     display_id = 0  # Unique ID for each display message (user/assistant parts)
 
     # Query chat_messages ordered by created_at
-    db_messages = (
-        db.query(ChatMessage)
-        .filter(ChatMessage.session_id == session_id)
-        .order_by(ChatMessage.created_at)
-        .all()
-    )
+    query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
+    if min_message_id_exclusive is not None:
+        query = query.filter(ChatMessage.id > min_message_id_exclusive)
+    db_messages = query.order_by(ChatMessage.created_at).all()
 
     for db_msg in db_messages:
         try:
@@ -312,7 +337,7 @@ def _extract_messages_for_display(
                                 ChatMessageDto(
                                     id=display_id,  # Unique display ID
                                     source_message_id=db_msg.id,
-                                    session_id=session_id,
+                                    session_id=session_id_override or session_id,
                                     role=ChatMessageRole.USER,
                                     timestamp=db_msg.created_at,
                                     content=part.content,
@@ -343,7 +368,7 @@ def _extract_messages_for_display(
                     ChatMessageDto(
                         id=display_id,
                         source_message_id=db_msg.id,
-                        session_id=session_id,
+                        session_id=session_id_override or session_id,
                         role=ChatMessageRole.TOOL,
                         timestamp=db_msg.created_at,
                         content=process_summary_label,
@@ -360,7 +385,7 @@ def _extract_messages_for_display(
                     ChatMessageDto(
                         id=display_id,  # Unique display ID
                         source_message_id=db_msg.id,
-                        session_id=session_id,
+                        session_id=session_id_override or session_id,
                         role=ChatMessageRole.ASSISTANT,
                         timestamp=db_msg.created_at,
                         content=latest_assistant_text,
@@ -368,6 +393,14 @@ def _extract_messages_for_display(
                         status=status,
                         error=db_msg.error,
                         feed_options=render_metadata.feed_options if render_metadata else [],
+                        council_candidates=(
+                            render_metadata.council_candidates if render_metadata else []
+                        ),
+                        active_council_child_session_id=(
+                            render_metadata.active_council_child_session_id
+                            if render_metadata
+                            else None
+                        ),
                     )
                 )
         except Exception as e:
@@ -397,6 +430,7 @@ async def list_sessions(
     query = db.query(ChatSession).filter(
         ChatSession.user_id == current_user.id,
         ChatSession.is_archived == False,  # noqa: E712
+        ChatSession.is_hidden_from_history == False,  # noqa: E712
     )
 
     if content_id is not None:
@@ -413,15 +447,18 @@ async def list_sessions(
 
     # Get session IDs that have pending messages (for efficiency)
     session_ids = [s.id for s in sessions]
+    preview_session_ids = session_ids + [
+        s.active_child_session_id for s in sessions if s.active_child_session_id is not None
+    ]
     pending_session_ids: set[int] = set()
     sessions_with_messages: set[int] = set()
 
-    if session_ids:
+    if preview_session_ids:
         # Check for pending messages
         pending_messages = (
             db.query(ChatMessage.session_id)
             .filter(
-                ChatMessage.session_id.in_(session_ids),
+                ChatMessage.session_id.in_(preview_session_ids),
                 ChatMessage.status == MessageProcessingStatus.PROCESSING.value,
             )
             .distinct()
@@ -432,7 +469,7 @@ async def list_sessions(
         # Check which sessions have any messages at all
         sessions_with_any_messages = (
             db.query(ChatMessage.session_id)
-            .filter(ChatMessage.session_id.in_(session_ids))
+            .filter(ChatMessage.session_id.in_(preview_session_ids))
             .distinct()
             .all()
         )
@@ -440,14 +477,14 @@ async def list_sessions(
 
     # Batch-query the most recent message per session for previews
     last_message_map: dict[int, ChatMessage] = {}
-    if session_ids:
+    if preview_session_ids:
         # Subquery to get the max message ID per session
         latest_msg_subq = (
             db.query(
                 ChatMessage.session_id,
                 func.max(ChatMessage.id).label("max_id"),
             )
-            .filter(ChatMessage.session_id.in_(session_ids))
+            .filter(ChatMessage.session_id.in_(preview_session_ids))
             .group_by(ChatMessage.session_id)
             .subquery()
         )
@@ -488,14 +525,15 @@ async def list_sessions(
                 article_summary = _extract_short_summary(content)
                 article_source = content.source
 
-        has_pending = session.id in pending_session_ids
+        preview_session = _resolve_active_child_session(db, session) or session
+        has_pending = preview_session.id in pending_session_ids
         is_favorite = session.content_id in favorite_content_ids if session.content_id else False
         has_messages = session.id in sessions_with_messages
 
         # Extract last message preview
         last_preview: str | None = None
         last_role: str | None = None
-        last_msg = last_message_map.get(session.id)
+        last_msg = last_message_map.get(preview_session.id)
         if last_msg:
             last_preview, last_role = _extract_last_message_preview(last_msg)
 
@@ -736,6 +774,16 @@ async def get_session(
 
     # Load messages
     messages = _extract_messages_for_display(db, session_id)
+    if session.council_mode:
+        active_child_session = _resolve_active_child_session(db, session)
+        if active_child_session is not None:
+            branch_messages = _extract_messages_for_display(
+                db,
+                active_child_session.id,
+                session_id_override=session.id,
+                min_message_id_exclusive=active_child_session.branch_start_message_id,
+            )
+            messages.extend(branch_messages)
 
     session_summary = _session_to_summary(
         session,
@@ -770,6 +818,18 @@ async def delete_session(
     if not session.is_archived:
         session.is_archived = True
         session.updated_at = datetime.now(UTC)
+        if session.council_mode:
+            (
+                db.query(ChatSession)
+                .filter(ChatSession.parent_session_id == session.id)
+                .update(
+                    {
+                        ChatSession.is_archived: True,
+                        ChatSession.updated_at: datetime.now(UTC),
+                    },
+                    synchronize_session=False,
+                )
+            )
         db.commit()
 
     logger.info(
@@ -816,6 +876,13 @@ async def send_message(
     if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to access this session")
 
+    effective_session = session
+    if session.council_mode:
+        active_child_session = _resolve_active_child_session(db, session)
+        if active_child_session is None:
+            raise HTTPException(status_code=400, detail="No active council branch selected")
+        effective_session = active_child_session
+
     logger.info(
         "Chat message accepted",
         extra=build_log_extra(
@@ -824,13 +891,19 @@ async def send_message(
             event_name="chat.turn",
             status="started",
             user_id=current_user.id,
-            session_id=session_id,
-            context_data={"model": session.llm_model},
+            session_id=effective_session.id,
+            context_data={"model": effective_session.llm_model},
         ),
     )
 
     # Create the processing message record immediately
-    db_message = create_processing_message(db, session_id, request.message)
+    db_message = create_processing_message(db, effective_session.id, request.message)
+    effective_session.last_message_at = datetime.now(UTC)
+    effective_session.updated_at = datetime.now(UTC)
+    if session.council_mode:
+        session.last_message_at = effective_session.last_message_at
+        session.updated_at = effective_session.updated_at
+    db.commit()
 
     trimmed_msg = request.message.replace("\n", " ")[:100]
     if len(request.message) > 100:
@@ -844,30 +917,32 @@ async def send_message(
     )
 
     # Start async processing using BackgroundTasks (not asyncio.create_task which can be GC'd)
-    if session.session_type == "deep_research":
+    if effective_session.session_type == "deep_research":
         from app.services.deep_research import process_deep_research_message
 
         background_tasks.add_task(
-            process_deep_research_message, session_id, db_message.id, request.message
+            process_deep_research_message, effective_session.id, db_message.id, request.message
         )
-    elif session.session_type in ASSISTANT_SESSION_TYPES:
+    elif effective_session.session_type in ASSISTANT_SESSION_TYPES:
         background_tasks.add_task(
             process_assistant_turn_async,
-            session_id,
+            effective_session.id,
             db_message.id,
             request.message,
             screen_context=AssistantScreenContext(
-                screen_type=session.session_type,
-                screen_title=session.title,
-                content_id=session.content_id,
+                screen_type=effective_session.session_type,
+                screen_title=effective_session.title,
+                content_id=effective_session.content_id,
             ),
         )
     else:
-        background_tasks.add_task(process_message_async, session_id, db_message.id, request.message)
+        background_tasks.add_task(
+            process_message_async, effective_session.id, db_message.id, request.message
+        )
 
     user_message = _build_processing_user_message(
         db_message=db_message,
-        session_id=session_id,
+        session_id=session.id,
         content=request.message,
     )
 
@@ -1053,12 +1128,16 @@ async def get_message_status(
         assistant_message = ChatMessageDto(
             id=_build_async_assistant_display_id(message_id),
             source_message_id=message_id,
-            session_id=db_message.session_id,
+            session_id=session.parent_session_id or db_message.session_id,
             role=ChatMessageRole.ASSISTANT,
             content=assistant_content,
             timestamp=db_message.created_at,
             status=MessageProcessingStatusDto.COMPLETED,
             feed_options=render_metadata.feed_options if render_metadata else [],
+            council_candidates=render_metadata.council_candidates if render_metadata else [],
+            active_council_child_session_id=(
+                render_metadata.active_council_child_session_id if render_metadata else None
+            ),
         )
 
         return MessageStatusResponse(
@@ -1073,6 +1152,71 @@ async def get_message_status(
     except Exception as e:
         logger.error(f"Failed to extract assistant message: {e}")
         raise HTTPException(status_code=500, detail="Failed to parse message") from None
+
+
+@router.post(
+    "/sessions/{session_id}/council/start",
+    response_model=ChatSessionDetailDto,
+    summary="Start council mode",
+)
+async def start_council_mode(
+    session_id: Annotated[int, Path(..., description="Chat session ID", gt=0)],
+    request: CouncilStartRequest,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ChatSessionDetailDto:
+    """Fork the current chat into four persona branches and persist the council row."""
+
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this session")
+
+    try:
+        await start_council_chat(
+            db,
+            parent_session=session,
+            user=current_user,
+            user_prompt=request.message,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return await get_session(session_id=session_id, db=db, current_user=current_user)
+
+
+@router.post(
+    "/sessions/{session_id}/council/select",
+    response_model=ChatSessionDetailDto,
+    summary="Select council branch",
+)
+async def select_council_mode_branch(
+    session_id: Annotated[int, Path(..., description="Chat session ID", gt=0)],
+    request: CouncilSelectRequest,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ChatSessionDetailDto:
+    """Switch the active council branch and return the merged parent transcript."""
+
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this session")
+    if not session.council_mode:
+        raise HTTPException(status_code=400, detail="Council mode is not active for this chat")
+
+    try:
+        select_council_branch(
+            db,
+            parent_session=session,
+            child_session_id=request.child_session_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return await get_session(session_id=session_id, db=db, current_user=current_user)
 
 
 @router.post(

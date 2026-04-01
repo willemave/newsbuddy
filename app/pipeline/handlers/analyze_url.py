@@ -189,6 +189,9 @@ class FeedSubscriptionFlow:
         self,
         url: str,
         page_title: str | None,
+        *,
+        db,
+        content_id: int | None = None,
     ) -> dict[str, str] | None:
         """Return detected feed metadata when the submitted URL is already a feed."""
         detector = FeedDetector(use_exa_search=False)
@@ -201,6 +204,14 @@ class FeedSubscriptionFlow:
             page_url=url,
             page_title=page_title or validated_feed.get("title"),
             html_content=None,
+            db=db,
+            usage_persist={
+                "feature": "feed_detection",
+                "operation": "feed_detection.classify_feed_type",
+                "source": "queue",
+                "content_id": content_id,
+                "metadata": {"page_url": url},
+            },
         )
         return {
             "url": url,
@@ -224,7 +235,12 @@ class FeedSubscriptionFlow:
             return FlowOutcome(handled=False, success=True)
 
         fetch_status = "no_feed_found"
-        detected_feed = self._detect_direct_feed_url(url, content.title)
+        detected_feed = self._detect_direct_feed_url(
+            url,
+            content.title,
+            db=db,
+            content_id=content.id,
+        )
         all_detected_feeds = None
         if not detected_feed:
             html_content: str | None = None
@@ -253,6 +269,14 @@ class FeedSubscriptionFlow:
                     page_title=content.title,
                     source=SELF_SUBMISSION_SOURCE,
                     content_type=content.content_type,
+                    db=db,
+                    usage_persist={
+                        "feature": "feed_detection",
+                        "operation": "feed_detection.classify_feed_type",
+                        "source": "queue",
+                        "content_id": content.id,
+                        "metadata": {"page_url": str(url)},
+                    },
                 )
                 if feed_data:
                     detected_feed = feed_data.get("detected_feed")
@@ -771,7 +795,18 @@ class UrlAnalysisFlow:
             return None
 
         llm_gateway = get_llm_gateway()
-        result = llm_gateway.analyze_url(url, instruction=analysis_instruction)
+        result = llm_gateway.analyze_url(
+            url,
+            instruction=analysis_instruction,
+            db=db,
+            usage_persist={
+                "feature": "content_analyzer",
+                "operation": "content_analyzer.analyze_url",
+                "source": "queue",
+                "content_id": content.id,
+                "metadata": {"url": str(url)},
+            },
+        )
 
         if isinstance(result, AnalysisError):
             logger.warning(

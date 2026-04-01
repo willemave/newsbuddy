@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from sqlalchemy.orm import Session
+
 from app.models.contracts import ContentType
 from app.models.metadata import SummaryPayload
 from app.services.content_analyzer import AnalysisError, ContentAnalysisOutput, get_content_analyzer
@@ -18,10 +22,18 @@ class LlmGateway:
         self,
         url: str,
         instruction: str | None = None,
+        *,
+        db: Session | None = None,
+        usage_persist: dict[str, Any] | None = None,
     ) -> ContentAnalysisOutput | AnalysisError:
         """Analyze URL content and optional instruction links."""
         analyzer = get_content_analyzer()
-        return analyzer.analyze_url(url, instruction=instruction)
+        return analyzer.analyze_url(
+            url,
+            instruction=instruction,
+            db=db,
+            usage_persist=usage_persist,
+        )
 
     def summarize(
         self,
@@ -34,6 +46,8 @@ class LlmGateway:
         content_id: int | str | None = None,
         provider_override: str | None = None,
         model_hint: str | None = None,
+        db: Session | None = None,
+        usage_persist: dict[str, Any] | None = None,
     ) -> SummaryPayload | None:
         """Summarize content using canonical summarizer policy."""
         return self._summarizer.summarize(
@@ -45,6 +59,8 @@ class LlmGateway:
             content_id=content_id,
             provider_override=provider_override,
             model_hint=model_hint,
+            db=db,
+            usage_persist=usage_persist,
         )
 
 

@@ -35,8 +35,8 @@ SYSTEM_AND_ARTICLE_BUDGET_RATIO = 0.75
 TOKEN_CHARS_PER_TOKEN = 4
 
 SYSTEM_PROMPT_TEXT = (
-    "You are a deep-dive assistant helping users explore articles, news, and topics. "
-    "Be concise but thorough. Help users understand, critique, and apply what they read."
+    "You are an assistant helping users explore articles, news, and topics. "
+    "Be concise but thorough. Help users understand what they read."
     "\n\n"
     "**CRITICAL - How to Use Web Search:**\n"
     "- Use exa_web_search to research topics, verify claims, and find context\n"
@@ -49,12 +49,10 @@ SYSTEM_PROMPT_TEXT = (
     "- Search multiple times if exploring different angles"
     "\n\n"
     "**Response Format:**\n"
-    "- Use markdown: **bold** for emphasis, bullet points for lists\n"
     "- Do not use markdown tables in chat responses. "
     "On mobile, format comparisons as headings, bullets, "
     "or one-item-per-line entries instead\n"
     "- Always cite sources with markdown links when referencing search results\n"
-    "- Structure responses: brief intro → key findings → sources section\n"
     "- Keep responses focused and scannable"
 )
 
@@ -786,6 +784,22 @@ def _log_chat_usage(
     )
 
 
+def _sync_parent_session_activity(db: Session, session: ChatSession) -> None:
+    """Mirror child-session activity onto a visible parent council session."""
+
+    if not session.parent_session_id:
+        return
+
+    parent_session = (
+        db.query(ChatSession).filter(ChatSession.id == session.parent_session_id).first()
+    )
+    if parent_session is None:
+        return
+
+    parent_session.updated_at = datetime.now(UTC)
+    parent_session.last_message_at = session.last_message_at or datetime.now(UTC)
+
+
 def _run_agent_sync(
     model_spec: str,
     user_prompt: str,
@@ -937,6 +951,7 @@ async def run_chat_turn(
 
         session.last_message_at = datetime.now(UTC)
         session.updated_at = datetime.now(UTC)
+        _sync_parent_session_activity(db, session)
         db.commit()
 
         total_ms = (perf_counter() - total_start) * 1000
@@ -1168,6 +1183,7 @@ async def process_message_async(
         # Update session timestamps
         session.last_message_at = datetime.now(UTC)
         session.updated_at = datetime.now(UTC)
+        _sync_parent_session_activity(db, session)
         db.commit()
 
         total_ms = (perf_counter() - total_start) * 1000

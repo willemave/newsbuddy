@@ -53,7 +53,7 @@ PROVIDER_DEFAULTS: dict[str, str] = {
 # Deep research model constant for easy reference
 DEEP_RESEARCH_MODEL = "o4-mini-deep-research-2025-06-26"
 
-DEFAULT_PROVIDER = LLMProvider.ANTHROPIC.value
+DEFAULT_PROVIDER = LLMProvider.OPENAI.value
 DEFAULT_MODEL = PROVIDER_DEFAULTS[DEFAULT_PROVIDER]
 PREFIX_TO_PROVIDER: dict[str, str] = {
     prefix: provider for provider, prefix in PROVIDER_PREFIXES.items()
@@ -67,7 +67,7 @@ def resolve_model(
     """Resolve provider + model hint into canonical provider and full model spec.
 
     Args:
-        provider: Optional provider enum/string (openai|anthropic|google). Defaults to anthropic.
+        provider: Optional provider enum/string (openai|anthropic|google). Defaults to openai.
         model_hint: Optional specific model name or already-prefixed model spec.
 
     Returns:

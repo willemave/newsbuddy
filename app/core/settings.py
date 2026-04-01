@@ -73,8 +73,8 @@ class Settings(BaseSettings):
     news_header_model: str = "google:gemini-3.1-flash-lite-preview"
     news_digest_primary_similarity_threshold: float = Field(default=0.86, ge=0.0, le=1.0)
     news_digest_secondary_similarity_threshold: float = Field(default=0.82, ge=0.0, le=1.0)
-    news_digest_min_uncovered_items: int = Field(default=8, ge=1)
-    news_digest_min_provisional_groups: int = Field(default=3, ge=1)
+    news_digest_min_uncovered_items: int = Field(default=15, ge=1)
+    news_digest_min_provisional_groups: int = Field(default=15, ge=1)
     news_digest_min_interval_minutes: int = Field(default=60, ge=1)
     news_digest_max_candidates: int = Field(default=150, ge=1)
     news_digest_scheduler_interval_minutes: int = Field(default=15, ge=1)

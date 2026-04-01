@@ -347,6 +347,18 @@ class SummarizeHandler:
                         max_bullet_points=max_bullet_points,
                         max_quotes=max_quotes,
                         provider_override=provider_override,
+                        db=db,
+                        usage_persist={
+                            "feature": "summarization",
+                            "operation": "summarization.llm_summarization",
+                            "source": "queue",
+                            "task_id": task.id,
+                            "content_id": content.id,
+                            "metadata": {
+                                "content_type": content.content_type,
+                                "summarization_type": summarization_type,
+                            },
+                        },
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.exception(
