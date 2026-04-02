@@ -384,8 +384,7 @@ struct ContentDetailView: View {
         )
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
-        .toolbarBackground(.automatic, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
         // Hide the main tab bar while viewing details
         .toolbar(.hidden, for: .tabBar)
         .task {
