@@ -12,12 +12,20 @@ from app.presenters.content_presenter import (
 )
 from app.repositories.content_detail_repository import get_content_detail
 from app.services.feed_subscription import can_subscribe_to_feed
+from app.services.news_feed import get_visible_news_item_detail
 
 
 def execute(db: Session, *, user_id: int, content_id: int):
     """Return content detail response."""
     row = get_content_detail(db, user_id=user_id, content_id=content_id)
     if not row:
+        news_item_detail = get_visible_news_item_detail(
+            db,
+            user_id=user_id,
+            news_item_id=content_id,
+        )
+        if news_item_detail is not None:
+            return news_item_detail
         raise HTTPException(status_code=404, detail="Content not found")
 
     content, is_read, is_favorited, body_available, body_format = row

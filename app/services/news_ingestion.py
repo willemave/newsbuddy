@@ -106,6 +106,14 @@ def _normalize_key_points(value: Any) -> list[str]:
     return points
 
 
+def _has_materialized_summary(
+    *,
+    summary_key_points: list[str],
+    summary_text: str | None,
+) -> bool:
+    return bool(summary_key_points or summary_text)
+
+
 def _normalize_url(value: Any) -> str | None:
     cleaned = _clean_string(value)
     if cleaned is None:
@@ -363,6 +371,11 @@ def build_news_item_upsert_input_from_scraped_item(item: dict[str, Any]) -> News
             metadata.get("tweet_id")
         )
 
+    has_materialized_summary = _has_materialized_summary(
+        summary_key_points=summary_key_points,
+        summary_text=summary_text,
+    )
+
     return NewsItemUpsertInput(
         visibility_scope=normalized_scope,
         owner_user_id=owner_user_id,
@@ -384,9 +397,7 @@ def build_news_item_upsert_input_from_scraped_item(item: dict[str, Any]) -> News
         summary_key_points=summary_key_points,
         summary_text=summary_text,
         raw_metadata=metadata,
-        status=NewsItemStatus.READY
-        if summary_title or summary_key_points or summary_text
-        else NewsItemStatus.NEW,
+        status=NewsItemStatus.READY if has_materialized_summary else NewsItemStatus.NEW,
         published_at=_normalize_datetime(
             item.get("published_at")
             or metadata.get("published_at")
@@ -415,14 +426,15 @@ def build_news_item_upsert_input_from_content(content: Content) -> NewsItemUpser
     summary_text = _clean_string(summary_meta.get("summary"))
     summary_key_points = _normalize_key_points(summary_meta.get("key_points"))
     summary_title = _clean_string(summary_meta.get("title")) or _clean_string(content.title)
-    status = NewsItemStatus.READY if content.status == "completed" else NewsItemStatus.NEW
-    if (
-        not summary_title
-        and not summary_text
-        and not summary_key_points
-        and status == NewsItemStatus.READY
-    ):
-        status = NewsItemStatus.NEW
+    has_materialized_summary = _has_materialized_summary(
+        summary_key_points=summary_key_points,
+        summary_text=summary_text,
+    )
+    status = (
+        NewsItemStatus.READY
+        if content.status == "completed" and has_materialized_summary
+        else NewsItemStatus.NEW
+    )
 
     return NewsItemUpsertInput(
         visibility_scope=visibility_scope,

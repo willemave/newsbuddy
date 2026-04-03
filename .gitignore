@@ -41,8 +41,11 @@ logs/
 *.pyd
 
 build/
+.build/
 .deriveddata/
 *.png
+*.db-shm
+*.db-wal
 
 # Mac/Linux system files
 .DS_Store

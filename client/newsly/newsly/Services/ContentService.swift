@@ -227,6 +227,11 @@ class ContentService {
         return try await client.request(endpoint)
     }
 
+    func fetchNewsItemDetail(id: Int) async throws -> ContentDetail {
+        let endpoint = APIRequestDescriptor<ContentDetail>(path: APIEndpoints.newsItem(id: id))
+        return try await client.request(endpoint)
+    }
+
     func fetchNewsItemList(
         readFilter: String = "all",
         cursor: String? = nil,
@@ -245,9 +250,11 @@ class ContentService {
     }
 
     func fetchContentBody(id: Int, variant: String = "source") async throws -> ContentBody {
-        let endpoint = APIRequestDescriptor<ContentBody>(path: APIEndpoints.contentBody(id: id))
-        let queryItems = [URLQueryItem(name: "variant", value: variant)]
-        return try await client.request(endpoint, queryItems: queryItems)
+        let endpoint = APIRequestDescriptor<ContentBody>(
+            path: APIEndpoints.contentBody(id: id),
+            queryItems: [URLQueryItem(name: "variant", value: variant)]
+        )
+        return try await client.request(endpoint)
     }
 
     func fetchContentDiscussion(id: Int) async throws -> ContentDiscussion {

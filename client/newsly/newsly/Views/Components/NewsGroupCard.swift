@@ -12,32 +12,6 @@ struct NewsGroupCard: View {
     let onConvert: (Int) async -> Void
     var isCurrent: Bool = false
 
-    /// Format publication date for compact display
-    private func formatDateShort(_ dateString: String) -> String {
-        let iso8601WithFractional = ISO8601DateFormatter()
-        iso8601WithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        if let date = iso8601WithFractional.date(from: dateString) {
-            let now = Date()
-            let calendar = Calendar.current
-            let components = calendar.dateComponents([.day, .hour], from: date, to: now)
-
-            if let days = components.day, days == 0 {
-                if let hours = components.hour {
-                    return "\(hours)h ago"
-                }
-            } else if let days = components.day, days < 7 {
-                return "\(days)d ago"
-            }
-
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMM d"
-            return formatter.string(from: date)
-        }
-
-        return ""
-    }
-
     var body: some View {
         let content = VStack(alignment: .leading, spacing: 0) {
             // News items
@@ -80,11 +54,9 @@ struct NewsGroupCard: View {
                             Spacer()
 
                             // Date
-                            if let pubDate = item.publicationDate {
-                                Text(formatDateShort(pubDate))
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
+                            ContentTimestampText(rawValue: item.primaryTimestamp, style: .compactRelative)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
                     .padding(.vertical, 8)

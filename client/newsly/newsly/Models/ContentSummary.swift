@@ -77,13 +77,6 @@ struct ContentSummary: Codable, Identifiable {
         return formatter
     }()
 
-    private static let relativeFallbackFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        formatter.timeZone = TimeZone.current
-        return formatter
-    }()
-
     private static let calendarDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -91,50 +84,8 @@ struct ContentSummary: Codable, Identifiable {
         return formatter
     }()
 
-    private static let iso8601WithFractionalFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static let iso8601Formatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-
-    private static let utcMicrosecondsFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-        formatter.timeZone = TimeZone(abbreviation: "UTC")
-        return formatter
-    }()
-
-    private static let utcSecondsFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        formatter.timeZone = TimeZone(abbreviation: "UTC")
-        return formatter
-    }()
-
     private static func parseDate(_ dateString: String) -> Date? {
-        if let date = iso8601WithFractionalFormatter.date(from: dateString) {
-            return date
-        }
-
-        if let date = iso8601Formatter.date(from: dateString) {
-            return date
-        }
-
-        if let date = utcMicrosecondsFormatter.date(from: dateString) {
-            return date
-        }
-
-        if let date = utcSecondsFormatter.date(from: dateString) {
-            return date
-        }
-
-        return nil
+        ContentTimestampFormatter.parse(dateString)
     }
 
     init(
@@ -242,6 +193,10 @@ struct ContentSummary: Codable, Identifiable {
         ContentType(rawValue: contentType)
     }
 
+    var primaryTimestamp: String {
+        publicationDate ?? processedAt ?? createdAt
+    }
+
     var apiContentType: APIContentType? {
         APIContentType(rawValue: contentType)
     }
@@ -296,27 +251,7 @@ struct ContentSummary: Codable, Identifiable {
 
     /// Relative time display for news items (e.g., "2h ago", "3d ago")
     var relativeTimeDisplay: String? {
-        guard let date = cachedItemDate else {
-            return nil
-        }
-
-        let now = Date()
-        let interval = now.timeIntervalSince(date)
-
-        if interval < 60 {
-            return "now"
-        } else if interval < 3600 {
-            let minutes = Int(interval / 60)
-            return "\(minutes)m ago"
-        } else if interval < 86400 {
-            let hours = Int(interval / 3600)
-            return "\(hours)h ago"
-        } else if interval < 604800 {
-            let days = Int(interval / 86400)
-            return "\(days)d ago"
-        } else {
-            return Self.relativeFallbackFormatter.string(from: date)
-        }
+        ContentTimestampFormatter.compactRelativeText(from: primaryTimestamp)
     }
 
     func updating(

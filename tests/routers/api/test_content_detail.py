@@ -1,8 +1,9 @@
 """Tests for content detail chat URL generation."""
 
+from datetime import UTC, datetime
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
-from app.models.schema import Content
+from app.models.schema import Content, NewsItem
 
 
 def _get_display_title(fixture_data: dict) -> str:
@@ -158,6 +159,55 @@ def test_content_body_returns_visible_content(client, create_sample_content, sam
     assert payload["content_id"] == content.id
     assert payload["variant"] == "source"
     assert payload["text"]
+
+
+def test_content_detail_falls_back_to_visible_news_item_when_legacy_content_is_missing(
+    client,
+    db_session,
+) -> None:
+    """Unified content detail should serve visible news items when legacy content is unavailable."""
+    legacy_news = Content(
+        id=6227,
+        content_type="news",
+        url="https://legacy.example/news/6227",
+        title="Legacy skipped row",
+        status="skipped",
+        content_metadata={},
+    )
+    visible_news_item = NewsItem(
+        id=6227,
+        ingest_key="news-item-6227",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="6227",
+        canonical_item_url="https://news.ycombinator.com/item?id=6227",
+        canonical_story_url="https://example.com/story-6227",
+        article_url="https://example.com/story-6227",
+        article_title="Visible news story",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=6227",
+        summary_title="Visible news summary",
+        summary_key_points=["Point one", "Point two"],
+        summary_text="Visible short-form summary",
+        raw_metadata={"cluster": {"related_titles": ["Visible news summary"]}},
+        status="ready",
+        ingested_at=datetime(2026, 4, 2, 14, 58, tzinfo=UTC).replace(tzinfo=None),
+        processed_at=datetime(2026, 4, 2, 14, 58, tzinfo=UTC).replace(tzinfo=None),
+    )
+    db_session.add_all([legacy_news, visible_news_item])
+    db_session.commit()
+
+    response = client.get("/api/content/6227")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == 6227
+    assert payload["content_type"] == "news"
+    assert payload["display_title"] == "Visible news summary"
+    assert payload["summary"] == "Visible short-form summary"
+    assert payload["metadata"]["article"]["title"] == "Visible news story"
 
 
 def create_sample_content_without_visibility(db_session, fixture_data: dict):

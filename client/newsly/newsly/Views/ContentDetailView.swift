@@ -830,9 +830,13 @@ struct ContentDetailView: View {
                         Text("·")
                             .foregroundColor(.white.opacity(0.5))
 
-                        Text(displayDateText(for: content))
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.8))
+                        ContentTimestampText(
+                            rawValue: content.primaryTimestamp,
+                            style: .detailMeta,
+                            fallback: "Recent"
+                        )
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.8))
                     }
                     .shadow(color: .black.opacity(0.4), radius: 3, x: 0, y: 1)
 
@@ -880,9 +884,13 @@ struct ContentDetailView: View {
                         Text("·")
                             .foregroundColor(.secondary.opacity(0.4))
 
-                        Text(displayDateText(for: content))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        ContentTimestampText(
+                            rawValue: content.primaryTimestamp,
+                            style: .detailMeta,
+                            fallback: "Recent"
+                        )
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1807,48 +1815,6 @@ struct ContentDetailView: View {
         default:
             return .secondary
         }
-    }
-
-    private func displayDateText(for content: ContentDetail) -> String {
-        let dateString = content.publicationDate ?? content.processedAt ?? content.createdAt
-        return formatDate(dateString)
-    }
-
-    private func formatDate(_ dateString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        var date = formatter.date(from: dateString)
-
-        // Try without fractional seconds if first attempt fails
-        if date == nil {
-            formatter.formatOptions = [.withInternetDateTime]
-            date = formatter.date(from: dateString)
-        }
-
-        guard let validDate = date else { return dateString }
-
-        let now = Date()
-        let timeInterval = now.timeIntervalSince(validDate)
-
-        // Use relative formatting for dates within the last 7 days
-        if timeInterval < 7 * 24 * 60 * 60 && timeInterval >= 0 {
-            let relativeFormatter = RelativeDateTimeFormatter()
-            relativeFormatter.unitsStyle = .short
-            return relativeFormatter.localizedString(for: validDate, relativeTo: now)
-        }
-
-        // Use compact format for older dates
-        let displayFormatter = DateFormatter()
-        displayFormatter.dateFormat = "MMM d"
-
-        // Add year if not current year
-        let calendar = Calendar.current
-        if !calendar.isDate(validDate, equalTo: now, toGranularity: .year) {
-            displayFormatter.dateFormat = "MMM d, yyyy"
-        }
-
-        return displayFormatter.string(from: validDate)
     }
 
     private func logSummarySnapshot(content: ContentDetail, context: String) {

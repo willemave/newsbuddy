@@ -58,12 +58,24 @@ def _normalize_key_points(value: Any) -> list[str]:
     return points
 
 
+def _has_materialized_summary(
+    *,
+    key_points: list[str],
+    summary_text: str | None,
+) -> bool:
+    return bool(key_points or summary_text)
+
+
 def _extract_existing_summary(item: NewsItem) -> NewsSummary | None:
-    if item.summary_title or item.summary_key_points or item.summary_text:
+    item_key_points = _normalize_key_points(item.summary_key_points)
+    if _has_materialized_summary(
+        key_points=item_key_points,
+        summary_text=item.summary_text,
+    ):
         return NewsSummary(
             title=item.summary_title,
             article_url=item.article_url,
-            key_points=_normalize_key_points(item.summary_key_points),
+            key_points=item_key_points,
             summary=item.summary_text,
         )
 
@@ -71,11 +83,18 @@ def _extract_existing_summary(item: NewsItem) -> NewsSummary | None:
     summary = raw_metadata.get("summary")
     if not isinstance(summary, dict):
         return None
+    summary_key_points = _normalize_key_points(summary.get("key_points"))
+    summary_text = _clean_string(summary.get("summary"))
+    if not _has_materialized_summary(
+        key_points=summary_key_points,
+        summary_text=summary_text,
+    ):
+        return None
     return NewsSummary(
         title=_clean_string(summary.get("title")) or item.article_title,
         article_url=_clean_string(summary.get("article_url")) or item.article_url,
-        key_points=_normalize_key_points(summary.get("key_points")),
-        summary=_clean_string(summary.get("summary")),
+        key_points=summary_key_points,
+        summary=summary_text,
     )
 
 

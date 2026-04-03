@@ -108,6 +108,10 @@ struct ContentDetail: Codable, Identifiable {
         guard let resolvedSummaryVersion else { return nil }
         return APISummaryVersion(rawValue: resolvedSummaryVersion)
     }
+
+    var primaryTimestamp: String {
+        publicationDate ?? processedAt ?? createdAt
+    }
     
     var articleMetadata: ArticleMetadata? {
         guard apiContentType == .article else { return nil }

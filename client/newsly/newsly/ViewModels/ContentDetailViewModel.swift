@@ -59,8 +59,13 @@ class ContentDetailViewModel: ObservableObject {
         errorMessage = nil
 
         do {
-            logger.debug("[ContentDetail] Fetching content detail | contentId=\(self.contentId)")
-            let fetched = try await contentService.fetchContentDetail(id: contentId, contentType: contentType)
+            logger.debug("[ContentDetail] Fetching content detail | contentId=\(self.contentId) contentType=\(self.contentType?.rawValue ?? "nil", privacy: .public)")
+            let fetched: ContentDetail
+            if contentType == .news {
+                fetched = try await contentService.fetchNewsItemDetail(id: contentId)
+            } else {
+                fetched = try await contentService.fetchContentDetail(id: contentId)
+            }
             content = fetched
             contentBody = nil
             logger.info("[ContentDetail] Content fetched | contentId=\(self.contentId) type=\(fetched.contentType, privacy: .public) isRead=\(fetched.isRead) title=\(fetched.displayTitle, privacy: .public)")
@@ -84,11 +89,7 @@ class ContentDetailViewModel: ObservableObject {
             // Auto-mark as read if not already read
             if !fetched.isRead {
                 logger.info("[ContentDetail] Content not read, marking as read | contentId=\(self.contentId) type=\(fetched.contentType, privacy: .public)")
-                if fetched.apiContentType == .news {
-                    try await contentService.markNewsItemAsRead(id: contentId)
-                } else {
-                    try await contentService.markContentAsRead(id: contentId)
-                }
+                try await contentService.markContentAsRead(id: contentId)
                 logger.info("[ContentDetail] Successfully marked as read | contentId=\(self.contentId)")
 
                 // Post notification so list views can update their local state

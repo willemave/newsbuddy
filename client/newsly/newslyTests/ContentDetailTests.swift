@@ -113,6 +113,55 @@ final class ContentDetailTests: XCTestCase {
         XCTAssertEqual(detail.resolvedNewsKeyPoints, ["Metadata point"])
     }
 
+    func testPrimaryTimestampPrefersPublicationDate() throws {
+        let detail = try decodeDetail(
+            from: """
+            {
+              "id": 9,
+              "content_type": "news",
+              "url": "https://example.com/story-3",
+              "title": "Story title",
+              "display_title": "Display title",
+              "source": "Techmeme",
+              "status": "completed",
+              "error_message": null,
+              "retry_count": 0,
+              "metadata": {},
+              "created_at": "2026-04-02T10:00:00Z",
+              "updated_at": null,
+              "processed_at": "2026-04-02T10:05:00Z",
+              "checked_out_by": null,
+              "checked_out_at": null,
+              "publication_date": "2026-04-02T09:00:00Z",
+              "is_read": false,
+              "is_favorited": false,
+              "summary": null,
+              "short_summary": null,
+              "summary_kind": null,
+              "summary_version": null,
+              "structured_summary": null,
+              "bullet_points": [],
+              "quotes": [],
+              "topics": [],
+              "full_markdown": null,
+              "body_available": false,
+              "body_kind": null,
+              "body_format": null,
+              "news_article_url": null,
+              "news_discussion_url": null,
+              "news_key_points": [],
+              "news_summary": null,
+              "image_url": null,
+              "thumbnail_url": null,
+              "detected_feed": null,
+              "can_subscribe": false
+            }
+            """
+        )
+
+        XCTAssertEqual(detail.primaryTimestamp, "2026-04-02T09:00:00Z")
+    }
+
     private func decodeDetail(from json: String) throws -> ContentDetail {
         let data = Data(json.utf8)
         return try JSONDecoder().decode(ContentDetail.self, from: data)

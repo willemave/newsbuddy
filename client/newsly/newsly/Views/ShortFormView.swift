@@ -265,6 +265,7 @@ private struct ShortNewsRow: View {
                 .padding(.top, 2)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Spacing.rowHorizontal)
         .padding(.vertical, 16)
         .overlay(alignment: .bottom) {

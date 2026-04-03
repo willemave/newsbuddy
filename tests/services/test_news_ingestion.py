@@ -49,6 +49,78 @@ def test_build_news_item_upsert_input_from_content_infers_user_scope() -> None:
     assert payload.legacy_content_id == 42
 
 
+def test_build_news_item_upsert_input_from_scraped_item_requires_real_summary() -> None:
+    payload = build_news_item_upsert_input_from_scraped_item(
+        {
+            "url": "https://example.com/story",
+            "title": "Example story",
+            "content_type": ContentType.NEWS,
+            "metadata": {
+                "platform": "reddit",
+                "source": "example_subreddit",
+                "source_type": "reddit",
+                "source_label": "example_subreddit",
+                "article": {
+                    "url": "https://example.com/story",
+                    "title": "Example story",
+                    "source_domain": "example.com",
+                },
+                "aggregator": {
+                    "name": "Reddit",
+                    "title": "Example story",
+                    "external_id": "abc123",
+                    "metadata": {
+                        "score": 1,
+                        "comments_count": 0,
+                    },
+                },
+                "discussion_url": "https://reddit.com/r/example/comments/abc123/example_story/",
+            },
+        }
+    )
+
+    assert payload.summary_title == "Example story"
+    assert payload.summary_key_points == []
+    assert payload.summary_text is None
+    assert payload.status == NewsItemStatus.NEW
+
+
+def test_build_news_item_upsert_input_from_content_requires_real_summary() -> None:
+    content = Content(
+        id=43,
+        content_type="news",
+        url="https://example.com/story",
+        source_url="https://news.ycombinator.com/item?id=43",
+        title="Example story",
+        source="example.com",
+        platform="hackernews",
+        status="completed",
+        content_metadata={
+            "discussion_url": "https://news.ycombinator.com/item?id=43",
+            "article": {
+                "url": "https://example.com/story",
+                "title": "Example story",
+                "source_domain": "example.com",
+            },
+            "summary": {
+                "title": "Example story",
+                "article_url": "https://example.com/story",
+                "key_points": [],
+                "summary": None,
+            },
+        },
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+
+    payload = build_news_item_upsert_input_from_content(content)
+
+    assert payload is not None
+    assert payload.summary_title == "Example story"
+    assert payload.summary_key_points == []
+    assert payload.summary_text is None
+    assert payload.status == NewsItemStatus.NEW
+
+
 def test_backfill_news_items_from_contents_is_idempotent(db_session) -> None:
     content = Content(
         content_type="news",

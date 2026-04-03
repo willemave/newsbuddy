@@ -187,15 +187,7 @@ class TechmemeScraper(BaseScraper):
         normalized_permalink = self._normalize_url(permalink) if permalink else primary_url
         cluster_token = self._derive_cluster_token(normalized_permalink)
 
-        primary_item = {
-            "title": entry.get("title") or primary_anchor.get("text") or primary_url,
-            "url": primary_url,
-            "summary": summary_text,
-            "source": primary_domain,
-            "metadata": {
-                "source_name": source_name,
-            },
-        }
+        headline_title = entry.get("title") or primary_anchor.get("text") or primary_url
 
         related_items = [
             {
@@ -211,7 +203,7 @@ class TechmemeScraper(BaseScraper):
             "source": primary_domain,
             "article": {
                 "url": primary_url,
-                "title": entry.get("title") or primary_item["title"],
+                "title": headline_title,
                 "source_domain": primary_domain,
             },
             "aggregator": {
@@ -227,6 +219,7 @@ class TechmemeScraper(BaseScraper):
                 },
             },
             "discussion_url": normalized_permalink,
+            "excerpt": summary_text,
             "discovery_time": (
                 publication_date.isoformat()
                 if publication_date
@@ -236,7 +229,7 @@ class TechmemeScraper(BaseScraper):
 
         return {
             "url": primary_url,  # Use original article URL (consistent with Twitter/HN scrapers)
-            "title": entry.get("title") or primary_item["title"],
+            "title": headline_title,
             "content_type": ContentType.NEWS,
             "is_aggregate": False,
             "metadata": metadata,

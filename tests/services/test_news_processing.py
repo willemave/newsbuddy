@@ -150,3 +150,52 @@ def test_process_news_item_passes_usage_persistence_context(db_session) -> None:
             "source_type": "hackernews",
         },
     }
+
+
+def test_process_news_item_does_not_treat_title_only_row_as_summarized(db_session) -> None:
+    item = NewsItem(
+        ingest_key="news-item-title-only",
+        visibility_scope="global",
+        platform="reddit",
+        source_type="reddit",
+        source_label="Reddit",
+        source_external_id="title-only-1",
+        article_url="https://example.com/story-4",
+        article_title="Example story 4",
+        article_domain="example.com",
+        discussion_url="https://reddit.com/r/example/comments/title_only/example_story_4/",
+        summary_title="Example story 4",
+        raw_metadata={"excerpt": "Useful source excerpt for summarization."},
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    calls: list[dict[str, object]] = []
+
+    def _summarize(*_args, **kwargs):
+        calls.append(kwargs)
+        return NewsSummary(
+            title="Example story 4",
+            article_url=item.article_url,
+            key_points=["Point one"],
+            summary="Short summary.",
+        )
+
+    summarizer = SimpleNamespace(summarize=_summarize)
+
+    result = process_news_item(
+        db_session,
+        news_item_id=item.id,
+        summarizer=summarizer,
+    )
+
+    db_session.refresh(item)
+    assert result.success is True
+    assert result.used_existing_summary is False
+    assert result.generated_summary is True
+    assert len(calls) == 1
+    assert item.status == "ready"
+    assert item.summary_key_points == ["Point one"]
+    assert item.summary_text == "Short summary."
