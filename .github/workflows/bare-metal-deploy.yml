@@ -16,6 +16,7 @@ jobs:
       DEPLOY_REMOTE_DIR: ${{ vars.DEPLOY_REMOTE_DIR }}
       DEPLOY_OWNER_GROUP: ${{ vars.DEPLOY_OWNER_GROUP }}
       DEPLOY_PROGRAMS: ${{ vars.DEPLOY_PROGRAMS }}
+      DEPLOY_REQUIRED_RUNNING_PROGRAMS: ${{ vars.DEPLOY_REQUIRED_RUNNING_PROGRAMS }}
       DEPLOY_PYTHON_VERSION: ${{ vars.DEPLOY_PYTHON_VERSION }}
       DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
     steps:
@@ -60,6 +61,7 @@ jobs:
           REMOTE_DIR="${DEPLOY_REMOTE_DIR:-/opt/news_app}"
           OWNER_GROUP="${DEPLOY_OWNER_GROUP:-newsapp:newsapp}"
           PROGRAMS="${DEPLOY_PROGRAMS:-news_app_server news_app_workers_content news_app_workers_image news_app_workers_media news_app_workers_onboarding news_app_workers_twitter news_app_workers_chat news_app_queue_watchdog news_app_bgutil_provider}"
+          REQUIRED_RUNNING_PROGRAMS="${DEPLOY_REQUIRED_RUNNING_PROGRAMS:-news_app_server news_app_workers_content news_app_workers_image news_app_workers_media news_app_queue_watchdog}"
           LEGACY_PROGRAMS="news_app_workers_transcribe"
 
           echo "→ Verifying SSH connectivity"
@@ -133,17 +135,8 @@ jobs:
           '"
 
           echo "→ Resolving supervisor programs to stop"
-          STOP_PROGRAMS=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
-            set -euo pipefail
-            existing=\$(sudo supervisorctl status | sed -E \"s/[[:space:]].*$//\")
-            resolved=\"\"
-            for p in $PROGRAMS $LEGACY_PROGRAMS; do
-              if echo \"\$existing\" | grep -qx \"\$p\"; then
-                resolved+=\"\$p \"
-              fi
-            done
-            echo \"\${resolved}\" | xargs
-          '")
+          STOP_STATUS_OUTPUT=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo supervisorctl status")
+          STOP_PROGRAMS=$(printf '%s\n' "$STOP_STATUS_OUTPUT" | python3 ./scripts/verify_supervisor_programs.py resolve --configured $PROGRAMS $LEGACY_PROGRAMS)
           if [[ -n "${STOP_PROGRAMS:-}" ]]; then
             echo "→ Supervisor programs to stop: $STOP_PROGRAMS"
             echo "→ Stopping supervisor programs"
@@ -170,21 +163,43 @@ jobs:
           '"
 
           echo "→ Restarting supervisor programs"
-          START_PROGRAMS=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
+          START_STATUS_OUTPUT=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
             set -euo pipefail
             sudo supervisorctl reread >/dev/null
             sudo supervisorctl update >/dev/null
-            existing=\$(sudo supervisorctl status | sed -E \"s/[[:space:]].*$//\")
-            resolved=\"\"
-            for p in $PROGRAMS; do
-              if echo \"\$existing\" | grep -qx \"\$p\"; then
-                resolved+=\"\$p \"
-              fi
-            done
-            echo \"\${resolved}\" | xargs
+            sudo supervisorctl status
           '")
+          START_PROGRAMS=$(printf '%s\n' "$START_STATUS_OUTPUT" | python3 ./scripts/verify_supervisor_programs.py resolve --configured $PROGRAMS)
           if [[ -z "${START_PROGRAMS:-}" ]]; then
             echo "No configured supervisor programs available to start after update: $PROGRAMS" >&2
             exit 1
           fi
-          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo supervisorctl start $START_PROGRAMS && sudo supervisorctl status"
+          REQUIRED_START_PROGRAMS=$(printf '%s\n' "$START_STATUS_OUTPUT" | python3 ./scripts/verify_supervisor_programs.py resolve --configured $REQUIRED_RUNNING_PROGRAMS)
+          echo "→ Required programs expected to be RUNNING: ${REQUIRED_START_PROGRAMS:-<none>}"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo supervisorctl start $START_PROGRAMS || true"
+
+          echo "→ Verifying required supervisor programs are RUNNING"
+          if [[ -z "${REQUIRED_START_PROGRAMS:-}" ]]; then
+            echo "→ No matching required supervisor programs found; printing status only"
+            printf '%s\n' "$START_STATUS_OUTPUT"
+          else
+            for attempt in 1 2 3 4 5 6; do
+              STATUS_OUTPUT=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo supervisorctl status")
+              MISSING_PROGRAMS=$(printf '%s\n' "$STATUS_OUTPUT" | python3 ./scripts/verify_supervisor_programs.py missing --required $REQUIRED_START_PROGRAMS)
+
+              if [[ -z "${MISSING_PROGRAMS// }" ]]; then
+                echo "All required supervisor programs are RUNNING"
+                printf '%s\n' "$STATUS_OUTPUT"
+                break
+              fi
+
+              if [[ $attempt -eq 6 ]]; then
+                echo "Required supervisor programs failed to reach RUNNING: $MISSING_PROGRAMS" >&2
+                printf '%s\n' "$STATUS_OUTPUT"
+                exit 1
+              fi
+
+              echo "Waiting for required programs to reach RUNNING (attempt $attempt/6): $MISSING_PROGRAMS"
+              sleep 5
+            done
+          fi
