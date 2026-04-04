@@ -1,87 +1,51 @@
 """Integration tests for authentication on protected endpoints."""
+
 from datetime import timedelta
 
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
 from app.core.security import create_access_token, create_token
-from app.main import app
-from app.models.schema import Content, ContentStatusEntry
-from app.models.user import User
 
 
-def test_api_endpoints_require_authentication():
+def test_api_endpoints_require_authentication(client_factory):
     """Test that API endpoints reject requests without authentication."""
-    client = TestClient(app)
+    with client_factory(authenticate=False) as client:
+        endpoints_to_test = [
+            ("GET", "/api/content/"),
+            ("GET", "/api/content/1"),
+            ("POST", "/api/content/1/favorite"),
+            ("POST", "/api/content/1/mark-read"),
+        ]
 
-    # Test core authenticated endpoints
-    endpoints_to_test = [
-        ("GET", "/api/content/"),
-        ("GET", "/api/content/1"),
-        ("POST", "/api/content/1/favorite"),
-        ("POST", "/api/content/1/mark-read"),
-    ]
+        for method, endpoint in endpoints_to_test:
+            if method == "GET":
+                response = client.get(endpoint)
+            elif method == "POST":
+                response = client.post(endpoint)
 
-    for method, endpoint in endpoints_to_test:
-        if method == "GET":
-            response = client.get(endpoint)
-        elif method == "POST":
-            response = client.post(endpoint)
-
-        # FastAPI's HTTPBearer returns 403 when no credentials provided, 401 for invalid credentials
-        assert response.status_code in [401, 403], (
-            f"{method} {endpoint} should require auth (got {response.status_code})"
-        )
+            assert response.status_code in [401, 403], (
+                f"{method} {endpoint} should require auth (got {response.status_code})"
+            )
 
 
-def test_authenticated_requests_accepted(db_session: Session):
+def test_authenticated_requests_accepted(
+    client_factory,
+    content_factory,
+    status_entry_factory,
+    user_factory,
+):
     """Test that authenticated requests are accepted."""
-    from app.core.db import get_db_session, get_readonly_db_session
-    from app.core.deps import get_current_user
-
-    # Create test user
-    user = User(
+    user = user_factory(
         apple_id="test.integration.001",
         email="integration@example.com",
-        is_active=True
     )
-    db_session.add(user)
-
-    # Create test content with valid metadata
-    content = Content(
-        content_type="article",
-        url="https://example.com/test",
+    content = content_factory(
         title="Test Article",
-        status="completed",
-        content_metadata={}
+        url="https://example.com/test",
     )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(user)
-    db_session.refresh(content)
-    db_session.add(ContentStatusEntry(user_id=user.id, content_id=content.id, status="inbox"))
-    db_session.commit()
+    status_entry_factory(user=user, content=content, status="inbox")
 
-    # Override dependencies
-    def override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
+    with client_factory(user=user) as client:
+        headers = {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
-    def override_get_current_user():
-        return user
-
-    app.dependency_overrides[get_db_session] = override_get_db
-    app.dependency_overrides[get_readonly_db_session] = override_get_db
-    app.dependency_overrides[get_current_user] = override_get_current_user
-
-    try:
-        client = TestClient(app)
-        token = create_access_token(user.id)
-        headers = {"Authorization": f"Bearer {token}"}
-
-        # These should all succeed now
         response = client.get("/api/content/", headers=headers)
         assert response.status_code == 200
 
@@ -90,36 +54,28 @@ def test_authenticated_requests_accepted(db_session: Session):
 
         response = client.post(f"/api/content/{content.id}/favorite", headers=headers)
         assert response.status_code == 200
-    finally:
-        app.dependency_overrides.clear()
 
 
-def test_invalid_token_rejected():
+def test_invalid_token_rejected(client_factory):
     """Test that requests with invalid tokens are rejected."""
-    client = TestClient(app)
-    headers = {"Authorization": "Bearer invalid.token.here"}
+    with client_factory(authenticate=False) as client:
+        response = client.get(
+            "/api/content/",
+            headers={"Authorization": "Bearer invalid.token.here"},
+        )
+        assert response.status_code == 401
 
-    response = client.get("/api/content/", headers=headers)
-    assert response.status_code == 401
 
-
-def test_expired_token_rejected(db_session: Session):
+def test_expired_token_rejected(client_factory, user_factory):
     """Test that expired tokens are rejected."""
-    # Create user
-    user = User(
+    user = user_factory(
         apple_id="test.expired.001",
         email="expired@example.com",
-        is_active=True
     )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-
-    # Create expired token
     expired_token = create_token(user.id, "access", timedelta(hours=-1))
-
-    client = TestClient(app)
-    headers = {"Authorization": f"Bearer {expired_token}"}
-
-    response = client.get("/api/content/", headers=headers)
-    assert response.status_code == 401
+    with client_factory(authenticate=False) as client:
+        response = client.get(
+            "/api/content/",
+            headers={"Authorization": f"Bearer {expired_token}"},
+        )
+        assert response.status_code == 401

@@ -1,16 +1,20 @@
 """Tests for content interaction analytics service."""
 
 import sqlite3
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.models.schema import AnalyticsInteraction, Content
 from app.models.user import User
+from app.services import content_interactions as content_interactions_service
 from app.services.content_interactions import (
+    INTERACTION_BUSY_TIMEOUT_MS,
     INTERACTION_TYPE_OPENED,
     ContentInteractionContentNotFoundError,
     RecordContentInteractionInput,
@@ -106,6 +110,34 @@ def test_record_content_interaction_idempotent_for_same_user(
     assert len(list(stored)) == 1
 
 
+def test_record_content_interaction_normalizes_timezone_aware_timestamp(
+    db_session: Session,
+    analytics_user: User,
+    analytics_content: Content,
+) -> None:
+    """It should store aware timestamps normalized to naive UTC."""
+    occurred_at = datetime(2026, 2, 15, 9, 30, tzinfo=timezone(timedelta(hours=2)))
+    interaction_id = str(uuid4())
+
+    result = record_content_interaction(
+        db_session,
+        RecordContentInteractionInput(
+            user_id=analytics_user.id,
+            content_id=analytics_content.id,
+            interaction_id=interaction_id,
+            interaction_type=INTERACTION_TYPE_OPENED,
+            occurred_at=occurred_at,
+        ),
+    )
+
+    stored = db_session.execute(
+        select(AnalyticsInteraction).where(
+            AnalyticsInteraction.id == result.analytics_interaction_id
+        )
+    ).scalar_one()
+    assert stored.occurred_at == occurred_at.astimezone(UTC).replace(tzinfo=None)
+
+
 def test_record_content_interaction_same_interaction_id_for_different_users(
     db_session: Session,
     analytics_content: Content,
@@ -149,6 +181,88 @@ def test_record_content_interaction_same_interaction_id_for_different_users(
     assert first.recorded is True
     assert second.recorded is True
     assert first.analytics_interaction_id != second.analytics_interaction_id
+
+
+def test_record_content_interaction_returns_existing_row_after_integrity_error(
+    db_session: Session,
+    analytics_user: User,
+    analytics_content: Content,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It should recover idempotently when a duplicate insert loses a race."""
+    interaction_id = str(uuid4())
+    existing = AnalyticsInteraction(
+        user_id=analytics_user.id,
+        content_id=analytics_content.id,
+        interaction_type=INTERACTION_TYPE_OPENED,
+        interaction_id=interaction_id,
+        surface="ios_content_detail",
+        context_data={},
+        occurred_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(existing)
+    db_session.commit()
+    db_session.refresh(existing)
+
+    def _raise_integrity_error(**_kwargs):
+        raise IntegrityError(
+            "INSERT INTO analytics_interactions",
+            {},
+            Exception("duplicate interaction"),
+        )
+
+    monkeypatch.setattr(
+        "app.services.content_interactions.run_with_sqlite_lock_retry",
+        _raise_integrity_error,
+    )
+
+    result = record_content_interaction(
+        db_session,
+        RecordContentInteractionInput(
+            user_id=analytics_user.id,
+            content_id=analytics_content.id,
+            interaction_id=interaction_id,
+            interaction_type=INTERACTION_TYPE_OPENED,
+            surface="ios_content_detail",
+        ),
+    )
+
+    assert result.recorded is False
+    assert result.analytics_interaction_id == existing.id
+
+
+def test_record_content_interaction_uses_short_busy_timeout(
+    db_session: Session,
+    analytics_user: User,
+    analytics_content: Content,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It should bound timeout for content lookup and persistence."""
+    timeouts: list[int] = []
+
+    @contextmanager
+    def _capture_timeout(_db: Session, timeout_ms: int):
+        timeouts.append(timeout_ms)
+        yield
+
+    monkeypatch.setattr(
+        content_interactions_service,
+        "temporary_sqlite_busy_timeout",
+        _capture_timeout,
+    )
+
+    result = record_content_interaction(
+        db_session,
+        RecordContentInteractionInput(
+            user_id=analytics_user.id,
+            content_id=analytics_content.id,
+            interaction_id=str(uuid4()),
+            interaction_type=INTERACTION_TYPE_OPENED,
+        ),
+    )
+
+    assert result.recorded is True
+    assert timeouts == [INTERACTION_BUSY_TIMEOUT_MS, INTERACTION_BUSY_TIMEOUT_MS]
 
 
 def test_record_content_interaction_raises_for_missing_content(

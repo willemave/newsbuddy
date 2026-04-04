@@ -1,78 +1,20 @@
 """Tests for read_status service."""
 
-import pytest
+import sqlite3
+
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.models.schema import Content, ContentReadStatus, User
+from app.models.schema import Content, User
 from app.services import read_status
-
-
-@pytest.fixture
-def test_user(db_session: Session) -> User:
-    """Create a test user."""
-    user = User(
-        email="test@example.com",
-        apple_id="test_apple_id",
-        is_active=True,
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    return user
-
-
-@pytest.fixture
-def test_content(db_session: Session) -> Content:
-    """Create test content."""
-    content = Content(
-        content_type="article",
-        url="https://example.com/article",
-        title="Test Article",
-        source="example.com",
-        status="completed",
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    return content
-
-
-@pytest.fixture
-def test_content_2(db_session: Session) -> Content:
-    """Create second test content."""
-    content = Content(
-        content_type="article",
-        url="https://example.com/article2",
-        title="Test Article 2",
-        source="example.com",
-        status="completed",
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    return content
-
-
-@pytest.fixture
-def test_content_3(db_session: Session) -> Content:
-    """Create third test content."""
-    content = Content(
-        content_type="article",
-        url="https://example.com/article3",
-        title="Test Article 3",
-        source="example.com",
-        status="completed",
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    return content
 
 
 class TestMarkContentAsRead:
     """Tests for mark_content_as_read function."""
 
-    def test_mark_content_as_read_success(self, db_session: Session, test_user: User, test_content: Content):
+    def test_mark_content_as_read_success(
+        self, db_session: Session, test_user: User, test_content: Content
+    ):
         """Test marking content as read successfully."""
         # Act
         result = read_status.mark_content_as_read(db_session, test_content.id, test_user.id)
@@ -83,7 +25,9 @@ class TestMarkContentAsRead:
         assert result.user_id == test_user.id
         assert result.read_at is not None
 
-    def test_mark_content_as_read_already_read(self, db_session: Session, test_user: User, test_content: Content):
+    def test_mark_content_as_read_already_read(
+        self, db_session: Session, test_user: User, test_content: Content
+    ):
         """Test marking already read content refreshes timestamp."""
         # Arrange - mark as read first
         first = read_status.mark_content_as_read(db_session, test_content.id, test_user.id)
@@ -97,13 +41,15 @@ class TestMarkContentAsRead:
         assert first.id == second.id
         assert second.read_at >= first_timestamp
 
-    def test_mark_content_as_read_user_isolation(self, db_session: Session, test_content: Content):
+    def test_mark_content_as_read_user_isolation(
+        self,
+        db_session: Session,
+        test_content: Content,
+        user_factory,
+    ):
         """Test that read status is isolated per user."""
-        # Arrange - create two users
-        user1 = User(email="user1@example.com", apple_id="apple_id_1", is_active=True)
-        user2 = User(email="user2@example.com", apple_id="apple_id_2", is_active=True)
-        db_session.add_all([user1, user2])
-        db_session.commit()
+        user1 = user_factory(email="user1@example.com", apple_id="apple_id_1")
+        user2 = user_factory(email="user2@example.com", apple_id="apple_id_2")
 
         # Act - user1 marks as read
         read_status.mark_content_as_read(db_session, test_content.id, user1.id)
@@ -111,6 +57,31 @@ class TestMarkContentAsRead:
         # Assert - user1 has read, user2 has not
         assert read_status.is_content_read(db_session, test_content.id, user1.id)
         assert not read_status.is_content_read(db_session, test_content.id, user2.id)
+
+    def test_mark_content_as_read_retries_locked_commit(
+        self, db_session: Session, test_user: User, test_content: Content, monkeypatch
+    ):
+        """Test marking content as read retries once when SQLite is locked."""
+        original_commit = db_session.commit
+        calls = 0
+
+        def flaky_commit():  # noqa: ANN202
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OperationalError(
+                    "INSERT read_status",
+                    {},
+                    sqlite3.OperationalError("database is locked"),
+                )
+            return original_commit()
+
+        monkeypatch.setattr(db_session, "commit", flaky_commit)
+
+        result = read_status.mark_content_as_read(db_session, test_content.id, test_user.id)
+
+        assert result is not None
+        assert calls == 2
 
 
 class TestMarkContentsAsRead:
@@ -126,12 +97,19 @@ class TestMarkContentsAsRead:
         assert failed_ids == []
 
     def test_mark_contents_as_read_multiple(
-        self, db_session: Session, test_user: User, test_content: Content, test_content_2: Content, test_content_3: Content
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+        test_content_2: Content,
+        test_content_3: Content,
     ):
         """Test marking multiple contents as read."""
         # Act
         content_ids = [test_content.id, test_content_2.id, test_content_3.id]
-        marked_count, failed_ids = read_status.mark_contents_as_read(db_session, content_ids, test_user.id)
+        marked_count, failed_ids = read_status.mark_contents_as_read(
+            db_session, content_ids, test_user.id
+        )
 
         # Assert
         assert marked_count == 3
@@ -140,11 +118,15 @@ class TestMarkContentsAsRead:
         assert read_status.is_content_read(db_session, test_content_2.id, test_user.id)
         assert read_status.is_content_read(db_session, test_content_3.id, test_user.id)
 
-    def test_mark_contents_as_read_with_duplicates(self, db_session: Session, test_user: User, test_content: Content):
+    def test_mark_contents_as_read_with_duplicates(
+        self, db_session: Session, test_user: User, test_content: Content
+    ):
         """Test marking contents with duplicate IDs."""
         # Act
         content_ids = [test_content.id, test_content.id, test_content.id]
-        marked_count, failed_ids = read_status.mark_contents_as_read(db_session, content_ids, test_user.id)
+        marked_count, failed_ids = read_status.mark_contents_as_read(
+            db_session, content_ids, test_user.id
+        )
 
         # Assert
         assert marked_count == 1  # Only one unique ID
@@ -159,21 +141,24 @@ class TestMarkContentsAsRead:
 
         # Act - mark both
         content_ids = [test_content.id, test_content_2.id]
-        marked_count, failed_ids = read_status.mark_contents_as_read(db_session, content_ids, test_user.id)
+        marked_count, failed_ids = read_status.mark_contents_as_read(
+            db_session, content_ids, test_user.id
+        )
 
         # Assert
         assert marked_count == 2
         assert failed_ids == []
 
     def test_mark_contents_as_read_user_isolation(
-        self, db_session: Session, test_content: Content, test_content_2: Content
+        self,
+        db_session: Session,
+        test_content: Content,
+        test_content_2: Content,
+        user_factory,
     ):
         """Test that bulk marking is isolated per user."""
-        # Arrange - create two users
-        user1 = User(email="user1@example.com", apple_id="apple_id_1", is_active=True)
-        user2 = User(email="user2@example.com", apple_id="apple_id_2", is_active=True)
-        db_session.add_all([user1, user2])
-        db_session.commit()
+        user1 = user_factory(email="user1@example.com", apple_id="apple_id_1")
+        user2 = user_factory(email="user2@example.com", apple_id="apple_id_2")
 
         # Act - user1 marks content1, user2 marks content2
         read_status.mark_contents_as_read(db_session, [test_content.id], user1.id)
@@ -184,6 +169,41 @@ class TestMarkContentsAsRead:
         user2_read = read_status.get_read_content_ids(db_session, user2.id)
         assert user1_read == [test_content.id]
         assert user2_read == [test_content_2.id]
+
+    def test_mark_contents_as_read_retries_locked_commit(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+        test_content_2: Content,
+        monkeypatch,
+    ):
+        """Test bulk marking retries once when SQLite is locked."""
+        original_commit = db_session.commit
+        calls = 0
+
+        def flaky_commit():  # noqa: ANN202
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OperationalError(
+                    "INSERT bulk_read_status",
+                    {},
+                    sqlite3.OperationalError("database is locked"),
+                )
+            return original_commit()
+
+        monkeypatch.setattr(db_session, "commit", flaky_commit)
+
+        marked_count, failed_ids = read_status.mark_contents_as_read(
+            db_session,
+            [test_content.id, test_content_2.id],
+            test_user.id,
+        )
+
+        assert marked_count == 2
+        assert failed_ids == []
+        assert calls == 2
 
 
 class TestGetReadContentIds:
@@ -214,14 +234,15 @@ class TestGetReadContentIds:
         assert test_content_2.id in content_ids
 
     def test_get_read_content_ids_user_isolation(
-        self, db_session: Session, test_content: Content, test_content_2: Content
+        self,
+        db_session: Session,
+        test_content: Content,
+        test_content_2: Content,
+        user_factory,
     ):
         """Test that read IDs are isolated per user."""
-        # Arrange - create two users with different read content
-        user1 = User(email="user1@example.com", apple_id="apple_id_1", is_active=True)
-        user2 = User(email="user2@example.com", apple_id="apple_id_2", is_active=True)
-        db_session.add_all([user1, user2])
-        db_session.commit()
+        user1 = user_factory(email="user1@example.com", apple_id="apple_id_1")
+        user2 = user_factory(email="user2@example.com", apple_id="apple_id_2")
 
         read_status.mark_content_as_read(db_session, test_content.id, user1.id)
         read_status.mark_content_as_read(db_session, test_content_2.id, user2.id)
@@ -238,7 +259,9 @@ class TestGetReadContentIds:
 class TestIsContentRead:
     """Tests for is_content_read function."""
 
-    def test_is_content_read_true(self, db_session: Session, test_user: User, test_content: Content):
+    def test_is_content_read_true(
+        self, db_session: Session, test_user: User, test_content: Content
+    ):
         """Test checking if content is read returns True when it is."""
         # Arrange
         read_status.mark_content_as_read(db_session, test_content.id, test_user.id)
@@ -249,7 +272,9 @@ class TestIsContentRead:
         # Assert
         assert is_read is True
 
-    def test_is_content_read_false(self, db_session: Session, test_user: User, test_content: Content):
+    def test_is_content_read_false(
+        self, db_session: Session, test_user: User, test_content: Content
+    ):
         """Test checking if content is read returns False when it isn't."""
         # Act
         is_read = read_status.is_content_read(db_session, test_content.id, test_user.id)
@@ -285,14 +310,15 @@ class TestClearReadStatus:
         assert count == 0
 
     def test_clear_read_status_user_isolation(
-        self, db_session: Session, test_content: Content, test_content_2: Content
+        self,
+        db_session: Session,
+        test_content: Content,
+        test_content_2: Content,
+        user_factory,
     ):
         """Test that clearing read status only affects specific user."""
-        # Arrange - create two users with read content
-        user1 = User(email="user1@example.com", apple_id="apple_id_1", is_active=True)
-        user2 = User(email="user2@example.com", apple_id="apple_id_2", is_active=True)
-        db_session.add_all([user1, user2])
-        db_session.commit()
+        user1 = user_factory(email="user1@example.com", apple_id="apple_id_1")
+        user2 = user_factory(email="user2@example.com", apple_id="apple_id_2")
 
         read_status.mark_content_as_read(db_session, test_content.id, user1.id)
         read_status.mark_content_as_read(db_session, test_content_2.id, user2.id)

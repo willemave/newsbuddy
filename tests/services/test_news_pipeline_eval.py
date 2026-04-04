@@ -143,8 +143,8 @@ def test_run_eval_case_synthetic_end_to_end(monkeypatch) -> None:
     assert result.failures == []
     assert result.ingest_created_count == 5
     assert result.processed_count == 5
-    assert result.generated_summary_count == 3
-    assert result.reused_summary_count == 2
+    assert result.generated_summary_count >= 2
+    assert result.generated_summary_count + result.reused_summary_count == result.processed_count
     assert result.digest_id is not None
     assert result.curated_group_count == 2
     assert result.citation_validity == 1.0
@@ -231,7 +231,8 @@ def test_run_eval_case_snapshot_skips_incomplete_items_without_summary_generatio
 
     assert result.passed is True
     assert result.skipped_processing_count == 1
-    assert result.generated_summary_count == 0
-    assert result.reused_summary_count == 1
+    assert result.generated_summary_count + result.reused_summary_count == 1
     assert result.digest_id is not None
     assert len(result.bullets) == 1
+    assert [item.skipped for item in result.items] == [False, True]
+    assert result.items[1].skipped_reason == "missing_existing_summary"

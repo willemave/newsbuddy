@@ -2,32 +2,17 @@
 
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.main import app
-from app.models.schema import AnalyticsInteraction, Content
+from app.models.schema import AnalyticsInteraction
 
 
-def _create_content(db_session: Session) -> Content:
-    """Create content fixture for analytics interaction API tests."""
-    content = Content(
-        content_type="article",
+def test_record_content_interaction_success(client, content_factory, db_session) -> None:
+    """It should persist a new interaction and return its ID."""
+    content = content_factory(
         url="https://example.com/api-interaction-content",
         title="Analytics API Content",
-        status="completed",
-        content_metadata={},
     )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    return content
-
-
-def test_record_content_interaction_success(client, db_session: Session) -> None:
-    """It should persist a new interaction and return its ID."""
-    content = _create_content(db_session)
     interaction_id = str(uuid4())
 
     response = client.post(
@@ -58,9 +43,12 @@ def test_record_content_interaction_success(client, db_session: Session) -> None
     assert stored[0].surface == "ios_content_detail"
 
 
-def test_record_content_interaction_idempotent(client, db_session: Session) -> None:
+def test_record_content_interaction_idempotent(client, content_factory, db_session) -> None:
     """It should return recorded=false for duplicate interaction IDs."""
-    content = _create_content(db_session)
+    content = content_factory(
+        url="https://example.com/api-interaction-content",
+        title="Analytics API Content",
+    )
     interaction_id = str(uuid4())
     payload = {
         "interaction_id": interaction_id,
@@ -98,16 +86,16 @@ def test_record_content_interaction_missing_content(client) -> None:
     assert response.json()["detail"] == "Content not found"
 
 
-def test_record_content_interaction_requires_authentication() -> None:
+def test_record_content_interaction_requires_authentication(client_factory) -> None:
     """It should reject unauthenticated requests."""
-    unauthenticated_client = TestClient(app)
-    response = unauthenticated_client.post(
-        "/api/analytics",
-        json={
-            "interaction_id": str(uuid4()),
-            "content_id": 1,
-            "interaction_type": "opened",
-        },
-    )
+    with client_factory(authenticate=False) as unauthenticated_client:
+        response = unauthenticated_client.post(
+            "/api/analytics",
+            json={
+                "interaction_id": str(uuid4()),
+                "content_id": 1,
+                "interaction_type": "opened",
+            },
+        )
 
     assert response.status_code in [401, 403]

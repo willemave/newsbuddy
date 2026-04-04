@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from app.constants import DEFAULT_NEW_FEED_LIMIT
 from app.models.schema import Content, FeedDiscoveryRun, FeedDiscoverySuggestion, UserScraperConfig
 from app.models.user import User
 from app.services.podcast_search import PodcastEpisodeSearchHit
+
+pytestmark = pytest.mark.usefixtures("stub_valid_feed_url")
 
 
 def _create_run(db_session, user_id: int) -> FeedDiscoveryRun:

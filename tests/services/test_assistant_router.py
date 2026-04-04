@@ -2,6 +2,7 @@
 
 from pydantic_ai.models.test import TestModel
 
+from app.core.settings import get_settings
 from app.models.schema import Content, ContentStatusEntry, UserScraperConfig
 from app.services import assistant_router
 
@@ -204,3 +205,37 @@ def test_format_content_hits_reports_total_matches() -> None:
     )
 
     assert "Feed Content (13 total matches, showing 1):" in formatted
+
+
+def test_build_assistant_personal_library_runtime_skips_sync_when_sandbox_disabled(
+    db_session,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "personal_markdown_enabled", True)
+    monkeypatch.setattr(settings, "chat_sandbox_provider", "disabled")
+
+    sync_calls: list[int] = []
+
+    def _unexpected_sync(_db, *, user_id: int):  # noqa: ANN001
+        sync_calls.append(user_id)
+        raise AssertionError(
+            "assistant personal markdown sync should not run when sandbox is disabled"
+        )
+
+    monkeypatch.setattr(
+        assistant_router,
+        "sync_personal_markdown_library_for_user",
+        _unexpected_sync,
+    )
+
+    sandbox_session, personal_library_error = (
+        assistant_router._build_assistant_personal_library_runtime(
+            db=db_session,
+            user_id=42,
+        )
+    )
+
+    assert sandbox_session is None
+    assert personal_library_error is None
+    assert sync_calls == []

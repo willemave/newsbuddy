@@ -1,46 +1,19 @@
 """Tests for the bulk mark read API endpoint."""
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.models.schema import Content, ContentReadStatus
-
-
-def _create_content(db_session: Session, index: int) -> Content:
-    """Create content fixture for API tests."""
-
-    content = Content(
-        content_type="article",
-        url=f"https://example.com/api-bulk-{index}",
-        title=f"API Bulk Article {index}",
-        status="completed",
-        content_metadata={
-            "summary": {
-                "title": f"API Bulk Article {index}",
-                "overview": "This overview is long enough to satisfy structured summary validation.",
-                "bullet_points": [
-                    {"text": "Key point one", "category": "key_finding"},
-                    {"text": "Key point two", "category": "methodology"},
-                    {"text": "Key point three", "category": "conclusion"},
-                ],
-                "quotes": [],
-                "topics": ["Testing"],
-                "summarization_date": "2025-12-31T00:00:00Z",
-            },
-            "summary_kind": "long_structured",
-            "summary_version": 1,
-        },
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    return content
+from app.models.schema import ContentReadStatus
 
 
-def test_bulk_mark_read_endpoint_success(client, db_session: Session) -> None:
+def test_bulk_mark_read_endpoint_success(client, content_factory, db_session) -> None:
     """Ensure the endpoint marks all provided IDs as read."""
-
-    contents = [_create_content(db_session, index) for index in range(3)]
+    contents = [
+        content_factory(
+            url=f"https://example.com/api-bulk-{index}",
+            title=f"API Bulk Article {index}",
+        )
+        for index in range(3)
+    ]
     content_ids = [content.id for content in contents]
 
     response = client.post(
@@ -59,10 +32,12 @@ def test_bulk_mark_read_endpoint_success(client, db_session: Session) -> None:
     assert sorted(stored_ids) == sorted(content_ids)
 
 
-def test_bulk_mark_read_endpoint_handles_invalid_ids(client, db_session: Session) -> None:
+def test_bulk_mark_read_endpoint_handles_invalid_ids(client, content_factory) -> None:
     """Ensure the endpoint rejects invalid IDs."""
-
-    content = _create_content(db_session, 0)
+    content = content_factory(
+        url="https://example.com/api-bulk-0",
+        title="API Bulk Article 0",
+    )
 
     response = client.post(
         "/api/content/bulk-mark-read",

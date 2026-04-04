@@ -377,6 +377,147 @@ def test_process_news_item_ignores_void_placeholder_titles(db_session) -> None:
     assert item.status == "ready"
 
 
+def test_process_news_item_accepts_long_generated_titles(db_session) -> None:
+    long_title = "A" * 400
+    item = NewsItem(
+        ingest_key="news-item-long-generated-title",
+        visibility_scope="global",
+        platform="reddit",
+        source_type="reddit",
+        source_label="Reddit",
+        source_external_id="long-generated-title-1",
+        article_url="https://example.com/story-7b",
+        article_title="Example story 7b",
+        article_domain="example.com",
+        discussion_url="https://reddit.com/r/example/comments/long/example_story_7b/",
+        raw_metadata={
+            "excerpt": "Useful source excerpt for summarization.",
+            "discussion_payload": {"comments": []},
+        },
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    summarizer = SimpleNamespace(
+        summarize=lambda *_args, **_kwargs: NewsSummary(
+            title=long_title,
+            article_url=item.article_url,
+            key_points=["Fresh point"],
+            summary="Fresh summary text.",
+        )
+    )
+
+    result = process_news_item(
+        db_session,
+        news_item_id=item.id,
+        summarizer=summarizer,
+    )
+
+    db_session.refresh(item)
+    assert result.success is True
+    assert item.summary_title == long_title
+    assert item.status == "ready"
+
+
+def test_process_news_item_reuses_generated_digest_with_long_title(db_session) -> None:
+    long_title = ("Signal " * 60).strip()
+    item = NewsItem(
+        ingest_key="news-item-existing-long-title",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="existing-long-title-1",
+        article_url="https://example.com/story-6b",
+        article_title="Example story 6b",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=1266",
+        summary_title=long_title,
+        summary_key_points=["Generated point"],
+        summary_text="Generated summary text.",
+        raw_metadata={
+            "summary": {
+                "title": long_title,
+                "article_url": "https://example.com/story-6b",
+                "key_points": ["Generated point"],
+                "summary": "Generated summary text.",
+            },
+            "summary_kind": "short_news_digest",
+            "summary_version": 1,
+        },
+        status="ready",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    calls = 0
+
+    def _summarize(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return NewsSummary(
+            title="Should not be used",
+            article_url=item.article_url,
+            key_points=["Unexpected"],
+            summary="Unexpected",
+        )
+
+    result = process_news_item(
+        db_session,
+        news_item_id=item.id,
+        summarizer=SimpleNamespace(summarize=_summarize),
+    )
+
+    db_session.refresh(item)
+    assert result.success is True
+    assert result.used_existing_summary is True
+    assert result.generated_summary is False
+    assert calls == 0
+    assert item.summary_title == long_title
+
+
+def test_process_news_item_preserves_short_valid_titles(db_session) -> None:
+    item = NewsItem(
+        ingest_key="news-item-short-title",
+        visibility_scope="global",
+        platform="twitter",
+        source_type="twitter",
+        source_label="X",
+        source_external_id="short-title-1",
+        article_url="https://x.com/i/status/short-title-1",
+        canonical_story_url="https://x.com/i/status/short-title-1",
+        article_title="xAI",
+        article_domain="x.com",
+        discussion_url="https://x.com/i/status/short-title-1",
+        raw_metadata={"excerpt": "Short title should survive normalization."},
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    def _summarize(*args, **kwargs):  # noqa: ANN002, ANN003
+        return NewsSummary(
+            title="xAI",
+            article_url=item.article_url,
+            key_points=["Concrete short-title point."],
+            summary="Short valid titles should not be discarded.",
+        )
+
+    result = process_news_item(
+        db_session,
+        news_item_id=item.id,
+        summarizer=SimpleNamespace(summarize=_summarize),
+    )
+
+    db_session.refresh(item)
+    assert result.success is True
+    assert item.summary_title == "xAI"
+
+
 def test_enrich_news_item_article_reuses_existing_article_content(db_session) -> None:
     article = Content(
         content_type=ContentType.ARTICLE.value,

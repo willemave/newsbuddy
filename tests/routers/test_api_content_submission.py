@@ -1,5 +1,8 @@
 """Tests for user-submitted content endpoint."""
 
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
+
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content, ContentReadStatus, ContentStatusEntry, ProcessingTask
@@ -315,6 +318,155 @@ def test_existing_pending_analyze_task_gets_subscribe_to_feed_flag(client, db_se
     assert response.status_code == 200
     db_session.refresh(task)
     assert task.payload.get("subscribe_to_feed") is True
+
+
+def test_existing_pending_analyze_task_merges_instruction_crawl_links_and_platform_hint(
+    client,
+    db_session,
+):
+    """Existing pending analyze tasks should merge new analysis inputs without duplicating work."""
+    existing = Content(
+        url="https://example.com/article",
+        source_url=None,
+        content_type=ContentType.UNKNOWN.value,
+        status=ContentStatus.NEW.value,
+        source=SELF_SUBMISSION_SOURCE,
+        platform=None,
+        content_metadata={},
+    )
+    db_session.add(existing)
+    db_session.commit()
+    db_session.refresh(existing)
+
+    task = ProcessingTask(
+        task_type=TaskType.ANALYZE_URL.value,
+        content_id=existing.id,
+        payload={"content_id": existing.id},
+        status=TaskStatus.PENDING.value,
+        queue_name=TaskQueue.CONTENT.value,
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    response = client.post(
+        "/api/content/submit",
+        json={
+            "url": existing.url,
+            "note": "Add all links from the page",
+            "crawl_links": True,
+            "platform": "YouTube",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["task_id"] == task.id
+
+    db_session.refresh(existing)
+    db_session.refresh(task)
+    assert existing.source_url == existing.url
+    assert existing.platform == "youtube"
+    assert task.payload["content_id"] == existing.id
+    assert task.payload["instruction"] == "Add all links from the page"
+    assert task.payload["crawl_links"] is True
+
+
+def test_duplicate_completed_submission_updates_source_url_and_platform_without_reanalyzing(
+    client,
+    db_session,
+):
+    """Completed content should absorb missing metadata without restarting analysis."""
+    existing = Content(
+        url="https://example.com/article",
+        source_url=None,
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        source=SELF_SUBMISSION_SOURCE,
+        platform=None,
+        content_metadata={},
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    response = client.post(
+        "/api/content/submit",
+        json={
+            "url": existing.url,
+            "platform": "YouTube",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["already_exists"] is True
+    assert data["task_id"] is None
+    assert data["platform"] == "youtube"
+
+    db_session.refresh(existing)
+    assert existing.source_url == existing.url
+    assert existing.platform == "youtube"
+
+    tasks = (
+        db_session.query(ProcessingTask)
+        .filter_by(content_id=existing.id)
+        .filter(
+            ProcessingTask.task_type.in_(
+                [TaskType.ANALYZE_URL.value, TaskType.PROCESS_CONTENT.value]
+            )
+        )
+        .all()
+    )
+    assert tasks == []
+
+
+def test_submit_duplicate_constraint_reuses_existing_record_and_enqueues_task(
+    client,
+    db_session,
+    monkeypatch,
+):
+    """A duplicate insert race should fall back to the existing row."""
+    original_commit = db_session.commit
+    commit_calls = 0
+
+    def _commit_with_duplicate() -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        if commit_calls != 1:
+            original_commit()
+            return
+
+        competing_session = sessionmaker(bind=db_session.get_bind())()
+        try:
+            competing_session.add(
+                Content(
+                    url="https://example.com/article",
+                    source_url="https://example.com/article",
+                    content_type=ContentType.UNKNOWN.value,
+                    status=ContentStatus.NEW.value,
+                    source=SELF_SUBMISSION_SOURCE,
+                    content_metadata={},
+                )
+            )
+            competing_session.commit()
+        finally:
+            competing_session.close()
+
+        raise IntegrityError("INSERT INTO contents", {}, Exception("duplicate key"))
+
+    monkeypatch.setattr(db_session, "commit", _commit_with_duplicate)
+
+    response = client.post("/api/content/submit", json={"url": "https://example.com/article"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["already_exists"] is True
+    assert data["content_type"] == ContentType.UNKNOWN.value
+    assert data["task_id"] is not None
+
+    contents = db_session.query(Content).filter(Content.url == "https://example.com/article").all()
+    assert len(contents) == 1
+
+    task = db_session.query(ProcessingTask).filter_by(content_id=contents[0].id).one()
+    assert task.task_type == TaskType.ANALYZE_URL.value
 
 
 def test_reject_invalid_scheme(client):

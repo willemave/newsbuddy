@@ -9,6 +9,7 @@ from app.services.news_ingestion import (
     backfill_news_items_from_contents,
     build_news_item_upsert_input_from_content,
     build_news_item_upsert_input_from_scraped_item,
+    should_enqueue_news_item_enrichment,
     upsert_news_item,
 )
 
@@ -85,6 +86,55 @@ def test_build_news_item_upsert_input_from_scraped_item_requires_real_summary() 
     assert payload.status == NewsItemStatus.NEW
 
 
+def test_build_news_item_upsert_input_ignores_void_placeholder_titles() -> None:
+    payload = build_news_item_upsert_input_from_scraped_item(
+        {
+            "url": "https://example.com/story",
+            "title": "xAI",
+            "content_type": ContentType.NEWS,
+            "metadata": {
+                "platform": "twitter",
+                "source": "X",
+                "source_type": "twitter",
+                "article": {
+                    "url": "https://example.com/story",
+                    "title": "VOID",
+                    "source_domain": "example.com",
+                },
+                "summary": {
+                    "title": "VOID: A New AI Model for Video Object and Interaction Deletion",
+                },
+            },
+        }
+    )
+
+    assert payload.article_title == "VOID: A New AI Model for Video Object and Interaction Deletion"
+    assert payload.summary_title == "VOID: A New AI Model for Video Object and Interaction Deletion"
+
+
+def test_build_news_item_upsert_input_preserves_short_valid_titles() -> None:
+    payload = build_news_item_upsert_input_from_scraped_item(
+        {
+            "url": "https://example.com/story",
+            "title": "xAI",
+            "content_type": ContentType.NEWS,
+            "metadata": {
+                "platform": "twitter",
+                "source": "X",
+                "source_type": "twitter",
+                "article": {
+                    "url": "https://example.com/story",
+                    "title": "xAI",
+                    "source_domain": "example.com",
+                },
+            },
+        }
+    )
+
+    assert payload.article_title == "xAI"
+    assert payload.summary_title == "xAI"
+
+
 def test_build_news_item_upsert_input_from_content_requires_real_summary() -> None:
     content = Content(
         id=43,
@@ -119,6 +169,50 @@ def test_build_news_item_upsert_input_from_content_requires_real_summary() -> No
     assert payload.summary_key_points == []
     assert payload.summary_text is None
     assert payload.status == NewsItemStatus.NEW
+
+
+def test_build_news_item_upsert_input_from_content_ignores_void_placeholder_title() -> None:
+    content = Content(
+        id=44,
+        content_type="news",
+        url="https://example.com/story",
+        source_url="https://x.com/i/status/44",
+        title="VOID",
+        source="X",
+        platform="twitter",
+        status="completed",
+        content_metadata={
+            "article": {
+                "url": "https://example.com/story",
+                "title": "VOID",
+                "source_domain": "example.com",
+            },
+            "summary": {
+                "title": "VOID: A New AI Model for Video Object and Interaction Deletion",
+                "article_url": "https://example.com/story",
+                "key_points": ["Point"],
+                "summary": "Summary",
+            },
+        },
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+
+    payload = build_news_item_upsert_input_from_content(content)
+
+    assert payload is not None
+    assert payload.article_title == "VOID: A New AI Model for Video Object and Interaction Deletion"
+    assert payload.summary_title == "VOID: A New AI Model for Video Object and Interaction Deletion"
+
+
+def test_should_enqueue_news_item_enrichment_only_for_new_non_legacy_rows() -> None:
+    fresh_item = NewsItem(status=NewsItemStatus.NEW.value, legacy_content_id=None)
+    ready_item = NewsItem(status=NewsItemStatus.READY.value, legacy_content_id=None)
+    legacy_item = NewsItem(status=NewsItemStatus.NEW.value, legacy_content_id=99)
+
+    assert should_enqueue_news_item_enrichment(news_item=fresh_item, was_created=True) is True
+    assert should_enqueue_news_item_enrichment(news_item=ready_item, was_created=True) is False
+    assert should_enqueue_news_item_enrichment(news_item=fresh_item, was_created=False) is False
+    assert should_enqueue_news_item_enrichment(news_item=legacy_item, was_created=True) is False
 
 
 def test_backfill_news_items_from_contents_is_idempotent(db_session) -> None:

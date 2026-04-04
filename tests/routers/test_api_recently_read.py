@@ -2,68 +2,49 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy.orm import Session
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ContentFavorites, ContentReadStatus
-from app.models.user import User
-
-
-def test_recently_read_scoped_to_user(client, db_session: Session, test_user: User) -> None:
+def test_recently_read_scoped_to_user(
+    client,
+    content_factory,
+    favorite_factory,
+    read_status_factory,
+    test_user,
+    user_factory,
+) -> None:
     """Ensure recently read list only includes the current user's reads."""
-    other_user = User(
+    other_user = user_factory(
         apple_id="other_apple_id",
         email="other@example.com",
         full_name="Other User",
-        is_active=True,
     )
-    db_session.add(other_user)
-    db_session.commit()
-    db_session.refresh(other_user)
-
-    content_one = Content(
+    content_one = content_factory(
         url="https://example.com/read-by-current",
         title="Read by Current User",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.COMPLETED.value,
-        content_metadata={},
     )
-    content_two = Content(
+    content_two = content_factory(
         url="https://example.com/read-by-other",
         title="Read by Other User",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.COMPLETED.value,
-        content_metadata={},
     )
-    db_session.add_all([content_one, content_two])
-    db_session.commit()
-    db_session.refresh(content_one)
-    db_session.refresh(content_two)
 
     timestamp = datetime.now(UTC)
-    db_session.add_all(
-        [
-            ContentReadStatus(
-                user_id=test_user.id,
-                content_id=content_one.id,
-                read_at=timestamp,
-                created_at=timestamp,
-            ),
-            ContentReadStatus(
-                user_id=other_user.id,
-                content_id=content_two.id,
-                read_at=timestamp,
-                created_at=timestamp,
-            ),
-            ContentFavorites(
-                user_id=other_user.id,
-                content_id=content_one.id,
-                favorited_at=timestamp,
-                created_at=timestamp,
-            ),
-        ]
+    read_status_factory(
+        user=test_user,
+        content=content_one,
+        read_at=timestamp,
+        created_at=timestamp,
     )
-    db_session.commit()
+    read_status_factory(
+        user=other_user,
+        content=content_two,
+        read_at=timestamp,
+        created_at=timestamp,
+    )
+    favorite_factory(
+        user=other_user,
+        content=content_one,
+        favorited_at=timestamp,
+        created_at=timestamp,
+    )
 
     response = client.get("/api/content/recently-read/list")
     assert response.status_code == 200

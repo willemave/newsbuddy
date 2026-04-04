@@ -2,11 +2,13 @@
 
 import asyncio
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from sqlalchemy.orm import Session
 
+from app.core.settings import get_settings
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import ChatMessage, ChatSession, Content
 from app.services.chat_agent import ChatRunResult, save_messages
@@ -132,6 +134,46 @@ def test_create_chat_session_content_not_found(client: TestClient) -> None:
     )
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+def test_create_chat_session_syncs_personal_markdown_library(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "personal_markdown_root", tmp_path / "personal_markdown")
+    monkeypatch.setattr(settings, "personal_markdown_enabled", True)
+
+    content = Content(
+        url="https://example.com/personal-library-article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Personal Library Article",
+        source="Example Source",
+        content_metadata={
+            "content": "Body text for the personal library.",
+            "summary": {
+                "full_markdown": "# Personal Library Article\n\nSaved summary",
+            },
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    response = client.post(
+        "/api/content/chat/sessions",
+        json={"content_id": content.id},
+    )
+
+    assert response.status_code == 200
+    user_root = settings.personal_markdown_root_dir / str(test_user.id)
+    summary_files = list(user_root.rglob(f"*__summary__c{content.id}.md"))
+    assert len(summary_files) == 1
+    assert "Personal Library Article" in summary_files[0].read_text(encoding="utf-8")
 
 
 def test_list_chat_sessions(
@@ -271,6 +313,75 @@ def test_start_council_chat_creates_hidden_child_sessions_and_hides_them_from_hi
     assert history_response.status_code == 200
     history_payload = history_response.json()
     assert [session["id"] for session in history_payload] == [parent.id]
+
+
+def test_start_council_chat_builds_child_context_from_linked_content(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    content_factory,
+    monkeypatch,
+) -> None:
+    """Council start should derive branch context from linked content when no snapshot exists."""
+    content = content_factory(
+        title="Council Context Article",
+        content_metadata={
+            "content": "A detailed article body used to build council context.",
+            "summary": {
+                "summary": "A short summary for council context.",
+                "title": "Council Context Summary",
+            },
+        },
+    )
+    parent = ChatSession(
+        user_id=test_user.id,
+        content_id=content.id,
+        title="Content-backed Council Parent",
+        session_type="knowledge_chat",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add(parent)
+    db_session.commit()
+    db_session.refresh(parent)
+    _seed_turn(db_session, parent.id, "What matters?", "Initial answer.")
+
+    async def _fake_run_chat_turn(db, session, user_prompt, source="chat"):
+        del source
+        assistant_text = f"{session.council_persona_name} branch on: {user_prompt}"
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content=user_prompt)]),
+            ModelResponse(parts=[TextPart(content=assistant_text)]),
+        ]
+        save_messages(db, session.id, messages, display_user_prompt=user_prompt)
+        return ChatRunResult(
+            output_text=assistant_text,
+            new_messages=messages,
+            all_messages=messages,
+            tool_calls=[],
+        )
+
+    monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
+
+    response = client.post(
+        f"/api/content/chat/sessions/{parent.id}/council/start",
+        json={"message": "Give me four different perspectives."},
+    )
+
+    assert response.status_code == 200
+
+    db_session.expire_all()
+    child_sessions = (
+        db_session.query(ChatSession)
+        .filter(ChatSession.parent_session_id == parent.id)
+        .order_by(ChatSession.id)
+        .all()
+    )
+    assert len(child_sessions) == 4
+    assert any(
+        "A detailed article body used to build council context." in (child.context_snapshot or "")
+        for child in child_sessions
+    )
 
 
 def test_council_branch_selection_switches_visible_transcript_and_send_targets_active_child(

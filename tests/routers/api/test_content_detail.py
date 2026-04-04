@@ -139,9 +139,13 @@ def test_content_narration_returns_audio_bytes(
     assert "Here is the full summary for" in str(captured["text"])
 
 
-def test_content_body_requires_visible_content(client, db_session, sample_article_long):
+def test_content_body_requires_visible_content(
+    client,
+    create_sample_content,
+    sample_article_long,
+):
     """Canonical body endpoint should reject content outside the user's inbox."""
-    content = create_sample_content_without_visibility(db_session, sample_article_long)
+    content = create_sample_content(sample_article_long, visible=False)
 
     response = client.get(f"/api/content/{content.id}/body")
 
@@ -208,23 +212,3 @@ def test_content_detail_falls_back_to_visible_news_item_when_legacy_content_is_m
     assert payload["display_title"] == "Visible news summary"
     assert payload["summary"] == "Visible short-form summary"
     assert payload["metadata"]["article"]["title"] == "Visible news story"
-
-
-def create_sample_content_without_visibility(db_session, fixture_data: dict):
-    """Create sample content without an inbox visibility row."""
-    content = Content(
-        id=fixture_data.get("id"),
-        content_type=fixture_data["content_type"],
-        url=fixture_data["url"],
-        title=fixture_data["title"],
-        source=fixture_data["source"],
-        status=fixture_data["status"],
-        platform=fixture_data.get("platform"),
-        classification=fixture_data.get("classification"),
-        publication_date=None,
-        content_metadata=fixture_data.get("content_metadata", {}),
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    return content

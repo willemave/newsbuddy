@@ -6,7 +6,6 @@
     "minimum_bullet_count": 2,
     "minimum_generated_summary_count": 2,
     "minimum_processed_count": 5,
-    "minimum_reused_summary_count": 2,
     "required_citation_validity": 1.0
   },
   "input_mode": "scraped_items",

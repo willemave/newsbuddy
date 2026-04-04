@@ -1,56 +1,9 @@
 """Tests for favorites service."""
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models.schema import ChatSession, Content, User
 from app.services import favorites
-
-
-@pytest.fixture
-def test_user(db_session: Session) -> User:
-    """Create a test user."""
-    user = User(
-        email="test@example.com",
-        apple_id="test_apple_id",
-        is_active=True,
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    return user
-
-
-@pytest.fixture
-def test_content(db_session: Session) -> Content:
-    """Create test content."""
-    content = Content(
-        content_type="article",
-        url="https://example.com/article",
-        title="Test Article",
-        source="example.com",
-        status="completed",
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    return content
-
-
-@pytest.fixture
-def test_content_2(db_session: Session) -> Content:
-    """Create second test content."""
-    content = Content(
-        content_type="article",
-        url="https://example.com/article2",
-        title="Test Article 2",
-        source="example.com",
-        status="completed",
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    return content
 
 
 class TestToggleFavorite:
@@ -126,19 +79,19 @@ class TestToggleFavorite:
         assert is_favorited is False
         assert favorite is None
         assert (
-            db_session.query(ChatSession)
-            .filter(ChatSession.id == session.id)
-            .one_or_none()
+            db_session.query(ChatSession).filter(ChatSession.id == session.id).one_or_none()
             is not None
         )
 
-    def test_toggle_favorite_user_isolation(self, db_session: Session, test_content: Content):
+    def test_toggle_favorite_user_isolation(
+        self,
+        db_session: Session,
+        test_content: Content,
+        user_factory,
+    ):
         """Test that favorites are isolated per user."""
-        # Arrange - create two users
-        user1 = User(email="user1@example.com", apple_id="apple_id_1", is_active=True)
-        user2 = User(email="user2@example.com", apple_id="apple_id_2", is_active=True)
-        db_session.add_all([user1, user2])
-        db_session.commit()
+        user1 = user_factory(email="user1@example.com", apple_id="apple_id_1")
+        user2 = user_factory(email="user2@example.com", apple_id="apple_id_2")
 
         # Act - user1 favorites content
         favorites.toggle_favorite(db_session, test_content.id, user1.id)
@@ -214,13 +167,15 @@ class TestRemoveFavorite:
         # Assert
         assert removed is False
 
-    def test_remove_favorite_user_isolation(self, db_session: Session, test_content: Content):
+    def test_remove_favorite_user_isolation(
+        self,
+        db_session: Session,
+        test_content: Content,
+        user_factory,
+    ):
         """Test that removing favorite only affects specific user."""
-        # Arrange - create two users with same favorite
-        user1 = User(email="user1@example.com", apple_id="apple_id_1", is_active=True)
-        user2 = User(email="user2@example.com", apple_id="apple_id_2", is_active=True)
-        db_session.add_all([user1, user2])
-        db_session.commit()
+        user1 = user_factory(email="user1@example.com", apple_id="apple_id_1")
+        user2 = user_factory(email="user2@example.com", apple_id="apple_id_2")
 
         favorites.add_favorite(db_session, test_content.id, user1.id)
         favorites.add_favorite(db_session, test_content.id, user2.id)
@@ -261,14 +216,15 @@ class TestGetFavoriteContentIds:
         assert test_content_2.id in content_ids
 
     def test_get_favorite_content_ids_user_isolation(
-        self, db_session: Session, test_content: Content, test_content_2: Content
+        self,
+        db_session: Session,
+        test_content: Content,
+        test_content_2: Content,
+        user_factory,
     ):
         """Test that favorite IDs are isolated per user."""
-        # Arrange - create two users with different favorites
-        user1 = User(email="user1@example.com", apple_id="apple_id_1", is_active=True)
-        user2 = User(email="user2@example.com", apple_id="apple_id_2", is_active=True)
-        db_session.add_all([user1, user2])
-        db_session.commit()
+        user1 = user_factory(email="user1@example.com", apple_id="apple_id_1")
+        user2 = user_factory(email="user2@example.com", apple_id="apple_id_2")
 
         favorites.add_favorite(db_session, test_content.id, user1.id)
         favorites.add_favorite(db_session, test_content_2.id, user2.id)
@@ -339,14 +295,15 @@ class TestClearFavorites:
         assert count == 0
 
     def test_clear_favorites_user_isolation(
-        self, db_session: Session, test_content: Content, test_content_2: Content
+        self,
+        db_session: Session,
+        test_content: Content,
+        test_content_2: Content,
+        user_factory,
     ):
         """Test that clearing favorites only affects specific user."""
-        # Arrange - create two users with favorites
-        user1 = User(email="user1@example.com", apple_id="apple_id_1", is_active=True)
-        user2 = User(email="user2@example.com", apple_id="apple_id_2", is_active=True)
-        db_session.add_all([user1, user2])
-        db_session.commit()
+        user1 = user_factory(email="user1@example.com", apple_id="apple_id_1")
+        user2 = user_factory(email="user2@example.com", apple_id="apple_id_2")
 
         favorites.add_favorite(db_session, test_content.id, user1.id)
         favorites.add_favorite(db_session, test_content_2.id, user2.id)

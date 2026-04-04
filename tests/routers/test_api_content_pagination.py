@@ -360,6 +360,31 @@ class TestSearchEndpointPagination:
         assert "next_cursor" in data["meta"]
         assert "has_more" in data["meta"]
 
+    def test_search_skips_invalid_rows_when_domain_content_build_fails(
+        self,
+        client,
+        sample_contents,
+        monkeypatch,
+    ):
+        """Search should keep returning valid rows when one result is malformed."""
+        from app.application.queries import search_content_cards
+
+        broken_id = sample_contents[0].id
+        original_build_domain_content = search_content_cards.build_domain_content
+
+        def _build_domain_content(content):
+            if content.id == broken_id:
+                raise ValueError("invalid content metadata")
+            return original_build_domain_content(content)
+
+        monkeypatch.setattr(search_content_cards, "build_domain_content", _build_domain_content)
+
+        response = client.get("/api/content/search", params={"q": "Test", "limit": 50})
+        assert response.status_code == 200
+
+        ids = {item["id"] for item in response.json()["contents"]}
+        assert broken_id not in ids
+
 
 class TestFavoritesEndpointPagination:
     """Test pagination on GET /api/content/favorites/list endpoint."""

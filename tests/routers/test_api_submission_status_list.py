@@ -1,26 +1,21 @@
 """Tests for user submission status list endpoint."""
 
 from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
-from app.models.user import User
 
 
 def test_submission_status_list_filters_by_user_and_status(
     client,
-    db_session,
+    content_factory,
     test_user,
+    user_factory,
 ) -> None:
-    other_user = User(
+    other_user = user_factory(
         apple_id="other_apple_id_999",
         email="other@example.com",
         full_name="Other User",
-        is_active=True,
     )
-    db_session.add(other_user)
-    db_session.commit()
-    db_session.refresh(other_user)
 
-    processing = Content(
+    processing = content_factory(
         url="https://example.com/processing",
         source_url="https://example.com/processing",
         content_type=ContentType.UNKNOWN.value,
@@ -31,7 +26,7 @@ def test_submission_status_list_filters_by_user_and_status(
             "submitted_via": "share_sheet",
         },
     )
-    failed = Content(
+    failed = content_factory(
         url="https://example.com/failed",
         source_url="https://example.com/failed",
         content_type=ContentType.UNKNOWN.value,
@@ -43,7 +38,7 @@ def test_submission_status_list_filters_by_user_and_status(
             "submitted_via": "share_sheet",
         },
     )
-    skipped = Content(
+    skipped = content_factory(
         url="https://example.com/skipped",
         source_url="https://example.com/skipped",
         content_type=ContentType.UNKNOWN.value,
@@ -54,7 +49,7 @@ def test_submission_status_list_filters_by_user_and_status(
             "submitted_via": "share_sheet",
         },
     )
-    completed = Content(
+    completed = content_factory(
         url="https://example.com/completed",
         source_url="https://example.com/completed",
         content_type=ContentType.ARTICLE.value,
@@ -65,7 +60,7 @@ def test_submission_status_list_filters_by_user_and_status(
             "submitted_via": "share_sheet",
         },
     )
-    other_user_item = Content(
+    other_user_item = content_factory(
         url="https://example.com/other-user",
         source_url="https://example.com/other-user",
         content_type=ContentType.UNKNOWN.value,
@@ -76,9 +71,6 @@ def test_submission_status_list_filters_by_user_and_status(
             "submitted_via": "share_sheet",
         },
     )
-
-    db_session.add_all([processing, failed, skipped, completed, other_user_item])
-    db_session.commit()
 
     response = client.get("/api/content/submissions/list")
     assert response.status_code == 200

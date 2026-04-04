@@ -3,40 +3,27 @@
 from __future__ import annotations
 
 from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ContentDiscussion, ContentStatusEntry
+from app.models.schema import ContentDiscussion
 
 
-def _create_news_content(db_session, *, metadata: dict, user_id: int | None = None) -> Content:
-    content = Content(
+def test_get_content_discussion_returns_not_ready_when_missing(
+    client,
+    content_factory,
+    status_entry_factory,
+    test_user,
+) -> None:
+    content = content_factory(
         content_type=ContentType.NEWS.value,
         url="https://example.com/story",
         title="Example",
         source="example.com",
         status=ContentStatus.COMPLETED.value,
-        content_metadata=metadata,
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    if user_id is not None:
-        db_session.add(ContentStatusEntry(user_id=user_id, content_id=content.id, status="inbox"))
-        db_session.commit()
-    return content
-
-
-def test_get_content_discussion_returns_not_ready_when_missing(
-    client,
-    db_session,
-    test_user,
-) -> None:
-    content = _create_news_content(
-        db_session,
-        metadata={
+        content_metadata={
             "platform": "hackernews",
             "discussion_url": "https://news.ycombinator.com/item?id=123",
         },
-        user_id=test_user.id,
     )
+    status_entry_factory(user=test_user, content=content, status="inbox")
 
     response = client.get(f"/api/content/{content.id}/discussion")
 
@@ -49,17 +36,23 @@ def test_get_content_discussion_returns_not_ready_when_missing(
 
 def test_get_content_discussion_returns_comments_payload(
     client,
+    content_factory,
     db_session,
+    status_entry_factory,
     test_user,
 ) -> None:
-    content = _create_news_content(
-        db_session,
-        metadata={
+    content = content_factory(
+        content_type=ContentType.NEWS.value,
+        url="https://example.com/story",
+        title="Example",
+        source="example.com",
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={
             "platform": "hackernews",
             "discussion_url": "https://news.ycombinator.com/item?id=123",
         },
-        user_id=test_user.id,
     )
+    status_entry_factory(user=test_user, content=content, status="inbox")
     db_session.add(
         ContentDiscussion(
             content_id=content.id,
@@ -97,17 +90,23 @@ def test_get_content_discussion_returns_comments_payload(
 
 def test_get_content_discussion_returns_discussion_list_payload(
     client,
+    content_factory,
     db_session,
+    status_entry_factory,
     test_user,
 ) -> None:
-    content = _create_news_content(
-        db_session,
-        metadata={
+    content = content_factory(
+        content_type=ContentType.NEWS.value,
+        url="https://example.com/story",
+        title="Example",
+        source="example.com",
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={
             "platform": "techmeme",
             "discussion_url": "https://www.techmeme.com/260217/p39#a260217p39",
         },
-        user_id=test_user.id,
     )
+    status_entry_factory(user=test_user, content=content, status="inbox")
     db_session.add(
         ContentDiscussion(
             content_id=content.id,

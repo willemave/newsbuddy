@@ -1,47 +1,49 @@
-"""Test configuration and fixtures."""
+"""Shared test configuration and factories."""
+
+from __future__ import annotations
+
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
+from itertools import count
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.security import create_access_token
 from app.main import app
-from app.models.schema import Base, Content, ContentStatusEntry
+from app.models.schema import (
+    Base,
+    ChatSession,
+    Content,
+    ContentFavorites,
+    ContentReadStatus,
+    ContentStatusEntry,
+    ProcessingTask,
+    UserIntegrationConnection,
+)
 from app.models.user import User
 
 
-@pytest.fixture
-def db():
-    """Create test database session (for authentication tests)."""
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    session = TestSessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
-
-
-@pytest.fixture
-def test_db():
-    """Create a test database."""
-    engine = create_engine(
+def _create_testing_engine():
+    """Create an in-memory SQLite engine shared across sessions."""
+    return create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+
+@pytest.fixture
+def test_db():
+    """Create a test database engine."""
+    engine = _create_testing_engine()
     Base.metadata.create_all(bind=engine)
     try:
         yield engine
@@ -52,7 +54,7 @@ def test_db():
 
 @pytest.fixture
 def db_session(test_db):
-    """Create a test database session."""
+    """Create a writable test database session."""
     TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db)
     session = TestSessionLocal()
     try:
@@ -62,43 +64,356 @@ def db_session(test_db):
 
 
 @pytest.fixture
-def test_user(db_session):
-    """Create a test user for authentication."""
-    user = User(
-        apple_id="test_apple_id_12345",
-        email="test@example.com",
-        full_name="Test User",
-        is_active=True
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    return user
+def db(test_db):
+    """Backward-compatible DB session fixture used by auth-heavy tests."""
+    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db)
+    session = TestSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
 
 
 @pytest.fixture
-def client(db_session, test_user):
-    """Create a test client with database and auth overrides."""
+def user_factory(db_session: Session):
+    """Create persisted users with sensible defaults."""
+    sequence = count(1)
+
+    def _create(**overrides: Any) -> User:
+        index = next(sequence)
+        user = User(
+            apple_id=f"test.apple.{index}",
+            email=f"user{index}@example.com",
+            full_name=f"Test User {index}",
+            is_active=True,
+        )
+        for key, value in overrides.items():
+            setattr(user, key, value)
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+        return user
+
+    return _create
+
+
+@pytest.fixture
+def test_user(user_factory):
+    """Create the default authenticated test user."""
+    return user_factory(
+        apple_id="test_apple_id_12345",
+        email="test@example.com",
+        full_name="Test User",
+    )
+
+
+def _default_content_metadata(*, title: str, content_type: str) -> dict[str, Any]:
+    """Build list/detail-friendly default metadata for common content types."""
+    del title, content_type
+    return {}
+
+
+@pytest.fixture
+def content_factory(db_session: Session):
+    """Create persisted content rows with list/detail-friendly defaults."""
+    sequence = count(1)
+
+    def _create(**overrides: Any) -> Content:
+        index = next(sequence)
+        content_type = overrides.pop("content_type", "article")
+        title = overrides.pop("title", f"Test Content {index}")
+        content = Content(
+            content_type=content_type,
+            url=overrides.pop("url", f"https://example.com/content/{index}"),
+            source_url=overrides.pop("source_url", None),
+            title=title,
+            source=overrides.pop("source", "example.com"),
+            status=overrides.pop("status", "completed"),
+            platform=overrides.pop("platform", None),
+            classification=overrides.pop("classification", None),
+            publication_date=overrides.pop("publication_date", None),
+            content_metadata=overrides.pop(
+                "content_metadata",
+                _default_content_metadata(title=title, content_type=content_type),
+            ),
+        )
+        for key, value in overrides.items():
+            setattr(content, key, value)
+        db_session.add(content)
+        db_session.commit()
+        db_session.refresh(content)
+        return content
+
+    return _create
+
+
+@pytest.fixture
+def test_content(content_factory):
+    """Create a default article content row."""
+    return content_factory(
+        title="Test Article",
+        url="https://example.com/article",
+    )
+
+
+@pytest.fixture
+def test_content_2(content_factory):
+    """Create a second default article content row."""
+    return content_factory(
+        title="Test Article 2",
+        url="https://example.com/article2",
+    )
+
+
+@pytest.fixture
+def test_content_3(content_factory):
+    """Create a third default article content row."""
+    return content_factory(
+        title="Test Article 3",
+        url="https://example.com/article3",
+    )
+
+
+@pytest.fixture
+def status_entry_factory(db_session: Session):
+    """Create per-user content status rows."""
+
+    def _create(
+        *,
+        user: User | None = None,
+        user_id: int | None = None,
+        content: Content | None = None,
+        content_id: int | None = None,
+        status: str = "inbox",
+        **overrides: Any,
+    ) -> ContentStatusEntry:
+        entry = ContentStatusEntry(
+            user_id=user_id or (user.id if user is not None else None),
+            content_id=content_id or (content.id if content is not None else None),
+            status=status,
+            **overrides,
+        )
+        db_session.add(entry)
+        db_session.commit()
+        db_session.refresh(entry)
+        return entry
+
+    return _create
+
+
+@pytest.fixture
+def favorite_factory(db_session: Session):
+    """Create favorite rows for a user/content pair."""
+
+    def _create(
+        *,
+        user: User | None = None,
+        user_id: int | None = None,
+        content: Content | None = None,
+        content_id: int | None = None,
+        **overrides: Any,
+    ) -> ContentFavorites:
+        favorite = ContentFavorites(
+            user_id=user_id or (user.id if user is not None else None),
+            content_id=content_id or (content.id if content is not None else None),
+            **overrides,
+        )
+        db_session.add(favorite)
+        db_session.commit()
+        db_session.refresh(favorite)
+        return favorite
+
+    return _create
+
+
+@pytest.fixture
+def read_status_factory(db_session: Session):
+    """Create read-status rows for a user/content pair."""
+
+    def _create(
+        *,
+        user: User | None = None,
+        user_id: int | None = None,
+        content: Content | None = None,
+        content_id: int | None = None,
+        **overrides: Any,
+    ) -> ContentReadStatus:
+        entry = ContentReadStatus(
+            user_id=user_id or (user.id if user is not None else None),
+            content_id=content_id or (content.id if content is not None else None),
+            **overrides,
+        )
+        db_session.add(entry)
+        db_session.commit()
+        db_session.refresh(entry)
+        return entry
+
+    return _create
+
+
+@pytest.fixture
+def chat_session_factory(db_session: Session):
+    """Create chat sessions with optional content linkage."""
+    sequence = count(1)
+
+    def _create(
+        *,
+        user: User | None = None,
+        user_id: int | None = None,
+        content: Content | None = None,
+        content_id: int | None = None,
+        **overrides: Any,
+    ) -> ChatSession:
+        index = next(sequence)
+        session = ChatSession(
+            user_id=user_id or (user.id if user is not None else None),
+            content_id=content_id or (content.id if content is not None else None),
+            title=overrides.pop("title", f"Chat Session {index}"),
+            session_type=overrides.pop("session_type", "knowledge_chat"),
+            llm_model=overrides.pop("llm_model", "openai:gpt-5.4"),
+            llm_provider=overrides.pop("llm_provider", "openai"),
+            topic=overrides.pop("topic", None),
+            context_snapshot=overrides.pop("context_snapshot", None),
+        )
+        for key, value in overrides.items():
+            setattr(session, key, value)
+        db_session.add(session)
+        db_session.commit()
+        db_session.refresh(session)
+        return session
+
+    return _create
+
+
+@pytest.fixture
+def processing_task_factory(db_session: Session):
+    """Create queued processing tasks."""
+
+    def _create(
+        *,
+        content: Content | None = None,
+        content_id: int | None = None,
+        task_type: str = "analyze_url",
+        payload: dict[str, Any] | None = None,
+        status: str = "pending",
+        queue_name: str = "content",
+        **overrides: Any,
+    ) -> ProcessingTask:
+        task = ProcessingTask(
+            task_type=task_type,
+            content_id=content_id or (content.id if content is not None else None),
+            payload=payload or {},
+            status=status,
+            queue_name=queue_name,
+            **overrides,
+        )
+        db_session.add(task)
+        db_session.commit()
+        db_session.refresh(task)
+        return task
+
+    return _create
+
+
+@pytest.fixture
+def integration_connection_factory(db_session: Session):
+    """Create external provider integration rows."""
+    sequence = count(1)
+
+    def _create(
+        *,
+        user: User | None = None,
+        user_id: int | None = None,
+        provider: str = "x",
+        **overrides: Any,
+    ) -> UserIntegrationConnection:
+        index = next(sequence)
+        connection = UserIntegrationConnection(
+            user_id=user_id or (user.id if user is not None else None),
+            provider=provider,
+            provider_user_id=overrides.pop("provider_user_id", f"{provider}-user-{index}"),
+            provider_username=overrides.pop("provider_username", f"{provider}_user_{index}"),
+            scopes=overrides.pop("scopes", []),
+            connection_metadata=overrides.pop("connection_metadata", {}),
+            is_active=overrides.pop("is_active", True),
+        )
+        for key, value in overrides.items():
+            setattr(connection, key, value)
+        db_session.add(connection)
+        db_session.commit()
+        db_session.refresh(connection)
+        return connection
+
+    return _create
+
+
+@pytest.fixture
+def auth_headers_factory():
+    """Create Authorization headers for a user."""
+
+    def _create(user: User) -> dict[str, str]:
+        return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+
+    return _create
+
+
+@pytest.fixture
+def stub_valid_feed_url(monkeypatch):
+    """Accept test feed URLs without making network calls."""
+
+    monkeypatch.setattr(
+        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        lambda url: {"feed_url": url.strip()},
+    )
+
+
+@pytest.fixture
+def client_factory(db_session: Session, user_factory):
+    """Create TestClient instances with shared DB overrides and optional auth."""
     from app.core.db import get_db_session, get_readonly_db_session
     from app.core.deps import get_current_user
 
-    def override_get_db():
+    def override_get_db() -> Iterator[Session]:
         try:
             yield db_session
         finally:
             pass
 
-    def override_get_current_user():
-        return test_user
+    @contextmanager
+    def _create(
+        *,
+        user: User | None = None,
+        authenticate: bool = True,
+        extra_overrides: dict[Any, Any] | None = None,
+    ) -> Iterator[TestClient]:
+        app.dependency_overrides[get_db_session] = override_get_db
+        app.dependency_overrides[get_readonly_db_session] = override_get_db
 
-    app.dependency_overrides[get_db_session] = override_get_db
-    app.dependency_overrides[get_readonly_db_session] = override_get_db
-    app.dependency_overrides[get_current_user] = override_get_current_user
+        if authenticate:
+            resolved_user = user or user_factory()
 
-    with TestClient(app) as test_client:
+            def override_get_current_user() -> User:
+                return resolved_user
+
+            app.dependency_overrides[get_current_user] = override_get_current_user
+
+        if extra_overrides:
+            app.dependency_overrides.update(extra_overrides)
+
+        try:
+            with TestClient(app) as test_client:
+                yield test_client
+        finally:
+            app.dependency_overrides.clear()
+
+    return _create
+
+
+@pytest.fixture
+def client(client_factory, test_user):
+    """Create the default authenticated client."""
+    with client_factory(user=test_user) as test_client:
         yield test_client
-
-    app.dependency_overrides.clear()
 
 
 # Content fixtures
@@ -212,25 +527,25 @@ def create_content_from_fixture(fixture_data: dict[str, Any]) -> Content:
 
 
 @pytest.fixture
-def create_sample_content(db_session, test_user):
+def create_sample_content(db_session, status_entry_factory, test_user):
     """Factory fixture to create content from samples in the database.
 
     Usage:
         content = create_sample_content(sample_article_long)
     """
-    def _create(fixture_data: dict[str, Any]) -> Content:
+
+    def _create(
+        fixture_data: dict[str, Any],
+        *,
+        visible: bool = True,
+        user: User | None = None,
+    ) -> Content:
         content = create_content_from_fixture(fixture_data)
         db_session.add(content)
         db_session.commit()
         db_session.refresh(content)
-        db_session.add(
-            ContentStatusEntry(
-                user_id=test_user.id,
-                content_id=content.id,
-                status="inbox",
-            )
-        )
-        db_session.commit()
+        if visible:
+            status_entry_factory(user=user or test_user, content=content, status="inbox")
         return content
 
     return _create

@@ -1,7 +1,14 @@
+import asyncio
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
+from pydantic_ai.messages import ModelResponse, TextPart
+
+from app.core.settings import get_settings
 from app.models.metadata import ContentType
 from app.models.schema import ChatSession, Content
+from app.services import chat_agent
 from app.services.chat_agent import (
     ChatDeps,
     _build_chat_deps,
@@ -220,3 +227,139 @@ def test_dump_messages_json_restores_user_visible_prompt(db_session) -> None:
 
     assert payload[0]["parts"][0]["content"] == "Dig deeper into these digest bullets."
     assert "Session Context" not in payload[0]["parts"][0]["content"]
+
+
+def test_build_chat_deps_prepares_personal_library_runtime(
+    db_session,
+    test_user,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "personal_markdown_root", tmp_path / "personal_markdown")
+    monkeypatch.setattr(settings, "personal_markdown_enabled", True)
+    monkeypatch.setattr(settings, "chat_sandbox_provider", "local")
+
+    content = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://example.com/article",
+        title="Library Article",
+        source="Example Source",
+        content_metadata={
+            "content": "Saved content body",
+            "summary": {"full_markdown": "# Library Article\n\nSaved summary"},
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    session = ChatSession(
+        user_id=test_user.id,
+        content_id=content.id,
+        title="Library Chat",
+        session_type="knowledge_chat",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.4",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    deps = _build_chat_deps(db_session, session, include_full_text=True)
+
+    assert deps.personal_library_error is None
+    assert deps.sandbox_session is not None
+    files = deps.sandbox_session.list_files()
+    assert "library-article" in files
+    deps.sandbox_session.close()
+
+
+def test_build_chat_deps_skips_personal_library_sync_when_sandbox_disabled(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "personal_markdown_enabled", True)
+    monkeypatch.setattr(settings, "chat_sandbox_provider", "disabled")
+
+    sync_calls: list[int] = []
+
+    def _unexpected_sync(_db, *, user_id: int):  # noqa: ANN001
+        sync_calls.append(user_id)
+        raise AssertionError("personal markdown sync should not run when sandbox is disabled")
+
+    monkeypatch.setattr(chat_agent, "sync_personal_markdown_library_for_user", _unexpected_sync)
+
+    session = ChatSession(
+        user_id=test_user.id,
+        title="No Sandbox Chat",
+        session_type="knowledge_chat",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.4",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    deps = _build_chat_deps(db_session, session, include_full_text=True)
+
+    assert deps.sandbox_session is None
+    assert deps.personal_library_error is None
+    assert sync_calls == []
+
+
+def test_run_chat_turn_builds_deps_with_library_tools_enabled(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Council-capable Chat",
+        session_type="knowledge_chat",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.4",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    captured_flags: list[bool] = []
+
+    def _fake_build_chat_deps(
+        db,
+        current_session,
+        include_full_text: bool = False,
+        *,
+        include_library_tools: bool = True,
+    ) -> ChatDeps:
+        del db, include_full_text
+        captured_flags.append(include_library_tools)
+        return ChatDeps(
+            session=current_session,
+            content=None,
+            article_context=None,
+        )
+
+    async def _fake_run_in_threadpool(*_args, **_kwargs):
+        return SimpleNamespace(
+            output="Mocked assistant reply",
+            all_messages=[],
+            tool_calls=[],
+            new_messages=lambda: [
+                ModelResponse(parts=[TextPart(content="Mocked assistant reply")])
+            ],
+        )
+
+    monkeypatch.setattr(chat_agent, "_build_chat_deps", _fake_build_chat_deps)
+    monkeypatch.setattr(chat_agent, "load_message_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(chat_agent, "resolve_effective_api_key", lambda **_kwargs: None)
+    monkeypatch.setattr(chat_agent, "_log_chat_usage", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(chat_agent, "run_in_threadpool", _fake_run_in_threadpool)
+
+    result = asyncio.run(chat_agent.run_chat_turn(db_session, session, "Use the personal library."))
+
+    assert result.output_text == "Mocked assistant reply"
+    assert captured_flags == [True]

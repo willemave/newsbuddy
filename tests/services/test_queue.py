@@ -322,6 +322,7 @@ class TestTaskEnums:
         assert TaskType.DISCOVER_FEEDS.value == "discover_feeds"
         assert TaskType.DIG_DEEPER.value == "dig_deeper"
         assert TaskType.GENERATE_NEWS_DIGEST.value == "generate_news_digest"
+        assert TaskType.SYNC_INTEGRATION.value == "sync_integration"
 
     def test_task_status_values(self):
         """Test TaskStatus enum values."""
@@ -330,9 +331,8 @@ class TestTaskEnums:
         assert TaskStatus.COMPLETED.value == "completed"
         assert TaskStatus.FAILED.value == "failed"
 
-    def test_enum_counts(self):
-        """Test that enums have expected number of values."""
-        assert len(list(TaskType)) == 15
+    def test_task_status_count(self):
+        """TaskStatus should stay intentionally small and stable."""
         assert len(list(TaskStatus)) == 4
 
 

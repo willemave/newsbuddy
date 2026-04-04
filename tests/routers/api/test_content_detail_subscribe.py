@@ -1,37 +1,20 @@
 """Tests for can_subscribe behavior in content detail response."""
 
+import pytest
+
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ContentStatusEntry
 from app.services.scraper_configs import CreateUserScraperConfig, create_user_scraper_config
 
-
-def _create_content(
-    db_session,
-    *,
-    content_type: str,
-    source: str,
-    metadata: dict,
-    user_id: int | None = None,
-) -> Content:
-    content = Content(
-        url="https://example.com/article",
-        content_type=content_type,
-        title="Example",
-        source=source,
-        status=ContentStatus.COMPLETED.value,
-        content_metadata=metadata,
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-    if user_id is not None:
-        db_session.add(ContentStatusEntry(user_id=user_id, content_id=content.id, status="inbox"))
-        db_session.commit()
-    return content
+pytestmark = pytest.mark.usefixtures("stub_valid_feed_url")
 
 
-def test_can_subscribe_self_submission_true_when_missing_config(client, db_session, test_user):
+def test_can_subscribe_self_submission_true_when_missing_config(
+    client,
+    content_factory,
+    status_entry_factory,
+    test_user,
+):
     metadata = {
         "source": SELF_SUBMISSION_SOURCE,
         "content_type": "html",
@@ -43,13 +26,15 @@ def test_can_subscribe_self_submission_true_when_missing_config(client, db_sessi
             "format": "rss",
         },
     }
-    content = _create_content(
-        db_session,
+    content = content_factory(
         content_type=ContentType.ARTICLE.value,
+        url="https://example.com/article",
+        title="Example",
         source=SELF_SUBMISSION_SOURCE,
-        metadata=metadata,
-        user_id=test_user.id,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata=metadata,
     )
+    status_entry_factory(user=test_user, content=content, status="inbox")
 
     response = client.get(f"/api/content/{content.id}")
     assert response.status_code == 200
@@ -57,7 +42,13 @@ def test_can_subscribe_self_submission_true_when_missing_config(client, db_sessi
     assert data["can_subscribe"] is True
 
 
-def test_can_subscribe_false_when_already_subscribed(client, db_session, test_user):
+def test_can_subscribe_false_when_already_subscribed(
+    client,
+    db_session,
+    content_factory,
+    status_entry_factory,
+    test_user,
+):
     payload = CreateUserScraperConfig(
         scraper_type="atom",
         display_name="Example Feed",
@@ -77,13 +68,15 @@ def test_can_subscribe_false_when_already_subscribed(client, db_session, test_us
             "format": "rss",
         },
     }
-    content = _create_content(
-        db_session,
+    content = content_factory(
         content_type=ContentType.ARTICLE.value,
+        url="https://example.com/article",
+        title="Example",
         source=SELF_SUBMISSION_SOURCE,
-        metadata=metadata,
-        user_id=test_user.id,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata=metadata,
     )
+    status_entry_factory(user=test_user, content=content, status="inbox")
 
     response = client.get(f"/api/content/{content.id}")
     assert response.status_code == 200
@@ -91,7 +84,12 @@ def test_can_subscribe_false_when_already_subscribed(client, db_session, test_us
     assert data["can_subscribe"] is False
 
 
-def test_can_subscribe_false_for_non_news_non_self_submission(client, db_session, test_user):
+def test_can_subscribe_false_for_non_news_non_self_submission(
+    client,
+    content_factory,
+    status_entry_factory,
+    test_user,
+):
     metadata = {
         "source": "web",
         "content_type": "html",
@@ -103,13 +101,15 @@ def test_can_subscribe_false_for_non_news_non_self_submission(client, db_session
             "format": "rss",
         },
     }
-    content = _create_content(
-        db_session,
+    content = content_factory(
         content_type=ContentType.ARTICLE.value,
+        url="https://example.com/article",
+        title="Example",
         source="web",
-        metadata=metadata,
-        user_id=test_user.id,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata=metadata,
     )
+    status_entry_factory(user=test_user, content=content, status="inbox")
 
     response = client.get(f"/api/content/{content.id}")
     assert response.status_code == 200
@@ -117,7 +117,12 @@ def test_can_subscribe_false_for_non_news_non_self_submission(client, db_session
     assert data["can_subscribe"] is False
 
 
-def test_can_subscribe_true_for_news_content(client, db_session, test_user):
+def test_can_subscribe_true_for_news_content(
+    client,
+    content_factory,
+    status_entry_factory,
+    test_user,
+):
     metadata = {
         "source": "hackernews",
         "platform": "hackernews",
@@ -133,13 +138,15 @@ def test_can_subscribe_true_for_news_content(client, db_session, test_user):
             "format": "rss",
         },
     }
-    content = _create_content(
-        db_session,
+    content = content_factory(
         content_type=ContentType.NEWS.value,
+        url="https://example.com/article",
+        title="Example",
         source="hackernews",
-        metadata=metadata,
-        user_id=test_user.id,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata=metadata,
     )
+    status_entry_factory(user=test_user, content=content, status="inbox")
 
     response = client.get(f"/api/content/{content.id}")
     assert response.status_code == 200

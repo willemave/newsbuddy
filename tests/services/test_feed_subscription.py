@@ -1,11 +1,15 @@
 """Tests for detected feed subscription helper."""
 
+import pytest
+
 from app.constants import DEFAULT_NEW_FEED_LIMIT
 from app.models.schema import UserScraperConfig
 from app.services.feed_subscription import (
     subscribe_to_detected_feed,
     subscribe_to_detected_feed_result,
 )
+
+pytestmark = pytest.mark.usefixtures("stub_valid_feed_url")
 
 
 def test_subscribe_to_detected_feed_creates_config(db_session, test_user):

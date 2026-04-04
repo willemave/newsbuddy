@@ -310,3 +310,107 @@ def test_list_orders_news_by_publication_date_before_created_at(
 
     ids = [item["id"] for item in response.json()["contents"]]
     assert ids[:2] == [newer_published.id, older_published.id]
+
+
+def test_list_uses_fallback_summary_when_domain_content_build_fails(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    fallback_article = Content(
+        url="https://example.com/fallback-article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Fallback Article",
+        content_metadata={
+            "summary": {
+                "overview": "Fallback overview remains visible even when normalization fails.",
+            },
+            "image_generated_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    db_session.add(fallback_article)
+    db_session.commit()
+    db_session.refresh(fallback_article)
+
+    _add_inbox_status(db_session, test_user.id, fallback_article.id)
+    db_session.commit()
+
+    def _raise_build_error(_content):
+        raise ValueError("invalid content metadata")
+
+    monkeypatch.setattr(
+        "app.application.queries.list_content_cards.build_domain_content",
+        _raise_build_error,
+    )
+
+    response = client.get("/api/content/", params={"content_type": "article"})
+    assert response.status_code == 200
+
+    returned_item = next(
+        item for item in response.json()["contents"] if item["id"] == fallback_article.id
+    )
+    assert returned_item["title"] == "Fallback Article"
+    assert returned_item["short_summary"] == (
+        "Fallback overview remains visible even when normalization fails."
+    )
+    assert returned_item["image_url"] == f"/static/images/content/{fallback_article.id}.png"
+    assert returned_item["thumbnail_url"] == (
+        f"/static/images/thumbnails/{fallback_article.id}.png"
+    )
+
+
+def test_search_skips_invalid_content_rows_when_domain_content_build_fails(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    searchable_article = Content(
+        url="https://example.com/search-invalid-row",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Searchable Invalid Row",
+        content_metadata={
+            "summary": {
+                "title": "Searchable Invalid Row",
+                "overview": (
+                    "This summary exists so the row is searchable even if presenter "
+                    "normalization later fails."
+                ),
+                "bullet_points": [
+                    {"text": "Key point one", "category": "key_finding"},
+                    {"text": "Key point two", "category": "methodology"},
+                    {"text": "Key point three", "category": "conclusion"},
+                ],
+                "quotes": [],
+                "topics": ["Testing"],
+                "summarization_date": "2026-01-01T00:00:00Z",
+            },
+            "summary_kind": "long_structured",
+            "summary_version": 1,
+            "image_generated_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    db_session.add(searchable_article)
+    db_session.commit()
+    db_session.refresh(searchable_article)
+
+    _add_inbox_status(db_session, test_user.id, searchable_article.id)
+    db_session.commit()
+
+    def _raise_build_error(_content):
+        raise ValueError("invalid content metadata")
+
+    monkeypatch.setattr(
+        "app.application.queries.search_content_cards.build_domain_content",
+        _raise_build_error,
+    )
+
+    response = client.get("/api/content/search", params={"q": "Searchable"})
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["contents"] == []
+    assert payload["meta"]["total"] == 0

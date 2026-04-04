@@ -8,6 +8,8 @@ from app.services.scraper_configs import (
     list_user_scraper_configs,
 )
 
+pytestmark = pytest.mark.usefixtures("stub_valid_feed_url")
+
 
 def test_create_and_list_config(db_session):
     payload = CreateUserScraperConfig(

@@ -237,8 +237,56 @@ def test_sync_x_sources_ingests_digest_only_timeline_content(db_session, test_us
     assert news_item.raw_metadata["submitted_by_user_id"] == test_user.id
     assert recorded_prompts
     assert queue_gateway.calls == [
-        ("process_news_item", None, {"news_item_id": news_item.id}),
+        ("enrich_news_item_article", None, {"news_item_id": news_item.id}),
     ]
+
+
+def test_upsert_x_digest_tweet_content_does_not_reenqueue_existing_non_ready_rows(
+    db_session,
+    test_user,
+    monkeypatch,
+):
+    """Existing short-form rows should not re-enter enrichment on every sync."""
+    existing = NewsItem(
+        ingest_key="existing-x-tweet",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        platform="twitter",
+        source_type="x_timeline",
+        source_label="X Following",
+        source_external_id="401",
+        article_url="https://x.com/i/status/401",
+        canonical_story_url="https://x.com/i/status/401",
+        canonical_item_url="https://x.com/i/status/401",
+        discussion_url="https://x.com/i/status/401",
+        article_title="Existing X post",
+        summary_title="Existing X post",
+        raw_metadata={},
+        status="new",
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    queue_gateway = _FakeQueueGateway()
+    monkeypatch.setattr("app.services.x_integration.get_task_queue_gateway", lambda: queue_gateway)
+
+    was_created = _upsert_x_digest_tweet_content(
+        db_session,
+        user=test_user,
+        tweet=_tweet("401", "Existing sync candidate should not be re-enqueued."),
+        source_type="x_timeline",
+        source_label="X Following",
+        submitted_via="x_timeline",
+        filter_decision=XDigestFilterDecision(
+            score=0.92,
+            reason="Relevant timeline signal.",
+            accepted=True,
+        ),
+        aggregator_metadata={"timeline_type": "reverse_chronological"},
+    )
+
+    assert was_created is False
+    assert queue_gateway.calls == []
 
 
 def test_sync_x_sources_skips_bookmarks_when_bookmark_channel_is_recent(

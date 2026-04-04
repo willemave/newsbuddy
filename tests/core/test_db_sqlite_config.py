@@ -255,3 +255,33 @@ def test_run_with_sqlite_lock_retry_rolls_back_before_final_lock_failure(
 
     assert attempts["count"] == 3
     assert session.rollback_calls == 3
+
+
+def test_temporary_sqlite_busy_timeout_overrides_and_restores(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "sqlite-timeout.db"
+    settings = _build_settings(db_path)
+    monkeypatch.setattr(core_db, "get_settings", lambda: settings)
+    _reset_db_globals(monkeypatch)
+
+    try:
+        core_db.init_db()
+        session_factory = core_db.get_session_factory()
+        db = session_factory()
+        try:
+            default_timeout = int(db.execute(text("PRAGMA busy_timeout")).scalar())
+
+            with core_db.temporary_sqlite_busy_timeout(db, 250):
+                current_timeout = int(db.execute(text("PRAGMA busy_timeout")).scalar())
+                assert current_timeout == 250
+
+            restored_timeout = int(db.execute(text("PRAGMA busy_timeout")).scalar())
+            assert restored_timeout == default_timeout
+        finally:
+            db.close()
+    finally:
+        if core_db._engine is not None:
+            core_db._engine.dispose()
+        _reset_db_globals(monkeypatch)

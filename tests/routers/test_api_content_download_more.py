@@ -1,9 +1,16 @@
-from app.models.schema import Content, ContentStatusEntry, UserScraperConfig
+from app.models.schema import UserScraperConfig
 from app.routers.api import content_actions
 from app.services.feed_backfill import FeedBackfillResult
 
 
-def test_download_more_from_series_success(client, db_session, test_user, monkeypatch):
+def test_download_more_from_series_success(
+    client,
+    content_factory,
+    db_session,
+    status_entry_factory,
+    test_user,
+    monkeypatch,
+):
     config = UserScraperConfig(
         user_id=test_user.id,
         scraper_type="atom",
@@ -16,7 +23,7 @@ def test_download_more_from_series_success(client, db_session, test_user, monkey
     db_session.commit()
     db_session.refresh(config)
 
-    content = Content(
+    content = content_factory(
         content_type="article",
         url="https://example.com/post-1",
         source_url="https://example.com/post-1",
@@ -29,17 +36,7 @@ def test_download_more_from_series_success(client, db_session, test_user, monkey
             "source": "Example Feed",
         },
     )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-
-    status_entry = ContentStatusEntry(
-        user_id=test_user.id,
-        content_id=content.id,
-        status="inbox",
-    )
-    db_session.add(status_entry)
-    db_session.commit()
+    status_entry_factory(user=test_user, content=content, status="inbox")
 
     async def _run_in_threadpool(func, *args, **kwargs):
         return func(*args, **kwargs)
