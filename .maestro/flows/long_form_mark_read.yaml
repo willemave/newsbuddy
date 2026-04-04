@@ -1,0 +1,24 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+- tapOn:
+    id: tab.long_form
+- assertVisible:
+    id: long.screen
+- assertVisible:
+    id: long.row.${CONTENT_ID}
+- tapOn:
+    id: long.action.mark_read.${CONTENT_ID}
+- assertVisible:
+    id: long.screen
