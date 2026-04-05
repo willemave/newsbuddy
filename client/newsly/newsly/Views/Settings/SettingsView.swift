@@ -4,15 +4,19 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject var authViewModel: AuthenticationViewModel
     @ObservedObject private var settings = AppSettings.shared
+    private let cliLinkService = CLILinkService()
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var showMarkAllDialog = false
     @State private var isProcessingMarkAll = false
     @State private var showingDebugMenu = false
+    @State private var showingCLILinkScanner = false
+    @State private var isApprovingCLILink = false
     @State private var newsListPreferencePromptDraft = ""
     @State private var serverNewsListPreferencePrompt = ""
     @State private var hasUnsavedNewsListPreferencePromptEdits = false
@@ -66,6 +70,13 @@ struct SettingsView: View {
             DebugMenuView()
                 .environmentObject(authViewModel)
         }
+        .sheet(isPresented: $showingCLILinkScanner) {
+            CLILinkScannerSheet { scannedCode in
+                Task {
+                    await approveCLILink(scannedCode: scannedCode)
+                }
+            }
+        }
         .onChange(of: authViewModel.authState) { _, _ in
             syncNewsListPreferencePromptWithAuthenticatedUser(force: true)
             syncCouncilPersonasWithAuthenticatedUser(force: true)
@@ -85,6 +96,27 @@ struct SettingsView: View {
             if case .authenticated(let user) = authViewModel.authState {
                 VStack(spacing: 0) {
                     AccountCard(user: user)
+
+                    RowDivider(leadingInset: Spacing.rowHorizontal)
+
+                    Button {
+                        showingCLILinkScanner = true
+                    } label: {
+                        SettingsRow(
+                            icon: "qrcode.viewfinder",
+                            iconColor: .green,
+                            title: "Link CLI",
+                            subtitle: "Scan a Newsly CLI QR code to approve local access"
+                        ) {
+                            if isApprovingCLILink {
+                                ProgressView()
+                            } else {
+                                NavigationChevron()
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isApprovingCLILink)
 
                     RowDivider(leadingInset: Spacing.rowHorizontal)
 
@@ -511,6 +543,27 @@ struct SettingsView: View {
     }
 
     // MARK: - Actions
+
+    @MainActor
+    private func approveCLILink(scannedCode: String) async {
+        guard !isApprovingCLILink else { return }
+
+        isApprovingCLILink = true
+        defer { isApprovingCLILink = false }
+
+        do {
+            let response = try await cliLinkService.approve(
+                scannedCode: scannedCode,
+                deviceName: UIDevice.current.name
+            )
+            showingCLILinkScanner = false
+            alertMessage = "CLI linked with key prefix \(response.keyPrefix)."
+            showingAlert = true
+        } catch {
+            alertMessage = error.localizedDescription
+            showingAlert = true
+        }
+    }
 
     @MainActor
     private func syncNewsListPreferencePromptWithAuthenticatedUser(force: Bool) {

@@ -77,6 +77,9 @@ enum APIEndpoints {
     // MARK: - Auth Endpoints
     static let authDebugNewUser = "/auth/debug/new-user"
     static let authMe = "/auth/me"
+    static func cliLinkApprove(sessionID: String) -> String {
+        return "/api/agent/cli/link/\(sessionID)/approve"
+    }
 
     // MARK: - Discovery Endpoints
     static let discoverySuggestions = "/api/discovery/suggestions"
