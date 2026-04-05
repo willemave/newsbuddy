@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.repositories import stats_repository
-from app.routers.api.models import (
+from app.models.api.common import (
     LongFormStatsResponse,
     ProcessingCountResponse,
     UnreadCountsResponse,
 )
+from app.repositories import stats_repository
 
 
 def get_unread_counts(db: Session, *, user_id: int) -> UnreadCountsResponse:

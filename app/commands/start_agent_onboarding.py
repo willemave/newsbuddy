@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.routers.api.models import (
+from app.models.api.common import (
     AgentOnboardingStartRequest,
     AgentOnboardingStartResponse,
     OnboardingAudioDiscoverRequest,

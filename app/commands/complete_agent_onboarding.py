@@ -5,12 +5,12 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.schema import OnboardingDiscoverySuggestion
-from app.routers.api.models import (
+from app.models.api.common import (
     AgentOnboardingCompleteRequest,
     OnboardingCompleteRequest,
     OnboardingSelectedSource,
 )
+from app.models.schema import OnboardingDiscoverySuggestion
 from app.services.onboarding import complete_onboarding
 
 

@@ -5,12 +5,12 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.presenters.content_presenter import (
-    build_content_detail_response,
-    build_domain_content,
-    can_subscribe_for_feed,
-)
+from app.models.content_display import can_subscribe_for_feed
+from app.models.content_mapper import content_to_domain
 from app.repositories.content_detail_repository import get_content_detail
+from app.routers.api.content_responses import (
+    build_content_detail_response,
+)
 from app.services.feed_subscription import can_subscribe_to_feed
 from app.services.news_feed import get_visible_news_item_detail
 
@@ -30,7 +30,7 @@ def execute(db: Session, *, user_id: int, content_id: int):
 
     content, is_read, is_favorited, body_available, body_format = row
     try:
-        domain_content = build_domain_content(content)
+        domain_content = content_to_domain(content)
     except Exception as exc:
         raise HTTPException(
             status_code=500,

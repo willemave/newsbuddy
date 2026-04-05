@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.models.api.common import ApiKeyCreateResponse, ApiKeySummaryResponse
 from app.repositories.api_key_repository import create_api_key
-from app.routers.api.models import ApiKeyCreateResponse, ApiKeySummaryResponse
 
 
 def execute(

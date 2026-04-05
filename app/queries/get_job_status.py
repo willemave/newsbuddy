@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.models.api.common import JobStatusResponse
 from app.models.schema import ProcessingTask
-from app.routers.api.models import JobStatusResponse
 
 
 def execute(db: Session, *, job_id: int) -> JobStatusResponse:

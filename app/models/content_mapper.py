@@ -1,4 +1,4 @@
-"""Converters between domain models and database models."""
+"""Map between ORM content rows and normalized content models."""
 
 from datetime import UTC, datetime
 from typing import Any
@@ -51,7 +51,7 @@ def _select_http_url(raw_url: str, metadata: dict[str, Any], content_type: str) 
 
 
 def content_to_domain(db_content: DBContent) -> ContentData:
-    """Convert database Content to domain ContentData."""
+    """Convert database Content to normalized ContentData."""
     try:
         stored_metadata = normalize_metadata_shape(dict(db_content.content_metadata or {}))
         metadata = merge_runtime_metadata(stored_metadata)
@@ -84,11 +84,11 @@ def content_to_domain(db_content: DBContent) -> ContentData:
             processed_at=db_content.processed_at,
             publication_date=db_content.publication_date,
         )
-    except Exception as e:
+    except Exception as exc:
         logger.exception(
             "Error converting content %s: %s",
             db_content.id,
-            e,
+            exc,
             extra={
                 "component": "content_converter",
                 "operation": "content_to_domain",
@@ -122,9 +122,8 @@ def _normalize_summary_metadata(metadata: dict[str, Any], content_type: str) -> 
 
 
 def domain_to_content(content_data: ContentData, existing: DBContent | None = None) -> DBContent:
-    """Convert domain ContentData to database Content."""
+    """Convert normalized ContentData to database Content."""
     if existing:
-        # Update existing
         existing.title = content_data.title
         existing.status = content_data.status.value
         new_url = str(content_data.url)
@@ -134,21 +133,19 @@ def domain_to_content(content_data: ContentData, existing: DBContent | None = No
             existing.source_url = content_data.source_url
         elif existing.source_url is None:
             existing.source_url = new_url
-        # Serialize metadata to ensure datetime objects are handled
-        dumped_data = content_data.model_dump(mode="json")
-        md = normalize_metadata_shape(dumped_data["metadata"] or {})
-        runtime_md = merge_runtime_metadata(md)
-        # Keep DB columns for platform/source in sync with metadata if provided
-        plat = runtime_md.get("platform")
-        src = runtime_md.get("source")
-        if isinstance(plat, str) and plat.strip():
-            existing.platform = plat.strip().lower()
-        if isinstance(src, str) and src.strip():
-            existing.source = src.strip()
-        existing.content_metadata = md
 
-        # Sync classification from summary metadata to DB column for filtering
-        summary = runtime_md.get("summary")
+        dumped_data = content_data.model_dump(mode="json")
+        metadata = normalize_metadata_shape(dumped_data["metadata"] or {})
+        runtime_metadata = merge_runtime_metadata(metadata)
+        platform = runtime_metadata.get("platform")
+        source = runtime_metadata.get("source")
+        if isinstance(platform, str) and platform.strip():
+            existing.platform = platform.strip().lower()
+        if isinstance(source, str) and source.strip():
+            existing.source = source.strip()
+        existing.content_metadata = metadata
+
+        summary = runtime_metadata.get("summary")
         if isinstance(summary, dict):
             classification = summary.get("classification")
             if classification in ("to_read", "skip"):
@@ -160,24 +157,25 @@ def domain_to_content(content_data: ContentData, existing: DBContent | None = No
             existing.processed_at = content_data.processed_at
         existing.updated_at = datetime.now(UTC)
         return existing
-    else:
-        # Create new
-        dumped = content_data.model_dump(mode="json")
-        md = normalize_metadata_shape(dumped.get("metadata") or {})
-        runtime_md = merge_runtime_metadata(md)
-        plat = runtime_md.get("platform")
-        src = runtime_md.get("source")
-        return DBContent(
-            content_type=content_data.content_type.value,
-            url=str(content_data.url),
-            source_url=content_data.source_url or str(content_data.url),
-            title=content_data.title,
-            status=content_data.status.value,
-            platform=(plat.strip().lower() if isinstance(plat, str) and plat.strip() else None),
-            source=(src.strip() if isinstance(src, str) and src.strip() else None),
-            content_metadata=md,
-            error_message=content_data.error_message,
-            retry_count=content_data.retry_count,
-            created_at=content_data.created_at or datetime.now(UTC),
-            processed_at=content_data.processed_at,
-        )
+
+    dumped = content_data.model_dump(mode="json")
+    metadata = normalize_metadata_shape(dumped.get("metadata") or {})
+    runtime_metadata = merge_runtime_metadata(metadata)
+    platform = runtime_metadata.get("platform")
+    source = runtime_metadata.get("source")
+    return DBContent(
+        content_type=content_data.content_type.value,
+        url=str(content_data.url),
+        source_url=content_data.source_url or str(content_data.url),
+        title=content_data.title,
+        status=content_data.status.value,
+        platform=(
+            platform.strip().lower() if isinstance(platform, str) and platform.strip() else None
+        ),
+        source=(source.strip() if isinstance(source, str) and source.strip() else None),
+        content_metadata=metadata,
+        error_message=content_data.error_message,
+        retry_count=content_data.retry_count,
+        created_at=content_data.created_at or datetime.now(UTC),
+        processed_at=content_data.processed_at,
+    )

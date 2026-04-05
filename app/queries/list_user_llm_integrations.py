@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.models.api.common import UserLlmIntegrationResponse
 from app.repositories.user_integration_repository import list_user_llm_integrations
-from app.routers.api.models import UserLlmIntegrationResponse
 
 
 def execute(db: Session, *, user_id: int) -> list[UserLlmIntegrationResponse]:

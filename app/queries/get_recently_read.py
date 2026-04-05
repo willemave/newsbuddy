@@ -1,48 +1,44 @@
-"""Application query for favorited content cards."""
+"""Application query for recently-read content cards."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
+from app.models.api.common import ContentListResponse
+from app.models.content_display import resolve_image_urls
+from app.models.content_mapper import content_to_domain
 from app.models.metadata import ContentType
 from app.models.pagination import PaginationMetadata
-from app.presenters.content_presenter import (
-    build_content_summary_response,
-    build_domain_content,
-    resolve_image_urls,
-)
-from app.repositories.content_card_repository import get_favorites, list_content_types
-from app.routers.api.models import ContentListResponse
+from app.repositories.content_card_repository import get_recently_read, list_content_types
+from app.routers.api.content_responses import build_content_summary_response
 from app.utils.pagination import PaginationCursor
 
 logger = get_logger(__name__)
 
 
-def execute(
-    db: Session,
-    *,
-    user_id: int,
-    cursor: str | None,
-    limit: int,
-) -> ContentListResponse:
-    """Return favorited content list response."""
+def execute(db: Session, *, user_id: int, cursor: str | None, limit: int) -> ContentListResponse:
+    """Return recently-read content list response."""
     last_id = None
-    last_sort_timestamp = None
+    last_read_at = None
     if cursor:
         try:
             cursor_data = PaginationCursor.decode_cursor(cursor)
             last_id = cursor_data["last_id"]
-            last_sort_timestamp = cursor_data["last_created_at"]
+            raw_last_read_at = cursor_data.get("last_read_at")
+            if raw_last_read_at:
+                last_read_at = datetime.fromisoformat(raw_last_read_at)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    rows = get_favorites(
+    rows = get_recently_read(
         db,
         user_id=user_id,
         last_id=last_id,
-        last_sort_timestamp=last_sort_timestamp,
+        last_read_at=last_read_at,
         limit=limit,
     )
     has_more = len(rows) > limit
@@ -50,15 +46,15 @@ def execute(
         rows = rows[:limit]
 
     contents = []
-    for content, read_id, _favorite_id in rows:
+    for content, read_id, is_favorited, _read_at in rows:
         try:
-            domain_content = build_domain_content(content)
+            domain_content = content_to_domain(content)
         except Exception:
             logger.exception(
-                "Skipping invalid content row in favorites",
+                "Skipping invalid content row in recently_read",
                 extra={
-                    "component": "get_favorites",
-                    "operation": "build_domain_content",
+                    "component": "get_recently_read",
+                    "operation": "content_to_domain",
                     "item_id": content.id,
                 },
             )
@@ -69,7 +65,7 @@ def execute(
                 content=content,
                 domain_content=domain_content,
                 is_read=bool(read_id),
-                is_favorited=True,
+                is_favorited=bool(is_favorited),
                 image_url=image_url,
                 thumbnail_url=thumbnail_url,
             )
@@ -77,11 +73,12 @@ def execute(
 
     next_cursor = None
     if has_more and rows:
-        last_item = rows[-1][0]
+        last_content, _read_id, _is_favorited, last_read_at_value = rows[-1]
+        last_read_at_filter = last_read_at_value.isoformat() if last_read_at_value else None
         next_cursor = PaginationCursor.encode_cursor(
-            last_id=last_item.id,
-            last_created_at=last_item.created_at,
-            filters={},
+            last_id=last_content.id,
+            last_created_at=last_content.created_at,
+            filters={"last_read_at": last_read_at_filter},
         )
 
     return ContentListResponse(

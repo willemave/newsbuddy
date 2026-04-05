@@ -5,11 +5,11 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.models.api.common import UserLlmIntegrationResponse
 from app.repositories.user_integration_repository import (
     SUPPORTED_LLM_PROVIDERS,
     upsert_user_llm_integration,
 )
-from app.routers.api.models import UserLlmIntegrationResponse
 
 
 def execute(

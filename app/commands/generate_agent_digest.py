@@ -6,8 +6,8 @@ from datetime import UTC
 
 from sqlalchemy.orm import Session
 
+from app.models.api.common import AgentDigestRequest, AgentDigestResponse
 from app.models.contracts import TaskType
-from app.routers.api.models import AgentDigestRequest, AgentDigestResponse
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 
 

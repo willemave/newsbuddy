@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.routers.api.models import AgentSearchResponse, AgentSearchResultResponse
+from app.models.api.common import AgentSearchResponse, AgentSearchResultResponse
 from app.services.exa_client import exa_search
 from app.services.podcast_search import search_podcast_episodes
 
