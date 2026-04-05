@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.routers.api.chat_models import (
+from app.models.api.chat import (
     AssistantScreenContextDto,
     ChatMessageDisplayType,
     ChatMessageDto,
@@ -84,3 +84,8 @@ def test_assistant_screen_context_truncates_visible_content_ids() -> None:
     )
 
     assert context.visible_content_ids == list(range(1, 13))
+
+
+def test_assistant_screen_context_preserves_dto_schema_name() -> None:
+    """Assistant screen context should keep the DTO schema component name."""
+    assert AssistantScreenContextDto.model_json_schema()["title"] == "AssistantScreenContextDto"

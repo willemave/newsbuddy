@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 
-from app.application.commands import mark_read as mark_read_command
+from app.commands import mark_read as mark_read_command
 from app.repositories import read_status_repository
 
 

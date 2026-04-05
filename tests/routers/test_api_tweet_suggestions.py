@@ -13,11 +13,13 @@ from app.services.tweet_suggestions import (
     TweetSuggestionsResult,
 )
 
+TWEET_GENERATOR_PATCH_TARGET = (
+    "app.commands.generate_tweet_suggestions.generate_tweet_suggestions"
+)
+
 
 def test_tweet_suggestions_success(client: TestClient, db_session: Session) -> None:
     """Test successful tweet suggestion generation."""
-    # Create completed article - use empty bullet_points to avoid validation complexity
-    # The endpoint mocks the tweet generation anyway
     article = Content(
         url="https://example.com/article",
         content_type=ContentType.ARTICLE.value,
@@ -48,7 +50,6 @@ def test_tweet_suggestions_success(client: TestClient, db_session: Session) -> N
     db_session.commit()
     db_session.refresh(article)
 
-    # Mock the tweet generation service
     mock_result = TweetSuggestionsResult(
         content_id=article.id,
         creativity=5,
@@ -61,10 +62,7 @@ def test_tweet_suggestions_success(client: TestClient, db_session: Session) -> N
         ],
     )
 
-    with patch(
-        "app.routers.api.content_actions.generate_tweet_suggestions",
-        return_value=mock_result,
-    ):
+    with patch(TWEET_GENERATOR_PATCH_TARGET, return_value=mock_result):
         response = client.post(
             f"/api/content/{article.id}/tweet-suggestions",
             json={"creativity": 5},
@@ -122,10 +120,7 @@ def test_tweet_suggestions_with_message(client: TestClient, db_session: Session)
         ],
     )
 
-    with patch(
-        "app.routers.api.content_actions.generate_tweet_suggestions",
-        return_value=mock_result,
-    ) as mock_gen:
+    with patch(TWEET_GENERATOR_PATCH_TARGET, return_value=mock_result) as mock_gen:
         response = client.post(
             f"/api/content/{article.id}/tweet-suggestions",
             json={
@@ -134,7 +129,6 @@ def test_tweet_suggestions_with_message(client: TestClient, db_session: Session)
             },
         )
 
-        # Verify the message was passed to the service
         call_kwargs = mock_gen.call_args[1]
         assert call_kwargs["message"] == "focus on startup implications"
         assert call_kwargs["creativity"] == 7
@@ -155,11 +149,10 @@ def test_tweet_suggestions_content_not_found(client: TestClient, db_session: Ses
 
 def test_tweet_suggestions_content_not_completed(client: TestClient, db_session: Session) -> None:
     """Test 400 for content that's not completed."""
-    # Create content with NEW status
     article = Content(
         url="https://example.com/article",
         content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.NEW.value,  # Not completed
+        status=ContentStatus.NEW.value,
         title="Test Article",
     )
     db_session.add(article)
@@ -215,7 +208,7 @@ def test_tweet_suggestions_podcast_supported(client: TestClient, db_session: Ses
     )
 
     with patch(
-        "app.routers.api.content_actions.generate_tweet_suggestions",
+        "app.commands.generate_tweet_suggestions.generate_tweet_suggestions",
         return_value=mock_result,
     ):
         response = client.post(
@@ -240,17 +233,15 @@ def test_tweet_suggestions_creativity_out_of_range(client: TestClient, db_sessio
     db_session.commit()
     db_session.refresh(article)
 
-    # Test creativity too low
     response = client.post(
         f"/api/content/{article.id}/tweet-suggestions",
-        json={"creativity": 0},  # Below minimum (1)
+        json={"creativity": 0},
     )
     assert response.status_code == 422
 
-    # Test creativity too high
     response = client.post(
         f"/api/content/{article.id}/tweet-suggestions",
-        json={"creativity": 15},  # Above maximum (10)
+        json={"creativity": 15},
     )
     assert response.status_code == 422
 
@@ -285,11 +276,7 @@ def test_tweet_suggestions_llm_failure(client: TestClient, db_session: Session) 
     db_session.commit()
     db_session.refresh(article)
 
-    # Mock service to return None (failure)
-    with patch(
-        "app.routers.api.content_actions.generate_tweet_suggestions",
-        return_value=None,
-    ):
+    with patch(TWEET_GENERATOR_PATCH_TARGET, return_value=None):
         response = client.post(
             f"/api/content/{article.id}/tweet-suggestions",
             json={"creativity": 5},
@@ -337,10 +324,7 @@ def test_tweet_suggestions_news_content(client: TestClient, db_session: Session)
         ],
     )
 
-    with patch(
-        "app.routers.api.content_actions.generate_tweet_suggestions",
-        return_value=mock_result,
-    ):
+    with patch(TWEET_GENERATOR_PATCH_TARGET, return_value=mock_result):
         response = client.post(
             f"/api/content/{news.id}/tweet-suggestions",
             json={"creativity": 5},
@@ -383,7 +367,7 @@ def test_tweet_suggestions_default_creativity(client: TestClient, db_session: Se
 
     mock_result = TweetSuggestionsResult(
         content_id=article.id,
-        creativity=5,  # Default
+        creativity=5,
         length="medium",
         model=TWEET_MODEL,
         suggestions=[
@@ -393,16 +377,12 @@ def test_tweet_suggestions_default_creativity(client: TestClient, db_session: Se
         ],
     )
 
-    with patch(
-        "app.routers.api.content_actions.generate_tweet_suggestions",
-        return_value=mock_result,
-    ) as mock_gen:
+    with patch(TWEET_GENERATOR_PATCH_TARGET, return_value=mock_result) as mock_gen:
         response = client.post(
             f"/api/content/{article.id}/tweet-suggestions",
-            json={},  # No creativity specified
+            json={},
         )
 
-        # Verify default creativity was used
         call_kwargs = mock_gen.call_args[1]
         assert call_kwargs["creativity"] == 5
 

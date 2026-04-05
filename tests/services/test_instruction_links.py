@@ -3,8 +3,8 @@
 import pytest
 
 from app.constants import SELF_SUBMISSION_SOURCE
+from app.models.internal.content_analyzer import InstructionLink
 from app.models.schema import Content, ContentStatusEntry
-from app.services.content_analyzer import InstructionLink
 from app.services.instruction_links import create_contents_from_instruction_links
 
 

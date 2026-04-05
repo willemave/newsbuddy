@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.routers.api.models import OnboardingFastDiscoverRequest, OnboardingFastDiscoverResponse
+from app.models.api.common import OnboardingFastDiscoverRequest, OnboardingFastDiscoverResponse
 from app.services.onboarding import (
     AUDIO_PLAN_FALLBACK_MODELS,
     AUDIO_PLAN_MODEL,

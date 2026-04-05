@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from app.models.schema import ProcessingTask
-from app.routers.api.models import (
+from app.models.api.common import (
     OnboardingCompleteResponse,
     OnboardingDiscoveryStatusResponse,
     OnboardingFastDiscoverResponse,
 )
+from app.models.schema import ProcessingTask
 
 
 def test_agent_job_status_returns_processing_task(client, db_session):
@@ -37,7 +37,7 @@ def test_agent_search_returns_external_results(client, monkeypatch):
     """Agent search should wrap provider-backed external results only."""
 
     monkeypatch.setattr(
-        "app.application.queries.search_external_results.exa_search",
+        "app.queries.search_external_results.exa_search",
         lambda query, num_results: [
             SimpleNamespace(
                 title=f"Web {query}",
@@ -48,7 +48,7 @@ def test_agent_search_returns_external_results(client, monkeypatch):
         ],
     )
     monkeypatch.setattr(
-        "app.application.queries.search_external_results.search_podcast_episodes",
+        "app.queries.search_external_results.search_podcast_episodes",
         lambda query, limit: [
             SimpleNamespace(
                 title=f"Podcast {query}",
@@ -129,7 +129,7 @@ def test_agent_digest_route_returns_async_job_handle(client, monkeypatch):
             return 314
 
     monkeypatch.setattr(
-        "app.application.commands.generate_agent_digest.get_task_queue_gateway",
+        "app.commands.generate_agent_digest.get_task_queue_gateway",
         lambda: _FakeQueue(),
     )
 

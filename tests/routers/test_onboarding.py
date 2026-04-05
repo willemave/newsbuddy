@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from app.models.api.common import OnboardingSuggestion
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import (
     Content,
@@ -11,7 +12,6 @@ from app.models.schema import (
     OnboardingDiscoverySuggestion,
     UserScraperConfig,
 )
-from app.routers.api.models import OnboardingSuggestion
 from app.services.queue import TaskType
 
 

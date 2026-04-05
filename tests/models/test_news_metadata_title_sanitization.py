@@ -1,6 +1,6 @@
 """Regression tests for noisy/oversized news article metadata titles."""
 
-from app.domain.converters import content_to_domain
+from app.models.content_mapper import content_to_domain
 from app.models.metadata import ContentData, ContentStatus, ContentType
 from app.models.schema import Content as DBContent
 
@@ -8,8 +8,8 @@ from app.models.schema import Content as DBContent
 def _build_noisy_title() -> str:
     noisy = (
         "Learn Module | OpenClaw Army "
-        "<meta property=\"og:locale:alternate\" content=\"es\" /> "
-        "<script>var data = {\"foo\": \"bar\"};</script> "
+        '<meta property="og:locale:alternate" content="es" /> '
+        '<script>var data = {"foo": "bar"};</script> '
         "<div>ignored</div> "
     )
     return noisy * 30

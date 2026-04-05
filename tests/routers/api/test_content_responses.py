@@ -1,10 +1,10 @@
-"""Tests for content presenter primary_topic and top_comment extraction."""
+"""Tests for content API response primary_topic and top_comment extraction."""
 
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from app.models.metadata import ContentStatus, ContentType
-from app.presenters.content_presenter import build_content_summary_response
+from app.routers.api.content_responses import build_content_summary_response
 
 
 def _make_content_row(**overrides) -> MagicMock:

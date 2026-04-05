@@ -341,7 +341,7 @@ def test_list_uses_fallback_summary_when_domain_content_build_fails(
         raise ValueError("invalid content metadata")
 
     monkeypatch.setattr(
-        "app.application.queries.list_content_cards.build_domain_content",
+        "app.queries.list_content_cards.content_to_domain",
         _raise_build_error,
     )
 
@@ -404,7 +404,7 @@ def test_search_skips_invalid_content_rows_when_domain_content_build_fails(
         raise ValueError("invalid content metadata")
 
     monkeypatch.setattr(
-        "app.application.queries.search_content_cards.build_domain_content",
+        "app.queries.search_content_cards.content_to_domain",
         _raise_build_error,
     )
 

@@ -11,7 +11,7 @@ from app.services.content_analyzer import (
     ContentAnalyzer,
     get_content_analyzer,
 )
-from app.services.content_submission import (
+from app.services.url_detection import (
     infer_content_type_and_platform,
     should_use_llm_analysis,
 )

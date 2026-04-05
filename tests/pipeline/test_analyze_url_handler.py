@@ -113,7 +113,7 @@ def test_subscribe_to_feed_accepts_direct_feed_url(db_session, monkeypatch) -> N
         },
     )
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         lambda feed_url: {"feed_url": feed_url},
     )
     monkeypatch.setattr(
@@ -133,7 +133,7 @@ def test_subscribe_to_feed_accepts_direct_feed_url(db_session, monkeypatch) -> N
         ),
     )
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         lambda feed_url: {
             "feed_url": feed_url,
             "feed_format": "rss",
@@ -208,7 +208,7 @@ def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_tit
         lambda _self, feed_url: None,
     )
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         lambda feed_url: {"feed_url": feed_url},
     )
     monkeypatch.setattr(
@@ -227,7 +227,7 @@ def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_tit
         },
     )
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         lambda feed_url: {
             "feed_url": feed_url,
             "feed_format": "rss",
@@ -342,7 +342,7 @@ def test_subscribe_to_feed_existing_subscription_skips_initial_download(
         _unexpected_backfill,
     )
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         lambda feed_url: {
             "feed_url": feed_url,
             "feed_format": "rss",
@@ -403,7 +403,7 @@ def test_subscribe_to_feed_records_initial_download_failure(
         },
     )
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         lambda feed_url: {"feed_url": feed_url},
     )
     monkeypatch.setattr(
@@ -419,7 +419,7 @@ def test_subscribe_to_feed_records_initial_download_failure(
         _failing_backfill,
     )
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         lambda feed_url: {
             "feed_url": feed_url,
             "feed_format": "rss",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from unittest.mock import Mock
 
-from app.domain.converters import content_to_domain
+from app.models.content_mapper import content_to_domain
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content
 from app.pipeline.worker import ContentWorker

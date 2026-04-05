@@ -525,7 +525,7 @@ def stub_valid_feed_url(monkeypatch):
     """Accept test feed URLs without making network calls."""
 
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         lambda url: {"feed_url": url.strip()},
     )
 

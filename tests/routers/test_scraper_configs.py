@@ -19,7 +19,7 @@ def _stub_feed_validation(monkeypatch):
         return {"feed_url": feed_url.strip()}
 
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         _validate,
     )
 

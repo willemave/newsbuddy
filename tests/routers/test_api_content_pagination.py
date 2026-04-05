@@ -367,17 +367,17 @@ class TestSearchEndpointPagination:
         monkeypatch,
     ):
         """Search should keep returning valid rows when one result is malformed."""
-        from app.application.queries import search_content_cards
+        from app.queries import search_content_cards
 
         broken_id = sample_contents[0].id
-        original_build_domain_content = search_content_cards.build_domain_content
+        original_content_to_domain = search_content_cards.content_to_domain
 
-        def _build_domain_content(content):
+        def _content_to_domain(content):
             if content.id == broken_id:
                 raise ValueError("invalid content metadata")
-            return original_build_domain_content(content)
+            return original_content_to_domain(content)
 
-        monkeypatch.setattr(search_content_cards, "build_domain_content", _build_domain_content)
+        monkeypatch.setattr(search_content_cards, "content_to_domain", _content_to_domain)
 
         response = client.get("/api/content/search", params={"q": "Test", "limit": 50})
         assert response.status_code == 200

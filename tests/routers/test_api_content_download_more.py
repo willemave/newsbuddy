@@ -1,6 +1,6 @@
+from app.commands import download_more_from_series
+from app.models.internal.feed_backfill import FeedBackfillResult
 from app.models.schema import UserScraperConfig
-from app.routers.api import content_actions
-from app.services.feed_backfill import FeedBackfillResult
 
 
 def test_download_more_from_series_success(
@@ -52,8 +52,8 @@ def test_download_more_from_series_success(
             errors=0,
         )
 
-    monkeypatch.setattr(content_actions, "run_in_threadpool", _run_in_threadpool)
-    monkeypatch.setattr(content_actions, "backfill_feed_for_config", _fake_backfill)
+    monkeypatch.setattr(download_more_from_series, "run_in_threadpool", _run_in_threadpool)
+    monkeypatch.setattr(download_more_from_series, "backfill_feed_for_config", _fake_backfill)
 
     response = client.post(
         f"/api/content/{content.id}/download-more",

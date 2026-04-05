@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from app.domain.converters import content_to_domain
+from app.models.content_mapper import content_to_domain
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content
 from app.pipeline.worker import ContentWorker

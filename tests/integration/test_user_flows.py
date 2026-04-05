@@ -87,7 +87,7 @@ def test_onboarding_complete_seeds_configs_tasks_and_visible_content(
             return len(enqueued_tasks)
 
     monkeypatch.setattr(
-        "app.services.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
         lambda url: {"feed_url": url},
     )
     monkeypatch.setattr(

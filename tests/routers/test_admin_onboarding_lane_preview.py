@@ -2,7 +2,7 @@
 
 from app.core.deps import require_admin
 from app.main import app
-from app.routers.api.models import OnboardingAudioLanePreview, OnboardingAudioLanePreviewResponse
+from app.models.api.common import OnboardingAudioLanePreview, OnboardingAudioLanePreviewResponse
 
 
 def test_admin_onboarding_lane_preview_page_requires_admin_session(client):
