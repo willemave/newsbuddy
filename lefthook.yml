@@ -1,0 +1,20 @@
+# Lefthook keeps the repo's local git hooks in one tracked config.
+# Install with: `npx lefthook install`
+
+glob_matcher: doublestar
+
+pre-commit:
+  jobs:
+    - name: ruff check
+      glob: "**/*.py"
+      run: uv run ruff check --fix {staged_files}
+      stage_fixed: true
+
+    - name: ruff format
+      glob: "**/*.py"
+      run: uv run ruff format {staged_files}
+      stage_fixed: true
+
+    - name: mypy
+      glob: "**/*.py"
+      run: uv run --with mypy --with types-all mypy {staged_files}

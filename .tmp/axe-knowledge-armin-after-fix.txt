@@ -1,5 +1,0 @@
-tap -x 120 -y 724 --post-delay 0.4
-type "please find a blog by Armin Ronacher and subscribe to it"
-sleep 0.5
-tap -x 368 -y 726 --post-delay 0.5
-sleep 25

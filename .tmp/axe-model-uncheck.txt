@@ -1,6 +1,0 @@
-tap -x 200 -y 268 --post-delay 0.3
-tap -x 200 -y 341 --post-delay 0.3
-tap -x 200 -y 407 --post-delay 0.3
-tap -x 200 -y 480 --post-delay 0.3
-tap -x 200 -y 548 --post-delay 0.3
-sleep 1

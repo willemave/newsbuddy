@@ -1,7 +1,0 @@
-tap --id TabBarItemTitle --post-delay 0.4
-key-combo --modifiers 227 --key 4
-sleep 0.2
-type "javascript:document.body.innerText='AXE JS OK'"
-sleep 0.2
-key 40
-sleep 2

@@ -1,7 +1,0 @@
-tap --id TabBarItemTitle --post-delay 0.4
-key-combo --modifiers 227 --key 4
-sleep 0.2
-type 'http://127.0.0.1:8000/auth/admin/login?next=/admin/evals/summaries'
-sleep 0.2
-key 40
-sleep 3

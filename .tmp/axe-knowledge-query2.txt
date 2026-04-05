@@ -1,5 +1,0 @@
-tap -x 120 -y 724 --post-delay 0.4
-type "what are the hot new blogs for politics?"
-sleep 0.5
-tap --id arrow.up --post-delay 0.5
-sleep 18

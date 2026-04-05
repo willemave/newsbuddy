@@ -1,9 +1,11 @@
 {
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.8",
+    "lefthook": "^2.1.4",
     "tailwindcss": "^4.1.8"
   },
   "scripts": {
-    "dev": "npx @tailwindcss/cli -i ./static/css/styles.css -o ./static/css/app.css --watch"
+    "dev": "npx @tailwindcss/cli -i ./static/css/styles.css -o ./static/css/app.css --watch",
+    "hooks:install": "lefthook install"
   }
 }

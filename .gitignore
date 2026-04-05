@@ -15,6 +15,9 @@ logs/
 logs_from_server/
 .tmp/
 .worktrees/
+.githooks/
+
+.tmp/*
 
 static/*
 !static/js/
