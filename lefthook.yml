@@ -17,4 +17,4 @@ pre-commit:
 
     - name: mypy
       glob: "**/*.py"
-      run: uv run --with mypy --with types-all mypy {staged_files}
+      run: uv run --with mypy mypy {staged_files}
