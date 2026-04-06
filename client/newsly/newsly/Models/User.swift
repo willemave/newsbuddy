@@ -13,6 +13,9 @@ struct CouncilPersona: Codable, Equatable, Identifiable {
     let instructionPrompt: String
     let sortOrder: Int
 
+    static let maxExperts = 3
+    static let minExperts = 2
+
     enum CodingKeys: String, CodingKey {
         case id
         case displayName = "display_name"
@@ -20,32 +23,24 @@ struct CouncilPersona: Codable, Equatable, Identifiable {
         case sortOrder = "sort_order"
     }
 
-    static let defaults: [CouncilPersona] = [
-        CouncilPersona(
-            id: "analyst",
-            displayName: "Analyst",
-            instructionPrompt: "Focus on the core argument, strongest evidence, missing evidence, and what matters most if the user needs a clear mental model.",
-            sortOrder: 0
-        ),
-        CouncilPersona(
-            id: "skeptic",
-            displayName: "Skeptic",
-            instructionPrompt: "Stress-test assumptions, weak evidence, overreach, incentives, and what could make the thesis wrong.",
-            sortOrder: 1
-        ),
-        CouncilPersona(
-            id: "builder",
-            displayName: "Builder",
-            instructionPrompt: "Translate the discussion into concrete product, engineering, or operational implications and practical next moves.",
-            sortOrder: 2
-        ),
-        CouncilPersona(
-            id: "historian",
-            displayName: "Historian",
-            instructionPrompt: "Add context from prior cycles, related precedents, and comparable moments so the user can place the current topic in a longer arc.",
-            sortOrder: 3
-        )
-    ]
+    /// Create an expert from just a name. The backend generates the impersonation prompt.
+    init(name: String, sortOrder: Int) {
+        self.id = name.lowercased()
+            .components(separatedBy: .whitespaces)
+            .joined(separator: "_")
+            .prefix(50)
+            .description
+        self.displayName = name
+        self.instructionPrompt = ""
+        self.sortOrder = sortOrder
+    }
+
+    init(id: String, displayName: String, instructionPrompt: String = "", sortOrder: Int) {
+        self.id = id
+        self.displayName = displayName
+        self.instructionPrompt = instructionPrompt
+        self.sortOrder = sortOrder
+    }
 }
 
 /// User account model matching backend UserResponse schema
@@ -91,7 +86,7 @@ struct User: Codable, Identifiable, Equatable {
         fullName: String?,
         twitterUsername: String?,
         newsListPreferencePrompt: String,
-        councilPersonas: [CouncilPersona] = CouncilPersona.defaults,
+        councilPersonas: [CouncilPersona] = [],
         hasXBookmarkSync: Bool,
         isAdmin: Bool,
         isActive: Bool,
@@ -107,7 +102,7 @@ struct User: Codable, Identifiable, Equatable {
         self.fullName = fullName
         self.twitterUsername = twitterUsername
         self.newsListPreferencePrompt = newsListPreferencePrompt
-        self.councilPersonas = councilPersonas.isEmpty ? CouncilPersona.defaults : councilPersonas
+        self.councilPersonas = councilPersonas
         self.hasXBookmarkSync = hasXBookmarkSync
         self.isAdmin = isAdmin
         self.isActive = isActive
@@ -128,8 +123,7 @@ struct User: Codable, Identifiable, Equatable {
         newsListPreferencePrompt =
             try container.decodeIfPresent(String.self, forKey: .newsListPreferencePrompt) ?? ""
         councilPersonas =
-            try container.decodeIfPresent([CouncilPersona].self, forKey: .councilPersonas)
-            ?? CouncilPersona.defaults
+            try container.decodeIfPresent([CouncilPersona].self, forKey: .councilPersonas) ?? []
         hasXBookmarkSync = try container.decodeIfPresent(Bool.self, forKey: .hasXBookmarkSync) ?? false
         isAdmin = try container.decode(Bool.self, forKey: .isAdmin)
         isActive = try container.decode(Bool.self, forKey: .isActive)

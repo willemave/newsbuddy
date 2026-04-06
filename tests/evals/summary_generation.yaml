@@ -1,0 +1,168 @@
+suite: summary_generation_v1
+defaults:
+  model_spec: openai:gpt-5.4
+  judge_model_spec: openai:gpt-5.4
+  longform_template: editorial_narrative_v1
+
+cases:
+  - id: perplexity_tax_prep
+    content_type: news
+    source_kind: news_item
+    source_id: 7248
+    source_url: https://x.com/i/status/2039753718095286283
+    source_title: Wild.
+    existing_title: Wild.
+    bad_titles:
+      - Wild.
+    reference_titles:
+      - Perplexity Computer Adds Tax Filing Feature That Guides Users Through Federal Returns
+      - Perplexity Launches AI Tax Accountant Feature in Its Computer Product
+      - Perplexity Computer Now Offers Full Federal Tax Return Guidance via AI
+    notes: >
+      The current title is just a reaction. A good title should name Perplexity,
+      the tax-filing feature, and the concrete user outcome.
+    input_text: |
+      Tweet post:
+
+      Wild.
+
+      Perplexity Computer is now a tax accountant.
+
+      Select "Navigate my taxes" on Computer and it guides you through your entire federal return.
+
+      The AI takeover of white-collar work is moving faster than anyone predicted.
+
+  - id: claude_synthetic_emotions
+    content_type: news
+    source_kind: news_item
+    source_id: 7271
+    source_url: https://x.com/i/status/2039742293595328689
+    source_title: "From the paper:"
+    existing_title: "From the paper:"
+    bad_titles:
+      - "From the paper:"
+    reference_titles:
+      - Researchers Find Internal Representations of Emotion Concepts in Claude Sonnet 4.5
+      - Paper Investigates Why Large Language Models Appear to Exhibit Emotional Reactions
+      - Study Links Claude 4.5's Emotional Behaviors to Internal Emotion Concept Representations
+    notes: >
+      The bad title is a placeholder lead-in. A good title should say the paper is
+      about apparent emotional reactions in Claude Sonnet 4.5 and why they occur.
+    input_text: |
+      Tweet post:
+
+      From the paper:
+
+      "Large language models sometimes appear to exhibit emotional reactions."
+      The paper investigates why this happens in Claude Sonnet 4.5 and explores
+      implications for alignment-relevant behavior. It reports internal
+      representations of emotion concepts.
+
+  - id: consumer_gpu_local_sota
+    content_type: news
+    source_kind: news_item
+    source_id: 7272
+    source_url: https://x.com/i/status/2039742489276395818
+    source_title: Do you have ?
+    existing_title: Do you have ?
+    bad_titles:
+      - Do you have ?
+    reference_titles:
+      - New Local AI Model Achieves State-of-the-Art Performance on Consumer GPUs and MacBooks
+      - Local SOTA Model Released for RTX 3090-5090, MacBook Pro, and DGX Spark Hardware
+      - New State-of-the-Art Local Model Runs on Consumer Hardware from RTX 3090 to DGX Spark
+    notes: >
+      The current title is incomplete and context-free. A good title should explain
+      that a new local state-of-the-art model or system runs on broadly available
+      hardware including consumer GPUs and MacBooks.
+    input_text: |
+      Tweet post:
+
+      Do you have ?
+
+      RTX 3090, 4090, 5090
+      MacBook Pro 24-96 GB
+      DGX Spark
+
+      Y'all are eating good today, new local SOTA just for you.
+
+  - id: agentic_spend_cards_vs_stablecoins
+    content_type: news
+    source_kind: news_item
+    source_id: 7277
+    source_url: https://www.lithic.com/blog/simon-taylor-on-where-agentic-spend-is-going
+    source_title: Agentic spend.
+    existing_title: Agentic spend.
+    bad_titles:
+      - Agentic spend.
+    reference_titles:
+      - Lithic's Reggie Young on Whether Agentic Payments Will Flow Through Cards or Stablecoins
+      - "Cards vs. Stablecoins: Where Agentic Spend Is Heading According to Lithic"
+      - "The Future of Agentic Payments: Lithic Explores Cards, Stablecoins, and Hybrid Models"
+    notes: >
+      The current title is too short to be useful. A good title should mention the
+      cards-versus-stablecoins framing and that the piece is about where agentic
+      payments are headed.
+    input_text: |
+      Social and linked-article context:
+
+      Agentic spend.
+
+      Is it going to cards? Stablecoins? Both?
+
+      A discussion with Lithic's Reggie Young about where agentic spend is going.
+
+  - id: cursor_3_release_backlash
+    content_type: news
+    source_kind: news_item
+    source_id: 7288
+    source_url: https://cursor.com/blog/cursor-3
+    source_title: Cursor 3
+    existing_title: Cursor 3
+    bad_titles:
+      - Cursor 3
+    reference_titles:
+      - Cursor 3 Shifts to Agent-First UI, Sparking Debate Over Code-First Editing Trade-offs
+      - Cursor 3 Release Pivots Toward Chat-Based Workflows, Dividing Power Users
+      - Cursor 3's Agent-Centric Redesign Draws Mixed Reactions From Code-First Developers
+    notes: >
+      The current title just repeats the product name. A good title should capture
+      the release plus the debate over agent-first UI versus code-first workflows.
+    input_text: |
+      Article and discussion context:
+
+      Article title: Cursor 3
+      Linked URL: https://cursor.com/blog/cursor-3
+
+      Discussion summary:
+      - Many users say Cursor 3 shifts toward an agent-first or chat-first interface.
+      - Supporters call it practical for cloud-agent workflows and large production codebases.
+      - Critics argue it de-emphasizes code-first editing, review, and traditional IDE navigation.
+      - Several commenters say the product now looks closer to Claude/Codex-style interfaces.
+
+  - id: skill_file_requirements_clarity
+    content_type: article
+    source_kind: content
+    source_id: 28560
+    source_url: https://x.com/i/status/2006624792531923266
+    source_title: "Skill file:"
+    existing_title: "Skill file:"
+    bad_titles:
+      - "Skill file:"
+    reference_titles:
+      - "Skill File: Ask Minimal Clarifying Questions Only When Explicitly Invoked"
+      - A Minimal Skill File for Targeted Clarification to Avoid Building the Wrong Thing
+      - Skill File Treats Clarifying Questions as Targeted Interventions, Not Default Behavior
+    notes: >
+      The current title is almost empty. A good title should name the skill's idea:
+      ask the minimum clarifying questions needed to avoid building the wrong thing,
+      and only when explicitly invoked.
+    input_text: |
+      Article summary:
+
+      The piece defines a narrowly scoped skill called "ask-questions-if-underspecified."
+      Its thesis is that teams should ask the smallest set of clarifying questions
+      necessary to prevent building the wrong thing, and should do so only when
+      explicitly invoked.
+
+      It frames clarification as a targeted intervention rather than a default behavior.

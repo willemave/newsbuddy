@@ -19,7 +19,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.chat_message_metadata import ChatMessageRenderMetadata, CouncilCandidate
 from app.models.schema import ChatMessage, ChatSession, Content
-from app.models.user import CouncilPersonaConfig, User, resolve_user_council_personas
+from app.models.user import (
+    MIN_COUNCIL_EXPERTS,
+    CouncilPersonaConfig,
+    User,
+    resolve_user_council_personas,
+)
 from app.services.chat_agent import build_article_context, run_chat_turn, save_messages
 
 DISALLOWED_COUNCIL_SESSION_TYPES = {"deep_research", "voice_live"}
@@ -63,9 +68,7 @@ def get_parent_council_candidates(
     if not parent_session.council_message_id:
         return []
     db_message = (
-        db.query(ChatMessage)
-        .filter(ChatMessage.id == parent_session.council_message_id)
-        .first()
+        db.query(ChatMessage).filter(ChatMessage.id == parent_session.council_message_id).first()
     )
     if not db_message or not isinstance(db_message.render_metadata, dict):
         return []
@@ -76,13 +79,49 @@ def get_parent_council_candidates(
     return sorted(render_metadata.council_candidates, key=lambda candidate: candidate.order)
 
 
+def _build_impersonation_prompt(persona: CouncilPersonaConfig) -> str:
+    """Generate a rich impersonation prompt for a real-person expert."""
+
+    name = persona.display_name
+    return "\n".join(
+        [
+            f"You are {name}.",
+            "",
+            f"Respond to the content exactly as {name} would — drawing on their known "
+            "intellectual frameworks, public writings, talks, interviews, and characteristic "
+            "reasoning style.",
+            "",
+            "Guidelines:",
+            (
+                f"- Embody {name}'s actual perspective and voice, "
+                "not a generic summary of their views."
+            ),
+            "- Use their vocabulary, rhetorical patterns, and level of detail.",
+            (f"- If {name} has strong opinions on the topic, express those views directly."),
+            (
+                "- If the topic falls outside their known expertise, "
+                "reason from their established frameworks and say so briefly."
+            ),
+            "- Write in first person. Stay in character throughout.",
+            (
+                f"- Prioritize what {name} would actually find interesting "
+                "or important about this topic."
+            ),
+            (
+                f"- Do NOT open with 'As {name}...' or any self-referential "
+                "preamble. Just respond as they would."
+            ),
+        ]
+    )
+
+
 def build_child_context_snapshot(
     db: Session,
     *,
     parent_session: ChatSession,
     persona: CouncilPersonaConfig,
 ) -> str:
-    """Build a council child context snapshot with persona instructions."""
+    """Build a council child context snapshot with expert impersonation prompt."""
 
     context_sections: list[str] = []
     if parent_session.context_snapshot:
@@ -94,27 +133,17 @@ def build_child_context_snapshot(
             if content_context:
                 context_sections.append(content_context.strip())
 
+    context_sections.append(_build_impersonation_prompt(persona))
     context_sections.append(
         "\n".join(
             [
-                "Council Persona Instructions:",
-                f"- Persona name: {persona.display_name}",
-                "- Stay consistent with this persona across future turns in this branch.",
-                f"- Specific instruction: {persona.instruction_prompt}",
-            ]
-        )
-    )
-    context_sections.append(
-        "\n".join(
-            [
-                "Council Response Style:",
+                "Response Style:",
                 "- Keep responses concise by default.",
                 (
                     "- Prefer 2-4 short bullets or at most 2 short paragraphs "
                     "unless the user explicitly asks for depth."
                 ),
-                "- Lead with the most important point instead of a long preamble.",
-                "- Avoid repeating the title or doing persona roleplay theatrics.",
+                "- Lead with the most important insight instead of a long preamble.",
                 "- Focus on what matters, what is weak or missing, and what follows.",
             ]
         )
@@ -176,7 +205,7 @@ def build_council_branch_sessions(
             ),
             council_persona_id=persona.id,
             council_persona_name=persona.display_name,
-            council_persona_prompt=persona.instruction_prompt,
+            council_persona_prompt=_build_impersonation_prompt(persona),
             council_mode=False,
             is_hidden_from_history=True,
             llm_model=parent_session.llm_model,
@@ -301,6 +330,9 @@ async def start_council_chat(
     """Start council mode for a parent session and persist the council row."""
 
     validate_council_parent_session(parent_session)
+    personas = resolve_user_council_personas(user)
+    if len(personas) < MIN_COUNCIL_EXPERTS:
+        raise ValueError("Add at least two experts in Settings before using the council")
     child_sessions = build_council_branch_sessions(
         db,
         parent_session=parent_session,

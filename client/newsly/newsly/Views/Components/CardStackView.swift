@@ -10,7 +10,6 @@ import SwiftUI
 struct CardStackView: View {
     let groups: [NewsGroup]
     let onDismiss: (String) async -> Void
-    let onConvert: (Int) async -> Void
 
     // Track dismissed group IDs for immediate visual feedback
     @State private var dismissedGroupIds: Set<String> = []
@@ -53,10 +52,7 @@ struct CardStackView: View {
                     SwipeableCard(onDismiss: {
                         handleCardDismissed()
                     }) {
-                        NewsGroupCard(
-                            group: visibleGroups[0],
-                            onConvert: onConvert
-                        )
+                        NewsGroupCard(group: visibleGroups[0])
                     }
                     .id(visibleGroups[0].id)  // Use group ID for stable identity
                     .zIndex(100)

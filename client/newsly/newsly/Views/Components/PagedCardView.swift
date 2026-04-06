@@ -11,7 +11,6 @@ import UIKit
 struct PagedCardView: View {
     let groups: [NewsGroup]
     let onMarkRead: (String) async -> Void
-    let onConvert: (Int) async -> Void
     let onNearEnd: () async -> Void
     let onCardHeightMeasured: (CGFloat, CGFloat) -> Void  // (cardHeight, textWidth)
 
@@ -53,7 +52,6 @@ struct PagedCardView: View {
                         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
                             NewsGroupCard(
                                 group: group,
-                                onConvert: onConvert,
                                 isCurrent: index == currentIndex
                             )
                             .frame(height: cardHeight)

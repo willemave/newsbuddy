@@ -25,18 +25,12 @@ struct BulkMarkReadResponse: Codable {
 }
 
 struct ConvertNewsResponse: Codable {
-    let status: String
     let newContentId: Int
-    let originalContentId: Int
     let alreadyExists: Bool
-    let message: String
 
     enum CodingKeys: String, CodingKey {
-        case status
         case newContentId = "new_content_id"
-        case originalContentId = "original_content_id"
         case alreadyExists = "already_exists"
-        case message
     }
 }
 

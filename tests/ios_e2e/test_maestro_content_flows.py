@@ -182,28 +182,22 @@ def test_council_tabs_switch_between_mocked_branch_replies(
     content = create_sample_content(sample_article_long)
     test_user.council_personas = [
         {
-            "id": "analyst",
-            "display_name": "Analyst",
-            "instruction_prompt": "Focus on evidence and tradeoffs.",
+            "id": "paul_graham",
+            "display_name": "Paul Graham",
+            "instruction_prompt": "",
             "sort_order": 0,
         },
         {
-            "id": "strategist",
-            "display_name": "Strategist",
-            "instruction_prompt": "Focus on implications and action.",
+            "id": "ben_thompson",
+            "display_name": "Ben Thompson",
+            "instruction_prompt": "",
             "sort_order": 1,
         },
         {
-            "id": "skeptic",
-            "display_name": "Skeptic",
-            "instruction_prompt": "Stress weak assumptions.",
+            "id": "byrne_hobart",
+            "display_name": "Byrne Hobart",
+            "instruction_prompt": "",
             "sort_order": 2,
-        },
-        {
-            "id": "operator",
-            "display_name": "Operator",
-            "instruction_prompt": "Prefer practical execution details.",
-            "sort_order": 3,
         },
     ]
     db_session.commit()

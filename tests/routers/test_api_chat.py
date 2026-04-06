@@ -13,6 +13,27 @@ from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import ChatMessage, ChatSession, Content
 from app.services.chat_agent import ChatRunResult, save_messages
 
+TEST_COUNCIL_EXPERTS = [
+    {
+        "id": "paul_graham",
+        "display_name": "Paul Graham",
+        "instruction_prompt": "",
+        "sort_order": 0,
+    },
+    {
+        "id": "ben_thompson",
+        "display_name": "Ben Thompson",
+        "instruction_prompt": "",
+        "sort_order": 1,
+    },
+    {
+        "id": "byrne_hobart",
+        "display_name": "Byrne Hobart",
+        "instruction_prompt": "",
+        "sort_order": 2,
+    },
+]
+
 
 def test_create_chat_session_with_content(
     client: TestClient, db_session: Session, test_user
@@ -76,9 +97,7 @@ def test_create_chat_session_with_content(
     assert "Short Summary:" in db_session_record.context_snapshot
 
 
-def test_create_chat_session_with_topic(
-    client: TestClient, db_session: Session, test_user
-) -> None:
+def test_create_chat_session_with_topic(client: TestClient, db_session: Session, test_user) -> None:
     """Test creating a chat session with a specific topic."""
     # Create test content
     content = Content(
@@ -107,9 +126,7 @@ def test_create_chat_session_with_topic(
     assert "AI safety implications" in session["title"]
 
 
-def test_create_chat_session_without_content(
-    client: TestClient, db_session: Session
-) -> None:
+def test_create_chat_session_without_content(client: TestClient, db_session: Session) -> None:
     """Test creating an ad-hoc chat session without content."""
     response = client.post(
         "/api/content/chat/sessions",
@@ -176,9 +193,7 @@ def test_create_chat_session_syncs_personal_markdown_library(
     assert "Personal Library Article" in summary_files[0].read_text(encoding="utf-8")
 
 
-def test_list_chat_sessions(
-    client: TestClient, db_session: Session, test_user
-) -> None:
+def test_list_chat_sessions(client: TestClient, db_session: Session, test_user) -> None:
     """Test listing chat sessions for current user."""
     # Create test content
     content = Content(
@@ -236,6 +251,9 @@ def test_start_council_chat_creates_hidden_child_sessions_and_hides_them_from_hi
     monkeypatch,
 ) -> None:
     """Council start should fork hidden branches and expose only the parent session."""
+    test_user.council_personas = TEST_COUNCIL_EXPERTS
+    db_session.commit()
+
     parent = ChatSession(
         user_id=test_user.id,
         title="Council Parent",
@@ -289,17 +307,11 @@ def test_start_council_chat_creates_hidden_child_sessions_and_hides_them_from_hi
         .order_by(ChatSession.id)
         .all()
     )
-    assert len(child_sessions) == 4
+    assert len(child_sessions) == 3
     assert all(child.is_hidden_from_history is True for child in child_sessions)
     assert all(child.branch_start_message_id is not None for child in child_sessions)
-    assert all(
-        "Council Response Style:" in (child.context_snapshot or "")
-        for child in child_sessions
-    )
-    assert all(
-        "Keep responses concise by default." in (child.context_snapshot or "")
-        for child in child_sessions
-    )
+    assert all("Response Style:" in (child.context_snapshot or "") for child in child_sessions)
+    assert all("You are " in (child.context_snapshot or "") for child in child_sessions)
 
     council_rows = [
         message
@@ -307,7 +319,7 @@ def test_start_council_chat_creates_hidden_child_sessions_and_hides_them_from_hi
         if message["role"] == "assistant" and message["council_candidates"]
     ]
     assert len(council_rows) == 1
-    assert len(council_rows[0]["council_candidates"]) == 4
+    assert len(council_rows[0]["council_candidates"]) == 3
 
     history_response = client.get("/api/content/chat/sessions")
     assert history_response.status_code == 200
@@ -323,6 +335,9 @@ def test_start_council_chat_builds_child_context_from_linked_content(
     monkeypatch,
 ) -> None:
     """Council start should derive branch context from linked content when no snapshot exists."""
+    test_user.council_personas = TEST_COUNCIL_EXPERTS
+    db_session.commit()
+
     content = content_factory(
         title="Council Context Article",
         content_metadata={
@@ -377,7 +392,7 @@ def test_start_council_chat_builds_child_context_from_linked_content(
         .order_by(ChatSession.id)
         .all()
     )
-    assert len(child_sessions) == 4
+    assert len(child_sessions) == 3
     assert any(
         "A detailed article body used to build council context." in (child.context_snapshot or "")
         for child in child_sessions
@@ -391,6 +406,9 @@ def test_council_branch_selection_switches_visible_transcript_and_send_targets_a
     monkeypatch,
 ) -> None:
     """Selecting a council branch should swap downstream transcript and follow-up routing."""
+    test_user.council_personas = TEST_COUNCIL_EXPERTS
+    db_session.commit()
+
     parent = ChatSession(
         user_id=test_user.id,
         title="Switchable Council",
@@ -524,7 +542,10 @@ def test_start_council_chat_runs_branches_in_parallel(
     test_user,
     monkeypatch,
 ) -> None:
-    """Council start should launch all four branch turns before awaiting completion."""
+    """Council start should launch all branch turns before awaiting completion."""
+    test_user.council_personas = TEST_COUNCIL_EXPERTS
+    db_session.commit()
+
     parent = ChatSession(
         user_id=test_user.id,
         title="Parallel Council",
@@ -537,6 +558,7 @@ def test_start_council_chat_runs_branches_in_parallel(
     db_session.commit()
     db_session.refresh(parent)
 
+    expert_count = len(TEST_COUNCIL_EXPERTS)
     release_all = asyncio.Event()
     branch_started = 0
 
@@ -544,7 +566,7 @@ def test_start_council_chat_runs_branches_in_parallel(
         del source
         nonlocal branch_started
         branch_started += 1
-        if branch_started == 4:
+        if branch_started == expert_count:
             release_all.set()
         await asyncio.wait_for(release_all.wait(), timeout=0.2)
         assistant_text = f"{session.council_persona_name} parallel reply"
@@ -568,7 +590,7 @@ def test_start_council_chat_runs_branches_in_parallel(
     )
 
     assert response.status_code == 200
-    assert branch_started == 4
+    assert branch_started == expert_count
 
 
 def test_delete_chat_session_archives_council_children(
@@ -578,6 +600,9 @@ def test_delete_chat_session_archives_council_children(
     monkeypatch,
 ) -> None:
     """Deleting a council parent should archive all hidden child branches."""
+    test_user.council_personas = TEST_COUNCIL_EXPERTS
+    db_session.commit()
+
     parent = ChatSession(
         user_id=test_user.id,
         title="Council Delete",
@@ -626,7 +651,7 @@ def test_delete_chat_session_archives_council_children(
         .order_by(ChatSession.id)
         .all()
     )
-    assert len(child_sessions) == 4
+    assert len(child_sessions) == 3
     assert all(child.is_archived is True for child in child_sessions)
 
 
@@ -679,9 +704,7 @@ def test_list_chat_sessions_filter_by_content(
     assert sessions[0]["content_id"] == content1.id
 
 
-def test_get_chat_session_detail(
-    client: TestClient, db_session: Session, test_user
-) -> None:
+def test_get_chat_session_detail(client: TestClient, db_session: Session, test_user) -> None:
     """Test getting chat session details."""
     session = ChatSession(
         user_id=test_user.id,
@@ -789,7 +812,9 @@ def test_get_chat_session_detail_includes_assistant_feed_options(
     assert response.status_code == 200
     data = response.json()
     assert data["messages"][-1]["role"] == "assistant"
-    assert data["messages"][-1]["feed_options"][0]["feed_url"] == "https://lucumr.pocoo.org/feed.atom"
+    assert (
+        data["messages"][-1]["feed_options"][0]["feed_url"] == "https://lucumr.pocoo.org/feed.atom"
+    )
 
 
 def test_get_chat_session_detail_exposes_source_message_id_for_pending_rows(
@@ -851,9 +876,7 @@ def test_get_chat_session_not_found(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_get_chat_session_wrong_user(
-    client: TestClient, db_session: Session
-) -> None:
+def test_get_chat_session_wrong_user(client: TestClient, db_session: Session) -> None:
     """Test that users cannot access other users' sessions."""
     # Create session for a different user
     session = ChatSession(
@@ -920,9 +943,7 @@ def test_delete_chat_session_wrong_user(client: TestClient, db_session: Session)
     assert session.is_archived is False
 
 
-def test_different_llm_providers(
-    client: TestClient, db_session: Session
-) -> None:
+def test_different_llm_providers(client: TestClient, db_session: Session) -> None:
     """Test creating sessions with different LLM providers."""
     providers = [
         ("openai", "openai:gpt-5.4"),
@@ -1315,8 +1336,7 @@ def test_message_status_returns_distinct_assistant_display_id(
                 "parts": [
                     {
                         "content": (
-                            "Your most recently favorited article is "
-                            "AI Infrastructure Update."
+                            "Your most recently favorited article is AI Infrastructure Update."
                         ),
                         "id": None,
                         "provider_name": None,

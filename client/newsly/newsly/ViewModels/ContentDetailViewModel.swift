@@ -173,6 +173,29 @@ class ContentDetailViewModel: ObservableObject {
         }
     }
 
+    func saveLinkedArticleAsKnowledge() async {
+        guard let currentContent = content, currentContent.apiContentType == .news else {
+            return
+        }
+
+        do {
+            let response: ConvertNewsResponse
+            if contentType == .news {
+                response = try await contentService.convertNewsItemToArticle(id: currentContent.id)
+            } else {
+                response = try await contentService.convertNewsToArticle(id: currentContent.id)
+            }
+
+            if response.alreadyExists {
+                ToastService.shared.show("Article already saved to Knowledge", type: .info)
+            } else {
+                ToastService.shared.showSuccess("Saved linked article to Knowledge")
+            }
+        } catch {
+            ToastService.shared.showError("Failed to save linked article: \(error.localizedDescription)")
+        }
+    }
+
     /// Subscribe to the detected feed for this content.
     func subscribeToDetectedFeed() async {
         guard let feed = content?.detectedFeed else {

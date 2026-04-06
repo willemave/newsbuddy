@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, create_refresh_token
 from app.models.schema import UserIntegrationConnection
-from app.models.user import build_default_council_personas
 from app.services.news_list_preferences import DEFAULT_NEWS_LIST_PREFERENCE_PROMPT
 
 
@@ -277,7 +276,7 @@ def test_get_current_user_info(
     assert data["full_name"] == "Test Me User"
     assert data["twitter_username"] is None
     assert data["news_list_preference_prompt"] == DEFAULT_NEWS_LIST_PREFERENCE_PROMPT
-    assert data["council_personas"] == build_default_council_personas()
+    assert data["council_personas"] == []
     assert data["has_x_bookmark_sync"] is False
 
 
@@ -333,26 +332,17 @@ def test_update_current_user_info(
                 {
                     "id": "einstein",
                     "display_name": "Albert Einstein",
-                    "instruction_prompt": "Reduce the topic to first principles.",
                     "sort_order": 0,
                 },
                 {
                     "id": "turing",
                     "display_name": "Alan Turing",
-                    "instruction_prompt": "Focus on computation, systems, and limits.",
                     "sort_order": 1,
                 },
                 {
                     "id": "hopper",
                     "display_name": "Grace Hopper",
-                    "instruction_prompt": "Prefer practical engineering tradeoffs and clarity.",
                     "sort_order": 2,
-                },
-                {
-                    "id": "munger",
-                    "display_name": "Charlie Munger",
-                    "instruction_prompt": "Stress incentives and second-order effects.",
-                    "sort_order": 3,
                 },
             ],
             "news_list_preference_prompt": "Prefer semiconductors, infrastructure, and AI models.",
@@ -368,7 +358,6 @@ def test_update_current_user_info(
         "Albert Einstein",
         "Alan Turing",
         "Grace Hopper",
-        "Charlie Munger",
     ]
 
     db_session.refresh(test_user)
@@ -384,7 +373,7 @@ def test_update_current_user_info_rejects_invalid_council_persona_count(
     user_factory,
     auth_headers_factory,
 ) -> None:
-    """PATCH /auth/me should require exactly four council personas."""
+    """PATCH /auth/me should require 2-3 council experts."""
     test_user = user_factory(
         apple_id="001234.test.invalidcouncil",
         email="invalidcouncil@icloud.com",
@@ -399,27 +388,14 @@ def test_update_current_user_info_rejects_invalid_council_persona_count(
                 {
                     "id": "one",
                     "display_name": "One",
-                    "instruction_prompt": "First",
                     "sort_order": 0,
-                },
-                {
-                    "id": "two",
-                    "display_name": "Two",
-                    "instruction_prompt": "Second",
-                    "sort_order": 1,
-                },
-                {
-                    "id": "three",
-                    "display_name": "Three",
-                    "instruction_prompt": "Third",
-                    "sort_order": 2,
                 },
             ]
         },
     )
 
     assert response.status_code == 422
-    assert "at least 4 items" in str(response.json()).lower()
+    assert "at least 2 item" in str(response.json()).lower()
 
 
 def test_update_current_user_info_empty_prompt_falls_back_to_default(

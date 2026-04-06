@@ -21,8 +21,9 @@ struct SettingsView: View {
     @State private var serverNewsListPreferencePrompt = ""
     @State private var hasUnsavedNewsListPreferencePromptEdits = false
     @State private var isSavingNewsListPreferencePrompt = false
-    @State private var councilPersonasDraft = CouncilPersona.defaults
-    @State private var serverCouncilPersonas = CouncilPersona.defaults
+    @State private var councilPersonasDraft: [CouncilPersona] = []
+    @State private var serverCouncilPersonas: [CouncilPersona] = []
+    @State private var newExpertName = ""
     @State private var hasUnsavedCouncilPersonaEdits = false
     @State private var isSavingCouncilPersonas = false
     @FocusState private var isNewsListPreferencePromptFocused: Bool
@@ -204,10 +205,10 @@ struct SettingsView: View {
                         .frame(width: Spacing.iconSize, height: Spacing.iconSize)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Council Personas")
+                        Text("Your Experts")
                             .font(.listTitle)
                             .foregroundStyle(Color.onSurface)
-                        Text("These four branches power council chat and can be switched live with tabs inside a conversation.")
+                        Text("Add 2-3 people you respect. Council chat gives you their perspective on any article.")
                             .font(.listCaption)
                             .foregroundStyle(Color.onSurfaceSecondary)
                     }
@@ -215,54 +216,69 @@ struct SettingsView: View {
                     Spacer(minLength: 8)
                 }
 
+                // Expert list
                 ForEach(Array(councilPersonasDraft.enumerated()), id: \.element.id) { index, persona in
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField(
-                            "Persona name",
-                            text: Binding(
-                                get: { councilPersonasDraft[index].displayName },
-                                set: { newValue in
-                                    councilPersonasDraft[index] = CouncilPersona(
-                                        id: councilPersonasDraft[index].id,
-                                        displayName: newValue,
-                                        instructionPrompt: councilPersonasDraft[index].instructionPrompt,
-                                        sortOrder: councilPersonasDraft[index].sortOrder
-                                    )
-                                    hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
-                                }
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(expertColor(for: index).opacity(0.15))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                Text(persona.displayName.prefix(1).uppercased())
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(expertColor(for: index))
                             )
-                        )
-                        .textFieldStyle(.roundedBorder)
 
-                        TextEditor(
-                            text: Binding(
-                                get: { councilPersonasDraft[index].instructionPrompt },
-                                set: { newValue in
-                                    councilPersonasDraft[index] = CouncilPersona(
-                                        id: councilPersonasDraft[index].id,
-                                        displayName: councilPersonasDraft[index].displayName,
-                                        instructionPrompt: newValue,
-                                        sortOrder: councilPersonasDraft[index].sortOrder
-                                    )
-                                    hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
-                                }
-                            )
-                        )
-                        .frame(minHeight: 92)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 8)
-                        .background(Color.surfaceSecondary)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        Text(persona.displayName)
+                            .font(.body)
+                            .foregroundStyle(Color.onSurface)
+
+                        Spacer()
+
+                        Button {
+                            removeExpert(at: index)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundStyle(Color.onSurfaceSecondary.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .padding(12)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                     .background(Color.surfaceSecondary.opacity(0.55))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+
+                // Add expert input
+                if councilPersonasDraft.count < CouncilPersona.maxExperts {
+                    HStack(spacing: 10) {
+                        TextField("e.g. Paul Graham, Mariana Mazzucato", text: $newExpertName)
+                            .textFieldStyle(.roundedBorder)
+                            .submitLabel(.done)
+                            .onSubmit { addExpert() }
+
+                        Button {
+                            addExpert()
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundStyle(.orange)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(newExpertName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                 }
 
                 HStack {
-                    Text("Tapping a council tab switches the active branch for future messages.")
-                        .font(.caption)
-                        .foregroundStyle(Color.onSurfaceSecondary)
+                    if councilPersonasDraft.count < CouncilPersona.minExperts {
+                        Text("Add at least \(CouncilPersona.minExperts) experts to enable council chat.")
+                            .font(.caption)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                    } else {
+                        Text("Tap the council button in chat to hear from your experts.")
+                            .font(.caption)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                    }
                     Spacer()
                     Button {
                         Task { await saveCouncilPersonas() }
@@ -270,7 +286,7 @@ struct SettingsView: View {
                         if isSavingCouncilPersonas {
                             ProgressView()
                         } else {
-                            Text("Save Personas")
+                            Text("Save")
                                 .font(.callout.weight(.semibold))
                         }
                     }
@@ -281,6 +297,29 @@ struct SettingsView: View {
             .padding(.vertical, Spacing.rowVertical)
             .settingsCard()
         }
+    }
+
+    private func expertColor(for index: Int) -> Color {
+        let colors: [Color] = [.orange, .blue, .purple]
+        return colors[index % colors.count]
+    }
+
+    private func addExpert() {
+        let name = newExpertName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, councilPersonasDraft.count < CouncilPersona.maxExperts else { return }
+        let persona = CouncilPersona(name: name, sortOrder: councilPersonasDraft.count)
+        councilPersonasDraft.append(persona)
+        newExpertName = ""
+        hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
+    }
+
+    private func removeExpert(at index: Int) {
+        councilPersonasDraft.remove(at: index)
+        // Re-index sort orders
+        councilPersonasDraft = councilPersonasDraft.enumerated().map { i, persona in
+            CouncilPersona(id: persona.id, displayName: persona.displayName, sortOrder: i)
+        }
+        hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
     }
 
     private var newsListPreferencePromptRow: some View {
@@ -599,7 +638,7 @@ struct SettingsView: View {
     @MainActor
     private func syncCouncilPersonasWithAuthenticatedUser(force: Bool) {
         guard !isSavingCouncilPersonas else { return }
-        let resolved = authenticatedUser?.councilPersonas ?? CouncilPersona.defaults
+        let resolved = authenticatedUser?.councilPersonas ?? []
         serverCouncilPersonas = resolved
         if force || !hasUnsavedCouncilPersonaEdits {
             councilPersonasDraft = resolved
@@ -612,7 +651,6 @@ struct SettingsView: View {
             CouncilPersona(
                 id: persona.id,
                 displayName: persona.displayName.trimmingCharacters(in: .whitespacesAndNewlines),
-                instructionPrompt: persona.instructionPrompt.trimmingCharacters(in: .whitespacesAndNewlines),
                 sortOrder: index
             )
         }
@@ -645,8 +683,10 @@ struct SettingsView: View {
         guard !isSavingCouncilPersonas, authenticatedUser != nil else { return }
 
         let normalized = normalizedCouncilPersonas()
-        guard normalized.allSatisfy({ !$0.displayName.isEmpty && !$0.instructionPrompt.isEmpty }) else {
-            alertMessage = "Each council persona needs a name and prompt."
+        guard normalized.count >= CouncilPersona.minExperts,
+              normalized.count <= CouncilPersona.maxExperts,
+              normalized.allSatisfy({ !$0.displayName.isEmpty }) else {
+            alertMessage = "Add \(CouncilPersona.minExperts)-\(CouncilPersona.maxExperts) experts with names to save."
             showingAlert = true
             return
         }
@@ -662,10 +702,10 @@ struct SettingsView: View {
             serverCouncilPersonas = user.councilPersonas
             councilPersonasDraft = user.councilPersonas
             hasUnsavedCouncilPersonaEdits = false
-            alertMessage = "Council personas saved."
+            alertMessage = "Experts saved."
             showingAlert = true
         } catch {
-            alertMessage = "Failed to save council personas: \(error.localizedDescription)"
+            alertMessage = "Failed to save experts: \(error.localizedDescription)"
             showingAlert = true
         }
     }

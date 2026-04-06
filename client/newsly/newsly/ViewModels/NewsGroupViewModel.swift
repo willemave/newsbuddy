@@ -183,21 +183,6 @@ class NewsGroupViewModel: CursorPaginatedViewModel {
         }
     }
 
-    func convertToArticle(_ contentId: Int) async {
-        do {
-            let response = try await contentService.convertNewsItemToArticle(id: contentId)
-
-            // Show success message or navigate to new article
-            // For now, just log success
-            print("Converted to article: \(response.newContentId), already exists: \(response.alreadyExists)")
-
-            // Optionally: Navigate to the article detail view
-            // or show a toast notification
-        } catch {
-            errorMessage = "Failed to convert: \(error.localizedDescription)"
-        }
-    }
-
     func refresh() async {
         resetPagination()
         await loadNewsGroups(preserveReadGroups: true)

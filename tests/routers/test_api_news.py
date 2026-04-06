@@ -7,7 +7,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy.exc import OperationalError
 
+from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content, NewsItem, NewsItemReadStatus
+from app.repositories import favorites_repository
 
 
 class _FakeQueueService:
@@ -320,6 +322,7 @@ def test_list_news_items_orders_by_published_at_before_ingested_at(
 def test_convert_news_item_to_article_queues_processing(
     client,
     db_session,
+    test_user,
     monkeypatch,
 ) -> None:
     news_item = _create_news_item(
@@ -330,7 +333,10 @@ def test_convert_news_item_to_article_queues_processing(
     db_session.commit()
 
     fake_queue = _FakeQueueService()
-    monkeypatch.setattr("app.routers.api.news.get_queue_service", lambda: fake_queue)
+    monkeypatch.setattr(
+        "app.commands.convert_news_to_article.get_queue_service",
+        lambda: fake_queue,
+    )
 
     response = client.post(f"/api/news/items/{news_item.id}/convert-to-article")
     assert response.status_code == 200
@@ -339,9 +345,64 @@ def test_convert_news_item_to_article_queues_processing(
     assert payload["already_exists"] is False
     assert payload["news_item_id"] == news_item.id
     assert fake_queue.calls == [("process_content", payload["new_content_id"])]
+    assert (
+        favorites_repository.is_content_favorited(
+            db_session,
+            payload["new_content_id"],
+            test_user.id,
+        )
+        is True
+    )
 
     article = db_session.query(Content).filter(Content.id == payload["new_content_id"]).one()
     assert article.url == "https://example.com/convert-1"
+
+
+def test_convert_news_item_to_article_favorites_existing_article(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    existing_article = Content(
+        url="https://example.com/convert-existing",
+        source_url="https://example.com/convert-existing",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Existing article",
+        source="example.com",
+    )
+    db_session.add(existing_article)
+    db_session.flush()
+
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="convert-existing",
+        summary_title="Convert existing",
+    )
+    db_session.commit()
+
+    fake_queue = _FakeQueueService()
+    monkeypatch.setattr(
+        "app.commands.convert_news_to_article.get_queue_service",
+        lambda: fake_queue,
+    )
+
+    response = client.post(f"/api/news/items/{news_item.id}/convert-to-article")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["already_exists"] is True
+    assert payload["new_content_id"] == existing_article.id
+    assert fake_queue.calls == []
+    assert (
+        favorites_repository.is_content_favorited(
+            db_session,
+            existing_article.id,
+            test_user.id,
+        )
+        is True
+    )
 
 
 def test_removed_digest_routes_return_not_found(client) -> None:

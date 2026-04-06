@@ -20,7 +20,7 @@ def test_full_convert_workflow(client: TestClient, db_session: Session) -> None:
             "article": {
                 "url": "https://techblog.example/future-of-ai",
                 "title": "The Future of AI",
-                "source_domain": "techblog.example"
+                "source_domain": "techblog.example",
             },
             "discussion_url": "https://news.ycombinator.com/item?id=99999",
             "summary": {
@@ -28,10 +28,7 @@ def test_full_convert_workflow(client: TestClient, db_session: Session) -> None:
                 "summary": (
                     "Interesting discussion about AI trends that highlights recent advancements"
                 ),
-                "key_points": [
-                    "AI is evolving rapidly",
-                    "New models are more efficient"
-                ]
+                "key_points": ["AI is evolving rapidly", "New models are more efficient"],
             },
             "summary_kind": "short_news_digest",
             "summary_version": 1,
@@ -60,9 +57,9 @@ def test_full_convert_workflow(client: TestClient, db_session: Session) -> None:
     assert article.status == ContentStatus.PENDING.value
 
     # 4. Verify article appears in content list via database
-    all_articles = db_session.query(Content).filter(
-        Content.content_type == ContentType.ARTICLE.value
-    ).all()
+    all_articles = (
+        db_session.query(Content).filter(Content.content_type == ContentType.ARTICLE.value).all()
+    )
     article_ids = [a.id for a in all_articles]
     assert new_article_id in article_ids, (
         f"New article {new_article_id} not found in articles {article_ids}"
@@ -80,7 +77,7 @@ def test_full_convert_workflow(client: TestClient, db_session: Session) -> None:
 def test_convert_marks_news_as_favorite_interaction(
     client: TestClient, db_session: Session, test_user: User
 ) -> None:
-    """Test that favoriting news and converting preserves favorite status."""
+    """Test that converting news saves the resulting article to knowledge."""
     # Create news item
     news = Content(
         url="https://example.com/article",
@@ -116,8 +113,6 @@ def test_convert_marks_news_as_favorite_interaction(
     news_detail = client.get(f"/api/content/{news.id}")
     assert news_detail.json()["is_favorited"] is True
 
-    # Article is newly pending, so verify favorite state directly instead of via detail.
     assert (
-        favorites_repository.is_content_favorited(db_session, new_article_id, test_user.id)
-        is False
+        favorites_repository.is_content_favorited(db_session, new_article_id, test_user.id) is True
     )

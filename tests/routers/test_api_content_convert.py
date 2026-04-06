@@ -5,9 +5,14 @@ from sqlalchemy.orm import Session
 
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content
+from app.repositories import favorites_repository
 
 
-def test_convert_news_link_to_article(client: TestClient, db_session: Session) -> None:
+def test_convert_news_link_to_article(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+) -> None:
     """Test converting a news link to a full article."""
     # Create a news item with article URL
     news = Content(
@@ -18,13 +23,10 @@ def test_convert_news_link_to_article(client: TestClient, db_session: Session) -
             "article": {
                 "url": "https://example.com/article",
                 "title": "Test Article",
-                "source_domain": "example.com"
+                "source_domain": "example.com",
             },
             "discussion_url": "https://news.ycombinator.com/item?id=12345",
-            "summary": {
-                "title": "News Summary",
-                "summary": "This is a news summary"
-            },
+            "summary": {"title": "News Summary", "summary": "This is a news summary"},
             "summary_kind": "short_news_digest",
             "summary_version": 1,
         },
@@ -48,6 +50,9 @@ def test_convert_news_link_to_article(client: TestClient, db_session: Session) -
     assert new_article.content_type == ContentType.ARTICLE.value
     assert new_article.url == "https://example.com/article"
     assert new_article.status == ContentStatus.PENDING.value
+    assert (
+        favorites_repository.is_content_favorited(db_session, new_article.id, test_user.id) is True
+    )
 
 
 def test_convert_news_link_no_article_url(client: TestClient, db_session: Session) -> None:
@@ -57,9 +62,7 @@ def test_convert_news_link_no_article_url(client: TestClient, db_session: Sessio
         content_type=ContentType.NEWS.value,
         status=ContentStatus.COMPLETED.value,
         content_metadata={
-            "summary": {
-                "title": "News Summary"
-            },
+            "summary": {"title": "News Summary"},
             "summary_kind": "short_news_digest",
             "summary_version": 1,
         },
@@ -89,7 +92,11 @@ def test_convert_non_news_content(client: TestClient, db_session: Session) -> No
     assert "only news" in response.json()["detail"].lower()
 
 
-def test_convert_already_exists(client: TestClient, db_session: Session) -> None:
+def test_convert_already_exists(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+) -> None:
     """Test converting when article already exists returns existing ID."""
     article_url = "https://example.com/article"
 
@@ -124,3 +131,4 @@ def test_convert_already_exists(client: TestClient, db_session: Session) -> None
     assert data["status"] == "success"
     assert data["new_content_id"] == existing.id
     assert data["already_exists"] is True
+    assert favorites_repository.is_content_favorited(db_session, existing.id, test_user.id) is True

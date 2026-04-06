@@ -63,7 +63,6 @@ struct ContentDetailView: View {
     let initialContentId: Int
     let initialContentType: ContentType?
     let allContentIds: [Int]
-    let onConvert: ((Int) async -> Void)?
     @StateObject private var viewModel = ContentDetailViewModel()
     @StateObject private var chatSessionManager = ActiveChatSessionManager.shared
     @EnvironmentObject var readingStateStore: ReadingStateStore
@@ -101,13 +100,11 @@ struct ContentDetailView: View {
     init(
         contentId: Int,
         contentType: ContentType? = nil,
-        allContentIds: [Int] = [],
-        onConvert: ((Int) async -> Void)? = nil
+        allContentIds: [Int] = []
     ) {
         self.initialContentId = contentId
         self.initialContentType = contentType
         self.allContentIds = allContentIds.isEmpty ? [contentId] : allContentIds
-        self.onConvert = onConvert
         if let index = allContentIds.firstIndex(of: contentId) {
             self._currentIndex = State(initialValue: index)
         } else {
@@ -504,7 +501,7 @@ struct ContentDetailView: View {
         activeSheet = .chat
     }
 
-    private func startChatWithPrompt(_ prompt: String, contentId: Int) async {
+    private func startChat(contentId: Int, prompt: String? = nil) async {
         guard !isStartingChat else { return }
 
         isStartingChat = true
@@ -512,7 +509,9 @@ struct ContentDetailView: View {
 
         do {
             let session = try await ChatService.shared.startArticleChat(contentId: contentId)
-            _ = try await ChatService.shared.sendMessageAsync(sessionId: session.id, message: prompt)
+            if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                _ = try await ChatService.shared.sendMessageAsync(sessionId: session.id, message: prompt)
+            }
             activeSheet = nil
             openChatSession(sessionId: session.id, contentId: contentId)
         } catch {
@@ -970,14 +969,14 @@ struct ContentDetailView: View {
                 .accessibilityIdentifier("content.action.download_more")
             }
 
-            // Convert (news only)
-            if content.contentTypeEnum == .news, let onConvert = onConvert {
+            // Save linked article (news only)
+            if content.contentTypeEnum == .news {
                 Spacer()
 
                 Button(action: {
                     Task {
                         isConverting = true
-                        await onConvert(content.id)
+                        await viewModel.saveLinkedArticleAsKnowledge()
                         isConverting = false
                     }
                 }) {
@@ -986,11 +985,12 @@ struct ContentDetailView: View {
                             .scaleEffect(0.8)
                             .frame(width: 44, height: 44)
                     } else {
-                        minimalActionIcon("arrow.right.circle", overlaid: overlaid)
+                        minimalActionIcon("books.vertical", overlaid: overlaid)
                     }
                 }
                 .disabled(isConverting)
                 .accessibilityIdentifier("content.action.convert")
+                .accessibilityLabel("Save linked article to Knowledge")
             }
 
             Spacer()
@@ -1285,13 +1285,23 @@ struct ContentDetailView: View {
                 }
 
                 sheetOptionRow(
+                    icon: "message",
+                    iconColor: .accentColor,
+                    title: "Start chat",
+                    subtitle: "Ask your own question about this story",
+                    disabled: isStartingChat,
+                    action: {
+                        Task { await startChat(contentId: content.id) }
+                    }
+                )
+                sheetOptionRow(
                     icon: "doc.text.magnifyingglass",
                     iconColor: .blue,
                     title: "Dig deeper",
                     subtitle: "Explore key points in detail",
                     disabled: isStartingChat,
                     action: {
-                        Task { await startChatWithPrompt(deepDivePrompt(for: content), contentId: content.id) }
+                        Task { await startChat(contentId: content.id, prompt: deepDivePrompt(for: content)) }
                     }
                 )
                 sheetOptionRow(
@@ -1311,7 +1321,7 @@ struct ContentDetailView: View {
                     subtitle: "Verify claims with sources",
                     disabled: isStartingChat,
                     action: {
-                        Task { await startChatWithPrompt(corroboratePrompt(for: content), contentId: content.id) }
+                        Task { await startChat(contentId: content.id, prompt: corroboratePrompt(for: content)) }
                     }
                 )
                 sheetOptionRow(

@@ -11,59 +11,34 @@ from sqlalchemy.sql import func
 
 from app.core.db import Base
 
+MAX_COUNCIL_EXPERTS = 3
+MIN_COUNCIL_EXPERTS = 2
+
 
 def build_default_council_personas() -> list[dict[str, Any]]:
-    """Return the default council persona presets for new users."""
+    """Return the default council persona presets for new users.
 
-    return [
-        {
-            "id": "analyst",
-            "display_name": "Analyst",
-            "instruction_prompt": (
-                "Focus on the core argument, strongest evidence, missing evidence, "
-                "and what matters most if the user needs a clear mental model."
-            ),
-            "sort_order": 0,
-        },
-        {
-            "id": "skeptic",
-            "display_name": "Skeptic",
-            "instruction_prompt": (
-                "Stress-test assumptions, weak evidence, overreach, incentives, "
-                "and what could make the thesis wrong."
-            ),
-            "sort_order": 1,
-        },
-        {
-            "id": "builder",
-            "display_name": "Builder",
-            "instruction_prompt": (
-                "Translate the discussion into concrete product, engineering, or "
-                "operational implications and practical next moves."
-            ),
-            "sort_order": 2,
-        },
-        {
-            "id": "historian",
-            "display_name": "Historian",
-            "instruction_prompt": (
-                "Add context from prior cycles, related precedents, and comparable "
-                "moments so the user can place the current topic in a longer arc."
-            ),
-            "sort_order": 3,
-        },
-    ]
+    Returns an empty list — experts are personal and must be chosen by the user.
+    """
+
+    return []
 
 
 class CouncilPersonaConfig(BaseModel):
-    """User-configurable persona preset for council chat."""
+    """User-configurable expert for council chat.
+
+    Each expert represents a real person whose perspective the user values.
+    The ``instruction_prompt`` is kept for backward compatibility but is no
+    longer required — the council chat service generates a rich impersonation
+    prompt from the ``display_name`` at runtime.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(..., min_length=1, max_length=50)
     display_name: str = Field(..., min_length=1, max_length=80)
-    instruction_prompt: str = Field(..., min_length=1, max_length=1500)
-    sort_order: int = Field(..., ge=0, le=3)
+    instruction_prompt: str = Field(default="", max_length=1500)
+    sort_order: int = Field(..., ge=0, le=MAX_COUNCIL_EXPERTS - 1)
 
     @field_validator("id", "display_name", "instruction_prompt", mode="before")
     @classmethod
@@ -76,17 +51,17 @@ class CouncilPersonaConfig(BaseModel):
 
 
 def resolve_user_council_personas(user: User | object) -> list[CouncilPersonaConfig]:
-    """Return validated council personas for a user, falling back to defaults."""
+    """Return validated council personas for a user (empty when unconfigured)."""
 
     raw_value = getattr(user, "council_personas", None)
-    if isinstance(raw_value, list):
+    if isinstance(raw_value, list) and raw_value:
         try:
             personas = [CouncilPersonaConfig.model_validate(item) for item in raw_value]
-            if len(personas) == 4:
+            if MIN_COUNCIL_EXPERTS <= len(personas) <= MAX_COUNCIL_EXPERTS:
                 return sorted(personas, key=lambda persona: persona.sort_order)
         except Exception:  # noqa: BLE001
             pass
-    return [CouncilPersonaConfig.model_validate(item) for item in build_default_council_personas()]
+    return []
 
 
 class User(Base):
@@ -241,8 +216,8 @@ class UpdateUserProfileRequest(BaseModel):
     news_list_preference_prompt: str | None = Field(default=None, max_length=4000)
     council_personas: list[CouncilPersonaConfig] | None = Field(
         default=None,
-        min_length=4,
-        max_length=4,
+        min_length=MIN_COUNCIL_EXPERTS,
+        max_length=MAX_COUNCIL_EXPERTS,
     )
 
     @field_validator("council_personas")
@@ -250,19 +225,22 @@ class UpdateUserProfileRequest(BaseModel):
     def validate_council_personas(
         cls, value: list[CouncilPersonaConfig] | None
     ) -> list[CouncilPersonaConfig] | None:
-        """Enforce stable council persona slots."""
+        """Enforce council expert slots (2-3 real-person experts)."""
 
         if value is None:
             return None
-        if len(value) != 4:
-            raise ValueError("council_personas must contain exactly 4 entries")
+        count = len(value)
+        if not (MIN_COUNCIL_EXPERTS <= count <= MAX_COUNCIL_EXPERTS):
+            raise ValueError(
+                f"council_personas must contain {MIN_COUNCIL_EXPERTS}-{MAX_COUNCIL_EXPERTS} entries"
+            )
 
         persona_ids = [persona.id for persona in value]
-        if len(set(persona_ids)) != 4:
+        if len(set(persona_ids)) != count:
             raise ValueError("council_personas must use unique ids")
 
         sort_orders = sorted(persona.sort_order for persona in value)
-        if sort_orders != [0, 1, 2, 3]:
-            raise ValueError("council_personas sort_order values must be 0, 1, 2, and 3")
+        if sort_orders != list(range(count)):
+            raise ValueError(f"council_personas sort_order values must be 0 through {count - 1}")
 
         return sorted(value, key=lambda persona: persona.sort_order)
