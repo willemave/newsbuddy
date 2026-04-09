@@ -80,6 +80,7 @@ def test_stream_agent_turn_emits_expected_events(monkeypatch: pytest.MonkeyPatch
             callback_agent_response,
             callback_agent_chat_response_part,
         ) -> None:
+            del client, agent_id, user_id, requires_auth, config
             self.audio_interface = audio_interface
             self.callback_agent_response = callback_agent_response
             self.callback_agent_chat_response_part = callback_agent_chat_response_part
@@ -162,6 +163,7 @@ def test_stream_agent_turn_reuses_one_runtime_for_multiple_turns(
             callback_agent_response,
             callback_agent_chat_response_part,
         ) -> None:
+            del client, agent_id, user_id, requires_auth, audio_interface, config
             self.callback_agent_response = callback_agent_response
             self.callback_agent_chat_response_part = callback_agent_chat_response_part
 

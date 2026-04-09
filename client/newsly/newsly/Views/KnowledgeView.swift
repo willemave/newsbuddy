@@ -9,6 +9,7 @@ import SwiftUI
 
 struct KnowledgeView: View {
     let onSelectSession: ((ChatSessionRoute) -> Void)?
+    let onShowFavorites: (() -> Void)?
     let onShowSessionHistory: (() -> Void)?
 
     @StateObject private var viewModel = KnowledgeHubViewModel()
@@ -58,9 +59,11 @@ struct KnowledgeView: View {
 
     init(
         onSelectSession: ((ChatSessionRoute) -> Void)? = nil,
+        onShowFavorites: (() -> Void)? = nil,
         onShowSessionHistory: (() -> Void)? = nil
     ) {
         self.onSelectSession = onSelectSession
+        self.onShowFavorites = onShowFavorites
         self.onShowSessionHistory = onShowSessionHistory
     }
 
@@ -72,6 +75,7 @@ struct KnowledgeView: View {
                     searchFieldSection
                     errorBannerSection
                     quickActionsSection
+                    librarySection
                     discoverySection
                     recentChatsSection
                 }
@@ -168,6 +172,58 @@ struct KnowledgeView: View {
 
     private var quickActionsSection: some View {
         actionSection(title: "Quick Actions", actions: quickActions)
+    }
+
+    private var librarySection: some View {
+        Group {
+            if let onShowFavorites {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Library")
+                        .font(.terracottaHeadlineSmall)
+                        .foregroundStyle(Color.onSurface)
+                        .padding(.horizontal, Spacing.screenHorizontal)
+
+                    Button {
+                        onShowFavorites()
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.terracottaPrimary)
+                                .frame(width: 38, height: 38)
+                                .background(Color.terracottaPrimary.opacity(0.14))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Favorites")
+                                    .font(.terracottaHeadlineSmall)
+                                    .foregroundColor(.onSurface)
+
+                                Text("Saved articles and podcasts")
+                                    .font(.terracottaBodySmall)
+                                    .foregroundColor(.onSurfaceSecondary)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.onSurfaceSecondary)
+                        }
+                        .padding(14)
+                        .background(Color.surfaceSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+                        )
+                        .padding(.horizontal, Spacing.screenHorizontal)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.bottom, 28)
+            }
+        }
     }
 
     private var discoverySection: some View {

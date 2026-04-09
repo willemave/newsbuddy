@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+from botocore.exceptions import ClientError
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.schema import Content, ContentBody
 from app.services.gateways.object_storage_gateway import (
@@ -30,6 +32,8 @@ API_METADATA_REDACT_KEYS: tuple[str, ...] = LEGACY_RAW_METADATA_KEYS + (
     "storage_key",
     "storage_bucket",
 )
+
+logger = get_logger(__name__)
 
 
 class ContentBodyVariant(StrEnum):
@@ -305,32 +309,37 @@ class ContentBodyResolver:
             .filter(ContentBody.content_id == content.id, ContentBody.variant == variant.value)
             .first()
         )
+        fallback_body = self._build_fallback_body(content=content, variant=variant)
         if row is None or not getattr(row, "storage_key", None):
-            metadata = (
-                content.content_metadata if isinstance(content.content_metadata, dict) else {}
-            )
-            fallback_text = (
-                extract_rendered_body_text(metadata)
-                if variant == ContentBodyVariant.RENDERED
-                else extract_source_body_text(content.content_type, metadata)
-            )
-            if not fallback_text:
-                return None
-            fallback_format = (
-                ContentBodyFormat.MARKDOWN
-                if variant == ContentBodyVariant.RENDERED
-                else ContentBodyFormat.TEXT
-            )
-            return ResolvedContentBody(
-                content_id=int(content.id),
-                variant=variant,
-                kind=_body_kind_for_content_type(content.content_type),
-                format=fallback_format,
-                text=fallback_text,
-                updated_at=getattr(content, "updated_at", None),
-            )
+            return fallback_body
 
-        text = self._gateway.get_text(key=row.storage_key)
+        try:
+            text = self._gateway.get_text(key=row.storage_key)
+        except FileNotFoundError:
+            logger.warning(
+                "Canonical content body missing from local storage; falling back to metadata",
+                extra={
+                    "content_id": int(content.id),
+                    "variant": variant.value,
+                    "storage_key": row.storage_key,
+                },
+            )
+            return fallback_body
+        except ClientError as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code") or "")
+            if error_code not in {"404", "NoSuchKey", "NotFound"}:
+                raise
+            logger.warning(
+                "Canonical content body missing from object storage; falling back to metadata",
+                extra={
+                    "content_id": int(content.id),
+                    "variant": variant.value,
+                    "storage_key": row.storage_key,
+                    "error_code": error_code,
+                },
+            )
+            return fallback_body
+
         return ResolvedContentBody(
             content_id=int(content.id),
             variant=variant,
@@ -338,6 +347,35 @@ class ContentBodyResolver:
             format=ContentBodyFormat(row.content_format),
             text=text,
             updated_at=row.updated_at,
+        )
+
+    def _build_fallback_body(
+        self,
+        *,
+        content: Content,
+        variant: ContentBodyVariant,
+    ) -> ResolvedContentBody | None:
+        metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
+        fallback_text = (
+            extract_rendered_body_text(metadata)
+            if variant == ContentBodyVariant.RENDERED
+            else extract_source_body_text(content.content_type, metadata)
+        )
+        if not fallback_text:
+            return None
+
+        fallback_format = (
+            ContentBodyFormat.MARKDOWN
+            if variant == ContentBodyVariant.RENDERED
+            else ContentBodyFormat.TEXT
+        )
+        return ResolvedContentBody(
+            content_id=int(content.id),
+            variant=variant,
+            kind=_body_kind_for_content_type(content.content_type),
+            format=fallback_format,
+            text=fallback_text,
+            updated_at=getattr(content, "updated_at", None),
         )
 
     def resolve_text(

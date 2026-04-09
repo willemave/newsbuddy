@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import json
 import os
 import shutil
 import socket
@@ -11,7 +9,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -19,16 +17,15 @@ from urllib.parse import urlparse
 import pytest
 import requests
 import uvicorn
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.db import get_db_session, get_readonly_db_session
 from app.main import app
-from app.models.schema import Base
+from tests.support.fixture_files import encode_launch_fixture
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MAESTRO_FLOW_DIR = REPO_ROOT / ".maestro" / "flows"
-FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
+IOS_E2E_DIR = Path(__file__).resolve().parent
+MAESTRO_FLOW_DIR = IOS_E2E_DIR / "flows"
 DEFAULT_APP_ID = "org.willemaw.newsly"
 
 
@@ -85,31 +82,10 @@ def maestro_bin() -> str:
 
 
 @pytest.fixture
-def test_db() -> Iterator:
-    """Create a file-backed SQLite engine for threaded iOS E2E traffic."""
-    with tempfile.NamedTemporaryFile(suffix="-ios-e2e.db", delete=False) as database_file:
-        database_path = Path(database_file.name)
-
-    engine = create_engine(
-        f"sqlite:///{database_path}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(bind=engine)
-    try:
-        yield engine
-    finally:
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
-        database_path.unlink(missing_ok=True)
-
-
-@pytest.fixture
-def live_server(test_db) -> Iterator[LiveServer]:
+def live_server(db_session_factory: sessionmaker) -> Iterator[LiveServer]:
     """Expose the FastAPI app over HTTP with test DB dependency overrides."""
-    session_local = sessionmaker(autocommit=False, autoflush=False, bind=test_db)
-
     def override_get_db() -> Iterator[Session]:
-        db = session_local()
+        db = db_session_factory()
         try:
             yield db
             db.commit()
@@ -139,7 +115,7 @@ def live_server(test_db) -> Iterator[LiveServer]:
 
 
 @pytest.fixture
-def run_maestro_flow(maestro_bin: str) -> callable:
+def run_maestro_flow(maestro_bin: str) -> Callable[..., subprocess.CompletedProcess[str]]:
     """Run a Maestro flow with shared Newsly E2E launch arguments."""
 
     _require_booted_simulator()
@@ -203,14 +179,87 @@ def run_maestro_flow(maestro_bin: str) -> callable:
     return _run
 
 
-def _load_json_fixture(name: str) -> dict:
-    fixture_path = FIXTURES_DIR / f"{name}.json"
-    return json.loads(fixture_path.read_text(encoding="utf-8"))
+@pytest.fixture
+def run_ios_flow(
+    live_server: LiveServer,
+    run_maestro_flow,
+    test_user,
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Run a Maestro flow against the shared live server and default test user."""
 
+    def _run(
+        flow_name: str,
+        *,
+        extra_env: Mapping[str, str] | None = None,
+        user_id: int | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return run_maestro_flow(
+            flow_name,
+            live_server=live_server,
+            user_id=test_user.id if user_id is None else user_id,
+            extra_env=extra_env,
+        )
+
+    return _run
+
+
+@pytest.fixture
+def completed_chat_processors_factory(
+    db_session_factory: sessionmaker,
+) -> Callable[..., tuple[Callable[..., Awaitable[None]], Callable[..., Awaitable[None]]]]:
+    """Build deterministic async chat processor stubs backed by the test DB."""
+    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+    from app.services.chat_agent import update_message_completed
+
+    def _build(
+        *,
+        assistant_reply: str,
+    ) -> tuple[Callable[..., Awaitable[None]], Callable[..., Awaitable[None]]]:
+        async def _process_message_async(
+            session_id: int,
+            message_id: int,
+            prompt: str,
+            *,
+            source: str = "chat",
+            task_id: int | None = None,
+        ) -> None:
+            del session_id, source, task_id
+            worker_db = db_session_factory()
+            try:
+                update_message_completed(
+                    worker_db,
+                    message_id,
+                    [
+                        ModelRequest(parts=[UserPromptPart(content=prompt)]),
+                        ModelResponse(parts=[TextPart(content=assistant_reply)]),
+                    ],
+                    display_user_prompt=prompt,
+                )
+            finally:
+                worker_db.close()
+
+        async def _process_assistant_turn_async(
+            session_id: int,
+            message_id: int,
+            prompt: str,
+            *,
+            screen_context,
+            source: str = "assistant",
+        ) -> None:
+            del screen_context
+            await _process_message_async(
+                session_id,
+                message_id,
+                prompt,
+                source=source,
+            )
+
+        return _process_message_async, _process_assistant_turn_async
+
+    return _build
 
 @pytest.fixture
 def ios_onboarding_personalized_fixture() -> str:
     """Return the personalized onboarding fixture encoded for launch arguments."""
-    fixture = _load_json_fixture("ios_onboarding_personalized")
-    payload = json.dumps(fixture, separators=(",", ":")).encode("utf-8")
-    return base64.b64encode(payload).decode("utf-8")
+    return encode_launch_fixture("ios_onboarding_personalized")

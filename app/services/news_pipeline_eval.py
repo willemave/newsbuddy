@@ -11,12 +11,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
 from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
-from app.core.db import Base
 from app.core.logging import get_logger
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
 from app.models.news_digest_models import NewsDigestBulletDraft, NewsDigestHeaderDraft
@@ -43,6 +40,7 @@ from app.services.news_ingestion import (
     upsert_news_item,
 )
 from app.services.news_processing import process_news_item
+from app.testing.postgres_harness import open_temporary_postgres_session
 
 logger = get_logger(__name__)
 
@@ -53,25 +51,9 @@ CASE_ID_CLEAN_PATTERN = re.compile(r"[^a-z0-9]+")
 
 @contextmanager
 def open_eval_session() -> Generator[Session]:
-    """Create an isolated in-memory database session for one eval run."""
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    session = session_local()
-    try:
+    """Create an isolated PostgreSQL-backed database session for one eval run."""
+    with open_temporary_postgres_session() as session:
         yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
 
 
 def load_eval_case(path: Path) -> NewsPipelineEvalCase:

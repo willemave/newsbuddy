@@ -59,6 +59,27 @@ def _clean_string(value: Any) -> str | None:
     return cleaned or None
 
 
+def _normalize_title_key(value: str | None) -> str | None:
+    cleaned = _clean_string(value)
+    if not cleaned:
+        return None
+    return cleaned.casefold()
+
+
+def _normalize_match_token(token: str) -> str:
+    normalized = token.casefold()
+    if normalized.endswith("ing") and len(normalized) > 6:
+        normalized = normalized[:-3]
+    elif (
+        (normalized.endswith("ed") and len(normalized) > 5)
+        or (normalized.endswith("es") and len(normalized) > 5)
+    ):
+        normalized = normalized[:-2]
+    elif normalized.endswith("s") and len(normalized) > 4:
+        normalized = normalized[:-1]
+    return normalized
+
+
 def _coerce_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -131,8 +152,12 @@ def match_tokens(item: NewsItem) -> set[str]:
 
 def match_tokens_for_text(text: str) -> set[str]:
     """Return normalized lexical tokens for already-built matching text."""
-    text = text.casefold()
-    return {token for token in MATCH_TOKEN_PATTERN.findall(text) if token not in MATCH_STOPWORDS}
+    tokens: set[str] = set()
+    for token in MATCH_TOKEN_PATTERN.findall(text.casefold()):
+        normalized = _normalize_match_token(token)
+        if normalized and normalized not in MATCH_STOPWORDS:
+            tokens.add(normalized)
+    return tokens
 
 
 def relaxed_lexical_guard(
@@ -271,6 +296,11 @@ def exact_relation_key(item: NewsItem) -> tuple[str, str] | None:
     if item.platform and item.source_external_id:
         return "external", f"{item.platform}:{item.source_external_id}"
     return None
+
+
+def exact_title_relation_key(item: NewsItem) -> str | None:
+    """Return a normalized exact-title key for deduping repeated summaries."""
+    return _normalize_title_key(item.summary_title or item.article_title)
 
 
 def select_best_evidence_item(items: list[NewsItem]) -> NewsItem:
@@ -425,6 +455,12 @@ def find_related_representative(
     if exact_key is not None:
         for candidate in candidates:
             if exact_relation_key(candidate) == exact_key:
+                return candidate
+
+    exact_title_key = exact_title_relation_key(item)
+    if exact_title_key is not None:
+        for candidate in candidates:
+            if exact_title_relation_key(candidate) == exact_title_key:
                 return candidate
 
     semantic_candidates, candidate_tokens_by_id, item_tokens = _semantic_prefilter_candidates(

@@ -38,7 +38,7 @@ def upgrade() -> None:
             JOIN contents c ON c.id = cf.content_id
             LEFT JOIN chat_sessions cs ON cs.user_id = cf.user_id
                 AND cs.content_id = cf.content_id
-                AND cs.is_archived = 0
+                AND cs.is_archived IS FALSE
             WHERE cs.id IS NULL
         """)
     ).fetchall()
@@ -59,7 +59,7 @@ def upgrade() -> None:
                      created_at, is_archived)
                 VALUES
                     (:user_id, :content_id, :title, 'article_brain', :llm_provider, :llm_model,
-                     :created_at, 0)
+                     :created_at, FALSE)
             """),
             {
                 "user_id": user_id,

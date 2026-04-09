@@ -39,7 +39,7 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
             sa.Column("updated_at", sa.DateTime(), nullable=True, onupdate=sa.func.now()),
             sa.Column("last_message_at", sa.DateTime(), nullable=True, index=True),
-            sa.Column("is_archived", sa.Boolean(), nullable=False, server_default="false"),
+            sa.Column("is_archived", sa.Boolean(), nullable=False, server_default=sa.false()),
         )
 
     if not _index_exists(inspector, "chat_sessions", "idx_chat_sessions_user_time"):

@@ -27,7 +27,7 @@ from app.models.user import (
 )
 from app.services.chat_agent import build_article_context, run_chat_turn, save_messages
 
-DISALLOWED_COUNCIL_SESSION_TYPES = {"deep_research", "voice_live"}
+DISALLOWED_COUNCIL_SESSION_TYPES = {"deep_research"}
 
 
 @dataclass

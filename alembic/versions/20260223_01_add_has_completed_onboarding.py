@@ -22,11 +22,11 @@ def upgrade() -> None:
             "has_completed_onboarding",
             sa.Boolean(),
             nullable=False,
-            server_default=sa.text("0"),
+            server_default=sa.false(),
         ),
     )
     # Backfill: existing users should not see onboarding again
-    op.execute("UPDATE users SET has_completed_onboarding = 1")
+    op.execute("UPDATE users SET has_completed_onboarding = TRUE")
 
 
 def downgrade() -> None:

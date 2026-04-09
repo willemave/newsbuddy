@@ -250,7 +250,6 @@ struct ChatSessionView: View {
     @State private var storedScrollState: ChatScrollState?
     @State private var hasRestoredScroll = false
     @State private var isAtBottom = false
-    @Namespace private var holdToTalkNamespace
 
     init(
         session: ChatSessionSummary,
@@ -761,6 +760,7 @@ struct ChatSessionView: View {
                         .font(.terracottaBodyMedium)
                         .lineLimit(1...5)
                         .focused($isInputFocused)
+                        .accessibilityIdentifier("knowledge.chat_input")
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -775,22 +775,19 @@ struct ChatSessionView: View {
                 )
                 .frame(maxWidth: .infinity)
 
-                HoldToTalkMicButton(
-                    isEnabled: !viewModel.isSending,
+                TapToTalkMicButton(
+                    isEnabled: !viewModel.isSending && !viewModel.isVoiceActionInFlight && !viewModel.isTranscribing,
                     isRecording: viewModel.isRecording,
+                    isBusy: viewModel.isVoiceActionInFlight && !viewModel.isRecording,
                     size: 38,
-                    namespace: holdToTalkNamespace,
-                    matchedId: "chat-session-mic",
-                    onPressStart: {
-                        Task { await viewModel.startVoiceRecording() }
-                    },
-                    onPressEnd: {
-                        Task { await viewModel.stopVoiceRecording() }
+                    action: {
+                        Task { await viewModel.toggleVoiceRecording() }
                     }
                 )
                 .opacity(viewModel.voiceDictationAvailable || viewModel.isRecording ? 1 : 0.72)
-                .accessibilityLabel("Hold to talk")
-                .accessibilityHint("Press and hold to dictate into this chat")
+                .accessibilityLabel(viewModel.isRecording ? "Stop recording" : "Start recording")
+                .accessibilityHint(viewModel.isRecording ? "Tap to stop and transcribe into this chat" : "Tap to dictate into this chat")
+                .accessibilityIdentifier("knowledge.chat_mic")
 
                 Button {
                     Task { await viewModel.sendMessage() }
@@ -810,6 +807,7 @@ struct ChatSessionView: View {
                     .clipShape(Circle())
                 }
                 .disabled(sendButtonDisabled)
+                .accessibilityIdentifier("knowledge.chat_send")
             }
 
             if viewModel.isTranscribing || viewModel.isRecording {
@@ -826,16 +824,23 @@ struct ChatSessionView: View {
 
                     if viewModel.isRecording {
                         HStack(spacing: 6) {
-                            Image(systemName: "waveform")
+                            Circle()
+                                .fill(Color.statusDestructive)
+                                .frame(width: 8, height: 8)
+                                .scaleEffect(1.0)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.statusDestructive.opacity(0.24), lineWidth: 6)
+                                        .scaleEffect(1.5)
+                                )
                                 .font(.terracottaBodySmall)
-                                .foregroundColor(Color.statusDestructive)
-                            Text("Listening...")
+                            Text("Recording. Tap the mic again to stop.")
                                 .font(.terracottaBodySmall)
                                 .foregroundColor(.onSurfaceSecondary)
                         }
                     }
                 }
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .padding(.horizontal, 16)

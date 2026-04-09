@@ -48,14 +48,12 @@ flowchart LR
   Admin["Jinja Admin UI"] --> API
   Agent["Agent / CLI / machine clients"] -->|API key or JWT| API
 
-  API --> DB[(SQLite / PostgreSQL-ready seams)]
+  API --> DB[(PostgreSQL)]
   API --> Static["/static and /static/images"]
   API --> Queue[(processing_tasks)]
 
   Scrapers["Scrapers"] -->|create contents + enqueue| Queue
   Submit["User submission"] -->|ANALYZE_URL| Queue
-  Voice["Realtime voice websocket"] <--> API
-
   Queue --> Workers["SequentialTaskProcessor workers"]
   Workers --> Analyzer["ContentAnalyzer"]
   Workers --> Strategies["Processing strategies"]
@@ -584,17 +582,7 @@ Endpoints:
 - `POST /api/openai/realtime/token`
 - `POST /api/openai/transcriptions`
 
-### 8.10 Voice APIs
-
-Prefix: `/api/voice`
-
-Endpoints:
-
-- `POST /api/voice/sessions`
-- `GET /api/voice/health`
-- `WS /api/voice/ws/{session_id}`
-
-### 8.11 Admin UI and logs
+### 8.10 Admin UI and logs
 
 Prefix: `/admin`
 
@@ -983,43 +971,22 @@ The `/api/agent/*` surface wraps existing features into machine-friendly flows:
 
 These APIs are intended for assistant and CLI style clients that do not need the full mobile UI semantics.
 
-## 14. Voice and Realtime Systems
+## 14. Audio and Narration Systems
 
-Voice support lives under `app/services/voice/` and `app/routers/api/voice.py`.
+Audio support is intentionally non-live.
 
-Modules:
+Active modules:
 
-- `session_manager.py`
-- `persistence.py`
-- `orchestrator.py`
-- `agent_streaming.py`
-- `elevenlabs_streaming.py`
-- `narration_tts.py`
+- `app/services/voice/narration_tts.py`
+- `app/routers/api/openai.py`
 
-### 14.1 Voice session flow
+### 14.1 Transcription flow
 
-1. client creates or resumes a voice session via `POST /api/voice/sessions`
-2. backend loads content context and/or chat context
-3. backend resolves or creates a linked chat session
-4. websocket client connects to `/api/voice/ws/{session_id}`
-5. orchestrator streams turn events, transcript deltas, assistant text, and assistant audio
+`/api/openai/transcriptions` accepts uploaded audio and returns backend-managed STT results.
 
-### 14.2 Voice dependencies
+### 14.2 Narration flow
 
-The voice system coordinates:
-
-- JWT-authenticated websocket access
-- ElevenLabs streaming/TTS health and audio output
-- persisted content/chat context
-- live onboarding intro state
-- session pruning and TTL behavior
-
-### 14.3 OpenAI helper endpoints
-
-Separate from the main voice websocket stack, `/api/openai/*` exposes:
-
-- realtime token creation
-- backend-assisted audio transcription
+Narration text is generated from content and rendered to one-shot TTS audio via `narration_tts.py`.
 
 ## 15. X Integration and External Connections
 

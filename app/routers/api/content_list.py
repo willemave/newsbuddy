@@ -121,14 +121,7 @@ def search_contents(
         deprecated=True,
     ),
 ) -> ContentListResponse:
-    """Search content with portable SQL patterns and cursor-based pagination.
-
-    When available, this uses SQLite FTS5 for fast, indexed search over titles,
-    sources, summaries, and transcripts. Otherwise it falls back to case-insensitive
-    LIKE over title/source and selected JSON fields (summary.title/summary.overview/
-    summary.hook) with a safe String cast for portability between SQLite and Postgres.
-    As a fallback, the entire JSON is also matched as text to catch legacy structures.
-    """
+    """Search content with portable SQL patterns and cursor-based pagination."""
     return search_content_cards.execute(
         db,
         user_id=current_user.id,

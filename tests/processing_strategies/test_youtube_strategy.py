@@ -78,7 +78,7 @@ async def test_extract_data_skips_known_download_errors(mocker, error_message):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def extract_info(self, _url, download=False):
+        def extract_info(self, _url, **_kwargs):
             raise yt_dlp.utils.DownloadError(error_message)
 
     mocker.patch("app.processing_strategies.youtube_strategy.yt_dlp.YoutubeDL", DummyYDL)
@@ -104,7 +104,7 @@ async def test_extract_data_raises_when_video_info_missing(mocker):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def extract_info(self, _url, download=False):
+        def extract_info(self, _url, **_kwargs):
             return None
 
     mocker.patch("app.processing_strategies.youtube_strategy.yt_dlp.YoutubeDL", DummyYDL)
@@ -129,7 +129,7 @@ async def test_extract_data_falls_back_to_title_when_no_text_content(mocker):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def extract_info(self, _url, download=False):
+        def extract_info(self, _url, **_kwargs):
             return {
                 "id": "abc123",
                 "title": "Sample Video",

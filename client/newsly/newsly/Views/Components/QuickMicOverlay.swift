@@ -417,6 +417,60 @@ struct HoldToTalkMicButton: View {
     }
 }
 
+struct TapToTalkMicButton: View {
+    let isEnabled: Bool
+    let isRecording: Bool
+    let isBusy: Bool
+    let size: CGFloat
+    var tint: Color = .accentColor
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: isEnabled || isRecording
+                                ? [tint, tint.opacity(0.82)]
+                                : [Color.gray.opacity(0.5), Color.gray.opacity(0.42)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                Circle()
+                    .stroke(Color.white.opacity(isRecording ? 0.26 : 0.14), lineWidth: 1)
+
+                Circle()
+                    .stroke(tint.opacity(isRecording ? 0.26 : 0), lineWidth: 8)
+                    .scaleEffect(isRecording ? 1.14 : 0.92)
+
+                if isBusy {
+                    ProgressView()
+                        .tint(.white)
+                        .controlSize(.small)
+                } else if isRecording {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: size * 0.3, weight: .bold))
+                        .foregroundStyle(.white)
+                } else {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: size * 0.34, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: size, height: size)
+            .scaleEffect(isRecording ? 1.05 : 1.0)
+            .shadow(color: tint.opacity(isRecording ? 0.22 : 0.12), radius: isRecording ? 12 : 8, y: 6)
+            .animation(.easeInOut(duration: 0.18), value: isRecording)
+            .animation(.easeInOut(duration: 0.18), value: isBusy)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+    }
+}
+
 struct WaveformGlyph: View {
     var body: some View {
         TimelineView(.animation) { context in

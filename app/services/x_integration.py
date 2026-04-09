@@ -14,7 +14,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
-from app.core.db import run_with_sqlite_lock_retry
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.content_submission import SubmitContentRequest
@@ -691,17 +690,7 @@ def _upsert_x_digest_tweet_content(
             db.rollback()
             raise
 
-    news_item, was_created = run_with_sqlite_lock_retry(
-        db=db,
-        component="x_integration",
-        operation="upsert_digest_tweet",
-        item_id=tweet.id,
-        context_data={
-            "source_type": source_type,
-            "submitted_via": submitted_via,
-        },
-        work=_persist_news_item,
-    )
+    news_item, was_created = _persist_news_item()
     queue_gateway = get_task_queue_gateway()
     if should_enqueue_news_item_enrichment(news_item=news_item, was_created=was_created):
         queue_gateway.enqueue(

@@ -254,9 +254,9 @@ def test_admin_logout(
     assert logout_response.json()["message"] == "Logged out"
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_get_current_user_info(
     auth_client: TestClient,
-    production_settings,
     user_factory,
     auth_headers_factory,
 ) -> None:
@@ -280,10 +280,10 @@ def test_get_current_user_info(
     assert data["has_x_bookmark_sync"] is False
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_get_current_user_info_reports_x_connection(
     auth_client: TestClient,
     db_session: Session,
-    production_settings,
     user_factory,
     auth_headers_factory,
 ) -> None:
@@ -308,10 +308,10 @@ def test_get_current_user_info_reports_x_connection(
     assert response.json()["has_x_bookmark_sync"] is True
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_update_current_user_info(
     auth_client: TestClient,
     db_session: Session,
-    production_settings,
     user_factory,
     auth_headers_factory,
 ) -> None:
@@ -367,9 +367,9 @@ def test_update_current_user_info(
     assert test_user.council_personas[0]["id"] == "einstein"
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_update_current_user_info_rejects_invalid_council_persona_count(
     auth_client: TestClient,
-    production_settings,
     user_factory,
     auth_headers_factory,
 ) -> None:
@@ -398,10 +398,10 @@ def test_update_current_user_info_rejects_invalid_council_persona_count(
     assert "at least 2 item" in str(response.json()).lower()
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_update_current_user_info_empty_prompt_falls_back_to_default(
     auth_client: TestClient,
     db_session: Session,
-    production_settings,
     user_factory,
     auth_headers_factory,
 ) -> None:
@@ -426,9 +426,9 @@ def test_update_current_user_info_empty_prompt_falls_back_to_default(
     assert test_user.news_list_preference_prompt is None
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_update_current_user_info_rejects_invalid_username(
     auth_client: TestClient,
-    production_settings,
     user_factory,
     auth_headers_factory,
 ) -> None:
@@ -449,27 +449,27 @@ def test_update_current_user_info_rejects_invalid_username(
     assert "Twitter username" in response.json()["detail"]
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_get_current_user_info_invalid_token(
     auth_client: TestClient,
-    production_settings,
 ) -> None:
     """Test /auth/me with invalid token."""
     response = auth_client.get("/auth/me", headers={"Authorization": "Bearer invalid.token.here"})
     assert response.status_code == 401
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_get_current_user_info_no_token(
     auth_client: TestClient,
-    production_settings,
 ) -> None:
     """Test /auth/me without token."""
     response = auth_client.get("/auth/me")
     assert response.status_code == 403
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_datetime_serialization_has_timezone(
     auth_client: TestClient,
-    production_settings,
     user_factory,
     auth_headers_factory,
 ) -> None:
@@ -518,10 +518,10 @@ def test_debug_new_user_enabled(
     assert data["refresh_token"]
 
 
+@pytest.mark.usefixtures("production_settings")
 def test_auth_me_repairs_invalid_email(
     auth_client: TestClient,
     db_session: Session,
-    production_settings,
     user_factory,
     auth_headers_factory,
 ) -> None:

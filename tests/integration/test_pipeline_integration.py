@@ -4,14 +4,10 @@ from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-import app.core.db as core_db
 from app.core.db import get_db
 from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Base, Content, ContentBody, ProcessingTask
+from app.models.schema import Content, ContentBody, ProcessingTask
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
 from app.pipeline.task_models import TaskEnvelope
 from app.services.queue import QueueService, TaskType
@@ -29,68 +25,45 @@ class _SummaryStub:
 
 
 @pytest.fixture
-def setup_test_db():
+def setup_test_db(db_session):
     """Setup an isolated test database with sample content."""
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    previous_engine = core_db._engine
-    previous_session_local = core_db._SessionLocal
-    previous_sqlite_log_flag = core_db._sqlite_runtime_diagnostics_logged
+    test_contents = [
+        Content(
+            url="https://example.com/article1",
+            title="Test Article 1",
+            content_type=ContentType.ARTICLE.value,
+            status=ContentStatus.NEW.value,
+            created_at=datetime.now(UTC),
+            content_metadata={},
+        ),
+        Content(
+            url="https://example.com/article2",
+            title="Test Article 2",
+            content_type=ContentType.ARTICLE.value,
+            status=ContentStatus.NEW.value,
+            created_at=datetime.now(UTC),
+            content_metadata={},
+        ),
+        Content(
+            url="https://failing-site.com/article",
+            title="Failing Article",
+            content_type=ContentType.ARTICLE.value,
+            status=ContentStatus.NEW.value,
+            created_at=datetime.now(UTC),
+            content_metadata={},
+        ),
+    ]
 
-    core_db._engine = engine
-    core_db._SessionLocal = session_factory
-    core_db._sqlite_runtime_diagnostics_logged = False
-    Base.metadata.create_all(bind=engine)
-
-    with get_db() as db:
-        # Add test content
-        test_contents = [
-            Content(
-                id=1,
-                url="https://example.com/article1",
-                title="Test Article 1",
-                content_type=ContentType.ARTICLE.value,
-                status=ContentStatus.NEW.value,
-                created_at=datetime.now(UTC),
-                content_metadata={},
-            ),
-            Content(
-                id=2,
-                url="https://example.com/article2",
-                title="Test Article 2",
-                content_type=ContentType.ARTICLE.value,
-                status=ContentStatus.NEW.value,
-                created_at=datetime.now(UTC),
-                content_metadata={},
-            ),
-            Content(
-                id=3,
-                url="https://failing-site.com/article",
-                title="Failing Article",
-                content_type=ContentType.ARTICLE.value,
-                status=ContentStatus.NEW.value,
-                created_at=datetime.now(UTC),
-                content_metadata={},
-            ),
-        ]
-
-        for content in test_contents:
-            db.add(content)
-        db.commit()
-
-    try:
-        yield
-    finally:
-        Base.metadata.drop_all(bind=engine)
-        core_db._engine = previous_engine
-        core_db._SessionLocal = previous_session_local
-        core_db._sqlite_runtime_diagnostics_logged = previous_sqlite_log_flag
-        engine.dispose()
-
+    for content in test_contents:
+        db_session.add(content)
+    db_session.commit()
+    for content in test_contents:
+        db_session.refresh(content)
+    yield {
+        "article1_id": test_contents[0].id,
+        "article2_id": test_contents[1].id,
+        "failing_article_id": test_contents[2].id,
+    }
 
 class TestPipelineIntegration:
     """Integration tests for the complete pipeline."""
@@ -98,9 +71,11 @@ class TestPipelineIntegration:
     @pytest.mark.integration
     def test_full_article_processing_pipeline(self, setup_test_db):
         """Test complete article processing from task creation to completion."""
+        article_id = setup_test_db["article1_id"]
+
         # Create processing task
         queue_service = QueueService()
-        task_id = queue_service.enqueue(task_type=TaskType.PROCESS_CONTENT, content_id=1)
+        task_id = queue_service.enqueue(task_type=TaskType.PROCESS_CONTENT, content_id=article_id)
 
         assert task_id is not None
 
@@ -168,11 +143,11 @@ class TestPipelineIntegration:
 
             # Verify content was processed
             with get_db() as db:
-                content = db.query(Content).filter(Content.id == 1).first()
+                content = db.query(Content).filter(Content.id == article_id).first()
                 source_body = (
                     db.query(ContentBody)
                     .filter(
-                        ContentBody.content_id == 1,
+                        ContentBody.content_id == article_id,
                         ContentBody.variant == "source",
                     )
                     .first()
@@ -188,12 +163,13 @@ class TestPipelineIntegration:
     @pytest.mark.integration
     def test_failed_task_retry_mechanism(self, setup_test_db):
         """Test task retry mechanism for failed tasks."""
+        failing_article_id = setup_test_db["failing_article_id"]
         queue_service = QueueService()
 
         # Create task for content that will fail
         queue_service.enqueue(
             task_type=TaskType.PROCESS_CONTENT,
-            content_id=3,  # Failing article
+            content_id=failing_article_id,
         )
 
         with (
@@ -238,10 +214,12 @@ class TestPipelineIntegration:
     @pytest.mark.integration
     def test_concurrent_processing(self, setup_test_db):
         """Test concurrent processing with multiple workers."""
+        article1_id = setup_test_db["article1_id"]
+        article2_id = setup_test_db["article2_id"]
         queue_service = QueueService()
 
         # Create multiple tasks
-        for content_id in [1, 2]:
+        for content_id in [article1_id, article2_id]:
             queue_service.enqueue(task_type=TaskType.PROCESS_CONTENT, content_id=content_id)
 
         # Mock services
@@ -314,6 +292,7 @@ class TestPipelineIntegration:
     @pytest.mark.integration
     def test_pipeline_error_recovery(self, setup_test_db):
         """Test pipeline recovery from various error conditions."""
+        article1_id = setup_test_db["article1_id"]
         queue_service = QueueService()
 
         # Test handling of invalid content ID
@@ -332,7 +311,7 @@ class TestPipelineIntegration:
         with get_db() as db:
             invalid_task = ProcessingTask(
                 task_type="INVALID_TYPE",
-                payload={"content_id": 1},
+                payload={"content_id": article1_id},
                 status="pending",
                 created_at=datetime.now(UTC),
                 retry_count=0,
@@ -355,6 +334,7 @@ class TestPipelineIntegration:
     @pytest.mark.integration
     def test_end_to_end_scraping_and_processing(self, setup_test_db):
         """Test complete flow from scraping to processing."""
+        del setup_test_db
         queue_service = QueueService()
 
         # Create scrape task

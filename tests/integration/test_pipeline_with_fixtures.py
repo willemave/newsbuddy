@@ -4,82 +4,14 @@ These tests demonstrate using the content_samples fixtures with the processing
 pipeline, showing how real data flows through the system.
 """
 
-from datetime import datetime
-from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-import app.core.db as core_db
-from app.core.db import get_db
 from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Base, Content, ProcessingTask
+from app.models.schema import ProcessingTask
 from app.pipeline.worker import ContentWorker
 from app.services.queue import QueueService, TaskType
-
-
-@pytest.fixture
-def db_session():
-    """Create a database session for testing."""
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    previous_engine = core_db._engine
-    previous_session_local = core_db._SessionLocal
-    previous_sqlite_log_flag = core_db._sqlite_runtime_diagnostics_logged
-
-    core_db._engine = engine
-    core_db._SessionLocal = session_factory
-    core_db._sqlite_runtime_diagnostics_logged = False
-    Base.metadata.create_all(bind=engine)
-
-    with get_db() as db:
-        db.query(ProcessingTask).delete()
-        db.query(Content).filter(Content.id.in_([1, 25, 118, 998, 999])).delete()
-        db.commit()
-        try:
-            yield db
-        finally:
-            db.rollback()
-            db.query(ProcessingTask).delete()
-            db.query(Content).filter(Content.id.in_([1, 25, 118, 998, 999])).delete()
-            db.commit()
-
-    Base.metadata.drop_all(bind=engine)
-    core_db._engine = previous_engine
-    core_db._SessionLocal = previous_session_local
-    core_db._sqlite_runtime_diagnostics_logged = previous_sqlite_log_flag
-    engine.dispose()
-
-
-def create_content_in_db(db, fixture_data: dict[str, Any]) -> Content:
-    """Create content from fixture in the database."""
-    publication_date = fixture_data.get("publication_date")
-    parsed_publication_date = (
-        datetime.fromisoformat(publication_date) if publication_date else None
-    )
-    content = Content(
-        id=fixture_data.get("id"),
-        content_type=fixture_data["content_type"],
-        url=fixture_data["url"],
-        title=fixture_data["title"],
-        source=fixture_data["source"],
-        status=fixture_data["status"],
-        platform=fixture_data.get("platform"),
-        classification=fixture_data.get("classification"),
-        publication_date=parsed_publication_date,
-        content_metadata=fixture_data.get("content_metadata", {}),
-    )
-    db.add(content)
-    db.commit()
-    db.refresh(content)
-    return content
 
 
 class TestPipelineWithRealData:
@@ -87,11 +19,10 @@ class TestPipelineWithRealData:
 
     @pytest.mark.integration
     def test_process_article_with_real_structure(
-        self, db_session, sample_unprocessed_article
+        self, db_session, sample_unprocessed_article, create_sample_content
     ):
         """Test processing an article using real content structure from fixtures."""
-        # Create content from fixture
-        content = create_content_in_db(db_session, sample_unprocessed_article)
+        content = create_sample_content(sample_unprocessed_article, visible=False)
         assert content.status == ContentStatus.NEW.value
 
         # Mock external dependencies
@@ -139,11 +70,10 @@ class TestPipelineWithRealData:
 
     @pytest.mark.integration
     def test_process_podcast_with_real_structure(
-        self, db_session, sample_unprocessed_podcast
+        self, db_session, sample_unprocessed_podcast, create_sample_content
     ):
         """Test processing a podcast using real transcript structure."""
-        # Create content from fixture
-        content = create_content_in_db(db_session, sample_unprocessed_podcast)
+        content = create_sample_content(sample_unprocessed_podcast, visible=False)
         assert content.status == sample_unprocessed_podcast["status"]
         assert "transcript" in content.content_metadata
 
@@ -169,11 +99,10 @@ class TestPipelineWithRealData:
 
     @pytest.mark.integration
     def test_completed_article_structure_matches_fixture(
-        self, db_session, sample_article_long
+        self, db_session, sample_article_long, create_sample_content
     ):
         """Verify that completed articles in DB match the structure of our fixtures."""
-        # Create a completed article from fixture
-        content = create_content_in_db(db_session, sample_article_long)
+        content = create_sample_content(sample_article_long, visible=False)
 
         # Verify it has all expected fields
         assert content.status == ContentStatus.COMPLETED.value
@@ -208,11 +137,11 @@ class TestPipelineWithRealData:
         db_session,
         sample_article_short,
         sample_podcast,
+        create_sample_content,
     ):
         """Test that different content types can be processed with their fixtures."""
-        # Create both types
-        article = create_content_in_db(db_session, sample_article_short)
-        podcast = create_content_in_db(db_session, sample_podcast)
+        article = create_sample_content(sample_article_short, visible=False)
+        podcast = create_sample_content(sample_podcast, visible=False)
 
         # Verify they're in the database with correct types
         assert article.content_type == ContentType.ARTICLE.value
@@ -229,11 +158,10 @@ class TestPipelineWithRealData:
 
     @pytest.mark.integration
     def test_queue_and_process_with_fixtures(
-        self, db_session, sample_unprocessed_article
+        self, db_session, sample_unprocessed_article, create_sample_content
     ):
         """Test complete flow: create content, queue task, process."""
-        # Create content
-        content = create_content_in_db(db_session, sample_unprocessed_article)
+        content = create_sample_content(sample_unprocessed_article, visible=False)
 
         # Queue processing task
         queue_service = QueueService()
@@ -258,10 +186,10 @@ class TestPipelineWithRealData:
 
     @pytest.mark.integration
     def test_article_metadata_preservation(
-        self, db_session, sample_article_long
+        self, db_session, sample_article_long, create_sample_content
     ):
         """Ensure all metadata fields from fixtures are preserved in DB."""
-        content = create_content_in_db(db_session, sample_article_long)
+        content = create_sample_content(sample_article_long, visible=False)
 
         # Verify metadata was preserved
         metadata = content.content_metadata

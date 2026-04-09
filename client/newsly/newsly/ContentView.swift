@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var shortFormPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
     @State private var isRestoringPath = false
+    @State private var hasAppliedE2EOpenChatRoute = false
     @Environment(\.scenePhase) private var scenePhase
 
     @MainActor
@@ -104,6 +105,9 @@ struct ContentView: View {
                         knowledgePath = NavigationPath()
                         knowledgePath.append(route)
                     },
+                    onShowFavorites: {
+                        knowledgePath.append(FavoritesRoute())
+                    },
                     onShowSessionHistory: {
                         knowledgePath = NavigationPath()
                         knowledgePath.append(SessionHistoryRoute())
@@ -138,6 +142,7 @@ struct ContentView: View {
         .onAppear {
             tabCoordinator.ensureInitialLoads()
             restoreIfNeeded()
+            applyE2EOpenChatRouteIfNeeded()
         }
         .onChange(of: tabCoordinator.selectedTab) { _, newValue in
             logger.info("[TabChange] selectedTab=\(String(describing: newValue), privacy: .public)")
@@ -146,6 +151,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 restoreIfNeeded()
+                applyE2EOpenChatRouteIfNeeded()
             }
         }
         .onReceive(chatNavigation.$pendingRoute) { route in
@@ -213,6 +219,17 @@ struct ContentView: View {
         knowledgePath = NavigationPath()
         knowledgePath.append(route)
     }
+
+    private func applyE2EOpenChatRouteIfNeeded() {
+        guard !hasAppliedE2EOpenChatRoute else { return }
+        guard let sessionId = E2ETestLaunch.openChatSessionId else { return }
+
+        hasAppliedE2EOpenChatRoute = true
+        Task { @MainActor in
+            await Task.yield()
+            openChatSession(route: ChatSessionRoute(sessionId: sessionId))
+        }
+    }
 }
 
 // MARK: - Content navigation destinations
@@ -251,6 +268,9 @@ private extension View {
                 ChatSessionHistoryView(onSelectSession: { route in
                     path.wrappedValue.append(route)
                 })
+            }
+            .navigationDestination(for: FavoritesRoute.self) { _ in
+                FavoritesView()
             }
     }
 }

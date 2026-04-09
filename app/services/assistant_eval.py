@@ -20,11 +20,8 @@ from pydantic_ai.messages import (
     ToolCallPart,
     ToolReturnPart,
 )
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.core.db import Base
 from app.core.settings import get_settings
 from app.models.chat_message_metadata import AssistantFeedOption
 from app.models.contracts import TaskStatus, TaskType
@@ -56,6 +53,7 @@ from app.services.llm_models import (
     resolve_model_provider,
 )
 from app.services.queue import QueueService
+from app.testing.postgres_harness import TemporaryPostgresHarness, create_temporary_postgres_harness
 
 DEFAULT_JUDGE_MODEL_SPEC = "openai:gpt-5.4"
 DEFAULT_SCREEN_CONTEXT = AssistantScreenContext(
@@ -214,20 +212,6 @@ class AssistantEvalReport(BaseModel):
     suite: str
     results: list[AssistantEvalResult]
 
-
-@dataclass
-class _SqliteHarness:
-    """Ephemeral SQLite harness backing one eval case."""
-
-    engine: Any
-    session_factory: sessionmaker
-
-    def close(self) -> None:
-        """Dispose of the harness database."""
-        Base.metadata.drop_all(bind=self.engine)
-        self.engine.dispose()
-
-
 @dataclass
 class _EvalQueueGateway:
     """Minimal queue gateway for in-process eval task execution."""
@@ -257,17 +241,9 @@ class _EvalQueueGateway:
         return len(self.enqueued_tasks)
 
 
-def create_eval_harness() -> _SqliteHarness:
-    """Create an isolated in-memory SQLite harness."""
-
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    return _SqliteHarness(engine=engine, session_factory=session_factory)
+def create_eval_harness() -> TemporaryPostgresHarness:
+    """Create an isolated PostgreSQL eval harness."""
+    return create_temporary_postgres_harness()
 
 
 def load_assistant_eval_suite(path: str | Path) -> AssistantEvalSuite:

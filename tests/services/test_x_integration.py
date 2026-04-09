@@ -1,9 +1,5 @@
 """Tests for X integration sync flows."""
-
-import sqlite3
 from datetime import UTC, datetime, timedelta
-
-from sqlalchemy.exc import OperationalError
 
 import app.services.x_integration as x_integration
 from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
@@ -390,54 +386,6 @@ def test_sync_x_sources_persists_bookmark_progress_when_timeline_fails(
     assert sync_state.last_status == "failed"
     assert sync_state.sync_metadata["bookmarks"]["last_synced_item_id"] == "101"
     assert "timeline" in (sync_state.last_error or "")
-
-
-def test_upsert_x_digest_tweet_content_retries_sqlite_lock_without_dirtying_session(
-    db_session,
-    test_user,
-    monkeypatch,
-):
-    """Digest tweet upsert should recover from transient SQLite lock contention."""
-    queue_gateway = _FakeQueueGateway()
-    attempts = {"count": 0}
-    original_upsert_news_item = x_integration.upsert_news_item
-
-    def flaky_upsert_news_item(db, payload):  # noqa: ANN001
-        attempts["count"] += 1
-        if attempts["count"] == 1:
-            raise OperationalError(
-                "INSERT INTO news_items",
-                {},
-                sqlite3.OperationalError("database is locked"),
-            )
-        return original_upsert_news_item(db, payload)
-
-    monkeypatch.setattr("app.core.db.time.sleep", lambda _seconds: None)
-    monkeypatch.setattr(
-        "app.services.x_integration.upsert_news_item",
-        flaky_upsert_news_item,
-    )
-    monkeypatch.setattr("app.services.x_integration.get_task_queue_gateway", lambda: queue_gateway)
-
-    was_created = _upsert_x_digest_tweet_content(
-        db_session,
-        user=test_user,
-        tweet=_tweet("301", "NVIDIA supplier checks still look tight."),
-        source_type="x_timeline",
-        source_label="X Following",
-        submitted_via="x_timeline",
-        filter_decision=XDigestFilterDecision(
-            score=0.92,
-            reason="Relevant supply-chain signal.",
-            accepted=True,
-        ),
-        aggregator_metadata={"timeline_type": "reverse_chronological"},
-    )
-
-    assert was_created is True
-    assert attempts["count"] == 2
-    assert db_session.query(NewsItem).count() == 1
-    assert queue_gateway.calls
 
 
 def test_sync_x_sources_skips_recent_scheduled_runs(db_session, test_user, monkeypatch):

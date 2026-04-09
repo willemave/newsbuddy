@@ -5,11 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from app.models.schema import Base, Content
+from app.models.schema import Content
 from app.services.prompt_debug_report import (
     FailureRecord,
     PromptDebugReport,
@@ -21,16 +17,6 @@ from app.services.prompt_debug_report import (
     render_markdown_report,
     select_failure_records,
 )
-
-
-def _build_test_session_factory():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    return engine, sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
 def test_select_failure_records_filters_by_component_and_window(tmp_path) -> None:
@@ -91,98 +77,93 @@ def test_select_failure_records_filters_by_component_and_window(tmp_path) -> Non
     assert failures[0].phase == "summarize"
 
 
-def test_reconstruct_summarize_prompt_from_content_metadata() -> None:
+def test_reconstruct_summarize_prompt_from_content_metadata(db_session_factory) -> None:
     """Summarize prompt reconstruction should return full prompt when content exists."""
-    engine, session_factory = _build_test_session_factory()
-    try:
-        with session_factory() as session:
-            content = Content(
-                id=42,
-                content_type="article",
-                url="https://example.com/article",
-                title="Example",
-                source="test",
-                status="failed",
-                content_metadata={"content": "Prompt reconstruction text."},
-            )
-            session.add(content)
-            session.commit()
-
-        failure = FailureRecord(
-            phase="summarize",
-            timestamp=datetime.now(UTC),
-            component="summarization",
-            operation="llm_summarization",
-            source_file="errors/summarization.jsonl",
-            item_id="42",
-            content_id=42,
+    with db_session_factory() as session:
+        content = Content(
+            id=42,
+            content_type="article",
             url="https://example.com/article",
-            model=None,
-            error_type="RuntimeError",
-            error_message="boom",
-            context_data={},
+            title="Example",
+            source="test",
+            status="failed",
+            content_metadata={"content": "Prompt reconstruction text."},
         )
+        session.add(content)
+        session.commit()
 
-        snapshot = reconstruct_summarize_prompt(failure=failure, db_session_factory=session_factory)
+    failure = FailureRecord(
+        phase="summarize",
+        timestamp=datetime.now(UTC),
+        component="summarization",
+        operation="llm_summarization",
+        source_file="errors/summarization.jsonl",
+        item_id="42",
+        content_id=42,
+        url="https://example.com/article",
+        model=None,
+        error_type="RuntimeError",
+        error_message="boom",
+        context_data={},
+    )
 
-        assert snapshot.reconstruction_quality == "full"
-        assert snapshot.phase == "summarize"
-        assert snapshot.system_prompt is not None
-        assert (
-            "expert editor writing an information-dense narrative summary"
-            in snapshot.system_prompt
-        )
-        assert snapshot.user_prompt is not None
-        assert "Prompt reconstruction text." in snapshot.user_prompt
-        assert snapshot.model == "openai:gpt-5.4-mini"
-    finally:
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
+    snapshot = reconstruct_summarize_prompt(
+        failure=failure,
+        db_session_factory=db_session_factory,
+    )
+
+    assert snapshot.reconstruction_quality == "full"
+    assert snapshot.phase == "summarize"
+    assert snapshot.system_prompt is not None
+    assert "expert editor writing an information-dense narrative summary" in snapshot.system_prompt
+    assert snapshot.user_prompt is not None
+    assert "Prompt reconstruction text." in snapshot.user_prompt
+    assert snapshot.model == "openai:gpt-5.4-mini"
 
 
-def test_reconstruct_summarize_prompt_uses_research_template_for_pdf() -> None:
-    engine, session_factory = _build_test_session_factory()
-    try:
-        with session_factory() as session:
-            content = Content(
-                id=43,
-                content_type="article",
-                url="https://example.com/paper.pdf",
-                title="Paper",
-                source="test",
-                status="failed",
-                content_metadata={
-                    "content": "Prompt reconstruction text for a paper.",
-                    "content_type": "pdf",
-                },
-            )
-            session.add(content)
-            session.commit()
-
-        failure = FailureRecord(
-            phase="summarize",
-            timestamp=datetime.now(UTC),
-            component="summarization",
-            operation="llm_summarization",
-            source_file="errors/summarization.jsonl",
-            item_id="43",
-            content_id=43,
+def test_reconstruct_summarize_prompt_uses_research_template_for_pdf(
+    db_session_factory,
+) -> None:
+    with db_session_factory() as session:
+        content = Content(
+            id=43,
+            content_type="article",
             url="https://example.com/paper.pdf",
-            model=None,
-            error_type="RuntimeError",
-            error_message="boom",
-            context_data={},
+            title="Paper",
+            source="test",
+            status="failed",
+            content_metadata={
+                "content": "Prompt reconstruction text for a paper.",
+                "content_type": "pdf",
+            },
         )
+        session.add(content)
+        session.commit()
 
-        snapshot = reconstruct_summarize_prompt(failure=failure, db_session_factory=session_factory)
+    failure = FailureRecord(
+        phase="summarize",
+        timestamp=datetime.now(UTC),
+        component="summarization",
+        operation="llm_summarization",
+        source_file="errors/summarization.jsonl",
+        item_id="43",
+        content_id=43,
+        url="https://example.com/paper.pdf",
+        model=None,
+        error_type="RuntimeError",
+        error_message="boom",
+        context_data={},
+    )
 
-        assert snapshot.reconstruction_quality == "full"
-        assert snapshot.system_prompt is not None
-        assert '"template": "research"' in snapshot.system_prompt
-        assert any(note == "prompt_type=editorial_research" for note in snapshot.notes)
-    finally:
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
+    snapshot = reconstruct_summarize_prompt(
+        failure=failure,
+        db_session_factory=db_session_factory,
+    )
+
+    assert snapshot.reconstruction_quality == "full"
+    assert snapshot.system_prompt is not None
+    assert '"template": "research"' in snapshot.system_prompt
+    assert any(note == "prompt_type=editorial_research" for note in snapshot.notes)
 
 
 def test_reconstruct_analyze_url_prompt_partial() -> None:

@@ -33,6 +33,7 @@ class PersonalMarkdownReasons:
 
     is_favorited: bool
     chat_session_ids: list[int]
+    saved_at: datetime | None
 
     @property
     def labels(self) -> list[str]:
@@ -97,12 +98,13 @@ def sync_personal_markdown_library_for_user(
 
     existing_content_ids = _scan_existing_content_ids(user_root)
     desired_content_ids = set(qualifying_reasons)
+    contents_by_id = _load_contents_by_id(db, desired_content_ids)
 
     for stale_content_id in sorted(existing_content_ids - desired_content_ids):
         deleted_files.extend(_delete_content_files(user_root, stale_content_id))
 
     for content_id, reasons in qualifying_reasons.items():
-        content = db.query(Content).filter(Content.id == content_id).first()
+        content = contents_by_id.get(content_id)
         if content is None:
             deleted_files.extend(_delete_content_files(user_root, content_id))
             continue
@@ -135,9 +137,10 @@ def collect_personal_markdown_documents_for_user(
         return []
 
     qualifying_reasons = _load_qualifying_content_reasons(db, user_id=user_id)
+    contents_by_id = _load_contents_by_id(db, set(qualifying_reasons))
     documents: list[PersonalMarkdownDocument] = []
     for content_id, reasons in qualifying_reasons.items():
-        content = db.query(Content).filter(Content.id == content_id).first()
+        content = contents_by_id.get(content_id)
         if content is None:
             continue
         documents.extend(
@@ -203,17 +206,20 @@ def _load_qualifying_content_reasons(
     *,
     user_id: int,
 ) -> dict[int, PersonalMarkdownReasons]:
-    favorite_ids = {
-        int(content_id)
-        for content_id, in (
-            db.query(ContentFavorites.content_id)
-            .filter(ContentFavorites.user_id == user_id)
-            .all()
-        )
+    favorite_rows = (
+        db.query(ContentFavorites.content_id, ContentFavorites.favorited_at)
+        .filter(ContentFavorites.user_id == user_id)
+        .all()
+    )
+    favorite_saved_at_map = {
+        int(content_id): favorited_at
+        for content_id, favorited_at in favorite_rows
+        if content_id is not None
     }
+    favorite_ids = set(favorite_saved_at_map)
 
     chat_rows = (
-        db.query(ChatSession.content_id, ChatSession.id)
+        db.query(ChatSession.content_id, ChatSession.id, ChatSession.created_at)
         .filter(
             ChatSession.user_id == user_id,
             ChatSession.content_id.is_not(None),
@@ -223,19 +229,37 @@ def _load_qualifying_content_reasons(
     )
 
     chat_session_map: dict[int, list[int]] = {}
-    for content_id, session_id in chat_rows:
+    chat_saved_at_map: dict[int, datetime | None] = {}
+    for content_id, session_id, created_at in chat_rows:
         if content_id is None:
             continue
-        chat_session_map.setdefault(int(content_id), []).append(int(session_id))
+        normalized_content_id = int(content_id)
+        chat_session_map.setdefault(normalized_content_id, []).append(int(session_id))
+        chat_saved_at_map[normalized_content_id] = _resolve_saved_at(
+            chat_saved_at_map.get(normalized_content_id),
+            created_at,
+        )
 
     all_content_ids = favorite_ids | set(chat_session_map)
     return {
         content_id: PersonalMarkdownReasons(
             is_favorited=content_id in favorite_ids,
             chat_session_ids=sorted(chat_session_map.get(content_id, [])),
+            saved_at=_resolve_saved_at(
+                favorite_saved_at_map.get(content_id),
+                chat_saved_at_map.get(content_id),
+            ),
         )
         for content_id in sorted(all_content_ids)
     }
+
+
+def _load_contents_by_id(db: Session, content_ids: set[int]) -> dict[int, Content]:
+    if not content_ids:
+        return {}
+
+    contents = db.query(Content).filter(Content.id.in_(content_ids)).all()
+    return {int(content.id): content for content in contents}
 
 
 def _load_reasons_for_content(
@@ -244,27 +268,30 @@ def _load_reasons_for_content(
     user_id: int,
     content_id: int,
 ) -> PersonalMarkdownReasons:
-    is_favorited = (
-        db.query(ContentFavorites.id)
+    favorite_row = (
+        db.query(ContentFavorites.favorited_at)
         .filter(ContentFavorites.user_id == user_id, ContentFavorites.content_id == content_id)
         .first()
-        is not None
     )
-    chat_session_ids = [
-        int(session_id)
-        for session_id, in (
-            db.query(distinct(ChatSession.id))
-            .filter(
-                ChatSession.user_id == user_id,
-                ChatSession.content_id == content_id,
-                ChatSession.is_archived == False,  # noqa: E712
-            )
-            .all()
+    favorite_saved_at = favorite_row[0] if favorite_row is not None else None
+    chat_rows = (
+        db.query(distinct(ChatSession.id), ChatSession.created_at)
+        .filter(
+            ChatSession.user_id == user_id,
+            ChatSession.content_id == content_id,
+            ChatSession.is_archived == False,  # noqa: E712
         )
-    ]
+        .all()
+    )
+    chat_session_ids = [int(session_id) for session_id, _created_at in chat_rows]
+    chat_saved_at = min(
+        (created_at for _session_id, created_at in chat_rows if created_at is not None),
+        default=None,
+    )
     return PersonalMarkdownReasons(
-        is_favorited=is_favorited,
+        is_favorited=favorite_row is not None,
         chat_session_ids=sorted(chat_session_ids),
+        saved_at=_resolve_saved_at(favorite_saved_at, chat_saved_at),
     )
 
 
@@ -417,7 +444,7 @@ def _render_markdown_document(
         "source": _content_source_name(content),
         "url": content.url,
         "published_at": _isoformat(_content_date(content)),
-        "saved_at": _isoformat(datetime.now(UTC)),
+        "saved_at": _isoformat(reasons.saved_at or getattr(content, "created_at", None)),
         "reasons": reasons.labels,
         "chat_session_ids": reasons.chat_session_ids,
     }
@@ -540,3 +567,10 @@ def _isoformat(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC).isoformat()
     return value.astimezone(UTC).isoformat()
+
+
+def _resolve_saved_at(*candidates: datetime | None) -> datetime | None:
+    valid_candidates = [candidate for candidate in candidates if candidate is not None]
+    if not valid_candidates:
+        return None
+    return min(valid_candidates)

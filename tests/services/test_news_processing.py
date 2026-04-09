@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from app.models.metadata import ContentType, NewsSummary
-from app.models.schema import Base, Content, NewsItem
+from app.models.schema import Content, NewsItem
 from app.services import news_processing as news_processing_module
 from app.services.discussion_fetcher import DiscussionFetchResult
 from app.services.news_article_bodies import NEWS_ARTICLE_BODY_REF_KEY
@@ -51,14 +47,10 @@ def test_process_news_item_fails_on_invalid_summarizer_output(db_session) -> Non
 
 
 def test_process_news_item_commits_processing_state_before_summarization(
-    tmp_path: Path,
+    db_session_factory,
 ) -> None:
-    engine = create_engine(f"sqlite:///{tmp_path / 'news-processing.db'}")
-    Base.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    write_session = session_factory()
-    read_session = session_factory()
+    write_session = db_session_factory()
+    read_session = db_session_factory()
     try:
         item = NewsItem(
             ingest_key="news-item-processing-commit",
@@ -99,8 +91,6 @@ def test_process_news_item_commits_processing_state_before_summarization(
     finally:
         write_session.close()
         read_session.close()
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
 
 
 def test_process_news_item_passes_usage_persistence_context(db_session) -> None:
@@ -156,9 +146,8 @@ def test_process_news_item_passes_usage_persistence_context(db_session) -> None:
     }
 
 
-def test_process_news_item_uses_sqlite_retry_for_finalize(
+def test_process_news_item_finalizes_summary(
     db_session,
-    monkeypatch,
 ) -> None:
     item = NewsItem(
         ingest_key="news-item-finalize-retry",
@@ -178,14 +167,6 @@ def test_process_news_item_uses_sqlite_retry_for_finalize(
     db_session.commit()
     db_session.refresh(item)
 
-    operations: list[str] = []
-
-    def _retry(**kwargs):
-        operations.append(str(kwargs["operation"]))
-        return kwargs["work"]()
-
-    monkeypatch.setattr(news_processing_module, "run_with_sqlite_lock_retry", _retry)
-
     result = process_news_item(
         db_session,
         news_item_id=item.id,
@@ -202,7 +183,6 @@ def test_process_news_item_uses_sqlite_retry_for_finalize(
     db_session.refresh(item)
     assert result.success is True
     assert item.status == "ready"
-    assert operations == ["process_news_item.finalize"]
 
 
 def test_process_news_item_fetches_discussion_via_public_news_item_flow(
@@ -358,9 +338,8 @@ def test_process_news_item_continues_when_discussion_fetch_fails(
     assert item.raw_metadata["discussion_error"] == "Discussion fetch failed: blocked"
 
 
-def test_process_news_item_uses_sqlite_retry_for_failure_persist(
+def test_process_news_item_marks_failure_on_invalid_summary_payload(
     db_session,
-    monkeypatch,
 ) -> None:
     item = NewsItem(
         ingest_key="news-item-failure-retry",
@@ -380,14 +359,6 @@ def test_process_news_item_uses_sqlite_retry_for_failure_persist(
     db_session.commit()
     db_session.refresh(item)
 
-    operations: list[str] = []
-
-    def _retry(**kwargs):
-        operations.append(str(kwargs["operation"]))
-        return kwargs["work"]()
-
-    monkeypatch.setattr(news_processing_module, "run_with_sqlite_lock_retry", _retry)
-
     result = process_news_item(
         db_session,
         news_item_id=item.id,
@@ -397,7 +368,6 @@ def test_process_news_item_uses_sqlite_retry_for_failure_persist(
     db_session.refresh(item)
     assert result.success is False
     assert item.status == "failed"
-    assert operations == ["process_news_item.mark_failed"]
 
 
 def test_process_news_item_does_not_treat_title_only_row_as_summarized(db_session) -> None:

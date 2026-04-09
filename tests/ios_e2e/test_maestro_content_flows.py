@@ -7,26 +7,28 @@ from datetime import UTC, datetime
 import pytest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-from app.models.schema import ChatSession, ContentFavorites, ContentReadStatus, NewsItem
+from app.models.schema import (
+    ChatMessage,
+    ChatSession,
+    ContentFavorites,
+    ContentReadStatus,
+    NewsItem,
+)
 from app.services.chat_agent import ChatRunResult, save_messages
 
 pytestmark = [pytest.mark.integration, pytest.mark.ios_e2e]
 
 
 def test_long_form_detail_flow_uses_seeded_fixture_data(
-    live_server,
-    run_maestro_flow,
+    run_ios_flow,
     create_sample_content,
     sample_article_long,
-    test_user,
 ) -> None:
     """The seeded long-form content fixture should render in the iOS app."""
     content = create_sample_content(sample_article_long)
 
-    run_maestro_flow(
+    run_ios_flow(
         "long_form_detail.yaml",
-        live_server=live_server,
-        user_id=test_user.id,
         extra_env={
             "CONTENT_ID": str(content.id),
             "CONTENT_TITLE": content.title,
@@ -35,8 +37,7 @@ def test_long_form_detail_flow_uses_seeded_fixture_data(
 
 
 def test_long_form_detail_favorite_action_updates_backend_state(
-    live_server,
-    run_maestro_flow,
+    run_ios_flow,
     create_sample_content,
     sample_article_long,
     test_user,
@@ -45,10 +46,8 @@ def test_long_form_detail_favorite_action_updates_backend_state(
     """Favoriting from the detail screen should persist to the shared backend DB."""
     content = create_sample_content(sample_article_long)
 
-    run_maestro_flow(
+    run_ios_flow(
         "long_form_favorite.yaml",
-        live_server=live_server,
-        user_id=test_user.id,
         extra_env={
             "CONTENT_ID": str(content.id),
             "CONTENT_TITLE": content.title,
@@ -67,8 +66,7 @@ def test_long_form_detail_favorite_action_updates_backend_state(
 
 
 def test_long_form_list_mark_read_action_updates_backend_state(
-    live_server,
-    run_maestro_flow,
+    run_ios_flow,
     create_sample_content,
     sample_article_long,
     test_user,
@@ -77,10 +75,8 @@ def test_long_form_list_mark_read_action_updates_backend_state(
     """Mark-as-read from the long-form list should persist to the shared backend DB."""
     content = create_sample_content(sample_article_long)
 
-    run_maestro_flow(
+    run_ios_flow(
         "long_form_mark_read.yaml",
-        live_server=live_server,
-        user_id=test_user.id,
         extra_env={"CONTENT_ID": str(content.id)},
     )
 
@@ -96,9 +92,7 @@ def test_long_form_list_mark_read_action_updates_backend_state(
 
 
 def test_short_form_detail_discussion_sheet_renders_embedded_comments(
-    live_server,
-    run_maestro_flow,
-    test_user,
+    run_ios_flow,
     db_session,
 ) -> None:
     """Comments button should open the in-app discussion sheet for news items."""
@@ -157,10 +151,8 @@ def test_short_form_detail_discussion_sheet_renders_embedded_comments(
     db_session.add(news_item)
     db_session.commit()
 
-    run_maestro_flow(
+    run_ios_flow(
         "short_form_discussion.yaml",
-        live_server=live_server,
-        user_id=test_user.id,
         extra_env={
             "CONTENT_ID": str(news_item.id),
             "COMMENT_ID": comment_id,
@@ -169,8 +161,7 @@ def test_short_form_detail_discussion_sheet_renders_embedded_comments(
 
 
 def test_council_tabs_switch_between_mocked_branch_replies(
-    live_server,
-    run_maestro_flow,
+    run_ios_flow,
     create_sample_content,
     sample_article_long,
     test_user,
@@ -236,10 +227,8 @@ def test_council_tabs_switch_between_mocked_branch_replies(
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
 
-    run_maestro_flow(
+    run_ios_flow(
         "long_form_council_mocked.yaml",
-        live_server=live_server,
-        user_id=test_user.id,
         extra_env={
             "CONTENT_ID": str(content.id),
             "ANALYST_REPLY": "Analyst mocked council reply",
@@ -253,18 +242,63 @@ def test_council_tabs_switch_between_mocked_branch_replies(
     assert parent_session.active_child_session_id is not None
 
 
-def test_personalized_onboarding_flow_uses_seeded_fixture_data(
-    live_server,
-    run_maestro_flow,
+def test_chat_mic_toggle_flow_uses_mocked_speech_and_sends_message(
+    run_ios_flow,
     test_user,
+    chat_session_factory,
+    db_session,
+    completed_chat_processors_factory,
+    monkeypatch,
+) -> None:
+    """The chat mic should toggle recording, surface the transcript, and send it."""
+    transcript = "Mocked mic transcript for chat UI"
+    assistant_reply = "Mocked assistant reply for chat UI"
+    session = chat_session_factory(
+        user=test_user,
+        title="Mocked Mic Session",
+        session_type="knowledge_chat",
+    )
+    _fake_process_message_async, _fake_process_assistant_turn_async = (
+        completed_chat_processors_factory(assistant_reply=assistant_reply)
+    )
+
+    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+
+    run_ios_flow(
+        "chat_mic_toggle.yaml",
+        extra_env={
+            "CHAT_SESSION_ID": str(session.id),
+            "TRANSCRIPT": transcript,
+            "ASSISTANT_REPLY": assistant_reply,
+        },
+    )
+
+    db_session.expire_all()
+    message = (
+        db_session.query(ChatMessage)
+        .filter(ChatMessage.session_id == session.id)
+        .order_by(ChatMessage.id.desc())
+        .first()
+    )
+    assert message is not None
+    assert message.status == "completed"
+    assert transcript in (message.message_list or "")
+    assert assistant_reply in (message.message_list or "")
+
+
+def test_personalized_onboarding_flow_uses_seeded_fixture_data(
+    run_ios_flow,
     db_session,
     ios_onboarding_personalized_fixture,
+    test_user,
 ) -> None:
     """Personalized onboarding should be Maestro-testable via deterministic launch fixtures."""
-    run_maestro_flow(
+    run_ios_flow(
         "onboarding_personalized.yaml",
-        live_server=live_server,
-        user_id=test_user.id,
         extra_env={"ONBOARDING_FIXTURE": ios_onboarding_personalized_fixture},
     )
 

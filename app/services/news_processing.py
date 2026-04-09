@@ -10,7 +10,6 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.constants import SUMMARY_KIND_SHORT_NEWS_DIGEST, SUMMARY_VERSION_V1
-from app.core.db import run_with_sqlite_lock_retry
 from app.core.logging import get_logger
 from app.models.contracts import NewsItemStatus
 from app.models.metadata import NewsSummary
@@ -248,14 +247,7 @@ def _finalize_processed_item(
         reconcile_news_item_relation(db, news_item_id=target.id)
         db.commit()
 
-    run_with_sqlite_lock_retry(
-        db=db,
-        component="news_processing",
-        operation="process_news_item.finalize",
-        item_id=str(item.id),
-        context_data={"news_item_id": item.id},
-        work=_write,
-    )
+    _write()
     db.refresh(item)
 
 
@@ -265,7 +257,7 @@ def _mark_processing_failure(
     news_item_id: int,
     error_message: str,
 ) -> str:
-    """Persist a failed processing state with SQLite lock retries."""
+    """Persist a failed processing state."""
 
     def _write() -> str:
         item = db.query(NewsItem).filter(NewsItem.id == news_item_id).first()
@@ -279,14 +271,7 @@ def _mark_processing_failure(
         db.commit()
         return item.status
 
-    return run_with_sqlite_lock_retry(
-        db=db,
-        component="news_processing",
-        operation="process_news_item.mark_failed",
-        item_id=str(news_item_id),
-        context_data={"news_item_id": news_item_id},
-        work=_write,
-    )
+    return _write()
 
 
 def _summarizer_accepts_context_kwargs(summarizer: object) -> bool:

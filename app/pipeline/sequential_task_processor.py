@@ -304,7 +304,7 @@ class SequentialTaskProcessor:
 
         self._shutdown_requested = False
 
-        def signal_handler(signum, frame):
+        def signal_handler(_signum, _frame):
             if not self._shutdown_requested:
                 logger.info("\n🛑 Received shutdown signal (Ctrl+C) - stopping gracefully...")
                 self._shutdown_requested = True

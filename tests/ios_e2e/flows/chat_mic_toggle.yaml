@@ -1,0 +1,30 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenChatSessionId: "${CHAT_SESSION_ID}"
+      newslyE2EFakeSpeechEnabled: true
+      newslyE2EFakeSpeechTranscript: "${TRANSCRIPT}"
+- assertVisible:
+    id: knowledge.chat_input
+- assertVisible:
+    id: knowledge.chat_mic
+- tapOn:
+    id: knowledge.chat_mic
+- assertVisible: "Recording. Tap the mic again to stop."
+- tapOn:
+    id: knowledge.chat_mic
+- assertVisible: "${TRANSCRIPT}"
+- tapOn:
+    id: knowledge.chat_send
+- assertVisible: "${ASSISTANT_REPLY}"
