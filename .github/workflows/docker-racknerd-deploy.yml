@@ -16,8 +16,6 @@ jobs:
       DEPLOY_REMOTE_DIR: ${{ vars.DEPLOY_REMOTE_DIR }}
       DEPLOY_OWNER_GROUP: ${{ vars.DEPLOY_OWNER_GROUP }}
       DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
-      DEPLOY_SERVICE_USER: ${{ vars.DEPLOY_SERVICE_USER }}
-      DEPLOY_LEGACY_PROGRAMS: ${{ vars.DEPLOY_LEGACY_PROGRAMS }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -68,8 +66,6 @@ jobs:
           SSH_OPTS=(-p "$PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes)
           REMOTE_DIR="${DEPLOY_REMOTE_DIR:-/opt/news_app}"
           OWNER_GROUP="${DEPLOY_OWNER_GROUP:-newsapp:newsapp}"
-          SERVICE_USER="${DEPLOY_SERVICE_USER:-${OWNER_GROUP%%:*}}"
-          LEGACY_PROGRAMS="${DEPLOY_LEGACY_PROGRAMS:-news_app_server news_app_workers_content news_app_workers_image news_app_workers_media news_app_workers_onboarding news_app_workers_twitter news_app_workers_chat news_app_queue_watchdog news_app_bgutil_provider news_app_workers_transcribe}"
 
           EXCLUDES=(
             ".git/"
@@ -121,58 +117,6 @@ jobs:
             fi
             sudo chmod 600 .env.racknerd
             sudo mkdir -p /data
-          '"
-
-          echo "→ Stopping legacy bare-metal processes if present"
-          ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
-            set -euo pipefail
-            if command -v supervisorctl >/dev/null 2>&1; then
-              sudo supervisorctl stop ${LEGACY_PROGRAMS} >/dev/null 2>&1 || true
-            fi
-            sudo -u ${SERVICE_USER} -H crontab -r >/dev/null 2>&1 || true
-
-            LEGACY_PATTERNS=(
-              \"python -m uvicorn app.main:app\"
-              \"/opt/news_app/scripts/run_workers.py\"
-              \"watchdog_queue_recovery.py --loop\"
-              \"docker/supercronic.py\"
-              \"start_bgutil_provider.sh\"
-            )
-
-            stop_matching_processes() {
-              local signal=\"\$1\"
-              local pattern=\"\"
-              local matched=\"false\"
-              for pattern in \"\${LEGACY_PATTERNS[@]}\"; do
-                if sudo pkill \"-\${signal}\" -f \"\$pattern\" >/dev/null 2>&1; then
-                  matched=\"true\"
-                fi
-              done
-              [[ \"\$matched\" == \"true\" ]]
-            }
-
-            stop_matching_processes TERM || true
-            sleep 5
-            stop_matching_processes KILL || true
-
-            for attempt in 1 2 3 4 5 6; do
-              if ! sudo ss -ltnp | grep -q '[: ]8000 '; then
-                break
-              fi
-              if [[ \$attempt -eq 6 ]]; then
-                echo \"Port 8000 is still in use after legacy shutdown\" >&2
-                sudo ss -ltnp | grep ':8000' >&2 || true
-                sudo pgrep -af \"python -m uvicorn app.main:app|/opt/news_app/scripts/run_workers.py|watchdog_queue_recovery.py|docker/supercronic.py|start_bgutil_provider.sh\" >&2 || true
-                exit 1
-              fi
-              sleep 5
-            done
-
-            if sudo ss -ltnp | grep -q '[: ]5432 '; then
-              echo \"Port 5432 is already in use on the host\" >&2
-              sudo ss -ltnp | grep ':5432' >&2 || true
-              exit 1
-            fi
           '"
 
           echo "→ Streaming image to remote host"
