@@ -4,13 +4,14 @@ Use this index as the single entrypoint for operational scripts.
 
 ## Deploy
 
-- GitHub Actions [`.github/workflows/bare-metal-deploy.yml`](../../../.github/workflows/bare-metal-deploy.yml) - Supported production app deploy path.
+- GitHub Actions [`.github/workflows/docker-racknerd-deploy.yml`](../../../.github/workflows/docker-racknerd-deploy.yml) - Supported production app deploy path.
 - `scripts/deploy/push_envs.sh` - Env-only helper to sync `.env.racknerd` to the host outside the normal GitHub deploy flow.
 - `scripts/deploy/common.sh` - Shared deploy functions (`require_option_value`, owner parsing, env sync promotion).
 - `scripts/check_and_run_migrations.sh` - Safe migration runner with settings validation.
 
 ## Runtime
 
+- `scripts/start_services.sh` - Unified local runtime launcher for `all`, `server`, `workers`, `scrapers`, `watchdog`, `scheduler`, and `migrate`.
 - `scripts/start_server.sh` - API server launcher.
 - `scripts/start_workers.sh` - Queue workers launcher.
 - `scripts/start_scrapers.sh` - Scraper launcher.

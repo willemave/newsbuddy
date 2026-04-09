@@ -8,7 +8,7 @@ from app.core.settings import Settings, get_settings
 
 
 def _set_required_env(monkeypatch) -> None:
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///./test.db")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://postgres@localhost/test_db")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret")
     monkeypatch.setenv("ADMIN_PASSWORD", "test-password")
 

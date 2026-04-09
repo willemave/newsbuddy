@@ -1,20 +1,16 @@
 """Tests for content interaction analytics service."""
 
-import sqlite3
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.schema import AnalyticsInteraction, Content
 from app.models.user import User
-from app.services import content_interactions as content_interactions_service
 from app.services.content_interactions import (
-    INTERACTION_BUSY_TIMEOUT_MS,
     INTERACTION_TYPE_OPENED,
     ContentInteractionContentNotFoundError,
     RecordContentInteractionInput,
@@ -211,10 +207,7 @@ def test_record_content_interaction_returns_existing_row_after_integrity_error(
             Exception("duplicate interaction"),
         )
 
-    monkeypatch.setattr(
-        "app.services.content_interactions.run_with_sqlite_lock_retry",
-        _raise_integrity_error,
-    )
+    monkeypatch.setattr(db_session, "flush", _raise_integrity_error)
 
     result = record_content_interaction(
         db_session,
@@ -229,40 +222,6 @@ def test_record_content_interaction_returns_existing_row_after_integrity_error(
 
     assert result.recorded is False
     assert result.analytics_interaction_id == existing.id
-
-
-def test_record_content_interaction_uses_short_busy_timeout(
-    db_session: Session,
-    analytics_user: User,
-    analytics_content: Content,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """It should bound timeout for content lookup and persistence."""
-    timeouts: list[int] = []
-
-    @contextmanager
-    def _capture_timeout(_db: Session, timeout_ms: int):
-        timeouts.append(timeout_ms)
-        yield
-
-    monkeypatch.setattr(
-        content_interactions_service,
-        "temporary_sqlite_busy_timeout",
-        _capture_timeout,
-    )
-
-    result = record_content_interaction(
-        db_session,
-        RecordContentInteractionInput(
-            user_id=analytics_user.id,
-            content_id=analytics_content.id,
-            interaction_id=str(uuid4()),
-            interaction_type=INTERACTION_TYPE_OPENED,
-        ),
-    )
-
-    assert result.recorded is True
-    assert timeouts == [INTERACTION_BUSY_TIMEOUT_MS, INTERACTION_BUSY_TIMEOUT_MS]
 
 
 def test_record_content_interaction_raises_for_missing_content(
@@ -280,35 +239,3 @@ def test_record_content_interaction_raises_for_missing_content(
                 interaction_type=INTERACTION_TYPE_OPENED,
             ),
         )
-
-
-def test_record_content_interaction_degrades_on_sqlite_lock(
-    db_session: Session,
-    analytics_user: User,
-    analytics_content: Content,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """SQLite lock contention should not fail the caller for analytics writes."""
-    monkeypatch.setattr("app.core.db.time.sleep", lambda _seconds: None)
-
-    def _locked_commit() -> None:
-        raise OperationalError(
-            "INSERT analytics_interactions",
-            {},
-            sqlite3.OperationalError("database is locked"),
-        )
-
-    monkeypatch.setattr(db_session, "commit", _locked_commit)
-
-    result = record_content_interaction(
-        db_session,
-        RecordContentInteractionInput(
-            user_id=analytics_user.id,
-            content_id=analytics_content.id,
-            interaction_id=str(uuid4()),
-            interaction_type=INTERACTION_TYPE_OPENED,
-        ),
-    )
-
-    assert result.recorded is False
-    assert result.analytics_interaction_id is None

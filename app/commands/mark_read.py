@@ -6,15 +6,13 @@ from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
-from app.core.db import temporary_sqlite_busy_timeout
 from app.models.schema import Content, ContentReadStatus
 from app.repositories import read_status_repository
 
 
 def mark_read(db: Session, *, user_id: int, content_id: int) -> dict[str, object]:
     """Mark a content item as read."""
-    with temporary_sqlite_busy_timeout(db, read_status_repository.READ_STATUS_BUSY_TIMEOUT_MS):
-        content = db.query(Content).filter(Content.id == content_id).first()
+    content = db.query(Content).filter(Content.id == content_id).first()
     if not content:
         raise HTTPException(status_code=404, detail="Content not found")
 

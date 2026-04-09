@@ -1,7 +1,7 @@
 # Ubuntu 24.04 setup: Supervisor + Nginx for `news_app`
 
 This guide matches the current production shape and the deploy flow in
-[`/.github/workflows/bare-metal-deploy.yml`](../../../.github/workflows/bare-metal-deploy.yml).
+[`/.github/workflows/docker-racknerd-deploy.yml`](../../../.github/workflows/docker-racknerd-deploy.yml).
 
 Supervisor manages:
 - `news_app_server`

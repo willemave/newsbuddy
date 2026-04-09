@@ -69,8 +69,10 @@ pytest tests/ -v       # Run tests
 
 ### Running the App
 ```bash
-# Local development
+# Local development uses native host services plus local PostgreSQL.
+# Reserve Docker for staging/production-style runs.
 uv sync && . .venv/bin/activate
+./scripts/setup_local_postgres.sh
 alembic upgrade head
 scripts/start_server.sh              # API server
 scripts/start_workers.sh             # Task workers
@@ -98,6 +100,6 @@ scripts/start_scrapers.sh            # Content scrapers
 
 ### Environment Variables (Required)
 ```bash
-DATABASE_URL="sqlite:///./news_app.db"
+DATABASE_URL="postgresql+psycopg://newsly:change-me@127.0.0.1:5432/newsly"
 JWT_SECRET_KEY=<generate with: python -c "import secrets; print(secrets.token_urlsafe(32))">
 ADMIN_PASSWORD=<secure-password>

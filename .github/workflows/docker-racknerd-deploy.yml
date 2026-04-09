@@ -1,0 +1,159 @@
+name: Docker Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build image and deploy to RackNerd
+    runs-on: ubuntu-latest
+    concurrency: news-app-docker-deploy
+    environment: production
+    env:
+      DEPLOY_REMOTE_DIR: ${{ vars.DEPLOY_REMOTE_DIR }}
+      DEPLOY_OWNER_GROUP: ${{ vars.DEPLOY_OWNER_GROUP }}
+      DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+      DEPLOY_SERVICE_USER: ${{ vars.DEPLOY_SERVICE_USER }}
+      DEPLOY_LEGACY_PROGRAMS: ${{ vars.DEPLOY_LEGACY_PROGRAMS }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build deployment image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: newsly:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start ssh-agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Trust remote host key
+        env:
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          PORT="${DEPLOY_SSH_PORT:-22}"
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "$PORT" -H "$DEPLOY_SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync repo and deploy container
+        env:
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+          IMAGE_TAG: newsly:${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${DEPLOY_SSH_USER:-}" || -z "${DEPLOY_SSH_HOST:-}" ]]; then
+            echo "DEPLOY_SSH_USER and DEPLOY_SSH_HOST secrets are required" >&2
+            exit 1
+          fi
+
+          REMOTE="${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}"
+          PORT="${DEPLOY_SSH_PORT:-22}"
+          SSH_OPTS=(-p "$PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes)
+          REMOTE_DIR="${DEPLOY_REMOTE_DIR:-/opt/news_app}"
+          OWNER_GROUP="${DEPLOY_OWNER_GROUP:-newsapp:newsapp}"
+          SERVICE_USER="${DEPLOY_SERVICE_USER:-${OWNER_GROUP%%:*}}"
+          LEGACY_PROGRAMS="${DEPLOY_LEGACY_PROGRAMS:-news_app_server news_app_workers_content news_app_workers_image news_app_workers_media news_app_workers_onboarding news_app_workers_twitter news_app_workers_chat news_app_queue_watchdog news_app_bgutil_provider news_app_workers_transcribe}"
+
+          EXCLUDES=(
+            ".git/"
+            ".github/"
+            ".worktrees/"
+            ".venv/"
+            "archive/"
+            "client/"
+            "data/"
+            "logs/"
+            "logs_from_server/"
+            "node_modules/"
+            "__pycache__/"
+            ".ruff_cache/"
+            ".pytest_cache/"
+            "*.pyc"
+            "*.pyo"
+            "*.db"
+            "*.sqlite"
+            ".DS_Store"
+            ".env"
+            ".env.docker"
+            ".env.docker.local"
+            ".env.local"
+            "docker/local-data/"
+          )
+          PROTECTED_PATHS=(
+            ".env.racknerd"
+          )
+
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo mkdir -p '$REMOTE_DIR' && sudo chown '$OWNER_GROUP' '$REMOTE_DIR' && sudo chmod 755 '$REMOTE_DIR'"
+
+          RSYNC_ARGS=(-az --delete --rsync-path="sudo rsync" --info=progress2 --chown="$OWNER_GROUP" -e "ssh -p $PORT -o StrictHostKeyChecking=yes -o BatchMode=yes")
+          for ex in "${EXCLUDES[@]}"; do
+            RSYNC_ARGS+=(--exclude "$ex")
+          done
+          for protected_path in "${PROTECTED_PATHS[@]}"; do
+            RSYNC_ARGS+=(--filter "P $protected_path")
+          done
+          rsync "${RSYNC_ARGS[@]}" ./ "$REMOTE:$REMOTE_DIR/"
+
+          echo "→ Verifying RackNerd env file"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
+            set -euo pipefail
+            cd \"$REMOTE_DIR\"
+            if [[ ! -f .env.racknerd ]]; then
+              echo \".env.racknerd is required for deploy\" >&2
+              exit 1
+            fi
+            sudo chmod 600 .env.racknerd
+            sudo mkdir -p /data
+          '"
+
+          echo "→ Stopping legacy bare-metal processes if present"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
+            set -euo pipefail
+            if command -v supervisorctl >/dev/null 2>&1; then
+              sudo supervisorctl stop ${LEGACY_PROGRAMS} >/dev/null 2>&1 || true
+            fi
+            sudo -u ${SERVICE_USER} -H crontab -r >/dev/null 2>&1 || true
+          '"
+
+          echo "→ Streaming image to remote host"
+          docker save "$IMAGE_TAG" | gzip | ssh "${SSH_OPTS[@]}" "$REMOTE" "gunzip | sudo docker load"
+
+          echo "→ Restarting Docker stack"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
+            set -euo pipefail
+            cd \"$REMOTE_DIR\"
+            sudo env NEWSLY_IMAGE=\"$IMAGE_TAG\" NEWSLY_ENV_FILE=.env.racknerd docker compose --env-file .env.racknerd down --remove-orphans || true
+            sudo env NEWSLY_IMAGE=\"$IMAGE_TAG\" NEWSLY_ENV_FILE=.env.racknerd docker compose --env-file .env.racknerd up -d
+          '"
+
+          echo "→ Verifying container health"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            STATUS=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' newsly" 2>/dev/null || true)
+            if [[ "$STATUS" == "healthy" ]]; then
+              ssh "${SSH_OPTS[@]}" "$REMOTE" "cd '$REMOTE_DIR' && sudo env NEWSLY_IMAGE='$IMAGE_TAG' NEWSLY_ENV_FILE=.env.racknerd docker compose --env-file .env.racknerd ps"
+              exit 0
+            fi
+            if [[ $attempt -eq 10 ]]; then
+              echo "Container failed to become healthy" >&2
+              ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker logs --tail 200 newsly || true"
+              exit 1
+            fi
+            sleep 10
+          done

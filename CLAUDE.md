@@ -18,6 +18,7 @@ This file stays minimal and only captures repo-specific working rules.
 - Backend: FastAPI, SQLAlchemy 2, Pydantic v2, database-backed async task queue.
 - Clients: SwiftUI iOS app, iOS Share Extension, Jinja admin UI, machine-facing APIs.
 - UI note: this repo is not a React app. Web UI is Jinja-rendered; mobile UI is SwiftUI.
+- Runtime note: local development should use the normal local services and a local PostgreSQL instance. Treat Docker as a staging/production runtime, not the default local-dev path.
 
 ## Dependency Direction
 

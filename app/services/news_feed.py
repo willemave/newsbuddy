@@ -7,11 +7,9 @@ from typing import Any
 
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.core.db import run_with_sqlite_lock_retry, temporary_sqlite_busy_timeout
 from app.models.api.common import (
     ContentDetailResponse,
     ContentListResponse,
@@ -30,17 +28,11 @@ from app.utils.pagination import PaginationCursor
 from app.utils.title_utils import resolve_display_title, resolve_title_candidate
 from app.utils.url_utils import normalize_http_url
 
-READ_STATUS_BUSY_TIMEOUT_MS = 250
-
 
 def _read_status_insert_for_dialect(db: Session):
-    """Return a dialect-aware insert builder for news-item read-status writes."""
-    dialect_name = db.get_bind().dialect.name
-    if dialect_name == "sqlite":
-        return sqlite_insert(NewsItemReadStatus)
-    if dialect_name == "postgresql":
-        return postgresql_insert(NewsItemReadStatus)
-    raise ValueError(f"Unsupported database dialect for news read status: {dialect_name}")
+    """Return the canonical insert builder for news-item read-status writes."""
+    del db
+    return postgresql_insert(NewsItemReadStatus)
 
 
 def _coerce_utc(value: datetime | None) -> datetime | None:
@@ -413,42 +405,31 @@ def bulk_mark_news_items_read(
         }
 
     try:
-
-        def _write() -> int:
-            with temporary_sqlite_busy_timeout(db, READ_STATUS_BUSY_TIMEOUT_MS):
-                timestamp = datetime.now(UTC).replace(tzinfo=None)
-                stmt = (
-                    _read_status_insert_for_dialect(db)
-                    .values(
-                        [
-                            {
-                                "user_id": user_id,
-                                "news_item_id": news_item_id,
-                                "read_at": timestamp,
-                                "created_at": timestamp,
-                            }
-                            for news_item_id in sorted(visible_ids)
-                        ]
-                    )
-                    .on_conflict_do_nothing(
-                        index_elements=[
-                            NewsItemReadStatus.user_id,
-                            NewsItemReadStatus.news_item_id,
-                        ]
-                    )
-                    .returning(NewsItemReadStatus.news_item_id)
-                )
-                inserted_ids = db.execute(stmt).scalars().all()
-                db.commit()
-                return len(inserted_ids)
-
-        marked_count = run_with_sqlite_lock_retry(
-            db=db,
-            component="news_feed",
-            operation="bulk_mark_news_items_read",
-            work=_write,
-            context_data={"user_id": user_id, "content_count": len(visible_ids)},
+        timestamp = datetime.now(UTC).replace(tzinfo=None)
+        stmt = (
+            _read_status_insert_for_dialect(db)
+            .values(
+                [
+                    {
+                        "user_id": user_id,
+                        "news_item_id": news_item_id,
+                        "read_at": timestamp,
+                        "created_at": timestamp,
+                    }
+                    for news_item_id in sorted(visible_ids)
+                ]
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    NewsItemReadStatus.user_id,
+                    NewsItemReadStatus.news_item_id,
+                ]
+            )
+            .returning(NewsItemReadStatus.news_item_id)
         )
+        inserted_ids = db.execute(stmt).scalars().all()
+        db.commit()
+        marked_count = len(inserted_ids)
     except OperationalError:
         db.rollback()
         return {

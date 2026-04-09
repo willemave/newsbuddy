@@ -24,16 +24,16 @@ ls -la /opt/newsly/scripts/backup_database.sh
 chmod +x /opt/newsly/scripts/backup_database.sh
 ```
 
-### 3. Verify sqlite3 is installed
+### 3. Verify PostgreSQL client tools are installed
 ```bash
-# Check if sqlite3 is available
-which sqlite3
+# Check if pg_dump is available
+which pg_dump
 
 # If not installed (Debian/Ubuntu):
-sudo apt-get install sqlite3
+sudo apt-get install postgresql-client
 
 # If not installed (RHEL/CentOS):
-sudo yum install sqlite
+sudo yum install postgresql
 ```
 
 ### 4. Test the backup script manually

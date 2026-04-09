@@ -8,8 +8,14 @@ from dotenv import load_dotenv
 from pydantic import AliasChoices, Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Load .env file into os.environ so libraries like openai/pydantic-ai can read it
-load_dotenv(override=True)
+
+def _resolve_env_file() -> Path:
+    env_file = os.getenv("NEWSLY_ENV_FILE", ".env")
+    return Path(env_file).expanduser()
+
+
+# Load the selected env file into os.environ so libraries like openai/pydantic-ai can read it
+load_dotenv(dotenv_path=_resolve_env_file(), override=True)
 
 
 def _default_images_base_dir() -> Path:
@@ -30,13 +36,10 @@ class Settings(BaseSettings):
         extra="ignore",  # Ignore extra fields from existing .env
     )
 
-    # Database - allow both PostgreSQL and SQLite for development
-    database_url: PostgresDsn | str
+    # Database
+    database_url: PostgresDsn
     database_pool_size: int = 20
     database_max_overflow: int = 40
-    sqlite_busy_timeout_ms: int = Field(default=30_000, ge=1_000)
-    sqlite_enable_wal: bool = False
-    sqlite_write_retry_attempts: int = Field(default=3, ge=1, le=10)
 
     # Application
     app_name: str = "News Aggregator"
@@ -97,27 +100,13 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("ELEVENLABS_API_KEY", "ELEVENLABS"),
     )
-    elevenlabs_stt_model_id: str = "scribe_v2_realtime"
-    elevenlabs_stt_language: str | None = None
     elevenlabs_tts_voice_id: str | None = "JBFqnCBsd6RMkjVDRZzb"
-    elevenlabs_tts_model: str | None = "eleven_multilingual_v2"
-    elevenlabs_tts_output_format: str | None = "pcm_16000"
     elevenlabs_digest_tts_model: str = "eleven_turbo_v2_5"
     elevenlabs_digest_tts_output_format: str = "mp3_44100_128"
     elevenlabs_digest_tts_speed: float = Field(default=1.0, ge=0.7, le=1.2)
     elevenlabs_agent_id: str = "agent_4701khf4v6jef3vskb8sd2a30m36"
     elevenlabs_agent_text_only: bool = True
     elevenlabs_agent_turn_timeout_seconds: int = 25
-    voice_haiku_model: str = "google:gemini-3.1-flash-lite-preview"
-    voice_session_ttl_minutes: int = 60
-    voice_max_context_turns: int = 20
-    voice_stt_commit_timeout_seconds: int = 8
-    voice_max_input_seconds: int = 30
-    voice_max_assistant_chars: int = 4_000
-    voice_ws_max_queue: int = 500
-    voice_trace_logging: bool = True
-    voice_audio_diag_logging: bool = False
-    voice_trace_max_chars: int = 600
     admin_conversational_session_ttl_minutes: int = 120
     admin_conversational_max_turns: int = 20
     admin_conversational_ws_max_queue: int = 500
@@ -252,12 +241,9 @@ class Settings(BaseSettings):
 
     @field_validator("database_url")
     @classmethod
-    def validate_database_url(cls, v):
+    def validate_database_url(cls, v: PostgresDsn) -> PostgresDsn:
         if not v:
             raise ValueError("DATABASE_URL must be set")
-        # Allow SQLite for development
-        if isinstance(v, str) and v.startswith("sqlite:"):
-            return v
         return v
 
     @field_validator("pdf_gemini_model")

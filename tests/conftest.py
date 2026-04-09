@@ -2,24 +2,20 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from itertools import count
-from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
+import app.core.db as core_db
 from app.core.security import create_access_token
 from app.main import app
 from app.models.schema import (
-    Base,
     ChatSession,
     Content,
     ContentFavorites,
@@ -30,34 +26,43 @@ from app.models.schema import (
     UserIntegrationConnection,
 )
 from app.models.user import User
-
-
-def _create_testing_engine():
-    """Create an in-memory SQLite engine shared across sessions."""
-    return create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+from app.testing.postgres_harness import TemporaryPostgresHarness, create_temporary_postgres_harness
+from tests.support.fixture_files import load_json_fixture
 
 
 @pytest.fixture
-def test_db():
-    """Create a test database engine."""
-    engine = _create_testing_engine()
-    Base.metadata.create_all(bind=engine)
+def postgres_harness() -> Iterator[TemporaryPostgresHarness]:
+    """Create an isolated PostgreSQL harness and bind global DB access to it."""
+    harness = create_temporary_postgres_harness(schema_prefix="newsly_test")
+    previous_engine = core_db._engine
+    previous_session_local = core_db._SessionLocal
+
+    core_db._engine = harness.engine
+    core_db._SessionLocal = harness.session_factory
     try:
-        yield engine
+        yield harness
     finally:
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
+        core_db._engine = previous_engine
+        core_db._SessionLocal = previous_session_local
+        harness.close()
 
 
 @pytest.fixture
-def db_session(test_db):
+def test_db(postgres_harness: TemporaryPostgresHarness):
+    """Create an isolated PostgreSQL test database and bind global DB access to it."""
+    return postgres_harness.engine
+
+
+@pytest.fixture
+def db_session_factory(postgres_harness: TemporaryPostgresHarness) -> sessionmaker:
+    """Return a session factory bound to the shared isolated test database."""
+    return postgres_harness.session_factory
+
+
+@pytest.fixture
+def db_session(db_session_factory: sessionmaker):
     """Create a writable test database session."""
-    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db)
-    session = TestSessionLocal()
+    session = db_session_factory()
     try:
         yield session
     finally:
@@ -65,10 +70,9 @@ def db_session(test_db):
 
 
 @pytest.fixture
-def db(test_db):
+def db(db_session_factory: sessionmaker):
     """Backward-compatible DB session fixture used by auth-heavy tests."""
-    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db)
-    session = TestSessionLocal()
+    session = db_session_factory()
     try:
         yield session
     finally:
@@ -76,15 +80,13 @@ def db(test_db):
 
 
 @pytest.fixture
-def llm_usage_db(test_db, monkeypatch):
+def llm_usage_db(db_session_factory: sessionmaker, monkeypatch):
     """Route out-of-band LLM usage writes to the current test database."""
     from app.services import llm_costs
 
-    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_db)
-
     @contextmanager
     def _get_db():
-        session = TestSessionLocal()
+        session = db_session_factory()
         try:
             yield session
             session.commit()
@@ -601,10 +603,6 @@ def client(client_factory, test_user):
         yield test_client
 
 
-# Content fixtures
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
-
-
 def load_fixture(fixture_name: str) -> dict[str, Any]:
     """Load a fixture from the fixtures directory.
 
@@ -614,9 +612,7 @@ def load_fixture(fixture_name: str) -> dict[str, Any]:
     Returns:
         Parsed JSON data from the fixture file
     """
-    fixture_path = FIXTURES_DIR / f"{fixture_name}.json"
-    with open(fixture_path) as f:
-        return json.load(f)
+    return load_json_fixture(fixture_name)
 
 
 @pytest.fixture

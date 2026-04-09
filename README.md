@@ -15,7 +15,7 @@
   <a href="#getting-started"><img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"></a>
   <a href="#cli"><img src="https://img.shields.io/badge/Go_CLI-1.23+-00add8?style=flat-square&logo=go&logoColor=white" alt="Go CLI"></a>
   <a href="#ios-app"><img src="https://img.shields.io/badge/SwiftUI-iOS_17+-007aff?style=flat-square&logo=swift&logoColor=white" alt="SwiftUI"></a>
-  <a href="https://github.com/willemave/news_app/actions"><img src="https://img.shields.io/github/actions/workflow/status/willemave/news_app/bare-metal-deploy.yml?branch=main&style=flat-square&label=deploy" alt="Deploy"></a>
+  <a href="https://github.com/willemave/news_app/actions"><img src="https://img.shields.io/github/actions/workflow/status/willemave/news_app/docker-racknerd-deploy.yml?branch=main&style=flat-square&label=deploy" alt="Deploy"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/docs-architecture-8b5cf6?style=flat-square" alt="Docs"></a>
 </p>
 
@@ -131,47 +131,113 @@ For full architecture details, see **[docs/architecture.md](docs/architecture.md
 
 ### Prerequisites
 
-- **Python 3.13+**
-- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager
-- **Node.js** — for Tailwind CSS build
+- **Homebrew** for the native PostgreSQL local-dev path
+- **uv** for Python environment management
+- **Docker** and **Docker Compose** only if you want the containerized runtime
 
-### Quick Start
+### Native PostgreSQL Quick Start
+
+This is the default local-development path. For day-to-day local work, run the app and workers as normal host services against a local PostgreSQL instance.
 
 ```bash
 # Clone
 git clone https://github.com/willemave/news_app.git
 cd news_app
 
-# Install dependencies
-uv sync && source .venv/bin/activate
+# Install/start PostgreSQL, create the local app DB/user, and update .env
+./scripts/setup_local_postgres.sh
+
+# Install Python dependencies
+uv sync && . .venv/bin/activate
+
+# Start the full local stack
+./scripts/start_services.sh all --env-file .env
+```
+
+The setup script installs Homebrew PostgreSQL if needed, starts the service, creates the `newsly` database + role, and rewrites `DATABASE_URL` in `.env` to point at `127.0.0.1:5432`.
+
+### Docker Quick Start
+
+Use this for staging or production-style container runs. Docker is not required for normal local development.
+
+```bash
+# Clone
+git clone https://github.com/willemave/news_app.git
+cd news_app
 
 # Configure environment
-cp .env.example .env
-# Edit .env with your API keys (see table below)
+cp .env.docker.example .env.docker.local
+# Edit .env.docker.local with your secrets
 
-# Set up database
-alembic upgrade head
+# Start the single-container stack (FastAPI + embedded Postgres)
+docker compose --env-file .env.docker.local up --build -d
 
-# Build CSS
-npx @tailwindcss/cli -i ./static/css/styles.css -o ./static/css/app.css
+# View logs
+docker compose logs -f newsly
+```
 
-# Launch
-scripts/start_server.sh     # API server on :8000
-scripts/start_workers.sh    # Background task workers
-scripts/start_scrapers.sh   # Content scrapers
+The container exposes:
+
+- API: `http://127.0.0.1:8000`
+- PostgreSQL: `127.0.0.1:5432`
+
+Set `NEWSLY_RUNTIME_MODE=server` in `.env.docker.local` to skip workers, the queue watchdog, and the scheduler while keeping the API server and embedded Postgres.
+
+### SQLite To PostgreSQL Migration
+
+```bash
+# Copy your existing SQLite file into the mounted local data directory
+mkdir -p docker/local-data
+cp /path/to/news_app.db docker/local-data/news_app.db
+
+# Start the stack first so embedded Postgres is ready
+docker compose --env-file .env.docker.local up --build -d
+
+# Restore or seed PostgreSQL directly before first start.
+# Legacy SQLite migration tooling has been removed.
+```
+
+### Local Start Scripts
+
+For native local development, use the unified launcher with `.env`:
+
+```bash
+# Run the local long-running stack
+./scripts/start_services.sh all --env-file .env
+
+# Run just the API server
+./scripts/start_services.sh server --env-file .env --port 8000 --reload
+
+# Run just the workers
+./scripts/start_services.sh workers --env-file .env --content-workers 2 --media-workers 1
+
+# Run migrations explicitly
+./scripts/start_services.sh migrate --env-file .env
+```
+
+The legacy entrypoints still work and now delegate to `start_services.sh`:
+
+```bash
+./scripts/start_server.sh --env-file .env
+./scripts/start_workers.sh --env-file .env
+./scripts/start_scrapers.sh --env-file .env --show-stats
+./scripts/start_queue_watchdog.sh --env-file .env
 ```
 
 ### Environment Variables
 
 | Variable | Required | Description |
 |----------|:--------:|-------------|
-| `DATABASE_URL` | Yes | `sqlite:///./news_app.db` for local dev |
+| `DATABASE_URL` | Yes | SQLAlchemy connection URL. Local dev uses native PostgreSQL on `127.0.0.1:5432`; Docker uses `.env.docker.local`. |
+| `PORT` | | API port inside/outside the container (default `8000`) |
 | `JWT_SECRET_KEY` | Yes | Token signing key — generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `ADMIN_PASSWORD` | Yes | Admin panel access |
 | `ANTHROPIC_API_KEY` | | Summarization, chat agents |
 | `OPENAI_API_KEY` | | Summarization, deep research |
 | `GOOGLE_API_KEY` | | Image generation (Gemini) |
 | `EXA_API_KEY` | | Web search in chat |
+
+Docker-only env templates remain in `.env.docker.example` and `.env.docker.local`.
 
 <br>
 
@@ -227,7 +293,7 @@ client/
 
 ### Deployment
 
-Production deploys are handled via GitHub Actions ([`.github/workflows/bare-metal-deploy.yml`](.github/workflows/bare-metal-deploy.yml)). Do not use `scripts/deploy/push_app.sh` for production.
+Production deploys are handled via GitHub Actions with Docker image build + RackNerd container rollout through [`.github/workflows/docker-racknerd-deploy.yml`](.github/workflows/docker-racknerd-deploy.yml). The server runs the repo `docker-compose.yml` and a single `newsly` container.
 
 <br>
 

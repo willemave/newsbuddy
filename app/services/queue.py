@@ -3,7 +3,7 @@ from typing import Any
 
 from sqlalchemy import and_, func, or_
 
-from app.core.db import get_db, run_with_sqlite_lock_retry
+from app.core.db import get_db
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.core.settings import get_settings
@@ -39,6 +39,11 @@ DEDUPABLE_CONTENT_TASK_TYPES: set[TaskType] = {
     TaskType.FETCH_DISCUSSION,
     TaskType.GENERATE_IMAGE,
 }
+
+
+def _utc_now() -> datetime:
+    """Return the repo's normalized naive-UTC timestamp shape."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class QueueService:
@@ -151,17 +156,7 @@ class QueueService:
                 db.commit()
                 return task_id
 
-            task_id = run_with_sqlite_lock_retry(
-                db=db,
-                component="queue",
-                operation="enqueue",
-                work=_create_task,
-                item_id=content_id,
-                context_data={
-                    "task_type": task_type.value,
-                    "queue_name": target_queue,
-                },
-            )
+            task_id = _create_task()
 
             logger.info(
                 "Task enqueued",
@@ -198,10 +193,9 @@ class QueueService:
         """
         with get_db() as db:
             # Retry claim a few times to avoid races across worker processes.
-            # This compare-and-set pattern works reliably even where SKIP LOCKED
-            # semantics are unavailable (e.g., SQLite).
+            # The compare-and-set update avoids duplicate claims between workers.
             for _ in range(5):
-                now = datetime.now(UTC)
+                now = _utc_now()
                 query = db.query(ProcessingTask.id).filter(
                     ProcessingTask.status == TaskStatus.PENDING.value,
                     or_(ProcessingTask.created_at.is_(None), ProcessingTask.created_at <= now),
@@ -252,6 +246,7 @@ class QueueService:
                 if raw_task_id is None:
                     raw_task_id = task_row[0]
                 task_id = int(raw_task_id)
+
                 def _claim_task(
                     claimed_task_id: int = task_id,
                     claimed_started_at: datetime = now,
@@ -276,18 +271,7 @@ class QueueService:
                     db.commit()
                     return int(claimed_rows)
 
-                claimed = run_with_sqlite_lock_retry(
-                    db=db,
-                    component="queue",
-                    operation="dequeue",
-                    work=_claim_task,
-                    item_id=task_id,
-                    context_data={
-                        "worker_id": worker_id,
-                        "queue_name": normalized_queue,
-                        "task_type": task_type.value if task_type is not None else None,
-                    },
-                )
+                claimed = _claim_task()
                 if claimed == 0:
                     continue
 
@@ -331,12 +315,13 @@ class QueueService:
     def complete_task(self, task_id: int, success: bool = True, error_message: str | None = None):
         """Mark a task as completed."""
         with get_db() as db:
+
             def _complete_task() -> dict[str, Any] | None:
                 task = db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()
                 if not task:
                     return None
 
-                task.completed_at = datetime.now(UTC)
+                task.completed_at = _utc_now()
                 if success:
                     task.status = TaskStatus.COMPLETED.value
                     task.error_message = None
@@ -351,14 +336,7 @@ class QueueService:
                     "error_message": task.error_message,
                 }
 
-            completion = run_with_sqlite_lock_retry(
-                db=db,
-                component="queue",
-                operation="complete_task",
-                work=_complete_task,
-                item_id=task_id,
-                context_data={"success": success},
-            )
+            completion = _complete_task()
 
             if completion is None:
                 logger.error(
@@ -428,7 +406,7 @@ class QueueService:
                 if not task:
                     return None
 
-                now = datetime.now(UTC)
+                now = _utc_now()
                 persisted_retry_count = int(task.retry_count or 0)
                 base_retry_count = max(persisted_retry_count, int(current_retry_count or 0))
 
@@ -459,20 +437,7 @@ class QueueService:
                     "retry_delay_seconds": resolved_delay_seconds,
                 }
 
-            transition = run_with_sqlite_lock_retry(
-                db=db,
-                component="queue",
-                operation="finalize_task",
-                work=_finalize_task,
-                item_id=task_id,
-                context_data={
-                    "success": success,
-                    "retryable": retryable,
-                    "current_retry_count": current_retry_count,
-                    "max_retries": max_retries,
-                    "retry_delay_seconds": resolved_delay_seconds,
-                },
-            )
+            transition = _finalize_task()
 
             if transition is None:
                 logger.error(
@@ -543,6 +508,7 @@ class QueueService:
     def retry_task(self, task_id: int, delay_seconds: int = 60):
         """Retry a failed task after a delay."""
         with get_db() as db:
+
             def _schedule_retry() -> dict[str, Any] | None:
                 task = db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()
                 if not task:
@@ -552,7 +518,7 @@ class QueueService:
                 task.retry_count += 1
                 task.started_at = None
                 task.completed_at = None
-                task.created_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+                task.created_at = _utc_now() + timedelta(seconds=delay_seconds)
                 db.commit()
                 return {
                     "task_type": task.task_type,
@@ -561,14 +527,7 @@ class QueueService:
                     "retry_count": task.retry_count,
                 }
 
-            retry_result = run_with_sqlite_lock_retry(
-                db=db,
-                component="queue",
-                operation="retry_task",
-                work=_schedule_retry,
-                item_id=task_id,
-                context_data={"delay_seconds": delay_seconds},
-            )
+            retry_result = _schedule_retry()
 
             if retry_result is None:
                 logger.error(
@@ -652,7 +611,7 @@ class QueueService:
             stats["pending_by_queue_type"] = pending_by_queue_type
 
             # Failed tasks in last hour
-            one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
+            one_hour_ago = _utc_now() - timedelta(hours=1)
             recent_failures = (
                 db.query(func.count(ProcessingTask.id))
                 .filter(
@@ -685,10 +644,7 @@ class QueueService:
         reasons: list[str] = []
         if content_pending >= settings.queue_backpressure_max_pending_content:
             reasons.append("content_queue_backlog")
-        if (
-            pending_process_news_item
-            >= settings.queue_backpressure_max_pending_process_news_item
-        ):
+        if pending_process_news_item >= settings.queue_backpressure_max_pending_process_news_item:
             reasons.append("process_news_item_backlog")
         if (
             pending_generate_news_digest
@@ -717,7 +673,7 @@ class QueueService:
     def cleanup_old_tasks(self, days: int = 7):
         """Remove completed tasks older than specified days."""
         with get_db() as db:
-            cutoff_date = datetime.now(UTC) - timedelta(days=days)
+            cutoff_date = _utc_now() - timedelta(days=days)
 
             deleted = (
                 db.query(ProcessingTask)

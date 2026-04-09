@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import UTC, datetime
-
-from sqlalchemy.exc import OperationalError
 
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content, NewsItem, NewsItemReadStatus
@@ -143,47 +140,6 @@ def test_list_news_items_hides_suppressed_members_and_marks_read(
     read_response = client.get("/api/news/items", params={"read_filter": "read"})
     assert read_response.status_code == 200
     assert [item["id"] for item in read_response.json()["contents"]] == [representative.id]
-
-
-def test_mark_news_items_read_returns_failed_ids_when_sqlite_is_locked(
-    client,
-    db_session,
-    monkeypatch,
-) -> None:
-    representative = _create_news_item(
-        db_session,
-        ingest_key="rep-locked",
-        summary_title="Representative story",
-    )
-    db_session.commit()
-
-    original_commit = db_session.commit
-    calls = 0
-
-    def flaky_commit():  # noqa: ANN202
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise OperationalError(
-                "INSERT news_item_read_status",
-                {},
-                sqlite3.OperationalError("database is locked"),
-            )
-        return original_commit()
-
-    monkeypatch.setattr(db_session, "commit", flaky_commit)
-
-    response = client.post(
-        "/api/news/items/mark-read",
-        json={"content_ids": [representative.id]},
-    )
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "success",
-        "marked_count": 1,
-        "failed_ids": [],
-        "total_requested": 1,
-    }
 
 
 def test_mark_news_items_read_is_idempotent_for_existing_rows(

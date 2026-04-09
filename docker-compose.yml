@@ -1,0 +1,17 @@
+services:
+  newsly:
+    build:
+      context: .
+    image: ${NEWSLY_IMAGE:-newsly:local}
+    container_name: newsly
+    restart: unless-stopped
+    env_file:
+      - ${NEWSLY_ENV_FILE:-.env.docker.local}
+    environment:
+      PORT: ${PORT:-8000}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+      - "${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}"
+    volumes:
+      - ${NEWSLY_DATA_ROOT_HOST_PATH:-./docker/local-data}:/data

@@ -1,9 +1,7 @@
-import sqlite3
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from sqlalchemy.exc import OperationalError
 
 from app.models.schema import ProcessingTask
 from app.services.queue import QueueService, TaskStatus, TaskType, get_queue_service
@@ -19,7 +17,7 @@ class TestQueueService:
     @pytest.fixture
     def mock_db_session(self):
         """Fixture for mocked database session."""
-        with patch('app.services.queue.get_db') as mock_get_db:
+        with patch("app.services.queue.get_db") as mock_get_db:
             mock_session = MagicMock()
             default_query = MagicMock()
             default_query.filter.return_value = default_query
@@ -35,9 +33,7 @@ class TestQueueService:
 
         service = QueueService()
         task_id = service.enqueue(
-            task_type=TaskType.PROCESS_CONTENT,
-            content_id=456,
-            payload={'test': 'data'}
+            task_type=TaskType.PROCESS_CONTENT, content_id=456, payload={"test": "data"}
         )
 
         # Verify task was created correctly
@@ -50,7 +46,7 @@ class TestQueueService:
         added_task = mock_db_session.add.call_args[0][0]
         assert added_task.task_type == TaskType.PROCESS_CONTENT.value
         assert added_task.content_id == 456
-        assert added_task.payload == {'test': 'data'}
+        assert added_task.payload == {"test": "data"}
         assert added_task.status == TaskStatus.PENDING.value
 
     def test_enqueue_task_minimal(self, mock_db_session):
@@ -73,7 +69,7 @@ class TestQueueService:
         mock_task.id = 123
         mock_task.task_type = TaskType.PROCESS_CONTENT.value
         mock_task.content_id = 456
-        mock_task.payload = {'test': 'data'}
+        mock_task.payload = {"test": "data"}
         mock_task.retry_count = 0
         mock_task.status = TaskStatus.PENDING.value
         mock_task.created_at = datetime.now(UTC)
@@ -91,11 +87,11 @@ class TestQueueService:
 
         # Verify result
         assert result is not None
-        assert result['id'] == 123
-        assert result['task_type'] == TaskType.PROCESS_CONTENT.value
-        assert result['content_id'] == 456
-        assert result['payload'] == {'test': 'data'}
-        assert result['retry_count'] == 0
+        assert result["id"] == 123
+        assert result["task_type"] == TaskType.PROCESS_CONTENT.value
+        assert result["content_id"] == 456
+        assert result["payload"] == {"test": "data"}
+        assert result["retry_count"] == 0
 
         # Verify task claim/update path was executed.
         assert mock_db_session.query.return_value.filter.return_value.update.called
@@ -157,11 +153,7 @@ class TestQueueService:
         mock_db_session.query.return_value.filter.return_value.first.return_value = mock_task
 
         service = QueueService()
-        service.complete_task(
-            task_id=123,
-            success=False,
-            error_message="Test error"
-        )
+        service.complete_task(task_id=123, success=False, error_message="Test error")
 
         assert mock_task.status == TaskStatus.FAILED.value
         assert mock_task.completed_at is not None
@@ -278,8 +270,8 @@ class TestQueueService:
         stats = service.get_queue_stats()
 
         expected_stats = {
-            'by_status': {'pending': 5, 'processing': 2, 'completed': 10},
-            'pending_by_type': {'process_content': 3, 'download_audio': 2},
+            "by_status": {"pending": 5, "processing": 2, "completed": 10},
+            "pending_by_type": {"process_content": 3, "download_audio": 2},
             "pending_by_queue": {"content": 4, "media": 1},
             "pending_by_queue_type": {
                 "content": {
@@ -290,7 +282,7 @@ class TestQueueService:
                     "transcribe": 1,
                 },
             },
-            'recent_failures': 1,
+            "recent_failures": 1,
         }
 
         assert stats == expected_stats
@@ -347,7 +339,7 @@ class TestQueueServiceSingleton:
         assert service1 is service2
         assert isinstance(service1, QueueService)
 
-    @patch('app.services.queue._queue_service', None)
+    @patch("app.services.queue._queue_service", None)
     def test_get_queue_service_creates_instance(self):
         """Test that get_queue_service creates instance when needed."""
         service = get_queue_service()
@@ -360,7 +352,7 @@ class TestQueueServiceIntegration:
     @pytest.fixture
     def mock_db_session(self):
         """Fixture for mocked database session."""
-        with patch('app.services.queue.get_db') as mock_get_db:
+        with patch("app.services.queue.get_db") as mock_get_db:
             mock_session = MagicMock()
             default_query = MagicMock()
             default_query.filter.return_value = default_query
@@ -377,10 +369,7 @@ class TestQueueServiceIntegration:
         mock_db_session.flush.side_effect = lambda: _set_last_added_task_id(mock_db_session, 123)
 
         # Enqueue task
-        task_id = service.enqueue(
-            task_type=TaskType.PROCESS_CONTENT,
-            content_id=456
-        )
+        task_id = service.enqueue(task_type=TaskType.PROCESS_CONTENT, content_id=456)
         assert task_id == 123
 
         # Mock task for dequeue
@@ -400,8 +389,8 @@ class TestQueueServiceIntegration:
 
         # Dequeue task
         dequeued = service.dequeue()
-        assert dequeued['id'] == 123
-        assert dequeued['task_type'] == TaskType.PROCESS_CONTENT.value
+        assert dequeued["id"] == 123
+        assert dequeued["task_type"] == TaskType.PROCESS_CONTENT.value
 
         # Mock task for completion
         mock_db_session.query.return_value.filter.return_value.first.return_value = mock_task
@@ -423,109 +412,10 @@ class TestQueueServiceIntegration:
         mock_db_session.query.return_value.filter.return_value.first.return_value = mock_task
 
         # Complete with failure
-        service.complete_task(
-            task_id=123,
-            success=False,
-            error_message="Network error"
-        )
+        service.complete_task(task_id=123, success=False, error_message="Network error")
         assert mock_task.status == TaskStatus.FAILED.value
 
         # Retry task
         service.retry_task(task_id=123)
         assert mock_task.status == TaskStatus.PENDING.value
         assert mock_task.retry_count == 1
-
-    def test_enqueue_retries_sqlite_lock(self, mock_db_session):
-        """SQLite lock contention on enqueue should be retried."""
-        mock_db_session.flush.side_effect = lambda: _set_last_added_task_id(mock_db_session, 123)
-        mock_db_session.commit.side_effect = [
-            OperationalError("INSERT task", {}, sqlite3.OperationalError("database is locked")),
-            None,
-        ]
-
-        service = QueueService()
-        task_id = service.enqueue(task_type=TaskType.PROCESS_CONTENT, content_id=456)
-
-        assert task_id == 123
-        assert mock_db_session.commit.call_count == 2
-        mock_db_session.rollback.assert_called_once()
-
-    def test_enqueue_does_not_retry_non_lock_operational_error(self, mock_db_session):
-        """Non-lock OperationalError cases should fail immediately."""
-        mock_db_session.flush.side_effect = lambda: _set_last_added_task_id(mock_db_session, 123)
-        mock_db_session.commit.side_effect = OperationalError(
-            "INSERT task",
-            {},
-            sqlite3.OperationalError("disk I/O error"),
-        )
-
-        service = QueueService()
-
-        with pytest.raises(OperationalError):
-            service.enqueue(task_type=TaskType.PROCESS_CONTENT, content_id=456)
-
-        assert mock_db_session.commit.call_count == 1
-        mock_db_session.rollback.assert_not_called()
-
-    def test_complete_task_retries_sqlite_lock(self, mock_db_session):
-        """SQLite lock contention on completion should be retried."""
-        mock_task = ProcessingTask()
-        mock_task.id = 123
-        mock_db_session.query.return_value.filter.return_value.first.return_value = mock_task
-        mock_db_session.commit.side_effect = [
-            OperationalError("UPDATE task", {}, sqlite3.OperationalError("database is locked")),
-            None,
-        ]
-
-        service = QueueService()
-        service.complete_task(task_id=123, success=True)
-
-        assert mock_task.status == TaskStatus.COMPLETED.value
-        assert mock_db_session.commit.call_count == 2
-        mock_db_session.rollback.assert_called_once()
-
-    def test_retry_task_retries_sqlite_lock(self, mock_db_session):
-        """SQLite lock contention on retry scheduling should be retried."""
-        mock_task = ProcessingTask()
-        mock_task.id = 123
-        mock_task.retry_count = 1
-        mock_db_session.query.return_value.filter.return_value.first.return_value = mock_task
-        mock_db_session.commit.side_effect = [
-            OperationalError("UPDATE task", {}, sqlite3.OperationalError("database is locked")),
-            None,
-        ]
-
-        service = QueueService()
-        service.retry_task(task_id=123, delay_seconds=120)
-
-        assert mock_task.status == TaskStatus.PENDING.value
-        assert mock_db_session.commit.call_count == 2
-        mock_db_session.rollback.assert_called_once()
-
-    def test_finalize_task_retries_sqlite_lock(self, mock_db_session):
-        """SQLite lock contention on finalize should be retried."""
-        mock_task = ProcessingTask()
-        mock_task.id = 123
-        mock_task.retry_count = 0
-        mock_db_session.query.return_value.filter.return_value.first.return_value = mock_task
-        mock_db_session.commit.side_effect = [
-            OperationalError("UPDATE task", {}, sqlite3.OperationalError("database is locked")),
-            None,
-        ]
-
-        service = QueueService()
-        transition = service.finalize_task(
-            123,
-            success=False,
-            error_message="boom",
-            retryable=True,
-            current_retry_count=0,
-            max_retries=3,
-            retry_delay_seconds=60,
-        )
-
-        assert transition is not None
-        assert transition["status"] == TaskStatus.PENDING.value
-        assert mock_task.status == TaskStatus.PENDING.value
-        assert mock_db_session.commit.call_count == 2
-        mock_db_session.rollback.assert_called_once()

@@ -178,12 +178,9 @@ python scripts/migrate_session_data.py --list-users
 
 ### "No session data found in backup database"
 
-Your backup might be from after the migration, or the tables might not exist. Check the backup:
-```bash
-sqlite3 /path/to/backup.db ".tables"
-```
-
-You should see tables like `content_favorites`, `content_read_status`, etc.
+This troubleshooting step only applied to the retired SQLite migration path. Current
+deployments are PostgreSQL-only; inspect the restored database with standard Postgres
+tools before rerunning any data migration workflow.
 
 ### Duplicate Records Skipped
 

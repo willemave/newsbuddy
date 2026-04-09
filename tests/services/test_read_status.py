@@ -1,8 +1,5 @@
 """Tests for read_status service."""
 
-import sqlite3
-
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.models.schema import Content, User
@@ -57,31 +54,6 @@ class TestMarkContentAsRead:
         # Assert - user1 has read, user2 has not
         assert read_status.is_content_read(db_session, test_content.id, user1.id)
         assert not read_status.is_content_read(db_session, test_content.id, user2.id)
-
-    def test_mark_content_as_read_retries_locked_commit(
-        self, db_session: Session, test_user: User, test_content: Content, monkeypatch
-    ):
-        """Test marking content as read retries once when SQLite is locked."""
-        original_commit = db_session.commit
-        calls = 0
-
-        def flaky_commit():  # noqa: ANN202
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                raise OperationalError(
-                    "INSERT read_status",
-                    {},
-                    sqlite3.OperationalError("database is locked"),
-                )
-            return original_commit()
-
-        monkeypatch.setattr(db_session, "commit", flaky_commit)
-
-        result = read_status.mark_content_as_read(db_session, test_content.id, test_user.id)
-
-        assert result is not None
-        assert calls == 2
 
 
 class TestMarkContentsAsRead:
@@ -169,41 +141,6 @@ class TestMarkContentsAsRead:
         user2_read = read_status.get_read_content_ids(db_session, user2.id)
         assert user1_read == [test_content.id]
         assert user2_read == [test_content_2.id]
-
-    def test_mark_contents_as_read_retries_locked_commit(
-        self,
-        db_session: Session,
-        test_user: User,
-        test_content: Content,
-        test_content_2: Content,
-        monkeypatch,
-    ):
-        """Test bulk marking retries once when SQLite is locked."""
-        original_commit = db_session.commit
-        calls = 0
-
-        def flaky_commit():  # noqa: ANN202
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                raise OperationalError(
-                    "INSERT bulk_read_status",
-                    {},
-                    sqlite3.OperationalError("database is locked"),
-                )
-            return original_commit()
-
-        monkeypatch.setattr(db_session, "commit", flaky_commit)
-
-        marked_count, failed_ids = read_status.mark_contents_as_read(
-            db_session,
-            [test_content.id, test_content_2.id],
-            test_user.id,
-        )
-
-        assert marked_count == 2
-        assert failed_ids == []
-        assert calls == 2
 
 
 class TestGetReadContentIds:
