@@ -140,7 +140,7 @@ jobs:
             )
 
             stop_matching_processes() {
-              local signal=\"$1\"
+              local signal=\"\$1\"
               local pattern=\"\"
               local matched=\"false\"
               for pattern in \"\${LEGACY_PATTERNS[@]}\"; do
