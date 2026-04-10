@@ -135,6 +135,32 @@ def test_build_news_item_upsert_input_preserves_short_valid_titles() -> None:
     assert payload.summary_title == "xAI"
 
 
+def test_build_news_item_upsert_input_drops_blocked_page_titles() -> None:
+    payload = build_news_item_upsert_input_from_scraped_item(
+        {
+            "url": "https://example.com/story",
+            "title": "OpenAI and Oracle discuss enterprise sales",
+            "content_type": ContentType.NEWS,
+            "metadata": {
+                "platform": "hackernews",
+                "source": "Hacker News",
+                "source_type": "hackernews",
+                "article": {
+                    "url": "https://example.com/story",
+                    "title": "wsj.com",
+                    "source_domain": "wsj.com",
+                },
+                "summary": {
+                    "title": "Subscribe to read",
+                },
+            },
+        }
+    )
+
+    assert payload.article_title == "OpenAI and Oracle discuss enterprise sales"
+    assert payload.summary_title == "OpenAI and Oracle discuss enterprise sales"
+
+
 def test_build_news_item_upsert_input_from_content_requires_real_summary() -> None:
     content = Content(
         id=43,
@@ -202,6 +228,39 @@ def test_build_news_item_upsert_input_from_content_ignores_void_placeholder_titl
     assert payload is not None
     assert payload.article_title == "VOID: A New AI Model for Video Object and Interaction Deletion"
     assert payload.summary_title == "VOID: A New AI Model for Video Object and Interaction Deletion"
+
+
+def test_build_news_item_upsert_input_from_content_drops_blocked_titles() -> None:
+    content = Content(
+        id=45,
+        content_type="news",
+        url="https://example.com/story",
+        source_url="https://news.ycombinator.com/item?id=45",
+        title="Amazon and Anthropic expand cloud partnership",
+        source="wsj.com",
+        platform="hackernews",
+        status="completed",
+        content_metadata={
+            "article": {
+                "url": "https://example.com/story",
+                "title": "wsj.com",
+                "source_domain": "wsj.com",
+            },
+            "summary": {
+                "title": "Subscribe to read",
+                "article_url": "https://example.com/story",
+                "key_points": ["Point"],
+                "summary": "Cloud partnership details and strategic implications.",
+            },
+        },
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+
+    payload = build_news_item_upsert_input_from_content(content)
+
+    assert payload is not None
+    assert payload.article_title == "Amazon and Anthropic expand cloud partnership"
+    assert payload.summary_title == "Amazon and Anthropic expand cloud partnership"
 
 
 def test_should_enqueue_news_item_enrichment_only_for_new_non_legacy_rows() -> None:

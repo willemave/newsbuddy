@@ -1,3 +1,5 @@
+from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx  # For creating mock Headers
@@ -302,6 +304,41 @@ def test_extract_data_failure_includes_error_message_details(
         assert "Timed out while waiting for page" in failure_message
         assert "status_code=504" in failure_message
         assert "redirected.example.com" in failure_message
+
+
+def test_newspaper_fallback_fetch_for_allowlisted_domain(html_strategy: HtmlProcessorStrategy):
+    """Domain-specific newspaper fallback should return parsed article data."""
+    article = SimpleNamespace(
+        title="OpenAI investor says AI requires an income tax overhaul",
+        text="A real article body extracted by newspaper.",
+        authors=["Financial Times"],
+        publish_date=datetime(2026, 3, 29),
+        article_html=(
+            "<html><head><meta property='og:title' "
+            "content='OpenAI investor says AI requires an income tax overhaul'></head></html>"
+        ),
+    )
+
+    with patch.dict("sys.modules", {"newspaper": SimpleNamespace(article=lambda _url: article)}):
+        extracted_data = html_strategy._newspaper_fallback_fetch(  # pylint: disable=protected-access
+            "https://www.ft.com/content/example",
+        )
+
+    assert extracted_data is not None
+    assert extracted_data["title"] == "OpenAI investor says AI requires an income tax overhaul"
+    assert extracted_data["text_content"] == "A real article body extracted by newspaper."
+    assert extracted_data["author"] == "Financial Times"
+    assert extracted_data["used_newspaper_fallback"] is True
+
+
+def test_newspaper_fallback_skips_non_allowlisted_domain(html_strategy: HtmlProcessorStrategy):
+    """Newspaper fallback should only run on the blocked-domain allowlist."""
+    with patch.dict("sys.modules", {"newspaper": SimpleNamespace(article=lambda _url: None)}):
+        extracted_data = html_strategy._newspaper_fallback_fetch(  # pylint: disable=protected-access
+            "https://example.com/article",
+        )
+
+    assert extracted_data is None
 
 
 def test_extract_data_with_browser_close_error(html_strategy: HtmlProcessorStrategy):

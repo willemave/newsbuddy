@@ -7,7 +7,7 @@ from app.constants import SELF_SUBMISSION_SOURCE
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import (
     Content,
-    ContentFavorites,
+    ContentKnowledgeSave,
     ContentReadStatus,
     ContentStatusEntry,
     ProcessingTask,
@@ -535,11 +535,18 @@ def test_share_and_chat_existing_completed_enqueues_dig_deeper_task(client, db_s
     assert task.queue_name == TaskQueue.CHAT.value
 
 
-def test_submit_favorite_and_mark_read_marks_read_and_favorites(client, db_session, test_user):
-    """Submitting with favorite_and_mark_read should mark the item read and save it."""
+def test_submit_save_to_knowledge_and_mark_read_marks_read_and_saves(
+    client,
+    db_session,
+    test_user,
+):
+    """Submitting with save_to_knowledge_and_mark_read should mark the item read and save it."""
     response = client.post(
         "/api/content/submit",
-        json={"url": "https://example.com/favorite-article", "favorite_and_mark_read": True},
+        json={
+            "url": "https://example.com/favorite-article",
+            "save_to_knowledge_and_mark_read": True,
+        },
     )
 
     assert response.status_code == 201
@@ -549,10 +556,10 @@ def test_submit_favorite_and_mark_read_marks_read_and_favorites(client, db_sessi
     assert created is not None
 
     favorite_row = (
-        db_session.query(ContentFavorites)
+        db_session.query(ContentKnowledgeSave)
         .filter(
-            ContentFavorites.user_id == test_user.id,
-            ContentFavorites.content_id == created.id,
+            ContentKnowledgeSave.user_id == test_user.id,
+            ContentKnowledgeSave.content_id == created.id,
         )
         .first()
     )
@@ -573,7 +580,7 @@ def test_submit_favorite_and_mark_read_marks_read_and_favorites(client, db_sessi
     assert task.task_type == TaskType.ANALYZE_URL.value
 
 
-def test_existing_completed_submission_favorite_and_mark_read_reuses_record(
+def test_existing_completed_submission_save_to_knowledge_and_mark_read_reuses_record(
     client,
     db_session,
     test_user,
@@ -591,7 +598,7 @@ def test_existing_completed_submission_favorite_and_mark_read_reuses_record(
 
     response = client.post(
         "/api/content/submit",
-        json={"url": existing.url, "favorite_and_mark_read": True},
+        json={"url": existing.url, "save_to_knowledge_and_mark_read": True},
     )
 
     assert response.status_code == 200
@@ -600,10 +607,10 @@ def test_existing_completed_submission_favorite_and_mark_read_reuses_record(
     assert data["task_id"] is None
 
     favorite_row = (
-        db_session.query(ContentFavorites)
+        db_session.query(ContentKnowledgeSave)
         .filter(
-            ContentFavorites.user_id == test_user.id,
-            ContentFavorites.content_id == existing.id,
+            ContentKnowledgeSave.user_id == test_user.id,
+            ContentKnowledgeSave.content_id == existing.id,
         )
         .first()
     )

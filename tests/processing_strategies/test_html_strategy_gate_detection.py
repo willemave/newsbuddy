@@ -66,3 +66,15 @@ def test_detect_extraction_issue_ignores_explicit_comment_urls() -> None:
     )
 
     assert reason is None
+
+
+def test_detect_extraction_issue_for_placeholder_paywall_title() -> None:
+    """Short paywalled placeholder pages should be treated as malformed."""
+    reason = HtmlProcessorStrategy._detect_extraction_issue(  # pylint: disable=protected-access
+        url="https://www.wsj.com/tech/ai/example-story",
+        title="Subscribe to read",
+        text_content="Subscribe to read. Sign in to continue reading this article.",
+        html_content="<html><head><title>Subscribe to read</title></head></html>",
+    )
+
+    assert reason == "blocked/paywalled placeholder title"

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content, ContentStatusEntry
 from app.models.user import User
-from app.repositories import favorites_repository
+from app.repositories import knowledge_repository
 
 
 def test_full_convert_workflow(client: TestClient, db_session: Session) -> None:
@@ -74,7 +74,7 @@ def test_full_convert_workflow(client: TestClient, db_session: Session) -> None:
     assert convert_again_data["new_content_id"] == new_article_id
 
 
-def test_convert_marks_news_as_favorite_interaction(
+def test_convert_saves_resulting_article_to_knowledge(
     client: TestClient, db_session: Session, test_user: User
 ) -> None:
     """Test that converting news saves the resulting article to knowledge."""
@@ -94,11 +94,6 @@ def test_convert_marks_news_as_favorite_interaction(
     db_session.add(ContentStatusEntry(user_id=test_user.id, content_id=news.id, status="inbox"))
     db_session.commit()
 
-    # Favorite the news
-    fav_response = client.post(f"/api/content/{news.id}/favorite")
-    assert fav_response.status_code == 200
-    assert fav_response.json()["is_favorited"] is True
-
     # Convert to article
     convert_response = client.post(f"/api/content/{news.id}/convert-to-article")
     assert convert_response.status_code == 200
@@ -109,10 +104,11 @@ def test_convert_marks_news_as_favorite_interaction(
     )
     db_session.commit()
 
-    # Verify news is still favorited
+    # Verify news item itself is still not a knowledge-saved target
     news_detail = client.get(f"/api/content/{news.id}")
-    assert news_detail.json()["is_favorited"] is True
+    assert news_detail.json()["is_saved_to_knowledge"] is False
 
     assert (
-        favorites_repository.is_content_favorited(db_session, new_article_id, test_user.id) is True
+        knowledge_repository.is_saved_to_knowledge(db_session, new_article_id, test_user.id)
+        is True
     )

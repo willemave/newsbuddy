@@ -63,7 +63,7 @@ class TestPrimaryTopic:
             content=row,
             domain_content=domain,
             is_read=False,
-            is_favorited=False,
+            is_saved_to_knowledge=False,
         )
 
         assert response.primary_topic == "AI"
@@ -77,7 +77,7 @@ class TestPrimaryTopic:
             content=row,
             domain_content=domain,
             is_read=False,
-            is_favorited=False,
+            is_saved_to_knowledge=False,
         )
 
         assert response.primary_topic == "Machine Learning"
@@ -95,7 +95,7 @@ class TestPrimaryTopic:
             content=row,
             domain_content=domain,
             is_read=False,
-            is_favorited=False,
+            is_saved_to_knowledge=False,
         )
 
         assert response.primary_topic == "hackernews"
@@ -109,7 +109,7 @@ class TestPrimaryTopic:
             content=row,
             domain_content=domain,
             is_read=False,
-            is_favorited=False,
+            is_saved_to_knowledge=False,
         )
 
         assert response.primary_topic is None
@@ -127,7 +127,7 @@ class TestPrimaryTopic:
             content=row,
             domain_content=domain,
             is_read=False,
-            is_favorited=False,
+            is_saved_to_knowledge=False,
         )
 
         assert response.primary_topic == "reddit"
@@ -145,7 +145,7 @@ class TestPrimaryTopic:
             content=row,
             domain_content=domain,
             is_read=False,
-            is_favorited=False,
+            is_saved_to_knowledge=False,
         )
 
         assert response.primary_topic == "hackernews"
@@ -165,7 +165,7 @@ class TestTopComment:
             content=row,
             domain_content=domain,
             is_read=False,
-            is_favorited=False,
+            is_saved_to_knowledge=False,
         )
 
         assert response.top_comment == {"author": "user123", "text": "Great article!"}
@@ -179,7 +179,7 @@ class TestTopComment:
             content=row,
             domain_content=domain,
             is_read=False,
-            is_favorited=False,
+            is_saved_to_knowledge=False,
         )
 
         assert response.top_comment is None
@@ -193,7 +193,7 @@ class TestTopComment:
             content=row,
             domain_content=domain,
             is_read=False,
-            is_favorited=False,
+            is_saved_to_knowledge=False,
         )
 
         assert response.top_comment is None

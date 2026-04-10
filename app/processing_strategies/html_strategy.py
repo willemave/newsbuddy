@@ -7,6 +7,7 @@ import logging
 import re
 from html import unescape
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import trafilatura
@@ -26,6 +27,7 @@ from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
 from app.services.exa_client import ExaClientError, exa_get_contents
 from app.utils.dates import parse_date_with_tz
+from app.utils.title_utils import clean_title
 
 logger = get_logger(__name__)
 
@@ -51,6 +53,13 @@ ACCESS_GATE_HTML_MARKERS: tuple[str, ...] = (
     "cf-turnstile",
     "performance & security by cloudflare",
 )
+NEWSPAPER_FALLBACK_DOMAINS: frozenset[str] = frozenset({"ft.com", "www.ft.com"})
+PAYWALL_TEXT_MARKERS: tuple[str, ...] = (
+    "subscribe to read",
+    "subscribe to continue reading",
+    "sign in to continue reading",
+    "this article is for subscribers",
+)
 ACCESS_GATE_MAX_TEXT_LENGTH = 2500
 DISCUSSION_ONLY_MAX_TEXT_LENGTH = 8000
 DISCUSSION_LEDE_MARKERS: tuple[str, ...] = (
@@ -75,6 +84,15 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
     def __init__(self, http_client: RobustHttpClient):
         super().__init__(http_client)
         self.settings = get_settings()
+
+    @staticmethod
+    def _host_for_url(url: str) -> str:
+        """Return a normalized hostname for a URL."""
+
+        try:
+            return (urlparse(url).netloc or "").lower()
+        except Exception:
+            return ""
 
     def _detect_source(self, url: str) -> str:
         """Detect the source type from URL."""
@@ -232,12 +250,8 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
     @staticmethod
     def _get_domain_overrides(url: str) -> dict[str, Any]:
         """Return per-domain crawl4ai overrides."""
-        try:
-            from urllib.parse import urlparse
 
-            host = (urlparse(url).netloc or "").lower()
-        except Exception:
-            host = ""
+        host = HtmlProcessorStrategy._host_for_url(url)
 
         overrides: dict[str, Any] = {}
         if host.endswith("screenrant.com"):
@@ -376,11 +390,25 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
     def _extract_title_from_html(html_content: str) -> str | None:
         """Extract a page title from raw HTML."""
 
-        match = re.search(r"<title[^>]*>(.*?)</title>", html_content, re.IGNORECASE | re.DOTALL)
-        if not match:
-            return None
-        title = unescape(match.group(1)).strip()
-        return re.sub(r"\s+", " ", title) if title else None
+        patterns = [
+            r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+name=["\']twitter:title["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+name=["\']title["\'][^>]+content=["\']([^"\']+)["\']',
+            r"<title[^>]*>(.*?)</title>",
+            r"<h1[^>]*>(.*?)</h1>",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html_content, re.IGNORECASE | re.DOTALL)
+            if not match:
+                continue
+            title = unescape(match.group(1)).strip()
+            title = re.sub(r"\s+", " ", title) if title else None
+            cleaned = clean_title(title)
+            if cleaned:
+                return cleaned
+            if title:
+                return title
+        return None
 
     @staticmethod
     def _extract_text_from_html(html_content: str) -> str:
@@ -417,6 +445,27 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             return "access gate detected: challenge/JS wall content"
         if html_marker_hit and short_payload:
             return "access gate detected: challenge/JS wall html markers"
+        return None
+
+    @staticmethod
+    def _detect_placeholder_title_issue(
+        *,
+        title: str | None,
+        text_content: str | None,
+    ) -> str | None:
+        """Detect paywall/blocked pages that expose only a placeholder title."""
+
+        normalized_title = re.sub(r"\s+", " ", title or "").strip()
+        if not normalized_title:
+            return None
+        if clean_title(normalized_title):
+            return None
+
+        normalized_text = re.sub(r"\s+", " ", text_content or "").strip().lower()
+        short_payload = 0 < len(normalized_text) <= ACCESS_GATE_MAX_TEXT_LENGTH
+        paywall_text_hit = any(marker in normalized_text for marker in PAYWALL_TEXT_MARKERS)
+        if short_payload or paywall_text_hit:
+            return "blocked/paywalled placeholder title"
         return None
 
     @staticmethod
@@ -473,6 +522,13 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         )
         if gate_reason:
             return gate_reason
+
+        placeholder_title_reason = cls._detect_placeholder_title_issue(
+            title=title,
+            text_content=text_content,
+        )
+        if placeholder_title_reason:
+            return placeholder_title_reason
 
         return cls._detect_discussion_only_extraction(
             url=url,
@@ -533,12 +589,7 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             )
             return None
 
-        try:
-            from urllib.parse import urlparse
-
-            host = urlparse(final_url).netloc or source
-        except Exception:
-            host = source
+        host = self._host_for_url(final_url) or source
 
         logger.info(
             "HtmlStrategy: Exa fallback extraction succeeded for %s (text_length=%s)",
@@ -598,12 +649,7 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             response.url,
             len(text_content),
         )
-        try:
-            from urllib.parse import urlparse
-
-            host = urlparse(str(response.url)).netloc or source
-        except Exception:
-            host = source
+        host = self._host_for_url(str(response.url)) or source
         return {
             "title": title,
             "author": None,
@@ -620,13 +666,86 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         }
 
     def _fallback_fetch(self, url: str, source: str) -> dict[str, Any] | None:
-        """Try Exa first, then plain HTTP/trafilatura as the final fallback."""
+        """Try domain-specific recovery first, then generic fallbacks."""
+
+        newspaper_data = self._newspaper_fallback_fetch(url)
+        if newspaper_data:
+            return newspaper_data
 
         exa_data = self._exa_fallback_fetch(url, source)
         if exa_data:
             return exa_data
 
         return self._http_fallback_fetch(url, source)
+
+    def _newspaper_fallback_fetch(self, url: str) -> dict[str, Any] | None:
+        """Use newspaper4k on a small blocked-domain allowlist before generic fallbacks."""
+
+        host = self._host_for_url(url)
+        if host not in NEWSPAPER_FALLBACK_DOMAINS:
+            return None
+
+        try:
+            import newspaper
+        except ImportError:
+            logger.debug("HtmlStrategy: newspaper4k not installed; skipping newspaper fallback")
+            return None
+
+        try:
+            article = newspaper.article(url)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "HtmlStrategy: newspaper fallback failed for %s: %s",
+                url,
+                exc,
+            )
+            return None
+
+        title = clean_title(getattr(article, "title", None))
+        text_content = re.sub(r"\s+", " ", getattr(article, "text", "") or "").strip()
+        if not text_content:
+            return None
+
+        extraction_issue = self._detect_extraction_issue(
+            url=url,
+            title=title,
+            text_content=text_content,
+            html_content=getattr(article, "article_html", None),
+        )
+        if extraction_issue:
+            logger.warning(
+                "HtmlStrategy: newspaper fallback content still appears malformed for %s (%s)",
+                url,
+                extraction_issue,
+            )
+            return None
+
+        publication_date = getattr(article, "publish_date", None)
+        authors = getattr(article, "authors", None)
+        author = (
+            ", ".join(author for author in authors if author)
+            if isinstance(authors, list)
+            else None
+        )
+
+        logger.info(
+            "HtmlStrategy: newspaper fallback extraction succeeded for %s (text_length=%s)",
+            url,
+            len(text_content),
+        )
+        return {
+            "title": title or "Untitled",
+            "author": author or None,
+            "publication_date": publication_date,
+            "text_content": text_content,
+            "content_type": "html",
+            "source": host,
+            "final_url_after_redirects": url,
+            "table_markdown": None,
+            "gate_page_detected": False,
+            "extraction_error": None,
+            "used_newspaper_fallback": True,
+        }
 
     def extract_data(self, content: str, url: str) -> dict[str, Any]:
         """

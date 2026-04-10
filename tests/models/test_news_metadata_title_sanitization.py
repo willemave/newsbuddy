@@ -53,6 +53,28 @@ def test_content_data_drops_placeholder_news_article_title() -> None:
     assert content.metadata["article"].get("title") is None
 
 
+def test_content_data_drops_blocked_page_titles() -> None:
+    content = ContentData(
+        content_type=ContentType.NEWS,
+        url="https://news.ycombinator.com/item?id=12345",
+        status=ContentStatus.COMPLETED,
+        metadata=_build_news_metadata("Subscribe to read"),
+    )
+
+    assert content.metadata["article"].get("title") is None
+
+
+def test_content_data_drops_bare_domain_titles() -> None:
+    content = ContentData(
+        content_type=ContentType.NEWS,
+        url="https://news.ycombinator.com/item?id=12346",
+        status=ContentStatus.COMPLETED,
+        metadata=_build_news_metadata("wsj.com"),
+    )
+
+    assert content.metadata["article"].get("title") is None
+
+
 def test_content_data_display_title_falls_back_to_summary_text() -> None:
     content = ContentData(
         content_type=ContentType.NEWS,

@@ -32,7 +32,7 @@ from app.models.api.common import (
 from app.models.content_submission import SubmitContentRequest
 from app.models.internal.scraper_configs import CreateUserScraperConfig
 from app.models.schema import (
-    ContentFavorites,
+    ContentKnowledgeSave,
     FeedDiscoveryRun,
     FeedDiscoverySuggestion,
     UserScraperConfig,
@@ -294,14 +294,17 @@ async def refresh_discovery(
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryRefreshResponse:
     settings = get_settings()
-    favorite_count = (
-        db.query(func.count(ContentFavorites.id))
-        .filter(ContentFavorites.user_id == current_user.id)
+    knowledge_save_count = (
+        db.query(func.count(ContentKnowledgeSave.id))
+        .filter(ContentKnowledgeSave.user_id == current_user.id)
         .scalar()
         or 0
     )
-    if favorite_count < settings.discovery_min_favorites:
-        raise HTTPException(status_code=400, detail="Not enough favorites to run discovery")
+    if knowledge_save_count < settings.discovery_min_favorites:
+        raise HTTPException(
+            status_code=400,
+            detail="Not enough saved knowledge to run discovery",
+        )
 
     task_id = get_task_queue_gateway().enqueue(
         TaskType.DISCOVER_FEEDS,

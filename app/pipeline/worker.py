@@ -33,6 +33,7 @@ from app.utils.summarization_inputs import (
     build_summarization_payload,
     compute_summarization_input_fingerprint,
 )
+from app.utils.title_utils import clean_title
 from app.utils.url_utils import is_http_url, normalize_http_url
 
 logger = get_logger(__name__)
@@ -460,6 +461,8 @@ class ContentWorker:
                 self._mark_non_retryable_failure(content, str(e))
                 return False
 
+            extracted_title = clean_title(extracted_data.get("title"))
+
             # Check if strategy marked this content to be skipped (e.g., images, YouTube auth)
             if extracted_data.get("skip_processing") or llm_data.get("skip_processing"):
                 skip_reason = (
@@ -477,12 +480,12 @@ class ContentWorker:
                 content.metadata["content_type"] = extracted_data.get("content_type", "unknown")
                 content.metadata["image_url"] = extracted_data.get("image_url")
                 content.metadata["final_url"] = extracted_data.get("final_url_after_redirects")
-                if extracted_data.get("title"):
-                    content.title = extracted_data.get("title")
+                if extracted_title:
+                    content.title = extracted_title
                 return True
 
             # Update content with extracted data
-            content.title = extracted_data.get("title") or content.title
+            content.title = extracted_title or content.title
 
             # Build metadata update dict
             final_url = extracted_data.get("final_url_after_redirects") or processed_url
@@ -513,14 +516,16 @@ class ContentWorker:
                 metadata_update["exa_fallback_length"] = extracted_data.get("exa_fallback_length")
                 if extracted_data.get("gate_page_reason"):
                     metadata_update["gate_page_reason"] = extracted_data.get("gate_page_reason")
+            if extracted_data.get("used_newspaper_fallback"):
+                metadata_update["used_newspaper_fallback"] = True
             if subscribe_to_feed:
                 metadata_update["subscribe_to_feed"] = True
 
             if content.content_type == ContentType.NEWS:
                 article_info = existing_metadata.get("article", {}).copy()
                 article_info["url"] = str(content.url)
-                if extracted_data.get("title"):
-                    article_info["title"] = extracted_data.get("title")
+                if extracted_title:
+                    article_info["title"] = extracted_title
                 if metadata_update.get("source"):
                     article_info["source_domain"] = metadata_update.get("source")
                 metadata_update["article"] = article_info
@@ -550,7 +555,7 @@ class ContentWorker:
                 feed_data = feed_detector.detect_from_links(
                     feed_links,
                     final_url,
-                    page_title=extracted_data.get("title"),
+                    page_title=extracted_title,
                     source=existing_metadata.get("source"),
                     content_type=content.content_type,
                 )

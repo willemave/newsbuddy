@@ -11,7 +11,12 @@ from app.models.feed_discovery import (
     DiscoveryLanePlan,
     DiscoveryQuery,
 )
-from app.models.schema import Content, ContentFavorites, FeedDiscoveryRun, FeedDiscoverySuggestion
+from app.models.schema import (
+    Content,
+    ContentKnowledgeSave,
+    FeedDiscoveryRun,
+    FeedDiscoverySuggestion,
+)
 from app.services.exa_client import ExaSearchResult
 from app.services.feed_discovery import FeedDiscoveryDeps, run_feed_discovery
 from app.services.llm_usage import record_usage
@@ -31,9 +36,9 @@ class _FakeResult:
 def _stub_direction_selector(db_session, user_id: int) -> DiscoveryDirectionPlan:
     record_usage("direction_select", _FakeResult(), model_spec="test-model")
     rows = (
-        db_session.query(ContentFavorites, Content)
-        .join(Content, Content.id == ContentFavorites.content_id)
-        .filter(ContentFavorites.user_id == user_id)
+        db_session.query(ContentKnowledgeSave, Content)
+        .join(Content, Content.id == ContentKnowledgeSave.content_id)
+        .filter(ContentKnowledgeSave.user_id == user_id)
         .all()
     )
     ids = [content.id for _fav, content in rows]
@@ -162,7 +167,7 @@ def test_run_feed_discovery_creates_run_and_suggestions(db_session, test_user, m
     db_session.commit()
 
     for content in contents:
-        db_session.add(ContentFavorites(user_id=test_user.id, content_id=content.id))
+        db_session.add(ContentKnowledgeSave(user_id=test_user.id, content_id=content.id))
     db_session.commit()
 
     @contextmanager

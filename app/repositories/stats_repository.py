@@ -11,7 +11,7 @@ from app.core.settings import get_settings
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import (
     Content,
-    ContentFavorites,
+    ContentKnowledgeSave,
     ContentReadStatus,
     ContentStatusEntry,
     NewsItem,
@@ -145,9 +145,9 @@ def get_long_form_stats(db: Session, *, user_id: int) -> dict[str, int]:
         )
     )
     favorite_exists = exists(
-        select(ContentFavorites.id).where(
-            ContentFavorites.user_id == user_id,
-            ContentFavorites.content_id == Content.id,
+        select(ContentKnowledgeSave.id).where(
+            ContentKnowledgeSave.user_id == user_id,
+            ContentKnowledgeSave.content_id == Content.id,
         )
     )
     processing_statuses = [
@@ -183,7 +183,7 @@ def get_long_form_stats(db: Session, *, user_id: int) -> dict[str, int]:
             .scalar()
             or 0
         ),
-        "favorited_count": int(
+        "saved_to_knowledge_count": int(
             db.query(func.count(Content.id))
             .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
             .filter(*inbox_filter)

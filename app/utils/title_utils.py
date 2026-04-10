@@ -18,6 +18,30 @@ _PLACEHOLDER_TITLE_VALUES = {
     "untitled",
     "void",
 }
+_BLOCKED_TITLE_VALUES = {
+    "access denied",
+    "attention required!",
+    "enable javascript and cookies to continue",
+    "forbes.com",
+    "fastcompany.com",
+    "please verify you are a human",
+    "subscribe to read",
+    "wsj.com",
+}
+_BLOCKED_TITLE_PREFIXES = (
+    "just a moment",
+    "verification required",
+)
+_BARE_DOMAIN_TITLE_PATTERN = re.compile(r"(?:[a-z0-9-]+\.)+[a-z]{2,63}/?", re.IGNORECASE)
+
+
+def _is_blocked_page_title(title: str) -> bool:
+    normalized = title.casefold().strip(" .!?:;-")
+    if normalized in _BLOCKED_TITLE_VALUES:
+        return True
+    if any(normalized.startswith(prefix) for prefix in _BLOCKED_TITLE_PREFIXES):
+        return True
+    return " " not in normalized and bool(_BARE_DOMAIN_TITLE_PATTERN.fullmatch(normalized))
 
 
 def clean_title(value: Any) -> str | None:
@@ -36,6 +60,8 @@ def clean_title(value: Any) -> str | None:
     if normalized in _PLACEHOLDER_TITLE_VALUES:
         return None
     if any(pattern.fullmatch(title) for pattern in _PLACEHOLDER_TITLE_PATTERNS):
+        return None
+    if _is_blocked_page_title(title):
         return None
 
     if len(title) > MAX_TITLE_CHARS:

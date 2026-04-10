@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import (
     Content,
-    ContentFavorites,
+    ContentKnowledgeSave,
     ContentReadStatus,
     ContentStatusEntry,
     NewsItem,
@@ -323,7 +323,7 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
         )
     )
     db_session.add(
-        ContentFavorites(
+        ContentKnowledgeSave(
             user_id=test_user.id,
             content_id=completed_article_favorited.id,
         )
@@ -337,7 +337,7 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
     assert payload["total_count"] == 4
     assert payload["read_count"] == 1
     assert payload["unread_count"] == 3
-    assert payload["favorited_count"] == 1
+    assert payload["saved_to_knowledge_count"] == 1
     assert payload["processing_count"] == 2
 
 

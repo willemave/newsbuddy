@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content
-from app.repositories import favorites_repository
+from app.repositories import knowledge_repository
 
 
 def test_convert_news_link_to_article(
@@ -51,7 +51,7 @@ def test_convert_news_link_to_article(
     assert new_article.url == "https://example.com/article"
     assert new_article.status == ContentStatus.PENDING.value
     assert (
-        favorites_repository.is_content_favorited(db_session, new_article.id, test_user.id) is True
+        knowledge_repository.is_saved_to_knowledge(db_session, new_article.id, test_user.id) is True
     )
 
 
@@ -131,4 +131,4 @@ def test_convert_already_exists(
     assert data["status"] == "success"
     assert data["new_content_id"] == existing.id
     assert data["already_exists"] is True
-    assert favorites_repository.is_content_favorited(db_session, existing.id, test_user.id) is True
+    assert knowledge_repository.is_saved_to_knowledge(db_session, existing.id, test_user.id) is True

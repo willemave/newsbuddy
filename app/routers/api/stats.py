@@ -59,7 +59,7 @@ def get_processing_count(
     summary="Get long-form content stats",
     description=(
         "Return long-form stats for the authenticated user, including totals, read/unread, "
-        "favorites, and processing counts."
+        "knowledge saves, and processing counts."
     ),
 )
 def get_long_form_stats(

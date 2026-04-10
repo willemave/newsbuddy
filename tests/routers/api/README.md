@@ -9,7 +9,7 @@ The API content router has been refactored from a single large file (`app/router
 - `content_list.py` - List, search, and unread counts endpoints
 - `content_detail.py` - Content detail and ChatGPT URL endpoints
 - `read_status.py` - Read/unread status management
-- `favorites.py` - Favorites management
+- `knowledge.py` - Knowledge-save management
 - `content_actions.py` - Content transformations (convert news to article)
 - `models.py` - All Pydantic request/response models
 
@@ -32,7 +32,7 @@ New tests can be added in this directory following the modular structure:
 - `test_content_list.py` - Tests for listing and search endpoints
 - `test_content_detail.py` - Tests for detail and chat URL endpoints
 - `test_read_status.py` - Tests for read status operations
-- `test_favorites.py` - Tests for favorites operations
+- `test_knowledge.py` - Tests for knowledge-save operations
 - `test_content_actions.py` - Tests for content transformation endpoints
 
 ## Running Tests

@@ -1,5 +1,6 @@
 """Tests for X API helpers."""
 
+import app.services.x_api as x_api
 from app.services.x_api import (
     _extract_linked_tweet_ids,
     _extract_next_token,
@@ -8,6 +9,31 @@ from app.services.x_api import (
     _normalize_external_url,
     build_tweet_processing_text,
 )
+
+
+def _patch_oauth_token_request(monkeypatch) -> dict[str, object]:
+    captured: dict[str, object] = {}
+    settings = x_api.get_settings()
+
+    monkeypatch.setattr(settings, "x_client_id", "client-id")
+    monkeypatch.setattr(settings, "x_client_secret", "client-secret")
+    monkeypatch.setattr(settings, "x_oauth_redirect_uri", "https://example.com/callback")
+    monkeypatch.setattr(settings, "x_oauth_token_url", "https://api.x.com/2/oauth2/token")
+
+    def fake_request_json(method, url, *, access_token, data, auth, **kwargs):  # noqa: ANN001
+        captured["method"] = method
+        captured["url"] = url
+        captured["data"] = data
+        captured["auth"] = auth
+        return {
+            "access_token": "token",
+            "refresh_token": "refresh",
+            "expires_in": 7200,
+            "scope": "tweet.read users.read",
+        }
+
+    monkeypatch.setattr(x_api, "_request_json", fake_request_json)
+    return captured
 
 
 def test_normalize_external_url_keeps_non_social_domains() -> None:
@@ -142,3 +168,37 @@ def test_map_list_and_extract_next_token() -> None:
     assert x_list.id == "42"
     assert x_list.name == "AI Infra"
     assert _extract_next_token({"next_token": "abc123"}) == "abc123"
+
+
+def test_exchange_oauth_code_includes_redirect_uri(monkeypatch) -> None:
+    """Authorization-code exchange must send redirect_uri to X."""
+    captured = _patch_oauth_token_request(monkeypatch)
+
+    x_api.exchange_oauth_code(code="oauth-code", code_verifier="verifier")
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://api.x.com/2/oauth2/token"
+    assert captured["data"] == {
+        "grant_type": "authorization_code",
+        "client_id": "client-id",
+        "redirect_uri": "https://example.com/callback",
+        "code": "oauth-code",
+        "code_verifier": "verifier",
+    }
+    assert captured["auth"] == ("client-id", "client-secret")
+
+
+def test_refresh_oauth_token_omits_redirect_uri(monkeypatch) -> None:
+    """Refresh-token exchange should not send redirect_uri."""
+    captured = _patch_oauth_token_request(monkeypatch)
+
+    x_api.refresh_oauth_token(refresh_token="refresh-token")
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://api.x.com/2/oauth2/token"
+    assert captured["data"] == {
+        "grant_type": "refresh_token",
+        "client_id": "client-id",
+        "refresh_token": "refresh-token",
+    }
+    assert captured["auth"] == ("client-id", "client-secret")

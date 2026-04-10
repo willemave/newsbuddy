@@ -5,13 +5,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import numpy as np
+import pytest
 
 from app.models.schema import NewsItem, NewsItemReadStatus
 from app.services.news_feed import count_unread_news_items
 from app.services.news_relations import (
     SEMANTIC_PREFILTER_MAX_CANDIDATES,
+    match_tokens_for_text,
     reconcile_news_item_relation,
 )
+from tests.services.news_relation_cluster_cases import PRODUCTION_CLUSTER_CASES
 
 
 def _news_item(
@@ -46,6 +49,28 @@ def _news_item(
     db_session.add(item)
     db_session.flush()
     return item
+
+
+def _high_similarity_encode(texts: list[str]) -> np.ndarray:
+    return np.ones((len(texts), 1), dtype=float)
+
+
+def _representative_first_titles(titles: list[str]) -> list[str]:
+    tokenized = [match_tokens_for_text(title) for title in titles]
+    best_index = 0
+    best_overlap = -1
+    for index, tokens in enumerate(tokenized):
+        overlap = sum(
+            len(tokens & other_tokens)
+            for other_tokens in tokenized
+            if other_tokens is not tokens
+        )
+        if overlap > best_overlap:
+            best_index = index
+            best_overlap = overlap
+    if best_index == 0:
+        return titles
+    return [titles[best_index], *titles[:best_index], *titles[best_index + 1 :]]
 
 
 def test_reconcile_news_item_relation_suppresses_exact_duplicate_and_keeps_unread_count_stable(
@@ -133,6 +158,61 @@ def test_reconcile_news_item_relation_suppresses_exact_duplicate_title_with_diff
     db_session.refresh(duplicate)
     assert duplicate.representative_news_item_id == representative.id
     assert representative.cluster_size == 2
+
+
+@pytest.mark.parametrize(
+    "case",
+    PRODUCTION_CLUSTER_CASES,
+    ids=[case["case_id"] for case in PRODUCTION_CLUSTER_CASES],
+)
+def test_reconcile_news_item_relation_clusters_curated_production_families(
+    db_session,
+    monkeypatch,
+    case: dict[str, object],
+) -> None:
+    monkeypatch.setattr("app.services.news_relations.encode_news_texts", _high_similarity_encode)
+
+    titles = _representative_first_titles(list(case["titles"]))
+    label = str(case["label"])
+
+    representative = _news_item(
+        db_session,
+        ingest_key=f"{case['case_id']}-rep",
+        source_external_id=f"{case['case_id']}-0",
+        title=titles[0],
+        story_url=f"https://example.com/{case['case_id']}/0",
+    )
+    representative.article_domain = "source0.example.com"
+    representative.source_label = "Source 0"
+    representative.summary_key_points = [label]
+    representative.summary_text = f"{label} summary"
+    reconcile_news_item_relation(db_session, news_item_id=representative.id)
+
+    created_ids = [representative.id]
+    for index, title in enumerate(titles[1:], start=1):
+        item = _news_item(
+            db_session,
+            ingest_key=f"{case['case_id']}-{index}",
+            source_external_id=f"{case['case_id']}-{index}",
+            title=title,
+            story_url=f"https://example.com/{case['case_id']}/{index}",
+        )
+        item.article_domain = f"source{index}.example.com"
+        item.source_label = f"Source {index}"
+        item.summary_key_points = [label]
+        item.summary_text = f"{label} summary"
+        reconcile_news_item_relation(db_session, news_item_id=item.id)
+        created_ids.append(item.id)
+
+    db_session.commit()
+
+    db_session.refresh(representative)
+    assert representative.cluster_size == len(titles)
+
+    for item_id in created_ids[1:]:
+        item = db_session.get(NewsItem, item_id)
+        assert item is not None
+        assert item.representative_news_item_id == representative.id
 
 
 def test_reconcile_news_item_relation_uses_secondary_threshold_with_lexical_guard(

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content, NewsItem, NewsItemReadStatus
-from app.repositories import favorites_repository
+from app.repositories import knowledge_repository
 
 
 class _FakeQueueService:
@@ -140,6 +140,30 @@ def test_list_news_items_hides_suppressed_members_and_marks_read(
     read_response = client.get("/api/news/items", params={"read_filter": "read"})
     assert read_response.status_code == 200
     assert [item["id"] for item in read_response.json()["contents"]] == [representative.id]
+
+
+def test_list_news_items_falls_back_from_blocked_titles_to_summary_text(
+    client,
+    db_session,
+) -> None:
+    item = _create_news_item(
+        db_session,
+        ingest_key="blocked-title",
+        summary_title="Subscribe to read",
+        article_title="wsj.com",
+        summary_text="OpenAI and Oracle discuss a new enterprise infrastructure partnership.",
+    )
+    db_session.commit()
+
+    response = client.get("/api/news/items")
+
+    assert response.status_code == 200
+    payload = response.json()
+    listed = next(content for content in payload["contents"] if content["id"] == item.id)
+    assert (
+        listed["title"]
+        == "OpenAI and Oracle discuss a new enterprise infrastructure partnership."
+    )
 
 
 def test_mark_news_items_read_is_idempotent_for_existing_rows(
@@ -327,7 +351,7 @@ def test_convert_news_item_to_article_queues_processing(
     assert payload["news_item_id"] == news_item.id
     assert fake_queue.calls == [("process_content", payload["new_content_id"])]
     assert (
-        favorites_repository.is_content_favorited(
+        knowledge_repository.is_saved_to_knowledge(
             db_session,
             payload["new_content_id"],
             test_user.id,
@@ -377,7 +401,7 @@ def test_convert_news_item_to_article_favorites_existing_article(
     assert payload["new_content_id"] == existing_article.id
     assert fake_queue.calls == []
     assert (
-        favorites_repository.is_content_favorited(
+        knowledge_repository.is_saved_to_knowledge(
             db_session,
             existing_article.id,
             test_user.id,

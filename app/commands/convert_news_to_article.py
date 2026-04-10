@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.api.common import ConvertNewsResponse
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content
-from app.repositories import favorites_repository
+from app.repositories import knowledge_repository
 from app.services.queue import TaskType, get_queue_service
 from app.utils.url_utils import is_http_url, normalize_http_url
 
@@ -79,7 +79,7 @@ def ensure_article_saved_to_knowledge(
     user_id: int,
     content_id: int,
 ) -> None:
-    """Ensure an article content row is favorited for the current user.
+    """Ensure an article content row is saved to knowledge for the current user.
 
     Args:
         db: Active database session.
@@ -87,13 +87,13 @@ def ensure_article_saved_to_knowledge(
         content_id: Article content identifier.
 
     Raises:
-        HTTPException: When the favorite could not be persisted.
+        HTTPException: When the knowledge save could not be persisted.
     """
-    favorite = favorites_repository.add_favorite(db, content_id, user_id)
-    if favorite is not None:
+    saved = knowledge_repository.save_to_knowledge(db, content_id, user_id)
+    if saved is not None:
         return
 
-    if favorites_repository.is_content_favorited(db, content_id, user_id):
+    if knowledge_repository.is_saved_to_knowledge(db, content_id, user_id):
         return
 
     raise HTTPException(

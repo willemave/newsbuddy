@@ -28,7 +28,7 @@ from app.models.contracts import TaskStatus, TaskType
 from app.models.internal.assistant import AssistantScreenContext
 from app.models.schema import (
     Content,
-    ContentFavorites,
+    ContentKnowledgeSave,
     NewsDigest,
     NewsDigestBullet,
     ProcessingTask,
@@ -318,7 +318,7 @@ def _seed_case_data(
         )
         db.add(content)
         db.flush()
-        db.add(ContentFavorites(user_id=user_id, content_id=int(content.id)))
+        db.add(ContentKnowledgeSave(user_id=user_id, content_id=int(content.id)))
 
     if seed_data.news_digests or seed_data.favorites:
         db.commit()

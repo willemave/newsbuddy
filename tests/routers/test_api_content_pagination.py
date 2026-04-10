@@ -4,12 +4,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content, ContentStatusEntry
 from app.models.user import User
+from app.repositories.search_backend import get_search_backend
 from app.utils.image_paths import get_content_images_dir
 from app.utils.pagination import PaginationCursor
 
@@ -79,43 +79,6 @@ def sample_contents(db_session: Session, test_user: User):
         for image_path in image_paths:
             if image_path.exists():
                 image_path.unlink()
-
-
-def _enable_fts(db_session: Session, contents: list[Content]) -> None:
-    """Create and seed the FTS table for search tests."""
-    try:
-        db_session.execute(
-            text(
-                """
-                CREATE VIRTUAL TABLE content_fts USING fts5(
-                    title,
-                    source,
-                    summary,
-                    transcript
-                )
-                """
-            )
-        )
-    except Exception:
-        pytest.skip("SQLite FTS5 not available")
-
-    for content in contents:
-        db_session.execute(
-            text(
-                """
-                INSERT INTO content_fts(rowid, title, source, summary, transcript)
-                VALUES (:rowid, :title, :source, :summary, :transcript)
-                """
-            ),
-            {
-                "rowid": content.id,
-                "title": content.title or "",
-                "source": content.source or "",
-                "summary": content.title or "",
-                "transcript": "",
-            },
-        )
-    db_session.commit()
 
 
 class TestCursorEncoding:
@@ -298,8 +261,8 @@ class TestSearchEndpointPagination:
         assert data["meta"]["next_cursor"] is not None
 
     def test_search_uses_fts_when_available(self, client, db_session, sample_contents):
-        """Use FTS when the table exists."""
-        _enable_fts(db_session, sample_contents)
+        """Use the PostgreSQL FTS backend when the database supports it."""
+        assert get_search_backend(db_session).supports_full_text()
 
         response = client.get("/api/content/search", params={"q": "Article", "limit": 5})
         assert response.status_code == 200
@@ -386,23 +349,23 @@ class TestSearchEndpointPagination:
         assert broken_id not in ids
 
 
-class TestFavoritesEndpointPagination:
-    """Test pagination on GET /api/content/favorites/list endpoint."""
+class TestKnowledgeLibraryPagination:
+    """Test pagination on GET /api/content/knowledge/list endpoint."""
 
     def test_favorites_pagination(self, client, sample_contents, db_session: Session, test_user):
-        """Test favorites list with pagination."""
-        from app.services import favorites
+        """Test knowledge library list with pagination."""
+        from app.services import knowledge
 
-        # Mark first 30 items as favorites
+        # Save first 30 items to knowledge
         for content in sample_contents[:30]:
-            favorites.toggle_favorite(db_session, content.id, test_user.id)
+            knowledge.toggle_knowledge_save(db_session, content.id, test_user.id)
 
         # First page
-        response1 = client.get("/api/content/favorites/list", params={"limit": 10})
+        response1 = client.get("/api/content/knowledge/list", params={"limit": 10})
         assert response1.status_code == 200
 
         data1 = response1.json()
-        # Should have some favorites (may be less than 10 due to DB state)
+        # Should have some saved items (may be less than 10 due to DB state)
         assert len(data1["contents"]) >= 0
         assert "has_more" in data1["meta"]
         assert "next_cursor" in data1["meta"]
@@ -410,7 +373,7 @@ class TestFavoritesEndpointPagination:
         # If there's a next page, fetch it
         if data1["meta"]["next_cursor"]:
             response2 = client.get(
-                "/api/content/favorites/list",
+                "/api/content/knowledge/list",
                 params={
                     "limit": 10,
                     "cursor": data1["meta"]["next_cursor"],
@@ -420,9 +383,9 @@ class TestFavoritesEndpointPagination:
             data2 = response2.json()
             assert len(data2["contents"]) >= 0
 
-    def test_empty_favorites(self, client, sample_contents):
-        """Test favorites pagination with no favorites."""
-        response = client.get("/api/content/favorites/list")
+    def test_empty_knowledge_library(self, client, sample_contents):
+        """Test knowledge library pagination with no saved items."""
+        response = client.get("/api/content/knowledge/list")
         assert response.status_code == 200
 
         data = response.json()

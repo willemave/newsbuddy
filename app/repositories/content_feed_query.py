@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
 from app.models.contracts import ContentStatus, ContentType
-from app.models.schema import Content, ContentFavorites, ContentReadStatus, ContentStatusEntry
+from app.models.schema import Content, ContentKnowledgeSave, ContentReadStatus, ContentStatusEntry
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ class FeedQueryRows:
 
     content: Content
     is_read: bool
-    is_favorited: bool
+    is_saved_to_knowledge: bool
 
 
 def content_sort_timestamp_expr():
@@ -57,7 +57,7 @@ def build_user_feed_query(
     db: Session,
     user_id: int,
     *,
-    mode: Literal["inbox", "favorites", "recently_read"] = "inbox",
+    mode: Literal["inbox", "knowledge_library", "recently_read"] = "inbox",
 ):
     """Build a base query for user content feeds.
 
@@ -67,13 +67,13 @@ def build_user_feed_query(
         mode: Feed mode controlling base joins/filters.
 
     Returns:
-        SQLAlchemy query with joins for read/favorite flags.
+        SQLAlchemy query with joins for read and knowledge-save flags.
     """
     query = (
         db.query(
             Content,
             ContentReadStatus.id.label("is_read"),
-            ContentFavorites.id.label("is_favorited"),
+            ContentKnowledgeSave.id.label("is_saved_to_knowledge"),
         )
         .outerjoin(
             ContentReadStatus,
@@ -83,10 +83,10 @@ def build_user_feed_query(
             ),
         )
         .outerjoin(
-            ContentFavorites,
+            ContentKnowledgeSave,
             and_(
-                ContentFavorites.content_id == Content.id,
-                ContentFavorites.user_id == user_id,
+                ContentKnowledgeSave.content_id == Content.id,
+                ContentKnowledgeSave.user_id == user_id,
             ),
         )
         .filter(Content.status == ContentStatus.COMPLETED.value)
@@ -115,8 +115,8 @@ def build_user_feed_query(
                 ContentStatusEntry.id.is_not(None),
             )
         )
-    elif mode == "favorites":
-        query = query.filter(ContentFavorites.id.is_not(None))
+    elif mode == "knowledge_library":
+        query = query.filter(ContentKnowledgeSave.id.is_not(None))
     elif mode == "recently_read":
         query = query.filter(ContentReadStatus.id.is_not(None))
 

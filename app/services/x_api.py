@@ -568,18 +568,21 @@ def _fetch_lists_page(
 def _oauth_token_request(*, grant_type: str, extra: dict[str, str]) -> dict[str, Any]:
     settings = get_settings()
     client_id = (settings.x_client_id or "").strip()
-    redirect_uri = (settings.x_oauth_redirect_uri or "").strip()
-    if not client_id or not redirect_uri:
-        raise ValueError(
-            "X OAuth is not configured (X_CLIENT_ID and X_OAUTH_REDIRECT_URI are required)"
-        )
+    if not client_id:
+        raise ValueError("X OAuth is not configured (X_CLIENT_ID is required)")
 
     payload = {
         "grant_type": grant_type,
         "client_id": client_id,
-        "redirect_uri": redirect_uri,
         **extra,
     }
+    if grant_type == "authorization_code":
+        redirect_uri = (settings.x_oauth_redirect_uri or "").strip()
+        if not redirect_uri:
+            raise ValueError(
+                "X OAuth is not configured (X_OAUTH_REDIRECT_URI is required)"
+            )
+        payload["redirect_uri"] = redirect_uri
     auth: tuple[str, str] | None = None
     client_secret = (settings.x_client_secret or "").strip()
     if client_secret:

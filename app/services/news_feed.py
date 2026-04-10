@@ -142,7 +142,11 @@ def _news_item_display_title(item: NewsItem) -> str:
     )
 
 
-def _present_summary(item: NewsItem, *, is_read: bool) -> ContentSummaryResponse:
+def _present_summary(
+    item: NewsItem,
+    *,
+    is_read: bool,
+) -> ContentSummaryResponse:
     cluster = _cluster_metadata(item)
     discussion_snippets = cluster.get("discussion_snippets")
     top_comment = _top_comment(item)
@@ -166,7 +170,7 @@ def _present_summary(item: NewsItem, *, is_read: bool) -> ContentSummaryResponse
         classification=_content_classification(item),
         publication_date=item.published_at.isoformat() if item.published_at else None,
         is_read=is_read,
-        is_favorited=False,
+        is_saved_to_knowledge=False,
         news_article_url=item.article_url or item.canonical_story_url,
         news_discussion_url=item.discussion_url or item.canonical_item_url,
         news_key_points=list(item.summary_key_points or []) or None,
@@ -180,7 +184,11 @@ def _present_summary(item: NewsItem, *, is_read: bool) -> ContentSummaryResponse
     )
 
 
-def _present_detail(item: NewsItem, *, is_read: bool) -> ContentDetailResponse:
+def _present_detail(
+    item: NewsItem,
+    *,
+    is_read: bool,
+) -> ContentDetailResponse:
     metadata = dict(item.raw_metadata or {})
     display_title = _news_item_display_title(item)
     article = metadata.get("article")
@@ -241,7 +249,7 @@ def _present_detail(item: NewsItem, *, is_read: bool) -> ContentDetailResponse:
         checked_out_at=None,
         publication_date=item.published_at.isoformat() if item.published_at else None,
         is_read=is_read,
-        is_favorited=False,
+        is_saved_to_knowledge=False,
         summary=item.summary_text,
         short_summary=item.summary_text,
         summary_kind=None,
@@ -344,7 +352,13 @@ def list_visible_news_items(
         )
 
     return ContentListResponse(
-        contents=[_present_summary(item, is_read=bool(row_is_read)) for item, row_is_read in rows],
+        contents=[
+            _present_summary(
+                item,
+                is_read=bool(row_is_read),
+            )
+            for item, row_is_read in rows
+        ],
         available_dates=available_dates,
         content_types=[ContentType.NEWS],
         meta=PaginationMetadata(
@@ -373,7 +387,10 @@ def get_visible_news_item_detail(
     if row is None:
         return None
     item, row_is_read = row
-    return _present_detail(item, is_read=bool(row_is_read))
+    return _present_detail(
+        item,
+        is_read=bool(row_is_read),
+    )
 
 
 def get_visible_news_item(db: Session, *, user_id: int, news_item_id: int) -> NewsItem | None:

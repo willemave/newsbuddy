@@ -13,7 +13,7 @@ from app.models.metadata import ContentClassification, ContentStatus, ContentTyp
 from app.models.metadata_state import normalize_metadata_shape, update_processing_state
 from app.models.schema import Content, ProcessingTask
 from app.models.user import User
-from app.repositories import favorites_repository
+from app.repositories import knowledge_repository
 from app.services import read_status
 from app.services.dig_deeper import enqueue_dig_deeper_task
 from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
@@ -155,15 +155,16 @@ def _apply_submission_user_state(
     *,
     user_id: int,
     content_id: int,
-    favorite_and_mark_read: bool,
+    save_to_knowledge_and_mark_read: bool,
     share_and_chat: bool,
     enqueue_dig_deeper: bool = False,
 ) -> None:
-    should_mark_read = favorite_and_mark_read or share_and_chat
+    should_mark_read = save_to_knowledge_and_mark_read or share_and_chat
     if should_mark_read:
         read_status.mark_content_as_read(db, content_id, user_id)
-    if favorite_and_mark_read:
-        favorites_repository.add_favorite(db, content_id, user_id)
+    if save_to_knowledge_and_mark_read:
+        # This flag now means "save to knowledge and mark read".
+        knowledge_repository.save_to_knowledge(db, content_id, user_id)
     if share_and_chat and enqueue_dig_deeper:
         enqueue_dig_deeper_task(db, content_id, user_id)
 
@@ -211,7 +212,9 @@ def submit_user_content(
     crawl_links = payload.crawl_links
     subscribe_to_feed = payload.subscribe_to_feed
     share_and_chat = payload.share_and_chat and not subscribe_to_feed
-    favorite_and_mark_read = payload.favorite_and_mark_read and not subscribe_to_feed
+    save_to_knowledge_and_mark_read = (
+        payload.save_to_knowledge_and_mark_read and not subscribe_to_feed
+    )
     platform_hint = (payload.platform or "").strip().lower() or None
 
     existing = db.query(Content).filter(Content.url == normalized_url).first()
@@ -253,7 +256,7 @@ def submit_user_content(
                 db,
                 user_id=current_user.id,
                 content_id=existing.id,
-                favorite_and_mark_read=favorite_and_mark_read,
+                save_to_knowledge_and_mark_read=save_to_knowledge_and_mark_read,
                 share_and_chat=share_and_chat,
                 enqueue_dig_deeper=existing.status == ContentStatus.COMPLETED.value,
             )
@@ -360,7 +363,7 @@ def submit_user_content(
             db,
             user_id=current_user.id,
             content_id=new_content.id,
-            favorite_and_mark_read=favorite_and_mark_read,
+            save_to_knowledge_and_mark_read=save_to_knowledge_and_mark_read,
             share_and_chat=share_and_chat,
         )
     task_id = _ensure_analyze_url_task(

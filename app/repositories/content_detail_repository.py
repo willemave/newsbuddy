@@ -15,7 +15,7 @@ def get_content_detail(db: Session, *, user_id: int, content_id: int):
         db.query(
             Content,
             context.is_read.label("is_read"),
-            context.is_favorited.label("is_favorited"),
+            context.is_saved_to_knowledge.label("is_saved_to_knowledge"),
             ContentBody.content_id.is_not(None).label("body_available"),
             ContentBody.content_format.label("body_format"),
         )

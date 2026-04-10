@@ -28,7 +28,7 @@ def execute(db: Session, *, user_id: int, content_id: int):
             return news_item_detail
         raise HTTPException(status_code=404, detail="Content not found")
 
-    content, is_read, is_favorited, body_available, body_format = row
+    content, is_read, is_saved_to_knowledge, body_available, body_format = row
     try:
         domain_content = content_to_domain(content)
     except Exception as exc:
@@ -46,7 +46,7 @@ def execute(db: Session, *, user_id: int, content_id: int):
         content=content,
         domain_content=domain_content,
         is_read=bool(is_read),
-        is_favorited=bool(is_favorited),
+        is_saved_to_knowledge=bool(is_saved_to_knowledge),
         detected_feed_data=detected_feed_data,
         can_subscribe=can_subscribe,
         body_available=bool(body_available),

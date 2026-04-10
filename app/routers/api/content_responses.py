@@ -2,11 +2,11 @@
 
 from typing import Any
 
+from app.models.api.common import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
 from app.models.content_display import resolve_image_urls
 from app.models.contracts import ContentClassification, ContentStatus
 from app.models.metadata import ContentData, ContentType
 from app.models.schema import Content
-from app.models.api.common import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
 from app.services.content_bodies import sanitize_metadata_for_api
 from app.utils.image_urls import build_content_image_url, build_thumbnail_url
 
@@ -53,7 +53,7 @@ def build_content_summary_response(
     content: Content,
     domain_content: ContentData,
     is_read: bool,
-    is_favorited: bool,
+    is_saved_to_knowledge: bool,
     image_url: str | None = None,
     thumbnail_url: str | None = None,
 ) -> ContentSummaryResponse:
@@ -121,7 +121,7 @@ def build_content_summary_response(
         if domain_content.publication_date
         else None,
         is_read=is_read,
-        is_favorited=is_favorited,
+        is_saved_to_knowledge=is_saved_to_knowledge,
         news_article_url=news_article_url,
         news_discussion_url=news_discussion_url,
         news_key_points=news_key_points,
@@ -141,7 +141,7 @@ def build_fallback_content_summary_response(
     content: Content,
     *,
     is_read: bool,
-    is_favorited: bool,
+    is_saved_to_knowledge: bool,
 ) -> ContentSummaryResponse | None:
     """Build a minimal summary response when full metadata normalization fails."""
     metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
@@ -180,7 +180,7 @@ def build_fallback_content_summary_response(
         classification=classification,
         publication_date=content.publication_date.isoformat() if content.publication_date else None,
         is_read=is_read,
-        is_favorited=is_favorited,
+        is_saved_to_knowledge=is_saved_to_knowledge,
         news_article_url=None,
         news_discussion_url=None,
         news_key_points=None,
@@ -200,7 +200,7 @@ def build_content_detail_response(
     content: Content,
     domain_content: ContentData,
     is_read: bool,
-    is_favorited: bool,
+    is_saved_to_knowledge: bool,
     detected_feed_data: dict[str, Any] | None,
     can_subscribe: bool,
     *,
@@ -270,7 +270,7 @@ def build_content_detail_response(
         if domain_content.publication_date
         else None,
         is_read=is_read,
-        is_favorited=is_favorited,
+        is_saved_to_knowledge=is_saved_to_knowledge,
         summary=news_summary_text,
         short_summary=news_summary_text,
         summary_kind=summary_kind,

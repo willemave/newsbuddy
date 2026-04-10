@@ -31,7 +31,7 @@ from app.models.feed_discovery import (
 )
 from app.models.schema import (
     Content,
-    ContentFavorites,
+    ContentKnowledgeSave,
     FeedDiscoveryRun,
     FeedDiscoverySuggestion,
     UserScraperConfig,
@@ -385,10 +385,10 @@ def _apply_timing_to_run(
 
 def _fetch_favorites(db: Session, user_id: int) -> list[FavoriteDigest]:
     rows = (
-        db.query(ContentFavorites, Content)
-        .join(Content, Content.id == ContentFavorites.content_id)
-        .filter(ContentFavorites.user_id == user_id)
-        .order_by(ContentFavorites.favorited_at.desc())
+        db.query(ContentKnowledgeSave, Content)
+        .join(Content, Content.id == ContentKnowledgeSave.content_id)
+        .filter(ContentKnowledgeSave.user_id == user_id)
+        .order_by(ContentKnowledgeSave.saved_at.desc())
         .all()
     )
 
@@ -477,9 +477,9 @@ def _get_direction_agent(model_spec: str) -> Agent[DiscoveryToolDeps, DiscoveryD
 
         with get_db() as db:
             base_query = (
-                db.query(ContentFavorites, Content)
-                .join(Content, Content.id == ContentFavorites.content_id)
-                .filter(ContentFavorites.user_id == ctx.deps.user_id)
+                db.query(ContentKnowledgeSave, Content)
+                .join(Content, Content.id == ContentKnowledgeSave.content_id)
+                .filter(ContentKnowledgeSave.user_id == ctx.deps.user_id)
             )
             if query:
                 like = f"%{query.strip()}%"
@@ -494,7 +494,7 @@ def _get_direction_agent(model_spec: str) -> Agent[DiscoveryToolDeps, DiscoveryD
 
             total = base_query.count()
             rows = (
-                base_query.order_by(ContentFavorites.favorited_at.desc())
+                base_query.order_by(ContentKnowledgeSave.saved_at.desc())
                 .offset(offset)
                 .limit(limit)
                 .all()

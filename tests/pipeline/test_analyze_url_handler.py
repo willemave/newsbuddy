@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -781,7 +782,7 @@ def test_tweet_share_resolves_article_from_same_author_thread_reply(
         author_id="u1",
         author_username="willem",
         author_name="Willem",
-        created_at="2026-03-29T10:00:00Z",
+        created_at=(datetime.now(UTC) - timedelta(hours=2)).isoformat().replace("+00:00", "Z"),
         conversation_id="123456789",
         external_urls=[],
     )
@@ -791,7 +792,9 @@ def test_tweet_share_resolves_article_from_same_author_thread_reply(
         author_id="u1",
         author_username="willem",
         author_name="Willem",
-        created_at="2026-03-29T10:01:00Z",
+        created_at=(datetime.now(UTC) - timedelta(hours=1, minutes=59))
+        .isoformat()
+        .replace("+00:00", "Z"),
         conversation_id="123456789",
         external_urls=["https://example.com/thread-story"],
     )

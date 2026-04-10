@@ -21,6 +21,7 @@ from app.services.news_article_bodies import (
     NEWS_ARTICLE_EXTRACTION_KEY,
     persist_news_item_article_body,
 )
+from app.utils.title_utils import clean_title
 from app.utils.url_utils import is_http_url, normalize_http_url
 
 logger = get_logger(__name__)
@@ -57,12 +58,7 @@ def _clean_string(value: Any) -> str | None:
 
 
 def _clean_title(value: Any) -> str | None:
-    cleaned = _clean_string(value)
-    if cleaned is None:
-        return None
-    if cleaned.casefold() == "void":
-        return None
-    return cleaned
+    return clean_title(value)
 
 
 def _run_strategy_method(method: Any, *args: Any) -> Any:

@@ -70,7 +70,7 @@ def execute(
         rows = rows[:limit]
 
     contents = []
-    for content, is_read, is_favorited in rows:
+    for content, is_read, is_saved_to_knowledge in rows:
         try:
             domain_content = content_to_domain(content)
         except Exception:
@@ -85,7 +85,7 @@ def execute(
             fallback = build_fallback_content_summary_response(
                 content,
                 is_read=bool(is_read),
-                is_favorited=bool(is_favorited),
+                is_saved_to_knowledge=bool(is_saved_to_knowledge),
             )
             if fallback is not None:
                 contents.append(fallback)
@@ -98,7 +98,7 @@ def execute(
                 content=content,
                 domain_content=domain_content,
                 is_read=bool(is_read),
-                is_favorited=bool(is_favorited),
+                is_saved_to_knowledge=bool(is_saved_to_knowledge),
                 image_url=image_url,
                 thumbnail_url=thumbnail_url,
             )

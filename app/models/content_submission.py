@@ -48,11 +48,11 @@ class SubmitContentRequest(BaseModel):
             "after processing completes."
         ),
     )
-    favorite_and_mark_read: bool = Field(
+    save_to_knowledge_and_mark_read: bool = Field(
         False,
         description=(
             "When true, download and summarize the submitted content, then mark it as "
-            "read and add it to the user's favorites."
+            "read and save it to the user's knowledge library."
         ),
     )
 
@@ -67,7 +67,7 @@ class SubmitContentRequest(BaseModel):
                 "crawl_links": True,
                 "subscribe_to_feed": False,
                 "share_and_chat": False,
-                "favorite_and_mark_read": False,
+                "save_to_knowledge_and_mark_read": False,
             }
         }
     )

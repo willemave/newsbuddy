@@ -46,7 +46,7 @@ def execute(db: Session, *, user_id: int, cursor: str | None, limit: int) -> Con
         rows = rows[:limit]
 
     contents = []
-    for content, read_id, is_favorited, _read_at in rows:
+    for content, read_id, is_saved_to_knowledge, _read_at in rows:
         try:
             domain_content = content_to_domain(content)
         except Exception:
@@ -65,7 +65,7 @@ def execute(db: Session, *, user_id: int, cursor: str | None, limit: int) -> Con
                 content=content,
                 domain_content=domain_content,
                 is_read=bool(read_id),
-                is_favorited=bool(is_favorited),
+                is_saved_to_knowledge=bool(is_saved_to_knowledge),
                 image_url=image_url,
                 thumbnail_url=thumbnail_url,
             )
@@ -73,7 +73,7 @@ def execute(db: Session, *, user_id: int, cursor: str | None, limit: int) -> Con
 
     next_cursor = None
     if has_more and rows:
-        last_content, _read_id, _is_favorited, last_read_at_value = rows[-1]
+        last_content, _read_id, _is_saved_to_knowledge, last_read_at_value = rows[-1]
         last_read_at_filter = last_read_at_value.isoformat() if last_read_at_value else None
         next_cursor = PaginationCursor.encode_cursor(
             last_id=last_content.id,
