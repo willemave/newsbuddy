@@ -90,6 +90,10 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+explicit_package_bases = true
+implicit_reexport = true
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+disable_error_code = ["import-untyped"]
 
 [tool.ruff]
 target-version = "py313"

@@ -1,9 +1,10 @@
 import subprocess
 import sys
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -14,8 +15,8 @@ logger = get_logger(__name__)
 
 Base = declarative_base()
 
-_engine = None
-_SessionLocal = None
+_engine: Engine | None = None
+_SessionLocal: sessionmaker[Session] | None = None
 
 
 def init_db() -> None:
@@ -40,14 +41,14 @@ def init_db() -> None:
     logger.info("Database initialized successfully")
 
 
-def get_engine():
+def get_engine() -> Engine:
     """Get the database engine, initializing if necessary."""
     if _engine is None:
         init_db()
     return _engine
 
 
-def get_session_factory():
+def get_session_factory() -> sessionmaker[Session]:
     """Get the session factory, initializing if necessary."""
     if _SessionLocal is None:
         init_db()
@@ -55,7 +56,7 @@ def get_session_factory():
 
 
 @contextmanager
-def get_db() -> Generator[Session]:
+def get_db() -> Iterator[Session]:
     """Context manager for database sessions."""
     SessionLocal = get_session_factory()
     db = SessionLocal()

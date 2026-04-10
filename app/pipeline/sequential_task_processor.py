@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from pydantic import ValidationError
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 
 from app.core.logging import get_logger, setup_logging
@@ -44,6 +45,20 @@ except ImportError:  # pragma: no cover
     psycopg = None
 
 logger = get_logger(__name__)
+
+
+def _psycopg_conninfo(database_url: str) -> str:
+    """Return a psycopg-compatible connection string from a SQLAlchemy URL."""
+    normalized = str(database_url)
+    try:
+        url = make_url(normalized)
+    except Exception:  # noqa: BLE001
+        return normalized
+    if not url.drivername.startswith("postgresql"):
+        return normalized
+    if "+" not in url.drivername:
+        return normalized
+    return url.set(drivername="postgresql").render_as_string(hide_password=False)
 
 
 def _task_extra(
@@ -165,7 +180,8 @@ class SequentialTaskProcessor:
         if psycopg is None:
             return None
         try:
-            self._queue_listener = psycopg.connect(str(self.settings.database_url), autocommit=True)
+            conninfo = _psycopg_conninfo(str(self.settings.database_url))
+            self._queue_listener = psycopg.connect(conninfo, autocommit=True)
             self._queue_listener.execute("LISTEN processing_tasks")
             return self._queue_listener
         except Exception:  # noqa: BLE001

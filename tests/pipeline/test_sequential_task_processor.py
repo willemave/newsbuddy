@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from app.pipeline.sequential_task_processor import SequentialTaskProcessor
+from app.pipeline.sequential_task_processor import SequentialTaskProcessor, _psycopg_conninfo
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.queue import TaskType
 
@@ -28,12 +28,35 @@ def processor():
 class TestSequentialTaskProcessor:
     """Test cases for SequentialTaskProcessor."""
 
+    def test_psycopg_conninfo_strips_sqlalchemy_driver_suffix(self):
+        conninfo = _psycopg_conninfo(
+            "postgresql+psycopg://newsly:secret@127.0.0.1:5432/newsly?sslmode=prefer"
+        )
+
+        assert conninfo == "postgresql://newsly:secret@127.0.0.1:5432/newsly?sslmode=prefer"
+
     def test_init(self, processor):
         """Test processor initialization."""
         assert processor.running is True
         assert processor.worker_id == "content-processor-1"
         assert processor.queue_service is not None
         assert processor.llm_service is not None
+
+    def test_ensure_queue_listener_uses_psycopg_compatible_conninfo(self, processor):
+        listener = Mock()
+        processor.settings.database_url = "postgresql+psycopg://postgres@localhost/newsly"
+
+        with patch("app.pipeline.sequential_task_processor.psycopg") as mock_psycopg:
+            mock_psycopg.connect.return_value = listener
+
+            result = processor._ensure_queue_listener()
+
+        assert result is listener
+        mock_psycopg.connect.assert_called_once_with(
+            "postgresql://postgres@localhost/newsly",
+            autocommit=True,
+        )
+        listener.execute.assert_called_once_with("LISTEN processing_tasks")
 
     def test_process_task_dispatches(self, processor):
         """Test processing uses dispatcher and returns TaskResult."""
