@@ -1,11 +1,11 @@
 //
-//  FavoritesView.swift
+//  KnowledgeLibraryView.swift
 //  newsly
 //
 
 import SwiftUI
 
-struct FavoritesView: View {
+struct KnowledgeLibraryView: View {
     let showNavigationTitle: Bool
 
     @StateObject private var viewModel = ContentListViewModel(defaultReadFilter: "all")
@@ -20,7 +20,7 @@ struct FavoritesView: View {
                 LoadingView()
             } else if let error = viewModel.errorMessage, viewModel.contents.isEmpty {
                 ErrorView(message: error) {
-                    Task { await viewModel.loadFavorites() }
+                    Task { await viewModel.loadKnowledgeLibrary() }
                 }
             } else if viewModel.contents.isEmpty {
                 emptyState
@@ -29,24 +29,24 @@ struct FavoritesView: View {
             }
         }
         .background(Color.surfacePrimary)
-        .navigationTitle(showNavigationTitle ? "Favorites" : "")
-        .task { await viewModel.loadFavorites() }
+        .navigationTitle(showNavigationTitle ? "Knowledge Library" : "")
+        .task { await viewModel.loadKnowledgeLibrary() }
     }
 
     // MARK: - Empty State
 
     private var emptyState: some View {
         VStack(spacing: 20) {
-            Image(systemName: "star")
+            Image(systemName: "books.vertical")
                 .font(.system(size: 48, weight: .light))
                 .foregroundStyle(Color.accentColor.opacity(0.7))
 
             VStack(spacing: 6) {
-                Text("No favorites yet")
+                Text("No saved knowledge yet")
                     .font(.listTitle.weight(.semibold))
                     .foregroundStyle(Color.onSurface)
 
-                Text("Swipe right on articles or podcasts to add them to your favorites.")
+                Text("Save articles or podcasts to Knowledge and they’ll show up here.")
                     .font(.listSubtitle)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
@@ -66,7 +66,7 @@ struct FavoritesView: View {
                     contentId: content.id,
                     allContentIds: viewModel.contents.map(\.id)
                 )) {
-                    FavoriteRow(content: content)
+                    KnowledgeLibraryRow(content: content)
                 }
                 .appListRow()
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -82,13 +82,13 @@ struct FavoritesView: View {
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button {
                         Task {
-                            await viewModel.toggleFavorite(content.id)
+                            await viewModel.toggleKnowledgeSave(content.id)
                             withAnimation(.easeOut(duration: 0.3)) {
                                 viewModel.contents.removeAll { $0.id == content.id }
                             }
                         }
                     } label: {
-                        Label("Remove", systemImage: "star.slash")
+                        Label("Remove", systemImage: "books.vertical.fill")
                     }
                     .tint(.red)
                 }
@@ -110,13 +110,13 @@ struct FavoritesView: View {
             }
         }
         .listStyle(.plain)
-        .refreshable { await viewModel.loadFavorites() }
+        .refreshable { await viewModel.loadKnowledgeLibrary() }
     }
 }
 
-// MARK: - Favorite Row
+// MARK: - Knowledge Library Row
 
-private struct FavoriteRow: View {
+private struct KnowledgeLibraryRow: View {
     let content: ContentSummary
 
     private var textOpacity: Double {

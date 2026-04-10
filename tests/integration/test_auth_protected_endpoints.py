@@ -11,7 +11,7 @@ def test_api_endpoints_require_authentication(client_factory):
         endpoints_to_test = [
             ("GET", "/api/content/"),
             ("GET", "/api/content/1"),
-            ("POST", "/api/content/1/favorite"),
+            ("POST", "/api/content/1/knowledge"),
             ("POST", "/api/content/1/mark-read"),
         ]
 
@@ -52,7 +52,7 @@ def test_authenticated_requests_accepted(
         response = client.get(f"/api/content/{content.id}", headers=headers)
         assert response.status_code == 200
 
-        response = client.post(f"/api/content/{content.id}/favorite", headers=headers)
+        response = client.post(f"/api/content/{content.id}/knowledge", headers=headers)
         assert response.status_code == 200
 
 

@@ -1,8 +1,8 @@
 //
-//  FavoritesRoute.swift
+//  KnowledgeLibraryRoute.swift
 //  newsly
 //
 
 import Foundation
 
-struct FavoritesRoute: Hashable {}
+struct KnowledgeLibraryRoute: Hashable {}

@@ -105,8 +105,8 @@ struct ContentView: View {
                         knowledgePath = NavigationPath()
                         knowledgePath.append(route)
                     },
-                    onShowFavorites: {
-                        knowledgePath.append(FavoritesRoute())
+                    onShowKnowledgeLibrary: {
+                        knowledgePath.append(KnowledgeLibraryRoute())
                     },
                     onShowSessionHistory: {
                         knowledgePath = NavigationPath()
@@ -269,8 +269,8 @@ private extension View {
                     path.wrappedValue.append(route)
                 })
             }
-            .navigationDestination(for: FavoritesRoute.self) { _ in
-                FavoritesView()
+            .navigationDestination(for: KnowledgeLibraryRoute.self) { _ in
+                KnowledgeLibraryView()
             }
     }
 }

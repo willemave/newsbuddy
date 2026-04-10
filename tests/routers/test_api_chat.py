@@ -1336,7 +1336,8 @@ def test_message_status_returns_distinct_assistant_display_id(
                 "parts": [
                     {
                         "content": (
-                            "Your most recently favorited article is AI Infrastructure Update."
+                            "Your most recent saved knowledge item in this result set is "
+                            "\"AI Infrastructure Update\" (https://example.com/ai-update)."
                         ),
                         "id": None,
                         "provider_name": None,

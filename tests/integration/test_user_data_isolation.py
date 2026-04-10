@@ -1,7 +1,7 @@
 """Integration tests for user data isolation."""
 
 
-def test_users_see_only_their_own_favorites(
+def test_users_see_only_their_own_knowledge_saves(
     auth_headers_factory,
     client_factory,
     content_factory,
@@ -9,7 +9,7 @@ def test_users_see_only_their_own_favorites(
     status_entry_factory,
     user_factory,
 ):
-    """Test that users only see their own favorites."""
+    """Test that users only see their own saved knowledge."""
     user1 = user_factory(apple_id="user1", email="user1@example.com")
     user2 = user_factory(apple_id="user2", email="user2@example.com")
     content1 = content_factory(title="Article 1", url="https://example.com/article1")
@@ -25,21 +25,21 @@ def test_users_see_only_their_own_favorites(
         headers = auth_headers_factory(user1)
         response = client.get(f"/api/content/{content1.id}", headers=headers)
         assert response.status_code == 200
-        assert response.json()["is_favorited"] is True
+        assert response.json()["is_saved_to_knowledge"] is True
 
         response = client.get(f"/api/content/{content2.id}", headers=headers)
         assert response.status_code == 200
-        assert response.json()["is_favorited"] is False
+        assert response.json()["is_saved_to_knowledge"] is False
 
     with client_factory(user=user2) as client:
         headers = auth_headers_factory(user2)
         response = client.get(f"/api/content/{content1.id}", headers=headers)
         assert response.status_code == 200
-        assert response.json()["is_favorited"] is False
+        assert response.json()["is_saved_to_knowledge"] is False
 
         response = client.get(f"/api/content/{content2.id}", headers=headers)
         assert response.status_code == 200
-        assert response.json()["is_favorited"] is True
+        assert response.json()["is_saved_to_knowledge"] is True
 
 
 def test_users_see_only_their_own_read_status(
@@ -79,14 +79,14 @@ def test_users_see_only_their_own_read_status(
         assert response.json()["is_read"] is False
 
 
-def test_favorite_action_only_affects_current_user(
+def test_knowledge_save_only_affects_current_user(
     auth_headers_factory,
     client_factory,
     content_factory,
     status_entry_factory,
     user_factory,
 ):
-    """Test that favoriting content only affects the current user."""
+    """Test that saving content to knowledge only affects the current user."""
     user1 = user_factory(
         apple_id="user1_fav_action",
         email="user1_fav@example.com",
@@ -96,7 +96,7 @@ def test_favorite_action_only_affects_current_user(
         email="user2_fav@example.com",
     )
     content = content_factory(
-        title="Favorite Action Test",
+        title="Knowledge Save Action Test",
         url="https://example.com/fav_action",
     )
     status_entry_factory(user=user1, content=content, status="inbox")
@@ -104,11 +104,11 @@ def test_favorite_action_only_affects_current_user(
 
     with client_factory(user=user1) as client:
         response = client.post(
-            f"/api/content/{content.id}/favorite",
+            f"/api/content/{content.id}/knowledge",
             headers=auth_headers_factory(user1),
         )
         assert response.status_code == 200
-        assert response.json()["is_favorited"] is True
+        assert response.json()["is_saved_to_knowledge"] is True
 
     with client_factory(user=user2) as client:
         response = client.get(
@@ -116,4 +116,4 @@ def test_favorite_action_only_affects_current_user(
             headers=auth_headers_factory(user2),
         )
         assert response.status_code == 200
-        assert response.json()["is_favorited"] is False
+        assert response.json()["is_saved_to_knowledge"] is False

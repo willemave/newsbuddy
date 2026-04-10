@@ -26,7 +26,7 @@ struct ContentSummary: Codable, Identifiable {
     let classification: String?
     let publicationDate: String?
     let isRead: Bool
-    var isFavorited: Bool
+    var isSavedToKnowledge: Bool
     let imageUrl: String?
     let thumbnailUrl: String?
     let primaryTopic: String?
@@ -52,7 +52,7 @@ struct ContentSummary: Codable, Identifiable {
         case classification
         case publicationDate = "publication_date"
         case isRead = "is_read"
-        case isFavorited = "is_favorited"
+        case isSavedToKnowledge = "is_saved_to_knowledge"
         case imageUrl = "image_url"
         case thumbnailUrl = "thumbnail_url"
         case primaryTopic = "primary_topic"
@@ -102,7 +102,7 @@ struct ContentSummary: Codable, Identifiable {
         classification: String?,
         publicationDate: String?,
         isRead: Bool,
-        isFavorited: Bool,
+        isSavedToKnowledge: Bool,
         imageUrl: String? = nil,
         thumbnailUrl: String? = nil,
         primaryTopic: String? = nil,
@@ -124,7 +124,7 @@ struct ContentSummary: Codable, Identifiable {
         self.classification = classification
         self.publicationDate = publicationDate
         self.isRead = isRead
-        self.isFavorited = isFavorited
+        self.isSavedToKnowledge = isSavedToKnowledge
         self.imageUrl = imageUrl
         self.thumbnailUrl = thumbnailUrl
         self.primaryTopic = primaryTopic
@@ -153,7 +153,7 @@ struct ContentSummary: Codable, Identifiable {
             classification: try container.decodeIfPresent(String.self, forKey: .classification),
             publicationDate: try container.decodeIfPresent(String.self, forKey: .publicationDate),
             isRead: try container.decode(Bool.self, forKey: .isRead),
-            isFavorited: try container.decodeIfPresent(Bool.self, forKey: .isFavorited) ?? false,
+            isSavedToKnowledge: try container.decodeIfPresent(Bool.self, forKey: .isSavedToKnowledge) ?? false,
             imageUrl: try container.decodeIfPresent(String.self, forKey: .imageUrl),
             thumbnailUrl: try container.decodeIfPresent(String.self, forKey: .thumbnailUrl),
             primaryTopic: try container.decodeIfPresent(String.self, forKey: .primaryTopic),
@@ -179,7 +179,7 @@ struct ContentSummary: Codable, Identifiable {
         try container.encodeIfPresent(classification, forKey: .classification)
         try container.encodeIfPresent(publicationDate, forKey: .publicationDate)
         try container.encode(isRead, forKey: .isRead)
-        try container.encode(isFavorited, forKey: .isFavorited)
+        try container.encode(isSavedToKnowledge, forKey: .isSavedToKnowledge)
         try container.encodeIfPresent(imageUrl, forKey: .imageUrl)
         try container.encodeIfPresent(thumbnailUrl, forKey: .thumbnailUrl)
         try container.encodeIfPresent(primaryTopic, forKey: .primaryTopic)
@@ -256,7 +256,7 @@ struct ContentSummary: Codable, Identifiable {
 
     func updating(
         isRead: Bool? = nil,
-        isFavorited: Bool? = nil
+        isSavedToKnowledge: Bool? = nil
     ) -> ContentSummary {
         ContentSummary(
             id: id,
@@ -272,7 +272,7 @@ struct ContentSummary: Codable, Identifiable {
             classification: classification,
             publicationDate: publicationDate,
             isRead: isRead ?? self.isRead,
-            isFavorited: isFavorited ?? self.isFavorited,
+            isSavedToKnowledge: isSavedToKnowledge ?? self.isSavedToKnowledge,
             imageUrl: imageUrl,
             thumbnailUrl: thumbnailUrl,
             primaryTopic: primaryTopic,

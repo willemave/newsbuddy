@@ -7,7 +7,7 @@ from enum import StrEnum
 import pytest
 
 from app.core.settings import get_settings
-from app.models.schema import Content, ContentFavorites
+from app.models.schema import Content, ContentKnowledgeSave
 from app.services import admin_conversational_agent as service
 
 
@@ -215,7 +215,7 @@ def test_stream_agent_turn_reuses_one_runtime_for_multiple_turns(
 
 
 def test_search_knowledge_returns_only_matching_favorites(db_session, test_user) -> None:
-    """Knowledge search should include only favorited matching content."""
+    """Knowledge search should include only knowledge-saved matching content."""
 
     c1 = Content(
         content_type="article",
@@ -246,8 +246,8 @@ def test_search_knowledge_returns_only_matching_favorites(db_session, test_user)
 
     db_session.add_all(
         [
-            ContentFavorites(user_id=test_user.id, content_id=c1.id),
-            ContentFavorites(user_id=test_user.id, content_id=c2.id),
+            ContentKnowledgeSave(user_id=test_user.id, content_id=c1.id),
+            ContentKnowledgeSave(user_id=test_user.id, content_id=c2.id),
         ]
     )
     db_session.commit()
@@ -274,7 +274,7 @@ def test_search_web_returns_empty_when_exa_unavailable(monkeypatch: pytest.Monke
 
 
 def test_build_available_knowledge_context_lists_favorites(db_session, test_user) -> None:
-    """Bootstrap knowledge context should enumerate favorited titles."""
+    """Bootstrap knowledge context should enumerate knowledge-saved titles."""
 
     content = Content(
         content_type="podcast",
@@ -286,16 +286,16 @@ def test_build_available_knowledge_context_lists_favorites(db_session, test_user
     )
     db_session.add(content)
     db_session.commit()
-    db_session.add(ContentFavorites(user_id=test_user.id, content_id=content.id))
+    db_session.add(ContentKnowledgeSave(user_id=test_user.id, content_id=content.id))
     db_session.commit()
 
     context = service.build_available_knowledge_context(db_session, test_user.id, limit=100)
-    assert "Known favorited user knowledge catalog" in context
+    assert "Known user knowledge catalog" in context
     assert "Podcast title" in context
 
 
-def test_stream_agent_turn_uses_local_favorites_response() -> None:
-    """Favorites/history questions should return deterministic local knowledge responses."""
+def test_stream_agent_turn_uses_local_saved_knowledge_response() -> None:
+    """Saved-history questions should return deterministic local knowledge responses."""
 
     state = service.create_or_get_session_state("local-favorites", 42)
     runtime = service.AgentConversationRuntime(

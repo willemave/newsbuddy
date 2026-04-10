@@ -31,7 +31,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     let articleSummary: String?
     let articleSource: String?
     let hasPendingMessage: Bool?
-    let isFavorite: Bool?
+    private let savedToKnowledgeValue: Bool?
     let hasMessages: Bool?
     let lastMessagePreview: String?
     let lastMessageRole: String?
@@ -54,7 +54,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         case articleSummary = "article_summary"
         case articleSource = "article_source"
         case hasPendingMessage = "has_pending_message"
-        case isFavorite = "is_favorite"
+        case savedToKnowledgeValue = "is_saved_to_knowledge"
         case hasMessages = "has_messages"
         case lastMessagePreview = "last_message_preview"
         case lastMessageRole = "last_message_role"
@@ -78,7 +78,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         articleSummary: String?,
         articleSource: String?,
         hasPendingMessage: Bool?,
-        isFavorite: Bool?,
+        isSavedToKnowledge: Bool?,
         hasMessages: Bool?,
         lastMessagePreview: String?,
         lastMessageRole: String?,
@@ -100,7 +100,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         self.articleSummary = articleSummary
         self.articleSource = articleSource
         self.hasPendingMessage = hasPendingMessage
-        self.isFavorite = isFavorite
+        self.savedToKnowledgeValue = isSavedToKnowledge
         self.hasMessages = hasMessages
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageRole = lastMessageRole
@@ -125,7 +125,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         articleSummary = try container.decodeIfPresent(String.self, forKey: .articleSummary)
         articleSource = try container.decodeIfPresent(String.self, forKey: .articleSource)
         hasPendingMessage = try container.decodeIfPresent(Bool.self, forKey: .hasPendingMessage)
-        isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite)
+        savedToKnowledgeValue = try container.decodeIfPresent(Bool.self, forKey: .savedToKnowledgeValue)
         hasMessages = try container.decodeIfPresent(Bool.self, forKey: .hasMessages)
         lastMessagePreview = try container.decodeIfPresent(String.self, forKey: .lastMessagePreview)
         lastMessageRole = try container.decodeIfPresent(String.self, forKey: .lastMessageRole)
@@ -165,9 +165,9 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         hasPendingMessage ?? false
     }
 
-    /// True if the linked content is favorited
-    var isFavorited: Bool {
-        isFavorite ?? false
+    /// True if the linked content is saved to knowledge
+    var isSavedToKnowledge: Bool {
+        savedToKnowledgeValue ?? false
     }
 
     /// True if the session has any messages
@@ -175,9 +175,9 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         hasMessages ?? true
     }
 
-    /// True if this is a favorited article with no chat messages yet
-    var isEmptyFavorite: Bool {
-        isFavorited && !hasAnyMessages
+    /// True if this is a saved article with no chat messages yet
+    var isEmptyKnowledgeSave: Bool {
+        isSavedToKnowledge && !hasAnyMessages
     }
 
     var isKnowledgeSession: Bool {
@@ -200,8 +200,8 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         if sessionType == "daily_digest_brain" || sessionType == "news_digest_brain" {
             return "About your news digest"
         }
-        // For empty favorites, show the source
-        if isEmptyFavorite, let source = articleSource {
+        // For empty knowledge saves, show the source
+        if isEmptyKnowledgeSave, let source = articleSource {
             return source
         }
         if sessionType == "knowledge_chat", let articleTitle = articleTitle {

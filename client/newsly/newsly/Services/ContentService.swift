@@ -479,15 +479,15 @@ class ContentService {
         return try await bulkMarkAsRead(contentIds: allUnreadIds)
     }
     
-    func toggleFavorite(id: Int) async throws -> [String: Any] {
-        return try await client.requestRaw(APIEndpoints.toggleFavorite(id: id), method: "POST")
-    }
-    
-    func removeFavorite(id: Int) async throws {
-        try await client.requestVoid(APIEndpoints.removeFavorite(id: id), method: "DELETE")
+    func saveToKnowledge(id: Int) async throws -> [String: Any] {
+        return try await client.requestRaw(APIEndpoints.saveToKnowledge(id: id), method: "POST")
     }
 
-    func fetchFavoritesList(cursor: String? = nil, limit: Int = 25) async throws -> ContentListResponse {
+    func removeFromKnowledge(id: Int) async throws {
+        try await client.requestVoid(APIEndpoints.removeFromKnowledge(id: id), method: "DELETE")
+    }
+
+    func fetchKnowledgeLibrary(cursor: String? = nil, limit: Int = 25) async throws -> ContentListResponse {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: String(limit))
         ]
@@ -496,7 +496,7 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(APIEndpoints.favoritesList, queryItems: queryItems)
+        return try await client.request(APIEndpoints.knowledgeLibraryList, queryItems: queryItems)
     }
 
     func fetchRecentlyReadList(cursor: String? = nil, limit: Int = 25) async throws -> ContentListResponse {

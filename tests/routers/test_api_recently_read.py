@@ -42,7 +42,7 @@ def test_recently_read_scoped_to_user(
     favorite_factory(
         user=other_user,
         content=content_one,
-        favorited_at=timestamp,
+        saved_at=timestamp,
         created_at=timestamp,
     )
 
@@ -56,4 +56,4 @@ def test_recently_read_scoped_to_user(
 
     item = next(entry for entry in payload["contents"] if entry["id"] == content_one.id)
     assert item["is_read"] is True
-    assert item["is_favorited"] is False
+    assert item["is_saved_to_knowledge"] is False

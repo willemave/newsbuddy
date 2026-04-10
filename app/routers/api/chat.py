@@ -47,7 +47,7 @@ from app.models.schema import (
     ChatMessage,
     ChatSession,
     Content,
-    ContentFavorites,
+    ContentKnowledgeSave,
     MessageProcessingStatus,
 )
 from app.models.user import User
@@ -126,7 +126,7 @@ def _session_to_summary(
     article_summary: str | None = None,
     article_source: str | None = None,
     has_pending_message: bool = False,
-    is_favorite: bool = False,
+    is_saved_to_knowledge: bool = False,
     has_messages: bool = True,
     last_message_preview: str | None = None,
     last_message_role: str | None = None,
@@ -149,7 +149,7 @@ def _session_to_summary(
         article_source=article_source,
         is_archived=session.is_archived,
         has_pending_message=has_pending_message,
-        is_favorite=is_favorite,
+        is_saved_to_knowledge=is_saved_to_knowledge,
         has_messages=has_messages,
         last_message_preview=last_message_preview,
         last_message_role=last_message_role,
@@ -447,11 +447,30 @@ async def list_sessions(
         .all()
     )
 
+    active_child_ids = [
+        session.active_child_session_id
+        for session in sessions
+        if session.active_child_session_id is not None
+    ]
+    active_child_sessions: dict[int, ChatSession] = {}
+    if active_child_ids:
+        active_child_rows = (
+            db.query(ChatSession)
+            .filter(ChatSession.id.in_(active_child_ids))
+            .filter(ChatSession.is_hidden_from_history == True)  # noqa: E712
+            .all()
+        )
+        active_child_sessions = {child.id: child for child in active_child_rows}
+
+    content_ids = [session.content_id for session in sessions if session.content_id is not None]
+    contents_by_id: dict[int, Content] = {}
+    if content_ids:
+        content_rows = db.query(Content).filter(Content.id.in_(content_ids)).all()
+        contents_by_id = {content.id: content for content in content_rows}
+
     # Get session IDs that have pending messages (for efficiency)
     session_ids = [s.id for s in sessions]
-    preview_session_ids = session_ids + [
-        s.active_child_session_id for s in sessions if s.active_child_session_id is not None
-    ]
+    preview_session_ids = session_ids + active_child_ids
     pending_session_ids: set[int] = set()
     sessions_with_messages: set[int] = set()
 
@@ -497,19 +516,18 @@ async def list_sessions(
         )
         last_message_map = {m.session_id: m for m in latest_messages}
 
-    # Get favorite content IDs for this user
-    content_ids = [s.content_id for s in sessions if s.content_id]
-    favorite_content_ids: set[int] = set()
+    # Get knowledge-saved content IDs for this user
+    knowledge_saved_content_ids: set[int] = set()
     if content_ids:
-        favorites = (
-            db.query(ContentFavorites.content_id)
+        knowledge_saves = (
+            db.query(ContentKnowledgeSave.content_id)
             .filter(
-                ContentFavorites.user_id == current_user.id,
-                ContentFavorites.content_id.in_(content_ids),
+                ContentKnowledgeSave.user_id == current_user.id,
+                ContentKnowledgeSave.content_id.in_(content_ids),
             )
             .all()
         )
-        favorite_content_ids = {f.content_id for f in favorites}
+        knowledge_saved_content_ids = {row.content_id for row in knowledge_saves}
 
     # Build response with article titles, URLs, summaries, and sources
     result = []
@@ -520,16 +538,22 @@ async def list_sessions(
         article_source = None
 
         if session.content_id:
-            content = db.query(Content).filter(Content.id == session.content_id).first()
+            content = contents_by_id.get(session.content_id)
             if content:
                 article_title = _resolve_article_title(content)
                 article_url = content.url
                 article_summary = _extract_short_summary(content)
                 article_source = content.source
 
-        preview_session = _resolve_active_child_session(db, session) or session
+        preview_session = session
+        if session.council_mode and session.active_child_session_id is not None:
+            candidate_child = active_child_sessions.get(session.active_child_session_id)
+            if candidate_child and candidate_child.parent_session_id == session.id:
+                preview_session = candidate_child
         has_pending = preview_session.id in pending_session_ids
-        is_favorite = session.content_id in favorite_content_ids if session.content_id else False
+        is_saved_to_knowledge = (
+            session.content_id in knowledge_saved_content_ids if session.content_id else False
+        )
         has_messages = session.id in sessions_with_messages
 
         # Extract last message preview
@@ -547,7 +571,7 @@ async def list_sessions(
                 article_summary=article_summary,
                 article_source=article_source,
                 has_pending_message=has_pending,
-                is_favorite=is_favorite,
+                is_saved_to_knowledge=is_saved_to_knowledge,
                 has_messages=has_messages,
                 last_message_preview=last_preview,
                 last_message_role=last_role,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.core.settings import get_settings
 from app.models.schema import ChatSession, Content, ContentBody
-from app.repositories import favorites_repository
+from app.repositories import knowledge_repository
 from app.services import content_bodies
 from app.services.content_bodies import ContentBodyFormat, ContentBodyVariant
 from app.services.gateways import object_storage_gateway
@@ -101,7 +101,7 @@ def test_sync_personal_markdown_library_writes_source_and_summary_files(
     content = _make_content()
     _persist_content(db_session, content)
 
-    favorites_repository.add_favorite(db_session, content.id, test_user.id)
+    knowledge_repository.save_to_knowledge(db_session, content.id, test_user.id)
 
     result = sync_personal_markdown_library_for_user(db_session, user_id=test_user.id)
 
@@ -126,7 +126,7 @@ def test_sync_personal_markdown_library_writes_source_and_summary_files(
     summary_text = summary_path.read_text(encoding="utf-8")
     assert "variant: source" in source_text
     assert "reasons:" in source_text
-    assert "- favorited" in source_text
+    assert "- saved_to_knowledge" in source_text
     assert "Raw body text from the article." in source_text
     assert "variant: summary" in summary_text
     assert "# How Agents Work" in summary_text
@@ -143,7 +143,7 @@ def test_sync_personal_markdown_for_content_keeps_files_when_chat_session_exists
     content = _make_content()
     _persist_content(db_session, content)
 
-    favorites_repository.add_favorite(db_session, content.id, test_user.id)
+    knowledge_repository.save_to_knowledge(db_session, content.id, test_user.id)
     chat_session = ChatSession(
         user_id=test_user.id,
         content_id=content.id,
@@ -155,7 +155,7 @@ def test_sync_personal_markdown_for_content_keeps_files_when_chat_session_exists
     db_session.add(chat_session)
     db_session.commit()
 
-    favorites_repository.remove_favorite(db_session, content.id, test_user.id)
+    knowledge_repository.remove_from_knowledge(db_session, content.id, test_user.id)
     result = sync_personal_markdown_for_content(
         db_session,
         user_id=test_user.id,
@@ -184,8 +184,8 @@ def test_sync_personal_markdown_for_content_deletes_files_when_no_reasons_remain
     content = _make_content()
     _persist_content(db_session, content)
 
-    favorites_repository.add_favorite(db_session, content.id, test_user.id)
-    favorites_repository.remove_favorite(db_session, content.id, test_user.id)
+    knowledge_repository.save_to_knowledge(db_session, content.id, test_user.id)
+    knowledge_repository.remove_from_knowledge(db_session, content.id, test_user.id)
 
     result = sync_personal_markdown_for_content(
         db_session,
@@ -238,7 +238,7 @@ def test_collect_personal_markdown_documents_skips_missing_source_object(
     )
     db_session.commit()
 
-    favorites_repository.add_favorite(db_session, content.id, test_user.id)
+    knowledge_repository.save_to_knowledge(db_session, content.id, test_user.id)
 
     documents = collect_personal_markdown_documents_for_user(
         db_session,
@@ -261,7 +261,7 @@ def test_collect_personal_markdown_documents_has_stable_checksums_between_calls(
     content = _make_content()
     _persist_content(db_session, content)
 
-    favorites_repository.add_favorite(db_session, content.id, test_user.id)
+    knowledge_repository.save_to_knowledge(db_session, content.id, test_user.id)
 
     first_documents = collect_personal_markdown_documents_for_user(
         db_session,
@@ -294,7 +294,7 @@ def test_collect_personal_markdown_documents_supports_mixed_types_and_reasons(
     podcast = _make_podcast_content()
     _persist_content(db_session, article, podcast)
 
-    favorites_repository.add_favorite(db_session, article.id, test_user.id)
+    knowledge_repository.save_to_knowledge(db_session, article.id, test_user.id)
     db_session.add(
         ChatSession(
             user_id=test_user.id,
@@ -320,6 +320,6 @@ def test_collect_personal_markdown_documents_supports_mixed_types_and_reasons(
     ]
 
     article_document, podcast_document = documents
-    assert "- favorited" in article_document.text
+    assert "- saved_to_knowledge" in article_document.text
     assert "- chatted" in podcast_document.text
     assert "source: BG2 Pod" in podcast_document.text

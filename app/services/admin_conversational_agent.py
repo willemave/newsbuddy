@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.schema import Content, ContentFavorites
+from app.models.schema import Content, ContentKnowledgeSave
 from app.services.exa_client import exa_search
 from app.utils.summary_utils import extract_summary_text
 
@@ -74,7 +74,7 @@ class AgentConversationRuntime:
 
 @dataclass
 class KnowledgeHit:
-    """Single knowledge hit from user favorited content."""
+    """Single knowledge hit from user-saved knowledge content."""
 
     content_id: int
     title: str
@@ -259,7 +259,7 @@ def search_knowledge(
     query: str,
     limit: int = MAX_KNOWLEDGE_HITS,
 ) -> list[KnowledgeHit]:
-    """Search favorited user content with deterministic SQL matching.
+    """Search user-saved knowledge content with deterministic SQL matching.
 
     Args:
         db: Active SQLAlchemy session.
@@ -268,7 +268,7 @@ def search_knowledge(
         limit: Maximum number of hits to return.
 
     Returns:
-        Ordered knowledge hits from favorited content only.
+        Ordered knowledge hits from saved knowledge content only.
     """
 
     normalized_query = query.strip()
@@ -280,8 +280,8 @@ def search_knowledge(
 
     base_query = (
         db.query(Content)
-        .join(ContentFavorites, ContentFavorites.content_id == Content.id)
-        .filter(ContentFavorites.user_id == user_id)
+        .join(ContentKnowledgeSave, ContentKnowledgeSave.content_id == Content.id)
+        .filter(ContentKnowledgeSave.user_id == user_id)
     )
     rows = (
         base_query
@@ -293,14 +293,14 @@ def search_knowledge(
                 cast(Content.content_metadata, Text).ilike(pattern),
             )
         )
-        .order_by(ContentFavorites.favorited_at.desc())
+        .order_by(ContentKnowledgeSave.saved_at.desc())
         .limit(max_hits)
         .all()
     )
     if not rows:
         rows = (
             base_query
-            .order_by(ContentFavorites.favorited_at.desc())
+            .order_by(ContentKnowledgeSave.saved_at.desc())
             .limit(max_hits)
             .all()
         )
@@ -358,24 +358,24 @@ def build_available_knowledge_context(
     user_id: int,
     limit: int = MAX_BOOTSTRAP_TITLES,
 ) -> str:
-    """Build a startup context listing known favorited titles for the user."""
+    """Build a startup context listing known saved titles for the user."""
 
     max_titles = max(1, min(limit, MAX_BOOTSTRAP_TITLES))
     rows = (
         db.query(Content.title, Content.source, Content.content_type, Content.url)
-        .join(ContentFavorites, ContentFavorites.content_id == Content.id)
-        .filter(ContentFavorites.user_id == user_id)
-        .order_by(ContentFavorites.favorited_at.desc())
+        .join(ContentKnowledgeSave, ContentKnowledgeSave.content_id == Content.id)
+        .filter(ContentKnowledgeSave.user_id == user_id)
+        .order_by(ContentKnowledgeSave.saved_at.desc())
         .limit(max_titles)
         .all()
     )
 
     lines = [
-        "Known favorited user knowledge catalog (most recent first).",
-        "Use this list to ground answers about what the user has saved/favorited.",
+        "Known user knowledge catalog (most recent first).",
+        "Use this list to ground answers about what the user has saved to knowledge.",
     ]
     if not rows:
-        lines.append("No favorited content found for this user.")
+        lines.append("No saved knowledge found for this user.")
     else:
         for idx, row in enumerate(rows, start=1):
             title = str(row.title or "Untitled")
@@ -515,7 +515,7 @@ def stream_agent_turn(
         user_text: User input.
         turn_id: Client-provided turn ID.
         emit_event: Event sink callback.
-        knowledge_hits: Favorited-content hits for this user turn.
+        knowledge_hits: Knowledge-library hits for this user turn.
         web_hits: Exa web hits for this user turn.
 
     Raises:
@@ -729,13 +729,13 @@ def _build_turn_context(
         "Tool results for the latest user message.",
         f"Latest user message: {user_text.strip()}",
         "Priority rules:",
-        "- SearchKnowledge entries are trusted records from THIS USER'S favorited content.",
+        "- SearchKnowledge entries are trusted records from THIS USER'S saved knowledge.",
         "- If SearchKnowledge has entries, you DO have access to user-specific saved articles.",
         (
-            "- For questions about favorites/history/last read item, prioritize "
+            "- For questions about saved history/last read item, prioritize "
             "SearchKnowledge over SearchWeb."
         ),
-        "- Do not claim you lack access to favorites when SearchKnowledge contains hits.",
+        "- Do not claim you lack access to saved knowledge when SearchKnowledge contains hits.",
         "",
         "SearchKnowledge results:",
     ]
@@ -751,7 +751,7 @@ def _build_turn_context(
                 lines.append(f"  summary={hit.summary}")
             if hit.transcript_excerpt:
                 lines.append(f"  transcript_excerpt={hit.transcript_excerpt}")
-        lines.append("Interpretation hint: [K1] is the most recent favorite in this result set.")
+        lines.append("Interpretation hint: [K1] is the most recent saved item in this result set.")
 
     lines.append("")
     lines.append("SearchWeb results:")
@@ -789,8 +789,8 @@ def _build_enriched_user_message(
     )
     lines = [
         "Follow these instructions before answering:",
-        "- Treat SearchKnowledge entries as available user favorites.",
-        "- If the question references favorites/history, answer from SearchKnowledge first.",
+        "- Treat SearchKnowledge entries as available user saved knowledge.",
+        "- If the question references saved knowledge/history, answer from SearchKnowledge first.",
         "- Do not claim you lack access when SearchKnowledge entries are present.",
         "",
         context_block,
@@ -807,11 +807,11 @@ def _build_local_knowledge_response(
     user_text: str,
     knowledge_hits: list[KnowledgeHit],
 ) -> str | None:
-    """Build deterministic answers for favorites/history intents using knowledge hits."""
+    """Build deterministic answers for saved-knowledge/history intents using knowledge hits."""
 
     if not knowledge_hits:
         return None
-    if not _is_favorites_intent(user_text):
+    if not _is_saved_knowledge_intent(user_text):
         return None
 
     query = user_text.lower()
@@ -819,11 +819,12 @@ def _build_local_knowledge_response(
         hit = knowledge_hits[0]
         summary = f" Summary: {hit.summary}" if hit.summary else ""
         return (
-            f"Your most recent favorited item in this result set is \"{hit.title}\" ({hit.url})."
+            "Your most recent saved knowledge item in this result set is "
+            f"\"{hit.title}\" ({hit.url})."
             f"{summary}"
         )
 
-    lines = ["Here are favorited items I can access from your saved knowledge:"]
+    lines = ["Here are items I can access from your saved knowledge:"]
     for idx, hit in enumerate(knowledge_hits, start=1):
         line = f"{idx}. {hit.title} ({hit.url})"
         if hit.summary:
@@ -832,8 +833,8 @@ def _build_local_knowledge_response(
     return "\n".join(lines)
 
 
-def _is_favorites_intent(user_text: str) -> bool:
-    """Return true when user asks about personal saved/favorite history."""
+def _is_saved_knowledge_intent(user_text: str) -> bool:
+    """Return true when user asks about personal saved-knowledge history."""
 
     text = user_text.lower().strip()
     if not text:

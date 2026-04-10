@@ -39,13 +39,13 @@ enum APIEndpoints {
     }
     static let analytics = "/api/analytics"
     static let bulkMarkRead = "/api/content/bulk-mark-read"
-    static func toggleFavorite(id: Int) -> String {
-        return "/api/content/\(id)/favorite"
+    static func saveToKnowledge(id: Int) -> String {
+        return "/api/content/\(id)/knowledge"
     }
-    static func removeFavorite(id: Int) -> String {
-        return "/api/content/\(id)/unfavorite"
+    static func removeFromKnowledge(id: Int) -> String {
+        return "/api/content/\(id)/knowledge"
     }
-    static let favoritesList = "/api/content/favorites/list"
+    static let knowledgeLibraryList = "/api/content/knowledge/list"
     static let recentlyReadList = "/api/content/recently-read/list"
     static func chatGPTUrl(id: Int) -> String {
         return "/api/content/\(id)/chat-url"

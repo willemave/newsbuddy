@@ -7,7 +7,7 @@ from app.routers.api import (
     content_actions,
     content_detail,
     content_list,
-    favorites,
+    knowledge,
     narration,
     read_status,
     scraper_configs,
@@ -38,7 +38,7 @@ router.include_router(narration.router)
 router.include_router(stats.router)
 router.include_router(content_detail.router)
 router.include_router(read_status.router)
-router.include_router(favorites.router)
+router.include_router(knowledge.router)
 router.include_router(content_actions.router)
 router.include_router(scraper_configs.router)
 router.include_router(submission.router)

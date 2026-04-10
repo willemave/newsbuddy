@@ -185,13 +185,13 @@ class ChatSessionSummaryDto(BaseModel):
         default=False,
         description="True if session has a message currently being processed",
     )
-    is_favorite: bool = Field(
+    is_saved_to_knowledge: bool = Field(
         default=False,
-        description="True if the linked content is favorited by the user",
+        description="True if the linked content is saved to the user's knowledge library",
     )
     has_messages: bool = Field(
         default=True,
-        description="True if session has any messages (false for new favorites)",
+        description="True if session has any messages (false for new saved items)",
     )
     last_message_preview: str | None = Field(
         default=None,

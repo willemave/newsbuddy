@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.schema import ChatSession, Content, ContentFavorites
+from app.models.schema import ChatSession, Content, ContentKnowledgeSave
 from app.services.content_bodies import ContentBodyVariant, get_content_body_resolver
 from app.utils.summary_utils import extract_short_summary, extract_summary_text
 
@@ -31,15 +31,15 @@ MarkdownVariant = Literal["source", "summary"]
 class PersonalMarkdownReasons:
     """Reasons a content item belongs in one user's personal library."""
 
-    is_favorited: bool
+    is_saved_to_knowledge: bool
     chat_session_ids: list[int]
     saved_at: datetime | None
 
     @property
     def labels(self) -> list[str]:
         labels: list[str] = []
-        if self.is_favorited:
-            labels.append("favorited")
+        if self.is_saved_to_knowledge:
+            labels.append("saved_to_knowledge")
         if self.chat_session_ids:
             labels.append("chatted")
         return labels
@@ -84,7 +84,7 @@ def sync_personal_markdown_library_for_user(
     *,
     user_id: int,
 ) -> PersonalMarkdownSyncResult:
-    """Reconcile one user's markdown library from favorites and chat sessions."""
+    """Reconcile one user's markdown library from knowledge saves and chat sessions."""
     settings = get_settings()
     if not settings.personal_markdown_enabled:
         return PersonalMarkdownSyncResult(user_id=user_id, written_files=[], deleted_files=[])
@@ -206,17 +206,17 @@ def _load_qualifying_content_reasons(
     *,
     user_id: int,
 ) -> dict[int, PersonalMarkdownReasons]:
-    favorite_rows = (
-        db.query(ContentFavorites.content_id, ContentFavorites.favorited_at)
-        .filter(ContentFavorites.user_id == user_id)
+    knowledge_rows = (
+        db.query(ContentKnowledgeSave.content_id, ContentKnowledgeSave.saved_at)
+        .filter(ContentKnowledgeSave.user_id == user_id)
         .all()
     )
-    favorite_saved_at_map = {
-        int(content_id): favorited_at
-        for content_id, favorited_at in favorite_rows
+    knowledge_saved_at_map = {
+        int(content_id): saved_at
+        for content_id, saved_at in knowledge_rows
         if content_id is not None
     }
-    favorite_ids = set(favorite_saved_at_map)
+    knowledge_ids = set(knowledge_saved_at_map)
 
     chat_rows = (
         db.query(ChatSession.content_id, ChatSession.id, ChatSession.created_at)
@@ -240,13 +240,13 @@ def _load_qualifying_content_reasons(
             created_at,
         )
 
-    all_content_ids = favorite_ids | set(chat_session_map)
+    all_content_ids = knowledge_ids | set(chat_session_map)
     return {
         content_id: PersonalMarkdownReasons(
-            is_favorited=content_id in favorite_ids,
+            is_saved_to_knowledge=content_id in knowledge_ids,
             chat_session_ids=sorted(chat_session_map.get(content_id, [])),
             saved_at=_resolve_saved_at(
-                favorite_saved_at_map.get(content_id),
+                knowledge_saved_at_map.get(content_id),
                 chat_saved_at_map.get(content_id),
             ),
         )
@@ -268,12 +268,15 @@ def _load_reasons_for_content(
     user_id: int,
     content_id: int,
 ) -> PersonalMarkdownReasons:
-    favorite_row = (
-        db.query(ContentFavorites.favorited_at)
-        .filter(ContentFavorites.user_id == user_id, ContentFavorites.content_id == content_id)
+    knowledge_row = (
+        db.query(ContentKnowledgeSave.saved_at)
+        .filter(
+            ContentKnowledgeSave.user_id == user_id,
+            ContentKnowledgeSave.content_id == content_id,
+        )
         .first()
     )
-    favorite_saved_at = favorite_row[0] if favorite_row is not None else None
+    knowledge_saved_at = knowledge_row[0] if knowledge_row is not None else None
     chat_rows = (
         db.query(distinct(ChatSession.id), ChatSession.created_at)
         .filter(
@@ -289,9 +292,9 @@ def _load_reasons_for_content(
         default=None,
     )
     return PersonalMarkdownReasons(
-        is_favorited=favorite_row is not None,
+        is_saved_to_knowledge=knowledge_row is not None,
         chat_session_ids=sorted(chat_session_ids),
-        saved_at=_resolve_saved_at(favorite_saved_at, chat_saved_at),
+        saved_at=_resolve_saved_at(knowledge_saved_at, chat_saved_at),
     )
 
 

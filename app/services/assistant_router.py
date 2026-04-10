@@ -29,7 +29,7 @@ from app.models.internal.assistant import AssistantScreenContext
 from app.models.metadata import ContentType
 from app.models.schema import ChatSession, Content, UserScraperConfig
 from app.models.user import User
-from app.repositories import favorites_repository, read_status_repository
+from app.repositories import knowledge_repository, read_status_repository
 from app.repositories.content_feed_query import build_user_feed_query
 from app.repositories.search_backend import get_search_backend
 from app.services.admin_conversational_agent import search_knowledge
@@ -123,7 +123,8 @@ ASSISTANT_SYSTEM_PROMPT = (
     "or summary markdown, call SearchMarkdownLibrary first.\n"
     "- When SearchMarkdownLibrary returns relevant file paths, call ReadMarkdownFile "
     "before answering from file contents.\n"
-    "- If the user asks about their saved or favorited content, call SearchKnowledge first.\n"
+    "- If the user asks about their saved knowledge or bookmarked content, "
+    "call SearchKnowledge first.\n"
     "- If the user asks about their in-app feed or inbox, "
     "call SearchContent first.\n"
     "- For broad current-events or recent factual questions, call search_web first.\n"
@@ -366,13 +367,13 @@ def _build_turn_instructions(user_text: str) -> str | None:
         return (
             "For this turn, call search_web before answering. "
             "Use a concise web query derived from the user's request. "
-            "If the request is actually about saved or favorited user content, "
+            "If the request is actually about saved knowledge, "
             "call SearchKnowledge first."
         )
 
     return (
         "For this turn, if the user is asking for specific factual information, "
-        "prefer tools over assumptions. Use SearchKnowledge for saved/favorited context "
+        "prefer tools over assumptions. Use SearchKnowledge for saved knowledge context "
         "and search_web for current external facts."
     )
 
@@ -419,12 +420,12 @@ def _build_screen_aware_turn_instructions(
 
 
 def _format_knowledge_hits(hits: list[object], query: str) -> str:
-    """Serialize favorited-content hits for the assistant tool."""
+    """Serialize saved-knowledge hits for the assistant tool."""
 
     if not hits:
-        return f'No matching favorited content was found for "{query}".'
+        return f'No matching saved knowledge was found for "{query}".'
 
-    lines = [f'Found {len(hits)} favorited items for "{query}":']
+    lines = [f'Found {len(hits)} saved knowledge items for "{query}":']
     for idx, hit in enumerate(hits, start=1):
         title = getattr(hit, "title", "Untitled")
         source = getattr(hit, "source", None) or "unknown"
@@ -468,11 +469,12 @@ def _format_content_hits(
                 lines.append(f"Feed Content ({total_content_matches} total matches):")
         else:
             lines.append("Feed Content:")
-        for idx, (content, is_read, is_favorited) in enumerate(content_rows, start=1):
+        for idx, (content, is_read, is_saved_to_knowledge) in enumerate(content_rows, start=1):
             lines.append(
                 f"{idx}. [{content.id}] {(content.title or 'Untitled').strip()} "
                 f"| type={content.content_type} | source={content.source or 'unknown'} "
-                f"| read={bool(is_read)} | favorited={bool(is_favorited)} | url={content.url}"
+                f"| read={bool(is_read)} | saved_to_knowledge={bool(is_saved_to_knowledge)} "
+                f"| url={content.url}"
             )
             summary = str((content.content_metadata or {}).get("summary") or "").strip()
             if summary:
@@ -662,7 +664,7 @@ def _get_or_create_agent(
         query: str,
         limit: int = 5,
     ) -> str:
-        """Search favorited user content for the current user."""
+        """Search knowledge-saved user content for the current user."""
         normalized_limit = max(1, min(limit, 10))
         with ctx.deps.session_factory() as db:
             hits = search_knowledge(
@@ -800,28 +802,32 @@ def _get_or_create_agent(
         return response.message
 
     @agent.tool
-    def favorite_content(
+    def save_to_knowledge(
         ctx: RunContext[AssistantDeps],
         content_id: int,
     ) -> str:
-        """Favorite a content item."""
+        """Save a content item to the user's knowledge library."""
         with ctx.deps.session_factory() as db:
-            favorite = favorites_repository.add_favorite(db, content_id, ctx.deps.user_id)
-        if favorite is None:
-            return f"Could not favorite content {content_id}."
-        return f"Favorited content {content_id}."
+            saved = knowledge_repository.save_to_knowledge(db, content_id, ctx.deps.user_id)
+        if saved is None:
+            return f"Could not save content {content_id} to knowledge."
+        return f"Saved content {content_id} to knowledge."
 
     @agent.tool
-    def unfavorite_content(
+    def remove_from_knowledge(
         ctx: RunContext[AssistantDeps],
         content_id: int,
     ) -> str:
-        """Remove a content item from favorites."""
+        """Remove a content item from the user's knowledge library."""
         with ctx.deps.session_factory() as db:
-            removed = favorites_repository.remove_favorite(db, content_id, ctx.deps.user_id)
+            removed = knowledge_repository.remove_from_knowledge(
+                db,
+                content_id,
+                ctx.deps.user_id,
+            )
         if not removed:
-            return f"Content {content_id} was not favorited."
-        return f"Removed content {content_id} from favorites."
+            return f"Content {content_id} was not saved to knowledge."
+        return f"Removed content {content_id} from knowledge."
 
     @agent.tool
     def mark_content_read(

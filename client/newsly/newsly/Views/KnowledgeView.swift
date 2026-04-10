@@ -9,7 +9,7 @@ import SwiftUI
 
 struct KnowledgeView: View {
     let onSelectSession: ((ChatSessionRoute) -> Void)?
-    let onShowFavorites: (() -> Void)?
+    let onShowKnowledgeLibrary: (() -> Void)?
     let onShowSessionHistory: (() -> Void)?
 
     @StateObject private var viewModel = KnowledgeHubViewModel()
@@ -59,11 +59,11 @@ struct KnowledgeView: View {
 
     init(
         onSelectSession: ((ChatSessionRoute) -> Void)? = nil,
-        onShowFavorites: (() -> Void)? = nil,
+        onShowKnowledgeLibrary: (() -> Void)? = nil,
         onShowSessionHistory: (() -> Void)? = nil
     ) {
         self.onSelectSession = onSelectSession
-        self.onShowFavorites = onShowFavorites
+        self.onShowKnowledgeLibrary = onShowKnowledgeLibrary
         self.onShowSessionHistory = onShowSessionHistory
     }
 
@@ -176,7 +176,7 @@ struct KnowledgeView: View {
 
     private var librarySection: some View {
         Group {
-            if let onShowFavorites {
+            if let onShowKnowledgeLibrary {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Library")
                         .font(.terracottaHeadlineSmall)
@@ -184,10 +184,10 @@ struct KnowledgeView: View {
                         .padding(.horizontal, Spacing.screenHorizontal)
 
                     Button {
-                        onShowFavorites()
+                        onShowKnowledgeLibrary()
                     } label: {
                         HStack(spacing: 14) {
-                            Image(systemName: "star.fill")
+                            Image(systemName: "books.vertical.fill")
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(.terracottaPrimary)
                                 .frame(width: 38, height: 38)
@@ -195,11 +195,11 @@ struct KnowledgeView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Favorites")
+                                Text("Knowledge Library")
                                     .font(.terracottaHeadlineSmall)
                                     .foregroundColor(.onSurface)
 
-                                Text("Saved articles and podcasts")
+                                Text("Saved articles and podcasts with markdown ready")
                                     .font(.terracottaBodySmall)
                                     .foregroundColor(.onSurfaceSecondary)
                             }

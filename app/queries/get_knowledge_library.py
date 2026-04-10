@@ -1,4 +1,4 @@
-"""Application query for favorited content cards."""
+"""Application query for the user's saved knowledge library."""
 
 from __future__ import annotations
 
@@ -11,7 +11,10 @@ from app.models.content_display import resolve_image_urls
 from app.models.content_mapper import content_to_domain
 from app.models.metadata import ContentType
 from app.models.pagination import PaginationMetadata
-from app.repositories.content_card_repository import get_favorites, list_content_types
+from app.repositories.content_card_repository import (
+    get_knowledge_library_entries,
+    list_content_types,
+)
 from app.routers.api.content_responses import build_content_summary_response
 from app.utils.pagination import PaginationCursor
 
@@ -25,7 +28,7 @@ def execute(
     cursor: str | None,
     limit: int,
 ) -> ContentListResponse:
-    """Return favorited content list response."""
+    """Return the user's saved knowledge library as a content list response."""
     last_id = None
     last_sort_timestamp = None
     if cursor:
@@ -36,7 +39,7 @@ def execute(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    rows = get_favorites(
+    rows = get_knowledge_library_entries(
         db,
         user_id=user_id,
         last_id=last_id,
@@ -48,14 +51,14 @@ def execute(
         rows = rows[:limit]
 
     contents = []
-    for content, read_id, _favorite_id in rows:
+    for content, read_id, _saved_row_id in rows:
         try:
             domain_content = content_to_domain(content)
         except Exception:
             logger.exception(
-                "Skipping invalid content row in favorites",
+                "Skipping invalid content row in knowledge library",
                 extra={
-                    "component": "get_favorites",
+                    "component": "get_knowledge_library",
                     "operation": "content_to_domain",
                     "item_id": content.id,
                 },
@@ -67,7 +70,7 @@ def execute(
                 content=content,
                 domain_content=domain_content,
                 is_read=bool(read_id),
-                is_favorited=True,
+                is_saved_to_knowledge=True,
                 image_url=image_url,
                 thumbnail_url=thumbnail_url,
             )

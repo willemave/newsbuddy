@@ -160,7 +160,7 @@ def test_list_detail_and_actions_flow_end_to_end(
     create_sample_content,
     sample_article_long,
 ):
-    """A seeded inbox item should round-trip through list, detail, read, and favorite flows."""
+    """A seeded inbox item should round-trip through list, detail, read, and knowledge save."""
     content = create_sample_content(sample_article_long)
 
     list_response = client.get("/api/content/")
@@ -170,17 +170,17 @@ def test_list_detail_and_actions_flow_end_to_end(
     ]
     assert len(matching_items) == 1
     assert matching_items[0]["is_read"] is False
-    assert matching_items[0]["is_favorited"] is False
+    assert matching_items[0]["is_saved_to_knowledge"] is False
 
     detail_response = client.get(f"/api/content/{content.id}")
     assert detail_response.status_code == 200
     assert detail_response.json()["title"] == content.title
     assert detail_response.json()["is_read"] is False
-    assert detail_response.json()["is_favorited"] is False
+    assert detail_response.json()["is_saved_to_knowledge"] is False
 
-    favorite_response = client.post(f"/api/content/{content.id}/favorite")
-    assert favorite_response.status_code == 200
-    assert favorite_response.json()["is_favorited"] is True
+    save_response = client.post(f"/api/content/{content.id}/knowledge")
+    assert save_response.status_code == 200
+    assert save_response.json()["is_saved_to_knowledge"] is True
 
     read_response = client.post(f"/api/content/{content.id}/mark-read")
     assert read_response.status_code == 200
@@ -189,7 +189,7 @@ def test_list_detail_and_actions_flow_end_to_end(
     refreshed_detail = client.get(f"/api/content/{content.id}")
     assert refreshed_detail.status_code == 200
     assert refreshed_detail.json()["is_read"] is True
-    assert refreshed_detail.json()["is_favorited"] is True
+    assert refreshed_detail.json()["is_saved_to_knowledge"] is True
 
     refreshed_list = client.get("/api/content/")
     assert refreshed_list.status_code == 200
@@ -197,7 +197,7 @@ def test_list_detail_and_actions_flow_end_to_end(
         item for item in refreshed_list.json()["contents"] if item["id"] == content.id
     )
     assert refreshed_item["is_read"] is True
-    assert refreshed_item["is_favorited"] is True
+    assert refreshed_item["is_saved_to_knowledge"] is True
 
 
 def test_chat_session_message_and_status_flow_end_to_end(

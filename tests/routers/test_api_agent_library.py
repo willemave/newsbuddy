@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.models.schema import Content
-from app.repositories import favorites_repository
+from app.repositories import knowledge_repository
 
 
 def _make_content() -> Content:
@@ -39,7 +39,7 @@ def _seed_favorited_content(db_session, test_user) -> Content:
     db_session.add(content)
     db_session.commit()
     db_session.refresh(content)
-    favorites_repository.add_favorite(db_session, content.id, test_user.id)
+    knowledge_repository.save_to_knowledge(db_session, content.id, test_user.id)
     return content
 
 

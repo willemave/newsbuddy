@@ -50,7 +50,10 @@ class ContentSummaryResponse(BaseModel):
         None, description="ISO timestamp of when content was published"
     )
     is_read: bool = Field(False, description="Whether the content has been marked as read")
-    is_favorited: bool = Field(False, description="Whether the content has been favorited")
+    is_saved_to_knowledge: bool = Field(
+        False,
+        description="Whether the content has been saved to the user's knowledge library",
+    )
     news_article_url: str | None = Field(
         None, description="Canonical article link for news content"
     )
@@ -455,7 +458,10 @@ class ContentDetailResponse(BaseModel):
         None, description="ISO timestamp of when content was published"
     )
     is_read: bool = Field(False, description="Whether the content has been marked as read")
-    is_favorited: bool = Field(False, description="Whether the content has been favorited")
+    is_saved_to_knowledge: bool = Field(
+        False,
+        description="Whether the content has been saved to the user's knowledge library",
+    )
     # Additional useful properties from ContentData
     summary: str | None = Field(None, description="Summary text")
     short_summary: str | None = Field(None, description="Short version of summary for list view")
@@ -713,7 +719,10 @@ class LongFormStatsResponse(BaseModel):
     total_count: int = Field(..., description="Total long-form items in the inbox")
     unread_count: int = Field(..., description="Unread long-form items")
     read_count: int = Field(..., description="Read long-form items")
-    favorited_count: int = Field(..., description="Favorited long-form items")
+    saved_to_knowledge_count: int = Field(
+        ...,
+        description="Long-form items saved to the user's knowledge library",
+    )
     processing_count: int = Field(
         ..., description="Long-form items pending or processing for the user"
     )
