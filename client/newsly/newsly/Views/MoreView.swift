@@ -32,8 +32,8 @@ struct MoreView: View {
                         Text("Submissions")
                             .foregroundStyle(Color.onSurface)
                         Spacer()
-                        if submissionsViewModel.submissions.count > 0 {
-                            CountBadge(count: submissionsViewModel.submissions.count, color: .red)
+                        if submissionsViewModel.unseenCount > 0 {
+                            CountBadge(count: submissionsViewModel.unseenCount, color: .red)
                         }
                     }
                     .frame(minHeight: RowMetrics.compactHeight)

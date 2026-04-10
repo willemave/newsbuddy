@@ -51,7 +51,7 @@ struct ContentView: View {
     }
 
     private var moreBadge: String? {
-        let count = submissionStatusViewModel.submissions.count
+        let count = submissionStatusViewModel.unseenCount
         return count > 0 ? String(count) : nil
     }
 

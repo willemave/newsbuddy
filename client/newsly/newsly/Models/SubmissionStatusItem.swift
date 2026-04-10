@@ -83,6 +83,10 @@ struct SubmissionStatusItem: Codable, Identifiable {
         return formatter.string(from: date)
     }
 
+    var createdDate: Date? {
+        parseDate(from: createdAt)
+    }
+
     private func parseDate(from dateString: String) -> Date? {
         let iso8601WithFractional = ISO8601DateFormatter()
         iso8601WithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

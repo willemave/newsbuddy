@@ -28,8 +28,15 @@ struct SubmissionsView: View {
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
         .navigationTitle("Submissions")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            viewModel.markCurrentSubmissionsViewed()
+        }
+        .onChange(of: viewModel.submissions.first?.createdAt) { _, _ in
+            viewModel.markCurrentSubmissionsViewed()
+        }
         .task {
             await viewModel.load()
+            viewModel.markCurrentSubmissionsViewed()
         }
     }
 
