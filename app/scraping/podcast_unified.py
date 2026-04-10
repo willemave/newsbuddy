@@ -157,6 +157,7 @@ class PodcastUnifiedScraper(BaseScraper):
                 logger.info(f"Processing {len(entries_to_process)} episodes from {feed_name}")
 
                 processed_entries = 0
+                missing_audio_titles: list[str] = []
                 for entry in entries_to_process:
                     item = self._process_entry(
                         entry,
@@ -165,11 +166,18 @@ class PodcastUnifiedScraper(BaseScraper):
                         feed_url,
                         user_id,
                         config_id,
+                        missing_audio_titles=missing_audio_titles,
                     )
                     if item:
                         items.append(item)
                         processed_entries += 1
 
+                if missing_audio_titles:
+                    logger.info(
+                        "Skipped %s podcast entries without audio enclosures from %s",
+                        len(missing_audio_titles),
+                        feed_name,
+                    )
                 logger.info(f"Successfully processed {processed_entries} episodes from {feed_name}")
 
             except Exception as e:
@@ -196,6 +204,7 @@ class PodcastUnifiedScraper(BaseScraper):
         feed_url: str,
         user_id: int | None,
         config_id: int | None = None,
+        missing_audio_titles: list[str] | None = None,
     ) -> dict[str, Any]:
         """Process a single podcast entry."""
         title = entry.get("title", "No Title")
@@ -203,7 +212,8 @@ class PodcastUnifiedScraper(BaseScraper):
         # Find audio enclosure URL first (this is the most important for podcasts)
         enclosure_url = self._find_audio_enclosure(entry, title)
         if not enclosure_url:
-            logger.warning(f"No audio enclosure found for: {title}")
+            if missing_audio_titles is not None:
+                missing_audio_titles.append(title)
             return None
 
         link, used_fallback, fallback_reason = self._select_entry_link(

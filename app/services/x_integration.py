@@ -61,6 +61,12 @@ TIMELINE_CHANNEL = "timeline"
 BOOKMARKS_CHANNEL = "bookmarks"
 REQUIRED_TIMELINE_SCOPES = frozenset({"tweet.read", "users.read"})
 USERNAME_REGEX = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+UNRECOVERABLE_X_REFRESH_ERROR_MARKERS = (
+    "X API 400: invalid_request",
+    "X API 400: invalid_grant",
+    "X API 400: invalid_client",
+    "X API 400: unauthorized_client",
+)
 
 
 @dataclass(frozen=True)
@@ -105,6 +111,10 @@ class XSyncSummary:
     created: int
     reused: int
     channels: dict[str, XSyncChannelSummary]
+
+
+class XReauthRequiredError(ValueError):
+    """Raised when a stored X connection can no longer be refreshed."""
 
 
 def normalize_twitter_username(username: str | None) -> str | None:
@@ -445,6 +455,21 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
             channels=channel_summaries,
         )
 
+    except XReauthRequiredError as exc:
+        sync_state.last_synced_at = _now_naive_utc()
+        sync_state.last_status = "reauth_required"
+        sync_state.last_error = str(exc)[:2000]
+        db.commit()
+        return XSyncSummary(
+            status="reauth_required",
+            fetched=0,
+            accepted=0,
+            filtered_out=0,
+            errored=0,
+            created=0,
+            reused=0,
+            channels={},
+        )
     except Exception as exc:  # noqa: BLE001
         sync_state.last_synced_at = _now_naive_utc()
         sync_state.last_status = "failed"
@@ -675,6 +700,7 @@ def _upsert_x_digest_tweet_content(
             "source_external_id": tweet.id,
         }
     )
+
     def _persist_news_item() -> tuple[Any, bool]:
         try:
             try:
@@ -976,7 +1002,19 @@ def _ensure_valid_access_token(db: Session, connection: UserIntegrationConnectio
         raise ValueError("X access token expired and no refresh token is available")
 
     refresh_token = decrypt_token(encrypted_refresh)
-    refreshed = refresh_oauth_token(refresh_token=refresh_token)
+    try:
+        refreshed = refresh_oauth_token(refresh_token=refresh_token)
+    except Exception as exc:  # noqa: BLE001
+        if not _is_unrecoverable_refresh_error(exc):
+            raise
+        _deactivate_connection_for_reauth(
+            db,
+            connection=connection,
+            reason=str(exc),
+        )
+        raise XReauthRequiredError(
+            "X connection requires reauthentication after token refresh failed"
+        ) from exc
     connection.access_token_encrypted = encrypt_token(refreshed.access_token)
     if refreshed.refresh_token:
         connection.refresh_token_encrypted = encrypt_token(refreshed.refresh_token)
@@ -986,6 +1024,35 @@ def _ensure_valid_access_token(db: Session, connection: UserIntegrationConnectio
     db.commit()
     db.refresh(connection)
     return refreshed.access_token
+
+
+def _is_unrecoverable_refresh_error(exc: Exception) -> bool:
+    message = str(exc)
+    return any(marker in message for marker in UNRECOVERABLE_X_REFRESH_ERROR_MARKERS)
+
+
+def _deactivate_connection_for_reauth(
+    db: Session,
+    *,
+    connection: UserIntegrationConnection,
+    reason: str,
+) -> None:
+    metadata = (
+        dict(connection.connection_metadata)
+        if isinstance(connection.connection_metadata, dict)
+        else {}
+    )
+    metadata["reauth_required"] = {
+        "reason": reason[:1000],
+        "recorded_at": datetime.now(UTC).isoformat(),
+    }
+    connection.connection_metadata = metadata
+    connection.is_active = False
+    connection.access_token_encrypted = None
+    connection.refresh_token_encrypted = None
+    connection.token_expires_at = None
+    db.commit()
+    db.refresh(connection)
 
 
 def _build_pkce_code_challenge(code_verifier: str) -> str:

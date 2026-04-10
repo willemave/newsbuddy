@@ -46,9 +46,12 @@ class TwitterUnifiedScraper(BaseScraper):
         cookies_path = client_section.get("cookies_path")
         self.cookies_path = self._resolve_cookies_path(cookies_path) if cookies_path else None
         self._auth_warning_lists: set[str] = set()
+        self._playwright_skip_lists: set[str] = set()
         self._guest_token: str | None = None
         self._guest_token_acquired_at: datetime | None = None
         self._has_auth_cookies = False
+        self._playwright_auth_checked = False
+        self._playwright_auth_available = False
         self._api_access_token: str | None = None
         self._api_access_token_checked = False
         self._bearer_token = self.settings.get("default_bearer_token", DEFAULT_GUEST_BEARER)
@@ -118,6 +121,9 @@ class TwitterUnifiedScraper(BaseScraper):
                         exc,
                     )
                     items = None
+                if not items and not self._has_playwright_auth_available():
+                    self._emit_playwright_skip_info(list_name, str(list_id))
+                    continue
                 if not items:
                     items = self._scrape_list_playwright(list_config)
                 if items:
@@ -169,6 +175,43 @@ class TwitterUnifiedScraper(BaseScraper):
                 return True
 
         return False
+
+    def _has_playwright_auth_available(self) -> bool:
+        """Return True when Playwright fallback has usable auth cookies."""
+        if self._playwright_auth_checked:
+            return self._playwright_auth_available
+
+        self._playwright_auth_checked = True
+        self._playwright_auth_available = False
+
+        if not self.cookies_path or not self.cookies_path.exists():
+            return False
+
+        try:
+            raw_content = self.cookies_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.info("Unable to read Twitter cookies from %s: %s", self.cookies_path, exc)
+            return False
+
+        prepared = self._parse_cookie_file(raw_content)
+        self._playwright_auth_available = any(
+            cookie.get("name") == "auth_token" for cookie in prepared
+        )
+        return self._playwright_auth_available
+
+    def _emit_playwright_skip_info(self, list_name: str, list_id: str) -> None:
+        identifier = str(list_id)
+        if identifier in self._playwright_skip_lists:
+            return
+        self._playwright_skip_lists.add(identifier)
+        logger.info(
+            (
+                "Skipping Playwright fallback for Twitter list '%s' (%s); "
+                "auth cookies are unavailable."
+            ),
+            list_name,
+            list_id,
+        )
 
     def _get_x_api_access_token(self) -> str | None:
         """Resolve an active X OAuth user token for list scraping."""
@@ -418,7 +461,7 @@ class TwitterUnifiedScraper(BaseScraper):
                             )
                             logger.info("Found tweet elements on page")
                         except Exception:
-                            logger.warning("Could not find tweet elements, but continuing...")
+                            logger.info("Could not find tweet elements, but continuing.")
 
                         # Give some time for dynamic content to load
                         page.wait_for_timeout(3000)

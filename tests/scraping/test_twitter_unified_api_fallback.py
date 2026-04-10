@@ -35,6 +35,7 @@ def test_scrape_uses_playwright_when_api_scrape_raises(
         "_scrape_list_api",
         lambda _config: (_ for _ in ()).throw(RuntimeError("api unavailable")),
     )
+    monkeypatch.setattr(scraper, "_has_playwright_auth_available", lambda: True)
 
     fallback_item = {
         "url": "https://example.com/story",
@@ -149,3 +150,28 @@ def test_scrape_list_api_uses_app_bearer_when_user_token_missing(monkeypatch) ->
     assert items is not None
     assert len(items) == 1
     assert items[0]["url"] == "https://example.com/fallback-story"
+
+
+def test_scrape_skips_playwright_without_auth_cookies_when_api_returns_no_items(
+    monkeypatch,
+) -> None:
+    """Avoid Playwright auth noise when no cookies are available."""
+    scraper = TwitterUnifiedScraper()
+    scraper.config = {
+        "twitter_lists": [{"name": "FinTech", "list_id": "1521123920950222849"}],
+        "settings": {},
+    }
+    scraper.settings = {}
+
+    monkeypatch.setattr(scraper, "_recent_scrape_hours", lambda _config: 0.0)
+    monkeypatch.setattr(scraper, "_scrape_list_api", lambda _config: None)
+    monkeypatch.setattr(scraper, "_has_playwright_auth_available", lambda: False)
+    monkeypatch.setattr(
+        scraper,
+        "_scrape_list_playwright",
+        lambda _config: (_ for _ in ()).throw(AssertionError("playwright should not run")),
+    )
+
+    items = scraper.scrape()
+
+    assert items == []

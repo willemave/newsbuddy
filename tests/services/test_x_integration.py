@@ -1,5 +1,8 @@
 """Tests for X integration sync flows."""
+
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 import app.services.x_integration as x_integration
 from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
@@ -201,6 +204,7 @@ def test_sync_x_sources_ingests_digest_only_timeline_content(db_session, test_us
             ]
         ),
     )
+
     def fake_score_x_digest_candidate(*, tweet, user_prompt, source_type, source_label):  # noqa: ANN001
         recorded_prompts.append(user_prompt)
         return XDigestFilterDecision(
@@ -375,9 +379,7 @@ def test_sync_x_sources_persists_bookmark_progress_when_timeline_fails(
     summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
 
     sync_state = (
-        db_session.query(UserIntegrationSyncState)
-        .filter_by(connection_id=connection.id)
-        .one()
+        db_session.query(UserIntegrationSyncState).filter_by(connection_id=connection.id).one()
     )
 
     assert summary.status == "failed"
@@ -418,6 +420,73 @@ def test_sync_x_sources_skips_recent_scheduled_runs(db_session, test_user, monke
     assert summary.status == "skipped_recently"
     assert summary.fetched == 0
     assert summary.channels == {}
+
+
+def test_ensure_valid_access_token_deactivates_connection_on_unrecoverable_refresh_error(
+    db_session,
+    test_user,
+    monkeypatch,
+):
+    """Invalid refresh responses should disable the connection until reauth."""
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read", "offline.access"],
+    )
+    connection.token_expires_at = (datetime.now(UTC) - timedelta(minutes=5)).replace(tzinfo=None)
+    db_session.add(connection)
+    db_session.commit()
+
+    monkeypatch.setattr("app.services.x_integration.decrypt_token", lambda _value: "refresh-token")
+    monkeypatch.setattr(
+        "app.services.x_integration.refresh_oauth_token",
+        lambda refresh_token: (_ for _ in ()).throw(RuntimeError("X API 400: invalid_request")),
+    )
+
+    with pytest.raises(x_integration.XReauthRequiredError):
+        x_integration._ensure_valid_access_token(db_session, connection)
+
+    db_session.refresh(connection)
+    assert connection.is_active is False
+    assert connection.access_token_encrypted is None
+    assert connection.refresh_token_encrypted is None
+    assert connection.token_expires_at is None
+    assert (
+        connection.connection_metadata["reauth_required"]["reason"] == "X API 400: invalid_request"
+    )
+
+
+def test_sync_x_sources_returns_reauth_required_for_invalid_refresh(
+    db_session,
+    test_user,
+    monkeypatch,
+):
+    """Expired broken connections should stop erroring and surface reauth-required status."""
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read", "offline.access"],
+    )
+    connection.token_expires_at = (datetime.now(UTC) - timedelta(minutes=5)).replace(tzinfo=None)
+    db_session.add(connection)
+    db_session.commit()
+
+    monkeypatch.setattr("app.services.x_integration.decrypt_token", lambda _value: "refresh-token")
+    monkeypatch.setattr(
+        "app.services.x_integration.refresh_oauth_token",
+        lambda refresh_token: (_ for _ in ()).throw(RuntimeError("X API 400: invalid_request")),
+    )
+
+    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    sync_state = (
+        db_session.query(UserIntegrationSyncState).filter_by(connection_id=connection.id).one()
+    )
+    db_session.refresh(connection)
+
+    assert summary.status == "reauth_required"
+    assert summary.channels == {}
+    assert connection.is_active is False
+    assert sync_state.last_status == "reauth_required"
+    assert "reauthentication" in (sync_state.last_error or "")
 
 
 def test_build_sync_metadata_payload_preserves_last_ids_when_run_is_empty() -> None:

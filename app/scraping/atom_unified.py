@@ -120,7 +120,7 @@ class AtomScraper(BaseScraper):
 
         feeds = self._load_feeds()
         if not feeds:
-            logger.warning("No Atom feeds configured. Skipping scrape.")
+            logger.info("No Atom feeds configured. Skipping scrape.")
             return items
 
         for feed_info in feeds:

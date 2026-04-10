@@ -1,8 +1,9 @@
 """Tests for Atom feed scraper."""
 
+import logging
 from pathlib import Path
 
-from app.scraping.atom_unified import load_atom_feeds
+from app.scraping.atom_unified import AtomScraper, load_atom_feeds
 
 
 def test_load_atom_feeds_missing_file(tmp_path: Path):
@@ -62,3 +63,25 @@ def test_atom_scraper_in_runner():
     scraper_names = runner.list_scrapers()
 
     assert "Atom" in scraper_names
+
+
+def test_atom_scraper_no_feeds_logs_info(
+    monkeypatch,
+    caplog,
+):
+    """Expected empty Atom config should not warn."""
+    scraper = AtomScraper()
+    monkeypatch.setattr(scraper, "_load_feeds", lambda: [])
+
+    caplog.set_level(logging.INFO)
+    items = scraper.scrape()
+
+    assert items == []
+    assert any(
+        record.levelno == logging.INFO and "No Atom feeds configured" in record.message
+        for record in caplog.records
+    )
+    assert not any(
+        "No Atom feeds configured" in record.message and record.levelno >= logging.WARNING
+        for record in caplog.records
+    )
