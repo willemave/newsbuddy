@@ -140,11 +140,12 @@ def show_status(session: Session, stale_hours: float, sample_limit: int) -> None
     if not pending_rows:
         print("None")
     else:
-        for row in pending_rows:
-            available = row.available_at.isoformat() if row.available_at else "None"
+        for pending_row in pending_rows:
+            available = pending_row.available_at.isoformat() if pending_row.available_at else "None"
             print(
-                f"id={row.id} type={row.task_type} queue={row.queue_name} "
-                f"content={row.content_id} retry={row.retry_count} available={available}"
+                f"id={pending_row.id} type={pending_row.task_type} "
+                f"queue={pending_row.queue_name} content={pending_row.content_id} "
+                f"retry={pending_row.retry_count} available={available}"
             )
 
 
@@ -311,10 +312,7 @@ def move_media_tasks(
     )
     print(f"Media tasks to move: {len(rows)}")
     for row in rows[:20]:
-        print(
-            f"id={row.id} status={row.status} queue={row.queue_name} "
-            f"content={row.content_id}"
-        )
+        print(f"id={row.id} status={row.status} queue={row.queue_name} content={row.content_id}")
     if len(rows) > 20:
         print(f"... plus {len(rows) - 20} more")
 
@@ -571,8 +569,7 @@ def main(argv: list[str] | None = None) -> int:
                 move_media_tasks(
                     session,
                     statuses=list(
-                        args.statuses
-                        or [TaskStatus.PENDING.value, TaskStatus.PROCESSING.value]
+                        args.statuses or [TaskStatus.PENDING.value, TaskStatus.PROCESSING.value]
                     ),
                     dry_run=bool(args.dry_run),
                     force=bool(args.yes),

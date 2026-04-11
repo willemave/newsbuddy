@@ -10,12 +10,15 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import HttpUrl, TypeAdapter
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.core.db import get_db
 from app.models.content_submission import SubmitContentRequest
+from app.models.metadata import ContentType
 from app.models.schema import Content
 from app.models.user import User
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
@@ -63,7 +66,17 @@ def main(urls: Iterable[str], instruction: str, email: str) -> None:
         user = _get_or_create_user(db, email)
 
         for url in urls:
-            payload = SubmitContentRequest(url=url, instruction=instruction)
+            payload = SubmitContentRequest(
+                url=TypeAdapter(HttpUrl).validate_python(url),
+                content_type=ContentType.ARTICLE,
+                title=None,
+                instruction=instruction,
+                platform=None,
+                crawl_links=False,
+                subscribe_to_feed=False,
+                share_and_chat=False,
+                save_to_knowledge_and_mark_read=False,
+            )
             response = submit_user_content(db, payload, user)
             print("submitted:", response.model_dump())
             if response.content_id is not None:

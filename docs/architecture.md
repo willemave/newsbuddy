@@ -303,7 +303,7 @@ The SQLAlchemy schema lives primarily in `app/models/schema.py` and `app/models/
 
 | Table | Purpose | Notes |
 |---|---|---|
-| `users` | End users and admin users | Apple identity, profile, digest settings, onboarding flags, X username |
+| `users` | End users and admin users | Apple identity, profile, onboarding flags, X username |
 | `contents` | Canonical content records | Content type, URL, source/platform, lifecycle status, JSON metadata, publication date |
 | `processing_tasks` | Async task queue | Task type, queue partition, payload, retries, timestamps |
 | `content_read_status` | Per-user read marks | One row per user/content |
@@ -313,7 +313,7 @@ The SQLAlchemy schema lives primarily in `app/models/schema.py` and `app/models/
 | `content_discussions` | Persisted discussion payload | HN/Reddit/Techmeme/social discussion snapshots |
 | `user_scraper_configs` | User-managed feed subscriptions | Substack, Atom, podcast RSS, YouTube, Reddit |
 | `event_logs` | Flexible event telemetry | Scraper stats, errors, maintenance events |
-| `news_digests` | Per-user daily digest cards | Roll-up summary, key points, bullet details, coverage checkpoint |
+| `news_items` | Short-form news rows | Visible news feed items, summaries, source metadata, clustering relations |
 | `feed_discovery_runs` | Discovery run metadata | Seed favorites, token/timing usage, status |
 | `feed_discovery_suggestions` | Discovery recommendations | Feed/podcast/YouTube suggestions with score/rationale |
 | `onboarding_discovery_runs` | Async onboarding runs | Audio/topic-driven discovery state |
@@ -616,7 +616,7 @@ Defined in `app/models/contracts.py`:
 - `onboarding_discover`
 - `dig_deeper`
 - `sync_integration`
-- `generate_news_digest`
+- `generate_agent_digest`
 
 ### 9.2 Queue partitions
 
@@ -641,7 +641,7 @@ Current task-to-queue mapping in `app/services/queue.py`:
 | `summarize` | `content` |
 | `fetch_discussion` | `content` |
 | `generate_image` | `image` |
-| `generate_news_digest` | `content` |
+| `generate_agent_digest` | `content` |
 | `discover_feeds` | `content` |
 | `onboarding_discover` | `onboarding` |
 | `dig_deeper` | `chat` |
@@ -825,14 +825,6 @@ Stored output lands in `content_discussions` and may also denormalize preview fi
 
 Generated files are stored in image directories resolved by `app/utils/image_paths.py` and exposed from `/static/images/...`.
 
-### 10.10 Daily digest generation
-
-Daily digest generation is its own queued workflow:
-
-- task type: `generate_news_digest`
-- table: `news_digests`
-- output includes title, summary, key points, bullet details, source content ids, source count, `coverage_end_at`
-- dedicated routes support read/unread state and launching dig-deeper chats from digest bullets
 
 ## 11. Scrapers and Feed Sources
 
@@ -1194,12 +1186,10 @@ Representative scripts under `scripts/`:
 - `scripts/check_and_run_migrations.sh`
 - Alembic migrations under `alembic/`
 
-### 21.3 Discovery, digests, and sync
+### 21.3 Discovery and sync
 
 - `scripts/run_feed_discovery.py`
-- `scripts/run_news_digests.py`
 - `scripts/run_integration_sync.py`
-- `scripts/backfill_news_digests.py`
 
 ### 21.4 Content maintenance
 

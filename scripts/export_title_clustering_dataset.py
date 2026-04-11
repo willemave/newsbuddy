@@ -7,7 +7,7 @@ import json
 import sqlite3
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 
@@ -218,9 +218,10 @@ def _build_duplicate_groups(records: list[dict[str, Any]]) -> dict[str, Any]:
             ),
             "domains": sorted(
                 {
-                    item.get("article_domain") or item.get("url_domain")
+                    domain
                     for item in group
-                    if item.get("article_domain") or item.get("url_domain")
+                    for domain in [item.get("article_domain") or item.get("url_domain")]
+                    if isinstance(domain, str)
                 }
             ),
             "rows": [
@@ -241,7 +242,9 @@ def _build_duplicate_groups(records: list[dict[str, Any]]) -> dict[str, Any]:
         for title_key, group in by_title_key.items()
         if len(group) > 1
     ]
-    duplicate_groups.sort(key=lambda item: (-item["count"], item["display_title"] or ""))
+    duplicate_groups.sort(
+        key=lambda item: (-cast(int, item["count"]), cast(str, item["display_title"] or ""))
+    )
 
     content_type_counts = Counter(record["content_type"] for record in records)
     return {

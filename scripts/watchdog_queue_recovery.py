@@ -67,7 +67,7 @@ class WatchdogRunResult:
     requeued_media: ActionResult
     requeued_process_content: ActionResult
     requeued_process_news_item: ActionResult
-    requeued_generate_news_digest: ActionResult
+    requeued_generate_agent_digest: ActionResult
 
     @property
     def total_touched(self) -> int:
@@ -77,7 +77,7 @@ class WatchdogRunResult:
             + self.requeued_media.touched_count
             + self.requeued_process_content.touched_count
             + self.requeued_process_news_item.touched_count
-            + self.requeued_generate_news_digest.touched_count
+            + self.requeued_generate_agent_digest.touched_count
         )
 
 
@@ -130,7 +130,7 @@ def _move_media_tasks(
         query = query.limit(limit)
 
     rows = query.all()
-    task_ids = [int(row.id) for row in rows]
+    task_ids = [int(row.id) for row in rows if row.id is not None]
 
     if not dry_run:
         for row in rows:
@@ -171,7 +171,7 @@ def _requeue_stale_tasks(
         query = query.limit(limit)
 
     rows = query.all()
-    task_ids = [int(row.id) for row in rows]
+    task_ids = [int(row.id) for row in rows if row.id is not None]
 
     if not dry_run:
         now = datetime.now(UTC)
@@ -207,7 +207,7 @@ def _record_watchdog_events(result: WatchdogRunResult) -> None:
         result.requeued_media,
         result.requeued_process_content,
         result.requeued_process_news_item,
-        result.requeued_generate_news_digest,
+        result.requeued_generate_agent_digest,
     ]
     for action in action_results:
         logger.info(
@@ -245,8 +245,8 @@ def _record_watchdog_events(result: WatchdogRunResult) -> None:
                 "requeued_media": result.requeued_media.touched_count,
                 "requeued_process_content": result.requeued_process_content.touched_count,
                 "requeued_process_news_item": result.requeued_process_news_item.touched_count,
-                "requeued_generate_news_digest": (
-                    result.requeued_generate_news_digest.touched_count
+                "requeued_generate_agent_digest": (
+                    result.requeued_generate_agent_digest.touched_count
                 ),
                 "dry_run": result.dry_run,
             },
@@ -310,7 +310,7 @@ def run_watchdog_once(
     transcribe_stale_hours: float | None = None,
     process_content_stale_hours: float,
     process_news_item_stale_hours: float | None = None,
-    generate_news_digest_stale_hours: float | None = None,
+    generate_agent_digest_stale_hours: float | None = None,
     alert_threshold: int,
     slack_webhook_url: str | None,
     dry_run: bool,
@@ -323,8 +323,8 @@ def run_watchdog_once(
         if media_stale_hours is not None
         else (transcribe_stale_hours if transcribe_stale_hours is not None else 2.0)
     )
-    effective_generate_news_digest_stale_hours = (
-        generate_news_digest_stale_hours if generate_news_digest_stale_hours is not None else 2.0
+    effective_generate_agent_digest_stale_hours = (
+        generate_agent_digest_stale_hours if generate_agent_digest_stale_hours is not None else 2.0
     )
 
     moved_media = _move_media_tasks(
@@ -361,11 +361,11 @@ def run_watchdog_once(
         dry_run=dry_run,
         limit=action_limit,
     )
-    requeued_generate_news_digest = _requeue_stale_tasks(
+    requeued_generate_agent_digest = _requeue_stale_tasks(
         session,
-        task_types=[TaskType.GENERATE_NEWS_DIGEST.value],
-        action_name="requeue_stale_generate_news_digest",
-        stale_hours=effective_generate_news_digest_stale_hours,
+        task_types=[TaskType.GENERATE_AGENT_DIGEST.value],
+        action_name="requeue_stale_generate_agent_digest",
+        stale_hours=effective_generate_agent_digest_stale_hours,
         dry_run=dry_run,
         limit=action_limit,
     )
@@ -379,7 +379,7 @@ def run_watchdog_once(
         requeued_media=requeued_media,
         requeued_process_content=requeued_process_content,
         requeued_process_news_item=requeued_process_news_item,
-        requeued_generate_news_digest=requeued_generate_news_digest,
+        requeued_generate_agent_digest=requeued_generate_agent_digest,
     )
 
     if dry_run:
@@ -426,10 +426,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Requeue media processing tasks older than this many hours",
     )
     parser.add_argument(
-        "--generate-news-digest-stale-hours",
+        "--generate-agent-digest-stale-hours",
         type=float,
-        default=_env_float("QUEUE_WATCHDOG_GENERATE_NEWS_DIGEST_STALE_HOURS", 2.0),
-        help="Requeue generate_news_digest tasks older than this many hours",
+        default=_env_float("QUEUE_WATCHDOG_GENERATE_AGENT_DIGEST_STALE_HOURS", 2.0),
+        help="Requeue generate_agent_digest tasks older than this many hours",
     )
     parser.add_argument(
         "--process-content-stale-hours",
@@ -490,8 +490,8 @@ def _print_result(result: WatchdogRunResult) -> None:
     print(f"  requeue_stale_process_content: {result.requeued_process_content.touched_count}")
     print(f"  requeue_stale_process_news_item: {result.requeued_process_news_item.touched_count}")
     print(
-        "  requeue_stale_generate_news_digest: "
-        f"{result.requeued_generate_news_digest.touched_count}"
+        "  requeue_stale_generate_agent_digest: "
+        f"{result.requeued_generate_agent_digest.touched_count}"
     )
     print(f"  total_touched: {result.total_touched}")
 
@@ -525,8 +525,8 @@ def main(argv: list[str] | None = None) -> int:
                     result = run_watchdog_once(
                         session=session,
                         media_stale_hours=float(args.media_stale_hours),
-                        generate_news_digest_stale_hours=float(
-                            args.generate_news_digest_stale_hours
+                        generate_agent_digest_stale_hours=float(
+                            args.generate_agent_digest_stale_hours
                         ),
                         process_content_stale_hours=float(args.process_content_stale_hours),
                         process_news_item_stale_hours=float(args.process_news_item_stale_hours),

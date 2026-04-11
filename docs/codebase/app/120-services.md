@@ -26,8 +26,6 @@ Business-logic layer for LLM access, content analysis and submission, chat, disc
 | `app/services/content_interactions.py` | `RecordContentInteractionInput`, `RecordContentInteractionResult`, `ContentInteractionContentNotFoundError`, `record_content_interaction` | Service functions for recording user content interaction analytics. |
 | `app/services/content_metadata_merge.py` | `compute_metadata_patch`, `refresh_merge_content_metadata` | Helpers for safe content metadata writes under concurrent task updates. |
 | `app/services/content_submission.py` | `normalize_url`, `submit_user_content` | Helpers for user-submitted one-off content. |
-| `app/services/news_chat.py` | `start_news_digest_bullet_chat` | Helpers for bullet-scoped news-digest dig-deeper chats. |
-| `app/services/news_digests.py` | `cluster_news_items`, `get_news_digest_trigger_decision`, `generate_news_digest_for_user`, `list_news_digests`, `enqueue_news_digest_generation` | News-native digest selection, clustering, persistence, and scheduler helpers. |
 | `app/services/deep_research.py` | `DeepResearchResult`, `DeepResearchClient`, `get_deep_research_client`, `close_deep_research_client`, `process_deep_research_message` | Deep research service using OpenAI's o4-mini-deep-research model |
 | `app/services/dig_deeper.py` | `resolve_display_title`, `build_dig_deeper_prompt`, `get_or_create_dig_deeper_session`, `create_dig_deeper_message`, `run_dig_deeper_message`, `enqueue_dig_deeper_task` | Helpers for auto-starting dig-deeper chats. |
 | `app/services/discussion_fetcher.py` | `DiscussionFetchError`, `DiscussionFetchResult`, `DiscussionPayload`, `DiscussionTarget`, `fetch_and_store_discussion` | Discussion ingestion service for news content. |

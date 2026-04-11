@@ -5677,7 +5677,7 @@
           "long_interleaved",
           "long_bullets",
           "long_editorial_narrative",
-          "short_news_digest"
+          "short_news"
         ],
         "title": "SummaryKind",
         "type": "string"

@@ -4506,7 +4506,7 @@ const (
 	SummaryKindLongInterleaved        SummaryKind = "long_interleaved"
 	SummaryKindLongBullets            SummaryKind = "long_bullets"
 	SummaryKindLongEditorialNarrative SummaryKind = "long_editorial_narrative"
-	SummaryKindShortNewsDigest        SummaryKind = "short_news_digest"
+	SummaryKindShortNews        SummaryKind = "short_news"
 )
 
 // AllValues returns all SummaryKind values.
@@ -4516,7 +4516,7 @@ func (SummaryKind) AllValues() []SummaryKind {
 		SummaryKindLongInterleaved,
 		SummaryKindLongBullets,
 		SummaryKindLongEditorialNarrative,
-		SummaryKindShortNewsDigest,
+		SummaryKindShortNews,
 	}
 }
 
@@ -4531,7 +4531,7 @@ func (s SummaryKind) MarshalText() ([]byte, error) {
 		return []byte(s), nil
 	case SummaryKindLongEditorialNarrative:
 		return []byte(s), nil
-	case SummaryKindShortNewsDigest:
+	case SummaryKindShortNews:
 		return []byte(s), nil
 	default:
 		return nil, errors.Errorf("invalid value: %q", s)
@@ -4553,8 +4553,8 @@ func (s *SummaryKind) UnmarshalText(data []byte) error {
 	case SummaryKindLongEditorialNarrative:
 		*s = SummaryKindLongEditorialNarrative
 		return nil
-	case SummaryKindShortNewsDigest:
-		*s = SummaryKindShortNewsDigest
+	case SummaryKindShortNews:
+		*s = SummaryKindShortNews
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)

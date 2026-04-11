@@ -65,7 +65,7 @@ from app.constants import (
     SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE,
     SUMMARY_KIND_LONG_INTERLEAVED,
     SUMMARY_KIND_LONG_STRUCTURED,
-    SUMMARY_KIND_SHORT_NEWS_DIGEST,
+    SUMMARY_KIND_SHORT_NEWS,
     SUMMARY_VERSION_V1,
     SUMMARY_VERSION_V2,
 )
@@ -73,7 +73,9 @@ from app.core.db import get_db, init_db
 from app.models.metadata import (
     ArticleMetadata,
     BulletedSummary,
+    BulletSummaryPoint,
     ContentClassification,
+    ContentQuote,
     ContentStatus,
     ContentType,
     EditorialKeyPoint,
@@ -86,6 +88,8 @@ from app.models.metadata import (
     NewsSummary,
     PodcastMetadata,
     StructuredSummary,
+    SummaryBulletPoint,
+    SummaryPayload,
     SummaryTextBullet,
 )
 from app.models.schema import Content, ContentDiscussion, ContentReadStatus, ContentStatusEntry
@@ -305,7 +309,7 @@ def random_datetime_for_day_offset(day_offset: int) -> datetime:
     )
 
 
-def generate_bullet_points(count: int = 4) -> list[dict[str, str]]:
+def generate_bullet_points(count: int = 4) -> list[SummaryBulletPoint]:
     """Generate sample bullet points with categories."""
     categories = ["key_finding", "methodology", "conclusion", "insight", "context", "review"]
     points = [
@@ -318,11 +322,12 @@ def generate_bullet_points(count: int = 4) -> list[dict[str, str]]:
     ]
 
     return [
-        {"text": random.choice(points), "category": random.choice(categories)} for _ in range(count)
+        SummaryBulletPoint(text=random.choice(points), category=random.choice(categories))
+        for _ in range(count)
     ]
 
 
-def generate_quotes(count: int = 2) -> list[dict[str, str | None]]:
+def generate_quotes(count: int = 2) -> list[ContentQuote]:
     """Generate sample quotes with context and attribution."""
     quotes = [
         (
@@ -343,12 +348,12 @@ def generate_quotes(count: int = 2) -> list[dict[str, str | None]]:
     ]
 
     return [
-        {"text": text, "context": ctx, "attribution": attribution}
+        ContentQuote(text=text, context=ctx, attribution=attribution)
         for text, ctx, attribution in random.sample(quotes, min(count, len(quotes)))
     ]
 
 
-def generate_bulleted_points(count: int) -> list[dict[str, Any]]:
+def generate_bulleted_points(count: int) -> list[BulletSummaryPoint]:
     """Generate bullet points with details and supporting quotes."""
     bullet_texts = [
         "Organizations are standardizing tools to reduce operational overhead.",
@@ -390,16 +395,16 @@ def generate_bulleted_points(count: int) -> list[dict[str, Any]]:
         selected.extend(chunk)
         for item in chunk:
             pool.remove(item)
-    points: list[dict[str, Any]] = []
+    points: list[BulletSummaryPoint] = []
     for text in selected:
         detail_focus = text.lower().rstrip(".")
         detail = random.choice(detail_templates).format(detail_focus=detail_focus)
         points.append(
-            {
-                "text": text,
-                "detail": detail,
-                "quotes": generate_quotes(random.randint(1, 3)),
-            }
+            BulletSummaryPoint(
+                text=text,
+                detail=detail,
+                quotes=generate_quotes(random.randint(1, 3)),
+            )
         )
     return points
 
@@ -559,9 +564,8 @@ def generate_editorial_quotes(count: int = 3) -> list[EditorialQuote]:
     quotes = generate_quotes(count)
     return [
         EditorialQuote(
-            text=item["text"],
-            context=item.get("context"),
-            attribution=item.get("attribution"),
+            text=item.text,
+            attribution=item.attribution,
         )
         for item in quotes
     ]
@@ -610,6 +614,7 @@ def generate_editorial_narrative(title: str, topic: str) -> EditorialNarrativeSu
         editorial_narrative="\n\n".join(paragraphs),
         quotes=generate_editorial_quotes(random.randint(2, 3)),
         key_points=generate_editorial_key_points(random.randint(4, 6)),
+        source_details=None,
         classification="to_read" if random.random() > 0.15 else "skip",
         summarization_date=random_datetime(7),
     )
@@ -643,6 +648,7 @@ class ArticleGenerator:
         topics = random.choice(TOPICS)
 
         selected_format = resolve_summary_format(summary_format)
+        summary: SummaryPayload
         summary_kind = SUMMARY_KIND_LONG_BULLETS
         summary_version = SUMMARY_VERSION_V1
 
@@ -764,6 +770,7 @@ class PodcastGenerator:
         episode_number = random.randint(1, 200)
 
         selected_format = resolve_summary_format(summary_format)
+        summary: SummaryPayload
         summary_kind = SUMMARY_KIND_LONG_BULLETS
         summary_version = SUMMARY_VERSION_V1
 
@@ -848,6 +855,13 @@ class PodcastGenerator:
             transcript="Welcome to the podcast. Today we're discussing... [full transcript]",
             duration=random.randint(1200, 7200),
             episode_number=episode_number,
+            video_url=None,
+            video_id=None,
+            channel_name=None,
+            thumbnail_url=None,
+            view_count=None,
+            like_count=None,
+            has_transcript=True,
             word_count=random.randint(3000, 10000),
             summary=summary,
             summary_kind=summary_kind,
@@ -920,7 +934,7 @@ class NewsGenerator:
         metadata: dict[str, Any] = {
             "source": source_domain,
             "platform": platform,
-            "summary_kind": SUMMARY_KIND_SHORT_NEWS_DIGEST,
+            "summary_kind": SUMMARY_KIND_SHORT_NEWS,
             "summary_version": SUMMARY_VERSION_V1,
             "article": {
                 "url": article_url,
@@ -1020,7 +1034,7 @@ class XDigestTweetGenerator:
                     "replies": random.randint(1, 80),
                 },
             },
-            "summary_kind": SUMMARY_KIND_SHORT_NEWS_DIGEST,
+            "summary_kind": SUMMARY_KIND_SHORT_NEWS,
             "summary_version": SUMMARY_VERSION_V1,
             "summary": {
                 "title": tweet_text[:120],
@@ -1187,9 +1201,12 @@ def insert_test_data(
         content = Content(**content_payload)
         session.add(content)
         session.flush()  # Get the ID
-        inserted_ids.append(content.id)
+        content_id = content.id
+        if content_id is None:
+            raise ValueError("Inserted content missing id")
+        inserted_ids.append(content_id)
         if content.content_type == ContentType.NEWS.value:
-            inserted_news_content_ids.append(content.id)
+            inserted_news_content_ids.append(content_id)
 
         # SQLite can reuse primary keys for rows that were deleted earlier.
         # If the local dev DB contains orphaned per-user rows for an old content ID,

@@ -196,10 +196,13 @@ async def run_test(
         user_msg = f"Title: {display_title}\n\nContent:\n\n{content[:50000]}"
         result = await agent.run(user_msg)
         duration_ms = int((datetime.now() - start).total_seconds() * 1000)
+        article_id = article.id
+        if article_id is None:
+            raise ValueError("Article missing id")
 
         return TestResult(
             model_name=model_name,
-            article_id=article.id,
+            article_id=article_id,
             article_title=display_title,
             summary=result.output,
             error=None,
@@ -207,9 +210,10 @@ async def run_test(
         )
     except Exception as e:
         duration_ms = int((datetime.now() - start).total_seconds() * 1000)
+        article_id = article.id or 0
         return TestResult(
             model_name=model_name,
-            article_id=article.id,
+            article_id=article_id,
             article_title=display_title,
             summary=None,
             error=str(e),
@@ -253,7 +257,7 @@ def print_result(result: TestResult) -> None:
     print(f"\nClassification: {s.classification}")
 
 
-async def main():
+async def main() -> None:
     """Run the interleaved summary experiment."""
     print("=" * 80)
     print("INTERLEAVED SUMMARY EXPERIMENT")
@@ -331,12 +335,26 @@ async def main():
         print(f"  Errors: {len(errors)}")
         print(f"  Avg duration: {avg_duration:.0f}ms")
 
-        if successes:
-            avg_insights = sum(len(r.summary.insights) for r in successes) / len(successes)
-            quotes_present = sum(
-                1 for r in successes for i in r.summary.insights if i.supporting_quote
+        successful_summaries = [r.summary for r in successes if r.summary is not None]
+        if successful_summaries:
+            total_summary_count = len(successful_summaries)
+            avg_insights = (
+                sum(
+                    (len(summary.insights) for summary in successful_summaries),
+                    0,
+                )
+                / total_summary_count
             )
-            total_insights = sum(len(r.summary.insights) for r in successes)
+            quotes_present = sum(
+                1
+                for summary in successful_summaries
+                for insight in summary.insights
+                if insight.supporting_quote
+            )
+            total_insights = sum(
+                (len(summary.insights) for summary in successful_summaries),
+                0,
+            )
             print(f"  Avg insights: {avg_insights:.1f}")
             print(f"  Quotes attached: {quotes_present}/{total_insights}")
 

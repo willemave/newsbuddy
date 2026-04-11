@@ -106,7 +106,7 @@ def _probe_pydantic_google_gla(api_key: str, model: str) -> str:
 
 
 def _probe_pydantic_vertex(project: str, location: str, model: str) -> str:
-    provider = GoogleProvider(vertexai=True, project=project, location=location)
+    provider = GoogleProvider(project=project, location=location)
     agent = Agent(
         GoogleModel(model, provider=provider),
         output_type=str,

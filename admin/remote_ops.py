@@ -45,12 +45,7 @@ def _load_schema_models() -> tuple[Any, Any, Any, Any]:
     """Load schema models lazily for DB-backed remote commands."""
     from app.models.schema import Content, LlmUsageRecord, ProcessingTask
 
-    try:
-        from app.models.schema import EventLog
-    except ImportError:  # pragma: no cover - legacy compatibility when EventLog is absent
-        EventLog = None
-
-    return Content, LlmUsageRecord, ProcessingTask, EventLog
+    return Content, LlmUsageRecord, ProcessingTask, None
 
 
 def db_tables(context: RemoteContext) -> dict[str, Any]:
@@ -260,14 +255,20 @@ def health_snapshot(context: RemoteContext) -> dict[str, Any]:
         with session_factory() as session:
             content_total = int(session.query(func.count(Content.id)).scalar() or 0)
             task_total = int(session.query(func.count(ProcessingTask.id)).scalar() or 0)
-            content_by_status = dict(
+            content_rows = (
                 session.query(Content.status, func.count(Content.id)).group_by(Content.status).all()
             )
-            task_by_status = dict(
+            content_by_status: dict[str | None, int] = {
+                status: int(count) for status, count in content_rows
+            }
+            task_rows = (
                 session.query(ProcessingTask.status, func.count(ProcessingTask.id))
                 .group_by(ProcessingTask.status)
                 .all()
             )
+            task_by_status: dict[str | None, int] = {
+                status: int(count) for status, count in task_rows
+            }
             latest_usage_at = session.query(func.max(LlmUsageRecord.created_at)).scalar()
 
             return {
@@ -674,7 +675,7 @@ def _collect_logs(
     log_path = context.service_log_dir / f"{source}.log"
     if not log_path.exists():
         return []
-    lines = deque(maxlen=limit or 10_000)
+    lines: deque[dict[str, Any]] = deque(maxlen=limit or 10_000)
     with log_path.open(encoding="utf-8") as handle:
         for raw_line in handle:
             parsed = parse_service_log_line(raw_line, source=source, file_path=str(log_path))
@@ -752,12 +753,12 @@ def _serialize_usage_row(row: LlmUsageRecord, *, unsafe_raw: bool) -> dict[str, 
 
 def _summarize_usage_rows(rows: list[LlmUsageRecord]) -> dict[str, Any]:
     totals = _usage_totals()
-    providers = Counter()
-    models = Counter()
+    providers: Counter[str] = Counter()
+    models: Counter[str] = Counter()
     for row in rows:
         _accumulate_usage(totals, row)
-        providers[row.provider] += 1
-        models[row.model] += 1
+        providers[row.provider or "unknown"] += 1
+        models[row.model or "unknown"] += 1
     totals["providers"] = dict(providers)
     totals["models"] = dict(models)
     return totals

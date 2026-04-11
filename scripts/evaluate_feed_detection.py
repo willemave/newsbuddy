@@ -142,7 +142,7 @@ def _inspect_page_urls(
     content_type: str,
     model_spec: str | None = None,
 ) -> list[dict[str, Any]]:
-    results = []
+    results: list[dict[str, Any]] = []
     for url in urls:
         html_content = _fetch_html(url)
         if not html_content:
@@ -158,16 +158,23 @@ def _inspect_page_urls(
         )
         if feed_data and feed_data.get("detected_feed"):
             detected = feed_data["detected_feed"]
+            model_name = model_spec or "heuristic"
             results.append(
                 {
                     "url": url,
                     "detected_feed": detected,
                     "all_detected_feeds": feed_data.get("all_detected_feeds"),
-                    "model": model_spec or "heuristic",
+                    "model": model_name,
                 }
             )
         else:
-            results.append({"url": url, "detected_feed": None, "model": model_spec})
+            results.append(
+                {
+                    "url": url,
+                    "detected_feed": None,
+                    "model": model_spec or "heuristic",
+                }
+            )
     return results
 
 

@@ -17,7 +17,6 @@ Supervisor manages:
 Cron manages:
 - `scripts/run_scrapers.py`
 - `scripts/run_twitter.py`
-- `scripts/run_news_digests.py`
 - `scripts/run_feed_discovery.py`
 
 ## 1) Install packages
@@ -139,15 +138,12 @@ sudo -u newsapp -H crontab /opt/news_app/crontab
 sudo -u newsapp -H crontab -l
 ```
 
-`run_news_digests.py` is cron-driven, not Supervisor-driven.
-
 Current production cadence:
 
 ```cron
 0 2 * * * flock -n /tmp/news_app_backup.lock /bin/bash -lc '/opt/news_app/scripts/backup_database.sh' >> /var/log/news_app/backup.log 2>&1
 */15 * * * * flock -n /tmp/news_app_scrapers.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_scrapers.py --show-stats --scrapers HackerNews Reddit Substack Techmeme Podcast Atom' >> /var/log/news_app/scrapers-cron.log 2>&1
 */15 * * * * flock -n /tmp/news_app_twitter.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_twitter.py' >> /var/log/news_app/twitter.log 2>&1
-*/15 * * * * flock -n /tmp/news_app_news_digests.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_news_digests.py' >> /var/log/news_app/news-digests.log 2>&1
 0 3 * * 1 flock -n /tmp/news_app_feed_discovery.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_feed_discovery.py' >> /var/log/news_app/feed-discovery-cron.log 2>&1
 ```
 
@@ -157,9 +153,6 @@ while cron jobs are also active.
 
 Each cron-managed job uses `flock -n` to prevent a new run from overlapping a
 previous still-running instance of the same job.
-
-`run_news_digests.py` polls every 15 minutes and lets per-user checkpoint logic
-inside the app decide whether a digest should actually be enqueued.
 
 The dedicated Twitter scheduler runs every 15 minutes. It runs the public
 Twitter list scraper and enqueues per-user bookmark/timeline/list refresh tasks when
@@ -171,7 +164,7 @@ SQLite defaults shipped in the repo:
 - `SQLITE_WRITE_RETRY_ATTEMPTS=3`
 - `QUEUE_BACKPRESSURE_MAX_PENDING_CONTENT=150`
 - `QUEUE_BACKPRESSURE_MAX_PENDING_PROCESS_NEWS_ITEM=75`
-- `QUEUE_BACKPRESSURE_MAX_PENDING_GENERATE_NEWS_DIGEST=5`
+- `QUEUE_BACKPRESSURE_MAX_PENDING_GENERATE_AGENT_DIGEST=5`
 
 Production should keep `SQLITE_ENABLE_WAL=true` so SQLite-backed queues use WAL
 mode when the runtime allows it.

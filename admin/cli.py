@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 
 from admin.config import AdminConfig, resolve_config
 from admin.output import Envelope, EnvelopeError, emit
@@ -39,7 +39,7 @@ class CommandResult:
 class AdminArgumentParser(argparse.ArgumentParser):
     """Argument parser with action-oriented error messages."""
 
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> Never:
         hint = _build_parser_hint(self.prog, message)
         formatted = message if hint is None else f"{message}\n\n{hint}"
         super().error(formatted)
@@ -533,7 +533,7 @@ def _parse_datetime_arg(raw: str | None, *, end_of_day: bool) -> datetime | None
     return parsed.astimezone(UTC)
 
 
-def _build_db_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _build_db_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:
     db_parser = subparsers.add_parser(
         "db",
         help="Read-only production DB access",
@@ -554,7 +554,7 @@ def _build_db_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
     explain_parser.add_argument("--sql", required=True)
 
 
-def _build_logs_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _build_logs_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:
     logs_parser = subparsers.add_parser(
         "logs",
         help="Inspect production logs",
@@ -622,7 +622,7 @@ def _build_logs_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
     sync_parser.add_argument("--destination", default=None)
 
 
-def _build_usage_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _build_usage_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:
     usage_parser = subparsers.add_parser(
         "usage",
         help="Query persisted LLM usage",
@@ -653,7 +653,7 @@ def _build_usage_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     content_parser.add_argument("--limit", type=int, default=200)
 
 
-def _build_fix_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _build_fix_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:
     fix_parser = subparsers.add_parser(
         "fix",
         help="Allowlisted production fixes",
@@ -699,7 +699,7 @@ def _build_fix_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
     run_scraper_parser.add_argument("--debug", action="store_true", dest="debug_mode")
 
 
-def _build_events_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _build_events_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:
     events_parser = subparsers.add_parser(
         "events",
         help="Query event logs",
@@ -715,7 +715,7 @@ def _build_events_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
     list_parser.add_argument("--limit", type=int, default=100)
 
 
-def _build_health_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _build_health_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:
     health_parser = subparsers.add_parser(
         "health",
         help="Coarse operational health snapshot",
@@ -725,7 +725,7 @@ def _build_health_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
     health_subparsers.add_parser("snapshot", help="Snapshot current operational counts")
 
 
-def _build_debug_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _build_debug_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:
     debug_parser = subparsers.add_parser(
         "debug",
         help="Local debug artifacts from production data",

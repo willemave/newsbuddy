@@ -35,6 +35,13 @@ LongformTemplate = Literal[
     "structured_v1",
     "editorial_narrative_v1",
 ]
+PromptType = Literal[
+    "structured",
+    "interleaved",
+    "long_bullets",
+    "news",
+    "editorial_narrative",
+]
 ESTIMATED_CHARS_PER_TOKEN = 4
 
 
@@ -153,7 +160,7 @@ def parse_content_types(raw_types: str) -> list[EvalContentType]:
 def resolve_prompt_settings(
     content_type: EvalContentType,
     longform_template: LongformTemplate,
-) -> tuple[str, int, int]:
+) -> tuple[PromptType, int, int]:
     """Resolve prompt type and limits using eval rules.
 
     Args:
@@ -164,7 +171,7 @@ def resolve_prompt_settings(
         Tuple of (prompt_type, max_bullet_points, max_quotes).
     """
     if content_type == "news":
-        return "news_digest", 4, 0
+        return "news", 4, 0
 
     if longform_template == "interleaved_v2":
         return "interleaved", 8, 8
@@ -231,6 +238,8 @@ def extract_usage(result: Any) -> dict[str, int | None]:
 
     def _to_int(value: object | None) -> int | None:
         if value is None:
+            return None
+        if not isinstance(value, (int, float, str, bytes, bytearray)):
             return None
         try:
             return int(value)
@@ -302,7 +311,7 @@ def build_run_sources(
     """
     with get_db() as db:
         if content_ids:
-            rows = db.query(Content).filter(Content.id.in_(content_ids)).all()  # type: ignore[arg-type]
+            rows = db.query(Content).filter(Content.id.in_(content_ids)).all()
             row_by_id = {row.id: row for row in rows}
 
             sources: list[Any] = []

@@ -16,5 +16,4 @@ Repository layer that wraps `APIClient` calls for content, read-state, and daily
 | File | Key symbols | Notes |
 |---|---|---|
 | `client/newsly/newsly/Repositories/ContentRepository.swift` | `protocol ContentRepositoryType`, `class ContentRepository`, `loadDetail`, `loadPage` | Types: `protocol ContentRepositoryType`, `class ContentRepository`. Functions: `loadDetail`, `loadPage` |
-| `client/newsly/newsly/Repositories/DailyNewsDigestRepository.swift` | `protocol DailyNewsDigestRepositoryType`, `class DailyNewsDigestRepository`, `loadPage`, `markRead`, `startBulletDigDeeperChat` | Repository for the `/api/news/digests` and bullet-based dig-deeper API. |
 | `client/newsly/newsly/Repositories/ReadStatusRepository.swift` | `protocol ReadStatusRepositoryType`, `class ReadStatusRepository`, `struct BulkMarkReadRequest`, `enum CodingKeys`, `markRead` | Types: `protocol ReadStatusRepositoryType`, `class ReadStatusRepository`, `struct BulkMarkReadRequest`, `enum CodingKeys`. Functions: `markRead` |

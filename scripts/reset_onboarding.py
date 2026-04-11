@@ -23,8 +23,7 @@ def main() -> None:
     args = parser.parse_args()
 
     init_db()
-    db = next(get_db())
-    try:
+    with get_db() as db:
         user = db.query(User).filter(User.id == args.user_id).first()
         if not user:
             print(f"User {args.user_id} not found.")
@@ -37,8 +36,6 @@ def main() -> None:
             f"Reset onboarding for user {args.user_id} ({user.email})."
             " has_completed_onboarding=False has_completed_new_user_tutorial=False"
         )
-    finally:
-        db.close()
 
 
 if __name__ == "__main__":

@@ -74,7 +74,8 @@ def import_feeds_for_user(user_id: int, clear_existing: bool = False) -> dict[st
                         .all()
                     )
                     exists = any(
-                        cfg.config.get("feed_url") == feed["url"] for cfg in existing_configs
+                        isinstance(cfg.config, dict) and cfg.config.get("feed_url") == feed["url"]
+                        for cfg in existing_configs
                     )
                     if exists:
                         logger.debug(f"Skipping existing: {feed['name']}")
@@ -110,7 +111,8 @@ def import_feeds_for_user(user_id: int, clear_existing: bool = False) -> dict[st
                         .all()
                     )
                     exists = any(
-                        cfg.config.get("feed_url") == feed["url"] for cfg in existing_configs
+                        isinstance(cfg.config, dict) and cfg.config.get("feed_url") == feed["url"]
+                        for cfg in existing_configs
                     )
                     if exists:
                         logger.debug(f"Skipping existing: {feed['name']}")
@@ -152,7 +154,9 @@ def import_feeds_for_user(user_id: int, clear_existing: bool = False) -> dict[st
                             .all()
                         )
                         exists = any(
-                            cfg.config.get("feed_url") == feed["url"] for cfg in existing_configs
+                            isinstance(cfg.config, dict)
+                            and cfg.config.get("feed_url") == feed["url"]
+                            for cfg in existing_configs
                         )
                         if exists:
                             logger.debug(f"Skipping existing: {feed['name']}")

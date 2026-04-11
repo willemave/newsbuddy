@@ -329,6 +329,7 @@ def create_gauge_image(score: float, size: int = 200) -> Image.Image:
     )
 
     # Draw score text
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
     except OSError:
@@ -505,8 +506,11 @@ def generate_thumbnail(
                     and part.inline_data.mime_type.startswith("image/")
                 ):
                     # Save thumbnail
+                    image_data = part.inline_data.data
+                    if image_data is None:
+                        continue
                     image_path = OUTPUT_DIR / f"{content_id}_thumb.png"
-                    image_path.write_bytes(part.inline_data.data)
+                    image_path.write_bytes(image_data)
                     result.image_path = str(image_path)
                     image_saved = True
                     break
@@ -803,19 +807,15 @@ def main() -> None:
     if not args.dry_run:
         settings = get_settings()
         if settings.google_cloud_project:
-            client_kwargs: dict[str, str | bool] = {
-                "vertexai": True,
-                "project": settings.google_cloud_project,
-                "location": settings.google_cloud_location,
-            }
+            client = genai.Client(
+                vertexai=True,
+                project=settings.google_cloud_project,
+                location=settings.google_cloud_location,
+            )
         else:
             if not settings.google_api_key:
                 raise ValueError("GOOGLE_API_KEY not configured for Vertex image generation.")
-            client_kwargs = {
-                "vertexai": True,
-                "api_key": settings.google_api_key,
-            }
-        client = genai.Client(**client_kwargs)
+            client = genai.Client(vertexai=True, api_key=settings.google_api_key)
         print(f"Using model: {IMAGE_MODEL}")
 
     print(f"Output directory: {OUTPUT_DIR}")
@@ -845,9 +845,15 @@ def main() -> None:
         print()
 
         for i, content in enumerate(content_items):
+            content_id = content.id
+            content_url = content.url
+            if content_id is None or not content_url:
+                print(f"[{i + 1}/{len(content_items)}] Skipping content with missing id/url")
+                continue
+
             # Skip if already exists and flag is set
-            if args.skip_existing and (OUTPUT_DIR / f"{content.id}_thumb.png").exists():
-                print(f"[{i + 1}/{len(content_items)}] Skipping {content.id} (exists)")
+            if args.skip_existing and (OUTPUT_DIR / f"{content_id}_thumb.png").exists():
+                print(f"[{i + 1}/{len(content_items)}] Skipping {content_id} (exists)")
                 continue
 
             # Extract content data
@@ -877,9 +883,9 @@ def main() -> None:
                 # Just analyze without generating
                 score = analyze_content_interestingness(title, overview, bullet_points, quotes)
                 result = ThumbnailResult(
-                    content_id=content.id,
+                    content_id=content_id,
                     title=title,
-                    url=content.url,
+                    url=content_url,
                     score=score,
                 )
                 print(
@@ -891,11 +897,13 @@ def main() -> None:
                     f"abstract={score.abstractness:.0f})"
                 )
             else:
+                if client is None:
+                    raise RuntimeError("Gemini client not initialized")
                 result = generate_thumbnail(
                     client=client,
-                    content_id=content.id,
+                    content_id=content_id,
                     title=title,
-                    url=content.url,
+                    url=content_url,
                     overview=overview,
                     bullet_points=bullet_points,
                     quotes=quotes,

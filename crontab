@@ -11,7 +11,6 @@ PATH=/opt/news_app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/
 */15 * * * * flock -n /tmp/news_app_twitter.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_twitter.py' >> /var/log/news_app/twitter.log 2>&1
 
 # Run news-native digest enqueue every 15 minutes
-*/15 * * * * flock -n /tmp/news_app_news_digests.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_news_digests.py' >> /var/log/news_app/news-digests.log 2>&1
 
 # Run feed discovery weekly (Mondays at 03:00 UTC)
 0 3 * * 1 flock -n /tmp/news_app_feed_discovery.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_feed_discovery.py' >> /var/log/news_app/feed-discovery-cron.log 2>&1

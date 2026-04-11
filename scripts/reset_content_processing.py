@@ -6,6 +6,7 @@ import sys
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -110,7 +111,7 @@ def perform_reset(options: ResetOptions) -> ResetResult:
     """Reset content processing state or cancel tasks based on provided options."""
 
     settings = get_settings()
-    engine = create_engine(settings.database_url)
+    engine = create_engine(str(settings.database_url))
     session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
     with session_factory() as session:
@@ -122,7 +123,7 @@ def perform_reset(options: ResetOptions) -> ResetResult:
 
             content_ids: list[int] | None
             if options.targets_subset:
-                content_ids = [content.id for content in content_rows]
+                content_ids = [content.id for content in content_rows if content.id is not None]
             else:
                 content_ids = None
 
@@ -147,7 +148,7 @@ def perform_reset(options: ResetOptions) -> ResetResult:
                     created_tasks=created_tasks,
                 )
 
-            reset_payload = {
+            reset_payload: dict[object, object] = {
                 Content.status: ContentStatus.NEW.value,
                 Content.error_message: None,
                 Content.retry_count: 0,
@@ -161,7 +162,10 @@ def perform_reset(options: ResetOptions) -> ResetResult:
             if content_ids is not None:
                 content_update_query = content_update_query.filter(Content.id.in_(content_ids))
 
-            reset_count = content_update_query.update(reset_payload, synchronize_session=False)
+            reset_count = content_update_query.update(
+                cast(Any, reset_payload),
+                synchronize_session=False,
+            )
 
             if not content_rows:
                 content_rows = list(

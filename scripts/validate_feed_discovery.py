@@ -18,7 +18,7 @@ from app.models.feed_discovery import (
     DiscoveryLanePlan,
     DiscoveryQuery,
 )
-from app.models.schema import ContentFavorites, FeedDiscoveryRun
+from app.models.schema import ContentKnowledgeSave, FeedDiscoveryRun
 from app.services.exa_client import ExaSearchResult
 from app.services.feed_discovery import FeedDiscoveryDeps, run_feed_discovery
 
@@ -33,7 +33,9 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _stub_direction_selector(db_session, user_id: int) -> DiscoveryDirectionPlan:
-    rows = db_session.query(ContentFavorites).filter(ContentFavorites.user_id == user_id).all()
+    rows = (
+        db_session.query(ContentKnowledgeSave).filter(ContentKnowledgeSave.user_id == user_id).all()
+    )
     ids = [row.content_id for row in rows]
     midpoint = max(1, len(ids) // 2)
     return DiscoveryDirectionPlan(
@@ -163,9 +165,9 @@ def _resolve_user_id(args: argparse.Namespace) -> int | None:
     min_favorites = max(settings.discovery_min_favorites, 1)
     with get_db() as db:
         row = (
-            db.query(ContentFavorites.user_id)
-            .group_by(ContentFavorites.user_id)
-            .having(func.count(ContentFavorites.id) >= min_favorites)
+            db.query(ContentKnowledgeSave.user_id)
+            .group_by(ContentKnowledgeSave.user_id)
+            .having(func.count(ContentKnowledgeSave.id) >= min_favorites)
             .first()
         )
         return row[0] if row else None
@@ -219,10 +221,14 @@ def main() -> None:
         )
         deps = FeedDiscoveryDeps(
             direction_selector=lambda db, user_id: _stub_direction_selector(db, user_id),
-            lane_planner=_stub_lane_planner,
-            candidate_extractor=_stub_candidate_extractor,
+            lane_planner=lambda db, user_id, plan: _stub_lane_planner(plan),
+            candidate_extractor=lambda db, user_id, lane, results: _stub_candidate_extractor(
+                lane, results
+            ),
             exa_search_fn=_stub_exa_search,
-            candidate_validator=_stub_candidate_validator,
+            candidate_validator=lambda db, user_id, candidates, source_type: (
+                _stub_candidate_validator(db, user_id, list(candidates), source_type)
+            ),
         )
         result = run_feed_discovery(user_id=user_id, trigger="manual", deps=deps)
 

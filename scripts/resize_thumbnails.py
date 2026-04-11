@@ -56,15 +56,16 @@ def generate_thumbnail(source_path: Path, dest_path: Path) -> bool:
     """
     try:
         with Image.open(source_path) as img:
+            working_img: Image.Image = img
             # Convert to RGB if necessary (for PNG with transparency)
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
+            if working_img.mode in ("RGBA", "P"):
+                working_img = working_img.convert("RGB")
 
             # Use LANCZOS resampling for high-quality downscaling
-            img.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+            working_img.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
 
             # Save with optimization
-            img.save(dest_path, "PNG", optimize=True)
+            working_img.save(dest_path, "PNG", optimize=True)
 
         return True
 

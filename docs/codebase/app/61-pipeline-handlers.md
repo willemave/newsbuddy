@@ -22,7 +22,6 @@ Concrete queue task handlers that translate task envelopes into service calls or
 | `app/pipeline/handlers/discover_feeds.py` | `DiscoverFeedsHandler` | Feed discovery task handler. |
 | `app/pipeline/handlers/download_audio.py` | `DownloadAudioHandler` | Podcast audio download task handler. |
 | `app/pipeline/handlers/fetch_discussion.py` | `FetchDiscussionHandler` | Discussion fetch task handler. |
-| `app/pipeline/handlers/generate_news_digest.py` | `GenerateNewsDigestHandler` | Task handler for news-native per-user digest generation. |
 | `app/pipeline/handlers/generate_image.py` | `GenerateImageHandler` | Image generation task handler. |
 | `app/pipeline/handlers/onboarding_discover.py` | `OnboardingDiscoverHandler` | Onboarding discovery enrichment task handler. |
 | `app/pipeline/handlers/process_content.py` | `ProcessContentHandler` | Content processing task handler. |

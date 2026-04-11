@@ -10,6 +10,7 @@ import os
 import sys
 from datetime import UTC, datetime
 from time import perf_counter
+from typing import Any
 
 # Add parent directory so we can import from app
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,7 +33,7 @@ def _get_backpressure_status() -> dict[str, object]:
     return get_queue_service().get_backpressure_status()
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Run scrapers to populate content links")
     parser.add_argument(
         "--scrapers",
@@ -102,7 +103,7 @@ def main():
                         },
                     ),
                 )
-                return
+                return 0
 
             logger.info(
                 "Scraper cron run started",
@@ -121,7 +122,7 @@ def main():
             logger.info(f"Available scrapers: {', '.join(available_scrapers)}")
 
             scraper_results: dict[str, int] = {}
-            scraper_stats: dict[str, object] = {}
+            scraper_stats: dict[str, Any] = {}
             scrapers_to_run = args.scrapers or available_scrapers
             stopped_due_to_backpressure = False
 

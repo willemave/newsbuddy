@@ -326,10 +326,14 @@ def main() -> None:
                     key_points.append(text)
 
             print(f"[{i + 1}/{len(items)}] {title[:60]}...")
+            content_id = content.id
+            if content_id is None:
+                print("    ERROR: missing content id")
+                continue
 
             result = generate_svg_infographic(
                 agent=agent,
-                content_id=content.id,
+                content_id=content_id,
                 title=title,
                 key_points=key_points,
             )

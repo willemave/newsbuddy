@@ -245,11 +245,13 @@ def detach_apple_signin(args: argparse.Namespace) -> int:
         normalized_email = normalize_email_input(args.email)
         user = load_user_by_email(db, normalized_email)
         email_slug = build_email_slug(normalized_email)
+        if user.apple_id is None:
+            raise ValueError(f"User {user.id} does not have an apple_id to detach.")
+        if user.id is None:
+            raise ValueError("User must have an id before detaching Apple Sign In.")
 
         if user.apple_id.startswith(DETACHED_APPLE_ID_PREFIX):
-            raise ValueError(
-                f"User {user.id} already has a detached apple_id: {user.apple_id}"
-            )
+            raise ValueError(f"User {user.id} already has a detached apple_id: {user.apple_id}")
 
         detached_apple_id = build_detached_apple_id(
             user_id=user.id,

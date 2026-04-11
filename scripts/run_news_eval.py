@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime
 from itertools import combinations
 from pathlib import Path
@@ -122,7 +123,7 @@ def _build_news_item(record: dict[str, Any]) -> NewsItem:
 
 def _pairwise_sets(
     item_ids: list[int],
-    labels_by_id: dict[int, str | None],
+    labels_by_id: Mapping[int, str | None],
 ) -> set[tuple[int, int]]:
     pairs: set[tuple[int, int]] = set()
     for left, right in combinations(sorted(item_ids), 2):
@@ -235,9 +236,12 @@ def _cluster_feed_items(
 ) -> list[list[NewsItem]]:
     representatives: list[NewsItem] = []
     clusters_by_representative_id: dict[int, list[NewsItem]] = {}
-    ordered_items = sorted(items, key=lambda item: (item.ingested_at or datetime.min, item.id))
+    ordered_items = sorted(items, key=lambda item: (item.ingested_at or datetime.min, item.id or 0))
 
     for item in ordered_items:
+        item_id = item.id
+        if item_id is None:
+            raise ValueError("News item missing id")
         representative = _find_related_representative(
             item,
             representatives,
@@ -250,9 +254,12 @@ def _cluster_feed_items(
         )
         if representative is None:
             representatives.append(item)
-            clusters_by_representative_id[item.id] = [item]
+            clusters_by_representative_id[item_id] = [item]
             continue
-        clusters_by_representative_id[representative.id].append(item)
+        representative_id = representative.id
+        if representative_id is None:
+            raise ValueError("Representative item missing id")
+        clusters_by_representative_id[representative_id].append(item)
 
     return list(clusters_by_representative_id.values())
 
@@ -289,20 +296,19 @@ def _score_case(records: list[dict[str, Any]], *, args: argparse.Namespace) -> d
     for cluster_index, cluster in enumerate(predicted_clusters, start=1):
         label = f"pred:{cluster_index}"
         for item in cluster:
-            predicted_labels[item.id] = label
+            item_id = item.id
+            if item_id is None:
+                raise ValueError("Predicted cluster item missing id")
+            predicted_labels[item_id] = label
 
-    item_ids = [item.id for item in items]
+    item_ids = [item.id for item in items if item.id is not None]
     gold_pairs = _pairwise_sets(item_ids, gold_labels)
     predicted_pairs = _pairwise_sets(item_ids, predicted_labels)
     true_positive = len(gold_pairs & predicted_pairs)
     false_positive = len(predicted_pairs - gold_pairs)
     precision = true_positive / len(predicted_pairs) if predicted_pairs else 1.0
     recall = true_positive / len(gold_pairs) if gold_pairs else 1.0
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if precision + recall
-        else 0.0
-    )
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     over_merge_rate = false_positive / len(predicted_pairs) if predicted_pairs else 0.0
     pairwise_positive_pairs, item_count = _pairwise_positive_count(predicted_clusters)
     return {
@@ -372,9 +378,7 @@ def main() -> None:
                     "secondary_threshold": args.secondary_threshold,
                     "require_guard_for_primary": args.require_guard_for_primary,
                     "min_title_token_overlap": args.min_title_token_overlap,
-                    "allow_source_or_domain_shortcut": (
-                        not args.disable_source_or_domain_shortcut
-                    ),
+                    "allow_source_or_domain_shortcut": (not args.disable_source_or_domain_shortcut),
                     "block_conflicting_exact_keys": args.block_conflicting_exact_keys,
                 },
                 "summaries": summaries,

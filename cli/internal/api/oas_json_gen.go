@@ -8502,8 +8502,8 @@ func (s *SummaryKind) Decode(d *jx.Decoder) error {
 		*s = SummaryKindLongBullets
 	case SummaryKindLongEditorialNarrative:
 		*s = SummaryKindLongEditorialNarrative
-	case SummaryKindShortNewsDigest:
-		*s = SummaryKindShortNewsDigest
+	case SummaryKindShortNews:
+		*s = SummaryKindShortNews
 	default:
 		*s = SummaryKind(v)
 	}

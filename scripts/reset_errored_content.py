@@ -147,7 +147,7 @@ def reset_errored_content(
     settings = get_settings()
 
     # Create engine and session
-    engine = create_engine(settings.database_url)
+    engine = create_engine(str(settings.database_url))
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
     with SessionLocal() as db:
@@ -221,10 +221,11 @@ def reset_errored_content(
             if missing_summary_count:
                 print(f"  - {missing_summary_count} 'completed' but missing summary")
 
-            content_ids = [content.id for content in affected_content]
+            content_ids = [content.id for content in affected_content if content.id is not None]
             if return_raw_logs:
                 default_name = (
-                    f"reset_errored_content_raw_logs_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.jsonl"
+                    "reset_errored_content_raw_logs_"
+                    f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.jsonl"
                 )
                 output_path = raw_logs_output or os.path.join("outputs", default_name)
                 matched_lines, matched_files, manifest_path = export_raw_logs_for_content(
@@ -245,7 +246,7 @@ def reset_errored_content(
                     ctype = content.content_type
                     status = content.status
                     print(f"  - ID: {content.id}, Type: {ctype}, Status: {status}")
-                    print(f"    Source: {content.source}, URL: {content.url[:60]}...")
+                    print(f"    Source: {content.source}, URL: {(content.url or '')[:60]}...")
                     if content.error_message:
                         print(f"    Error: {content.error_message[:100]}...")
                 if len(affected_content) > 20:
@@ -309,7 +310,8 @@ def reset_errored_content(
             # Show summary by content type
             type_counts: dict[str, int] = {}
             for content in affected_content:
-                type_counts[content.content_type] = type_counts.get(content.content_type, 0) + 1
+                if content.content_type is not None:
+                    type_counts[content.content_type] = type_counts.get(content.content_type, 0) + 1
 
             print("\nContent reset by type:")
             for content_type, count in sorted(type_counts.items()):

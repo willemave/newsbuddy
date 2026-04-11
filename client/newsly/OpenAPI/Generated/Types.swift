@@ -6519,7 +6519,7 @@ internal enum Components {
             case longInterleaved = "long_interleaved"
             case longBullets = "long_bullets"
             case longEditorialNarrative = "long_editorial_narrative"
-            case shortNewsDigest = "short_news_digest"
+            case shortNews = "short_news"
         }
         /// Supported summary schema versions.
         ///

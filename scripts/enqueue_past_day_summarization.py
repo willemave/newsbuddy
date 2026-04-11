@@ -86,9 +86,9 @@ def enqueue_past_day_for_summarization(
             print("\nContent to be enqueued:")
             for item in content_items:
                 title_preview = item.title[:60] if item.title else "No title"
+                created_at = item.created_at.isoformat() if item.created_at else "unknown"
                 print(
-                    f"  [{item.content_type}] ID={item.id} {title_preview} "
-                    f"(created: {item.created_at.isoformat()})"
+                    f"  [{item.content_type}] ID={item.id} {title_preview} (created: {created_at})"
                 )
             return
 
@@ -109,16 +109,15 @@ def enqueue_past_day_for_summarization(
 
                 # Check if content has necessary data for summarization
                 skip_item = False
+                content_metadata = (
+                    content.content_metadata if isinstance(content.content_metadata, dict) else {}
+                )
 
-                if content.content_type == "podcast" and not content.content_metadata.get(
-                    "transcript"
-                ):
+                if content.content_type == "podcast" and not content_metadata.get("transcript"):
                     logger.warning(f"No transcript found for podcast {content.id}, skipping")
                     skipped_count += 1
                     skip_item = True
-                elif content.content_type == "article" and not content.content_metadata.get(
-                    "content"
-                ):
+                elif content.content_type == "article" and not content_metadata.get("content"):
                     logger.warning(f"No content found for article {content.id}, skipping")
                     skipped_count += 1
                     skip_item = True

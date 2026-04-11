@@ -43,7 +43,7 @@ Reusable SwiftUI building blocks for cards, summaries, markdown rendering, filte
 | `client/newsly/newsly/Views/Components/LoadingView.swift` | `struct LoadingView` | Types: `struct LoadingView` |
 | `client/newsly/newsly/Views/Components/LongFormCard.swift` | `struct LongFormCard` | Types: `struct LongFormCard` |
 | `client/newsly/newsly/Views/Components/LongFormCardStackView.swift` | `struct LongFormCardStackView` | Calculate which index a dot at position i should represent |
-| `client/newsly/newsly/Views/Components/NewsDigestDetailView.swift` | `struct NewsDigestDetailView` | Types: `struct NewsDigestDetailView` |
+| `client/newsly/newsly/Views/Components/NewsItemDetailView.swift` | `struct NewsItemDetailView` | Types: `struct NewsItemDetailView` |
 | `client/newsly/newsly/Views/Components/NewsGroupCard.swift` | `struct NewsGroupCard` | Format publication date for compact display |
 | `client/newsly/newsly/Views/Components/PagedCardView.swift` | `struct PagedCardView`, `struct GroupHeightPreferenceKey`, `reduce` | Types: `struct PagedCardView`, `struct GroupHeightPreferenceKey`. Functions: `reduce` |
 | `client/newsly/newsly/Views/Components/PlaceholderCard.swift` | `struct PlaceholderCard` | Types: `struct PlaceholderCard` |

@@ -30,7 +30,7 @@ def truncate_text(text: str, max_length: int = 50) -> str:
     return text[:max_length] + "..." if len(text) > max_length else text
 
 
-def format_json_field(data: dict[Any, Any], max_length: int = 100) -> str:
+def format_json_field(data: dict[Any, Any] | None, max_length: int = 100) -> str:
     """Format JSON field for table display."""
     if not data:
         return ""
@@ -50,12 +50,14 @@ def dump_content_table(console: Console) -> None:
 
         # Create summary statistics
         total_count = len(contents)
-        status_counts = {}
-        type_counts = {}
+        status_counts: dict[str, int] = {}
+        type_counts: dict[str, int] = {}
 
         for content in contents:
-            status_counts[content.status] = status_counts.get(content.status, 0) + 1
-            type_counts[content.content_type] = type_counts.get(content.content_type, 0) + 1
+            status = content.status or "unknown"
+            content_type = content.content_type or "unknown"
+            status_counts[status] = status_counts.get(status, 0) + 1
+            type_counts[content_type] = type_counts.get(content_type, 0) + 1
 
         # Display summary
         summary_table = Table(title="Content Summary", show_header=True)
@@ -92,6 +94,9 @@ def dump_content_table(console: Console) -> None:
 
         # Show latest 20 records
         for content in contents[:20]:
+            content_status = content.status or "unknown"
+            content_type = content.content_type or "unknown"
+
             # Format status with color
             status_style = {
                 ContentStatus.NEW.value: "blue",
@@ -99,27 +104,34 @@ def dump_content_table(console: Console) -> None:
                 ContentStatus.COMPLETED.value: "green",
                 ContentStatus.FAILED.value: "red",
                 ContentStatus.SKIPPED.value: "dim",
-            }.get(content.status, "white")
+            }.get(content_status, "white")
 
             # Format type with color
             type_style = {
                 ContentType.ARTICLE.value: "cyan",
                 ContentType.PODCAST.value: "magenta",
-            }.get(content.content_type, "white")
+            }.get(content_type, "white")
 
             checkout_info = "Yes" if content.checked_out_by else "No"
             created_str = content.created_at.strftime("%m/%d %H:%M") if content.created_at else ""
 
             content_table.add_row(
                 str(content.id),
-                f"[{type_style}]{content.content_type}[/{type_style}]",
-                f"[{status_style}]{content.status}[/{status_style}]",
+                f"[{type_style}]{content_type}[/{type_style}]",
+                f"[{status_style}]{content_status}[/{status_style}]",
                 truncate_text(content.title or "", 40),
-                truncate_text(content.url, 50),
+                truncate_text(content.url or "", 50),
                 checkout_info,
                 str(content.retry_count),
                 created_str,
-                format_json_field(content.content_metadata, 30),
+                format_json_field(
+                    (
+                        content.content_metadata
+                        if isinstance(content.content_metadata, dict)
+                        else None
+                    ),
+                    30,
+                ),
             )
 
         console.print(content_table)
@@ -136,12 +148,14 @@ def dump_processing_tasks_table(console: Console) -> None:
 
         # Create summary statistics
         total_count = len(tasks)
-        status_counts = {}
-        type_counts = {}
+        status_counts: dict[str, int] = {}
+        type_counts: dict[str, int] = {}
 
         for task in tasks:
-            status_counts[task.status] = status_counts.get(task.status, 0) + 1
-            type_counts[task.task_type] = type_counts.get(task.task_type, 0) + 1
+            status = task.status or "unknown"
+            task_type = task.task_type or "unknown"
+            status_counts[status] = status_counts.get(status, 0) + 1
+            type_counts[task_type] = type_counts.get(task_type, 0) + 1
 
         # Display summary
         summary_table = Table(title="Processing Tasks Summary", show_header=True)
@@ -178,13 +192,15 @@ def dump_processing_tasks_table(console: Console) -> None:
 
         # Show latest 20 records
         for task in tasks[:20]:
+            task_status = task.status or "unknown"
+
             # Format status with color
             status_style = {
                 "pending": "blue",
                 "running": "yellow",
                 "completed": "green",
                 "failed": "red",
-            }.get(task.status, "white")
+            }.get(task_status, "white")
 
             created_str = task.created_at.strftime("%m/%d %H:%M") if task.created_at else ""
             started_str = task.started_at.strftime("%m/%d %H:%M") if task.started_at else ""
@@ -192,8 +208,8 @@ def dump_processing_tasks_table(console: Console) -> None:
 
             tasks_table.add_row(
                 str(task.id),
-                task.task_type,
-                f"[{status_style}]{task.status}[/{status_style}]",
+                task.task_type or "unknown",
+                f"[{status_style}]{task_status}[/{status_style}]",
                 str(task.content_id) if task.content_id else "",
                 str(task.retry_count),
                 created_str,
@@ -209,65 +225,65 @@ def show_detailed_record(console: Console, table_name: str, record_id: int) -> N
     """Show detailed view of a specific record."""
     with get_db() as db:
         if table_name.lower() == "content":
-            record = db.query(Content).filter(Content.id == record_id).first()
-            if not record:
+            content_record = db.query(Content).filter(Content.id == record_id).first()
+            if not content_record:
                 console.print(f"[red]Content record with ID {record_id} not found.[/red]")
                 return
 
             # Display detailed content
-            console.print(Panel(f"[bold]Content Record #{record.id}[/bold]"))
+            console.print(Panel(f"[bold]Content Record #{content_record.id}[/bold]"))
 
             details = [
-                f"[cyan]Type:[/cyan] {record.content_type}",
-                f"[cyan]Status:[/cyan] {record.status}",
-                f"[cyan]Title:[/cyan] {record.title or 'N/A'}",
-                f"[cyan]URL:[/cyan] {record.url}",
-                f"[cyan]Retry Count:[/cyan] {record.retry_count}",
-                f"[cyan]Checked Out By:[/cyan] {record.checked_out_by or 'None'}",
-                f"[cyan]Checked Out At:[/cyan] {record.checked_out_at or 'None'}",
-                f"[cyan]Created At:[/cyan] {record.created_at}",
-                f"[cyan]Updated At:[/cyan] {record.updated_at}",
-                f"[cyan]Processed At:[/cyan] {record.processed_at or 'None'}",
+                f"[cyan]Type:[/cyan] {content_record.content_type or 'unknown'}",
+                f"[cyan]Status:[/cyan] {content_record.status or 'unknown'}",
+                f"[cyan]Title:[/cyan] {content_record.title or 'N/A'}",
+                f"[cyan]URL:[/cyan] {content_record.url or 'N/A'}",
+                f"[cyan]Retry Count:[/cyan] {content_record.retry_count}",
+                f"[cyan]Checked Out By:[/cyan] {content_record.checked_out_by or 'None'}",
+                f"[cyan]Checked Out At:[/cyan] {content_record.checked_out_at or 'None'}",
+                f"[cyan]Created At:[/cyan] {content_record.created_at}",
+                f"[cyan]Updated At:[/cyan] {content_record.updated_at}",
+                f"[cyan]Processed At:[/cyan] {content_record.processed_at or 'None'}",
             ]
 
-            if record.error_message:
-                details.append(f"[cyan]Error Message:[/cyan] {record.error_message}")
+            if content_record.error_message:
+                details.append(f"[cyan]Error Message:[/cyan] {content_record.error_message}")
 
             for detail in details:
                 console.print(detail)
 
-            if record.content_metadata:
+            if content_record.content_metadata:
                 console.print("\n[cyan]Metadata:[/cyan]")
-                console.print(JSON.from_data(record.content_metadata))
+                console.print(JSON.from_data(content_record.content_metadata))
 
         elif table_name.lower() == "task":
-            record = db.query(ProcessingTask).filter(ProcessingTask.id == record_id).first()
-            if not record:
+            task_record = db.query(ProcessingTask).filter(ProcessingTask.id == record_id).first()
+            if not task_record:
                 console.print(f"[red]ProcessingTask record with ID {record_id} not found.[/red]")
                 return
 
             # Display detailed task
-            console.print(Panel(f"[bold]Processing Task #{record.id}[/bold]"))
+            console.print(Panel(f"[bold]Processing Task #{task_record.id}[/bold]"))
 
             details = [
-                f"[cyan]Task Type:[/cyan] {record.task_type}",
-                f"[cyan]Status:[/cyan] {record.status}",
-                f"[cyan]Content ID:[/cyan] {record.content_id or 'None'}",
-                f"[cyan]Retry Count:[/cyan] {record.retry_count}",
-                f"[cyan]Created At:[/cyan] {record.created_at}",
-                f"[cyan]Started At:[/cyan] {record.started_at or 'None'}",
-                f"[cyan]Completed At:[/cyan] {record.completed_at or 'None'}",
+                f"[cyan]Task Type:[/cyan] {task_record.task_type or 'unknown'}",
+                f"[cyan]Status:[/cyan] {task_record.status or 'unknown'}",
+                f"[cyan]Content ID:[/cyan] {task_record.content_id or 'None'}",
+                f"[cyan]Retry Count:[/cyan] {task_record.retry_count}",
+                f"[cyan]Created At:[/cyan] {task_record.created_at}",
+                f"[cyan]Started At:[/cyan] {task_record.started_at or 'None'}",
+                f"[cyan]Completed At:[/cyan] {task_record.completed_at or 'None'}",
             ]
 
-            if record.error_message:
-                details.append(f"[cyan]Error Message:[/cyan] {record.error_message}")
+            if task_record.error_message:
+                details.append(f"[cyan]Error Message:[/cyan] {task_record.error_message}")
 
             for detail in details:
                 console.print(detail)
 
-            if record.payload:
+            if task_record.payload:
                 console.print("\n[cyan]Payload:[/cyan]")
-                console.print(JSON.from_data(record.payload))
+                console.print(JSON.from_data(task_record.payload))
 
 
 def main():

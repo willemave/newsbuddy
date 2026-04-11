@@ -59,7 +59,7 @@ def extract_content_identifiers(errors: list[dict[str, Any]]) -> set[str]:
 def get_errored_content(db_path: str, identifiers: set[str]) -> list[Content]:
     """Query database for errored content."""
     engine = create_engine(db_path)
-    content_list = []
+    content_list: list[Content] = []
 
     with Session(engine) as session:
         # Query by URL

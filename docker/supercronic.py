@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import sys
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -60,4 +61,4 @@ async def _main(path: Path) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(_main(Path(os.sys.argv[1])))
+    asyncio.run(_main(Path(sys.argv[1])))

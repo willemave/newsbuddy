@@ -136,7 +136,7 @@ def render_ascii_to_image(
     draw = ImageDraw.Draw(img)
 
     # Try to use a monospace font
-    font = None
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont | None = None
     font_paths = [
         "/System/Library/Fonts/Monaco.ttf",
         "/System/Library/Fonts/Menlo.ttc",
@@ -172,13 +172,13 @@ def render_ascii_to_image(
     start_y = (height - total_text_height) // 2
 
     # Find max line width for centering
-    max_line_width = 0
+    max_line_width = 0.0
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
         line_width = bbox[2] - bbox[0]
-        max_line_width = max(max_line_width, line_width)
+        max_line_width = max(max_line_width, float(line_width))
 
-    start_x = (width - max_line_width) // 2
+    start_x = int((width - max_line_width) // 2)
 
     # Draw each line
     for i, line in enumerate(lines):
@@ -455,10 +455,14 @@ def main() -> None:
                     quotes.append(text)
 
             print(f"[{i + 1}/{len(items)}] {title[:60]}...")
+            content_id = content.id
+            if content_id is None:
+                print("    ERROR: missing content id")
+                continue
 
             result = generate_ascii_infographic(
                 agent=agent,
-                content_id=content.id,
+                content_id=content_id,
                 title=title,
                 key_points=key_points,
                 quotes=quotes,

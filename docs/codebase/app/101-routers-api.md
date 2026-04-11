@@ -22,7 +22,6 @@ User-facing JSON API surface for content, chat, discovery, onboarding, voice, in
 | `app/routers/api/content_actions.py` | `convert_news_to_article`, `download_more_from_series`, `get_tweet_suggestions` | Content transformation and action endpoints. |
 | `app/routers/api/content_detail.py` | `get_content_detail`, `get_content_discussion`, `get_chatgpt_url` | Content detail and chat URL endpoints. |
 | `app/routers/api/content_list.py` | `list_contents`, `search_contents`, `search_podcast_episode_matches` | Content listing and search endpoints. |
-| `app/routers/api/news_digests.py` | `list_news_digests`, `mark_daily_digest_read`, `mark_daily_digest_unread`, `get_daily_digest_voice_summary`, `get_daily_digest_voice_summary_audio`, `start_daily_digest_dig_deeper` | Daily news digest list and read-status endpoints. |
 | `app/routers/api/discovery.py` | `get_discovery_suggestions`, `get_discovery_history`, `search_discovery_podcast_episodes`, `refresh_discovery`, `subscribe_discovery_suggestions`, `add_discovery_items`, `dismiss_discovery_suggestions`, `clear_discovery_suggestions` | Discovery suggestions endpoints. |
 | `app/routers/api/favorites.py` | `toggle_favorite`, `unfavorite_content`, `get_favorites` | Favorites management endpoints. |
 | `app/routers/api/integrations.py` | `get_x_connection`, `start_x_oauth_flow`, `exchange_x_oauth_code`, `disconnect_x` | Integration endpoints for external providers (X/Twitter). |

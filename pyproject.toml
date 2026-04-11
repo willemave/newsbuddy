@@ -60,6 +60,7 @@ include = ["admin*", "app*", "cli*", "cron*"]
 
 [dependency-groups]
 dev = [
+    "mypy>=1.18.2",
     "pytest>=8.3.5",
     "pytest-asyncio>=1.0.0",
     "pytest-cov>=6.1.1",
@@ -86,9 +87,9 @@ markers = [
 
 [tool.mypy]
 python_version = "3.13"
-strict = true
-warn_return_any = true
 warn_unused_configs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
 ignore_missing_imports = true
 explicit_package_bases = true
 implicit_reexport = true

@@ -12,6 +12,7 @@ Usage:
 import argparse
 import os
 import sys
+from typing import Literal, cast
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -25,9 +26,10 @@ from app.services.scraper_configs import (
 )
 
 logger = get_logger(__name__)
+AllowedScraperType = Literal["substack", "atom", "podcast_rss", "youtube", "reddit"]
 
 
-def list_user_configs(user_id: int):
+def list_user_configs(user_id: int) -> None:
     """List all scraper configs for a user."""
     with get_db() as db:
         user = db.query(User).filter(User.id == user_id).first()
@@ -44,9 +46,10 @@ def list_user_configs(user_id: int):
 
         for config in configs:
             status = "✓ active" if config.is_active else "✗ inactive"
+            config_map = config.config if isinstance(config.config, dict) else {}
             logger.info(f"\n  [{config.id}] {config.display_name or 'Unnamed'} ({status})")
             logger.info(f"      Type: {config.scraper_type}")
-            logger.info(f"      URL: {config.feed_url or config.config.get('feed_url', 'N/A')}")
+            logger.info(f"      URL: {config.feed_url or config_map.get('feed_url', 'N/A')}")
             logger.info(f"      Config: {config.config}")
 
 
@@ -56,7 +59,7 @@ def add_config(
     feed_url: str,
     display_name: str | None,
     limit: int,
-):
+) -> bool:
     """Add a new scraper config for a user."""
     with get_db() as db:
         user = db.query(User).filter(User.id == user_id).first()
@@ -66,7 +69,7 @@ def add_config(
 
         try:
             config_data = CreateUserScraperConfig(
-                scraper_type=scraper_type,
+                scraper_type=cast(AllowedScraperType, scraper_type),
                 display_name=display_name,
                 config={
                     "feed_url": feed_url,

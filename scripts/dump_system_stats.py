@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -15,13 +16,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # Ensure application package imports resolve when executed as a script
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sqlalchemy import func  # noqa: E402
+from sqlalchemy import Row, func  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from app.core.db import get_session_factory  # noqa: E402
 from app.models.schema import (  # noqa: E402
     Content,
-    ContentFavorites,
+    ContentKnowledgeSave,
     ContentReadStatus,
     ContentUnlikes,
     ProcessingTask,
@@ -154,7 +155,7 @@ def parse_args(argv: list[str] | None = None) -> StatsOptions:
     )
 
 
-def _result_dict(rows: list[tuple[Any, int]]) -> dict[str, int]:
+def _result_dict(rows: Sequence[tuple[Any, int] | Row[tuple[Any, int]]]) -> dict[str, int]:
     """Convert grouped SQL rows into a normalized dictionary."""
 
     result: dict[str, int] = {}
@@ -165,7 +166,7 @@ def _result_dict(rows: list[tuple[Any, int]]) -> dict[str, int]:
 
 
 def _collect_labeled_counts(
-    rows: list[tuple[Any, int]],
+    rows: Sequence[tuple[Any, int] | Row[tuple[Any, int]]],
 ) -> list[LabeledCount]:
     """Convert grouped SQL rows into labeled count models."""
 
@@ -315,7 +316,7 @@ def collect_engagement_stats(session: Session) -> EngagementStats:
     """Return aggregate counts for engagement tables."""
 
     read_marks = int(session.query(func.count(ContentReadStatus.id)).scalar() or 0)
-    favorites = int(session.query(func.count(ContentFavorites.id)).scalar() or 0)
+    favorites = int(session.query(func.count(ContentKnowledgeSave.id)).scalar() or 0)
     unlikes = int(session.query(func.count(ContentUnlikes.id)).scalar() or 0)
 
     return EngagementStats(

@@ -46,7 +46,7 @@ PromptType = Literal[
     "long_bullets",
     "interleaved",
     "structured",
-    "news_digest",
+    "news",
     "editorial_narrative",
 ]
 
@@ -193,13 +193,13 @@ def parse_args() -> argparse.Namespace:
         "--custom-news-output-type",
         type=str,
         choices=[
-            "news_digest",
+            "news",
             "long_bullets",
             "interleaved",
             "structured",
             "editorial_narrative",
         ],
-        default="news_digest",
+        default="news",
         help="Output schema type to use when custom news prompts are configured.",
     )
     return parser.parse_args()
@@ -379,6 +379,8 @@ def coerce_int(value: object | None) -> int | None:
     """
     if value is None:
         return None
+    if not isinstance(value, (int, float, str, bytes, bytearray)):
+        return None
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -454,7 +456,7 @@ def resolve_builtin_prompt_settings(
         Tuple of prompt type, max bullet points, and max quotes.
     """
     if content_type == "news":
-        return "news_digest", 4, 0
+        return "news", 4, 0
 
     if longform_template == "interleaved_v2":
         return "interleaved", 8, 8
@@ -561,7 +563,9 @@ def resolve_prompt_for_source(
     return system_prompt, user_template, prompt_type
 
 
-def resolve_available_models(models: list[str]) -> tuple[list[tuple[str, str]], list[dict[str, str]]]:
+def resolve_available_models(
+    models: list[str],
+) -> tuple[list[tuple[str, str]], list[dict[str, str]]]:
     """Filter configured models by provider API key availability.
 
     Args:
@@ -672,7 +676,7 @@ def select_sources(
     """
     with get_db() as db:
         if content_ids:
-            rows = db.query(Content).filter(Content.id.in_(content_ids)).all()  # type: ignore[arg-type]
+            rows = db.query(Content).filter(Content.id.in_(content_ids)).all()
             row_by_id = {row.id: row for row in rows}
 
             sources: list[Any] = []
@@ -1236,7 +1240,9 @@ def render_html(report_payload: dict[str, Any]) -> str:
 
     model_names = ", ".join(f"{m['label']} ({m['alias']})" for m in models) or "None"
     skipped_text = (
-        " | ".join(f"{item['alias']}: {item['reason']}" for item in skipped_models) if skipped_models else "None"
+        " | ".join(f"{item['alias']}: {item['reason']}" for item in skipped_models)
+        if skipped_models
+        else "None"
     )
     prompt_cards = "".join(
         f"""
@@ -1632,7 +1638,7 @@ def render_html(report_payload: dict[str, Any]) -> str:
       <p class="detail"><strong>Generated:</strong> {html_escape(report_payload["run_completed_at"])}</p>
       <p class="detail"><strong>Models:</strong> {html_escape(model_names)}</p>
       <p class="detail"><strong>Skipped Models:</strong> {html_escape(skipped_text)}</p>
-      <p class="detail"><strong>Config:</strong> content_types={html_escape(','.join(config["content_types"]))}, sample_size={config["sample_size"]}, recent_pool_size={config["recent_pool_size"]}, longform_template={html_escape(config["longform_template"])}, seed={html_escape(str(config["seed"]))}</p>
+      <p class="detail"><strong>Config:</strong> content_types={html_escape(",".join(config["content_types"]))}, sample_size={config["sample_size"]}, recent_pool_size={config["recent_pool_size"]}, longform_template={html_escape(config["longform_template"])}, seed={html_escape(str(config["seed"]))}</p>
       <div class="grid">
         <div class="stat"><div class="label">Items</div><div class="value">{aggregate["items_total"]}</div></div>
         <div class="stat"><div class="label">Cells Total</div><div class="value">{aggregate["cells_total"]}</div></div>
@@ -1649,7 +1655,7 @@ def render_html(report_payload: dict[str, Any]) -> str:
         </div>
       </section>
     </section>
-    {''.join(sections)}
+    {"".join(sections)}
   </main>
 </body>
 </html>"""

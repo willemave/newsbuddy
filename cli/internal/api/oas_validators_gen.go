@@ -1311,7 +1311,7 @@ func (s SummaryKind) Validate() error {
 		return nil
 	case "long_editorial_narrative":
 		return nil
-	case "short_news_digest":
+	case "short_news":
 		return nil
 	default:
 		return errors.Errorf("invalid value: %v", s)
