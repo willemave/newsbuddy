@@ -163,6 +163,7 @@ def test_processing_count_includes_news_and_new_status(client, db_session, test_
                 ingest_key="processing-news-2",
                 visibility_scope="user",
                 owner_user_id=test_user.id,
+                user_scraper_config_id=10,
                 source_type="reddit",
                 status="processing",
                 ingested_at=datetime.now(UTC).replace(tzinfo=None),
@@ -183,8 +184,8 @@ def test_processing_count_includes_news_and_new_status(client, db_session, test_
     payload = response.json()
 
     assert payload["long_form_count"] == 3
-    assert payload["news_count"] == 3
-    assert payload["processing_count"] == 6
+    assert payload["news_count"] == 1
+    assert payload["processing_count"] == 4
 
 
 def test_processing_count_excludes_orphaned_stale_rows(client, db_session, test_user) -> None:
@@ -358,6 +359,46 @@ def test_unread_counts_use_visible_news_items(client, db_session, test_user) -> 
     db_session.add(news_item)
     db_session.commit()
     db_session.refresh(news_item)
+
+    response = client.get("/api/content/stats/unread-counts")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["news"] == 1
+
+
+def test_unread_counts_prefer_user_scoped_scraper_news_when_available(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    db_session.add(
+        NewsItem(
+            ingest_key="global-news-unread",
+            visibility_scope="global",
+            source_type="hackernews",
+            status="ready",
+            article_title="Global unread",
+            summary_title="Global unread",
+            summary_text="Summary",
+            ingested_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+    )
+    db_session.add(
+        NewsItem(
+            ingest_key="user-news-unread",
+            visibility_scope="user",
+            owner_user_id=test_user.id,
+            user_scraper_config_id=10,
+            source_type="reddit",
+            source_label="creativecoding",
+            status="ready",
+            article_title="User unread",
+            summary_title="User unread",
+            summary_text="Summary",
+            ingested_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+    )
+    db_session.commit()
 
     response = client.get("/api/content/stats/unread-counts")
     assert response.status_code == 200

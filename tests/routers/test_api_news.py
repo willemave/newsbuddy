@@ -39,6 +39,11 @@ def _create_news_item(
     raw_metadata: dict | None = None,
     published_at: datetime | None = None,
     ingested_at: datetime | None = None,
+    visibility_scope: str = "global",
+    owner_user_id: int | None = None,
+    user_scraper_config_id: int | None = None,
+    source_type: str = "hackernews",
+    source_label: str = "Hacker News",
 ) -> NewsItem:
     metadata = {
         "cluster": {
@@ -55,10 +60,12 @@ def _create_news_item(
 
     item = NewsItem(
         ingest_key=ingest_key,
-        visibility_scope="global",
-        platform="hackernews",
-        source_type="hackernews",
-        source_label="Hacker News",
+        visibility_scope=visibility_scope,
+        owner_user_id=owner_user_id,
+        user_scraper_config_id=user_scraper_config_id,
+        platform=source_type,
+        source_type=source_type,
+        source_label=source_label,
         source_external_id=ingest_key,
         canonical_item_url=f"https://news.ycombinator.com/item?id={ingest_key}",
         canonical_story_url=f"https://example.com/{ingest_key}",
@@ -228,6 +235,62 @@ def test_list_news_items_uses_denormalized_comment_count_when_available(
     payload = response.json()
     assert [item["id"] for item in payload["contents"]] == [news_item.id]
     assert payload["contents"][0]["comment_count"] == 42
+
+
+def test_list_news_items_prefers_user_scoped_scraper_news_when_available(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    _create_news_item(
+        db_session,
+        ingest_key="global-story",
+        summary_title="Global story",
+    )
+    user_item = _create_news_item(
+        db_session,
+        ingest_key="user-story",
+        summary_title="User story",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        user_scraper_config_id=99,
+        source_type="reddit",
+        source_label="creativecoding",
+    )
+    db_session.commit()
+
+    response = client.get("/api/news/items", params={"read_filter": "unread"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["id"] for item in payload["contents"]] == [user_item.id]
+
+
+def test_list_news_items_excludes_global_reddit_items(
+    client,
+    db_session,
+) -> None:
+    _create_news_item(
+        db_session,
+        ingest_key="global-hn-story",
+        summary_title="Global hacker news story",
+        source_type="hackernews",
+        source_label="Hacker News",
+    )
+    _create_news_item(
+        db_session,
+        ingest_key="global-reddit-story",
+        summary_title="Global reddit story",
+        source_type="reddit",
+        source_label="MachineLearning",
+    )
+    db_session.commit()
+
+    response = client.get("/api/news/items", params={"read_filter": "unread"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["title"] for item in payload["contents"]] == ["Global hacker news story"]
 
 
 def test_get_news_item_detail_includes_cluster_metadata(client, db_session) -> None:

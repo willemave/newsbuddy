@@ -17,6 +17,7 @@ from app.core.observability import bound_log_context, build_log_extra, get_task_
 from app.core.settings import get_settings
 from app.pipeline.dispatcher import TaskDispatcher
 from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
+from app.pipeline.handlers.backfill_feeds import BackfillFeedsHandler
 from app.pipeline.handlers.dig_deeper import DigDeeperHandler
 from app.pipeline.handlers.discover_feeds import DiscoverFeedsHandler
 from app.pipeline.handlers.download_audio import DownloadAudioHandler
@@ -136,6 +137,7 @@ class SequentialTaskProcessor:
         """Build task handlers for dispatching."""
         return [
             ScrapeHandler(),
+            BackfillFeedsHandler(),
             AnalyzeUrlHandler(),
             ProcessContentHandler(),
             EnrichNewsItemArticleHandler(),

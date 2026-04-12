@@ -101,11 +101,14 @@ def test_reddit_config_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     )
 
     monkeypatch.setenv("NEWSAPP_CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(
+        RedditUnifiedScraper,
+        "_load_subreddits_from_db",
+        lambda self: [],
+    )
 
     scraper = RedditUnifiedScraper()
-    assert {target.subreddit: target.limit for target in scraper.targets} == {
-        "MachineLearning": 5
-    }
+    assert scraper.targets == []
 
     metrics = get_scraper_metrics()
     assert "Reddit" not in metrics or "scrape_config_missing" not in metrics["Reddit"]

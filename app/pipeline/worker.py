@@ -964,40 +964,6 @@ class ContentWorker:
         if resolution.source:
             metadata["youtube_equivalent_source"] = resolution.source
 
-    def _apply_resolved_youtube_equivalent(
-        self,
-        *,
-        content: ContentData,
-        original_youtube_url: str,
-        resolution: YouTubeEquivalentResolution,
-    ) -> None:
-        self._apply_youtube_resolution_metadata(
-            content=content,
-            original_youtube_url=original_youtube_url,
-            resolution=resolution,
-        )
-
-        if resolution.resolved_url:
-            content.url = cast(Any, resolution.resolved_url)
-        if content.source_url is None:
-            content.source_url = original_youtube_url
-        if resolution.resolved_title:
-            content.title = resolution.resolved_title
-        if resolution.platform:
-            content.metadata["platform"] = resolution.platform
-        if resolution.media_url:
-            content.metadata["audio_url"] = resolution.media_url
-        if resolution.media_format:
-            content.metadata["media_format"] = resolution.media_format
-
-        content.error_message = None
-        if resolution.content_type == "article":
-            content.content_type = ContentType.ARTICLE
-            content.metadata.pop("content_to_summarize", None)
-            content.metadata.pop("content_to_filter", None)
-        else:
-            content.content_type = ContentType.PODCAST
-
     def _prepare_youtube_podcast_for_summary(
         self,
         *,
@@ -1053,11 +1019,25 @@ class ContentWorker:
                 resolution=resolution,
             )
             if resolution.resolved_url:
-                self._apply_resolved_youtube_equivalent(
-                    content=content,
-                    original_youtube_url=original_youtube_url,
-                    resolution=resolution,
-                )
+                content.url = cast(Any, resolution.resolved_url)
+                if content.source_url is None:
+                    content.source_url = original_youtube_url
+                if resolution.resolved_title:
+                    content.title = resolution.resolved_title
+                if resolution.platform:
+                    content.metadata["platform"] = resolution.platform
+                if resolution.media_url:
+                    content.metadata["audio_url"] = resolution.media_url
+                if resolution.media_format:
+                    content.metadata["media_format"] = resolution.media_format
+
+                content.error_message = None
+                if resolution.content_type == "article":
+                    content.content_type = ContentType.ARTICLE
+                    content.metadata.pop("content_to_summarize", None)
+                    content.metadata.pop("content_to_filter", None)
+                else:
+                    content.content_type = ContentType.PODCAST
                 logger.info(
                     "Resolved YouTube podcast %s to %s via %s",
                     content.id,

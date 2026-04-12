@@ -17,11 +17,11 @@ struct HowItWorksModal: View {
         var items: [(String, String, String)] = []
 
         if feedCount > 0 {
-            let noun = feedCount == 1 ? "feed is" : "feeds are"
+            let noun = feedCount == 1 ? "source is" : "sources are"
             items.append((
                 "arrow.trianglehead.2.clockwise",
                 "Processing",
-                "Your \(feedCount) \(noun) being ingested now. New articles will appear shortly."
+                "Your \(feedCount) \(noun) being ingested now. New items will appear shortly."
             ))
         }
 

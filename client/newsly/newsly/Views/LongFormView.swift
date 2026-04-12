@@ -444,7 +444,7 @@ struct LongFormView: View {
 
         while !Task.isCancelled {
             do {
-                try await Task.sleep(for: .seconds(30))
+                try await Task.sleep(for: .seconds(5))
             } catch {
                 break
             }

@@ -19,7 +19,7 @@ from app.models.schema import (
     ProcessingTask,
 )
 from app.repositories.content_repository import apply_visibility_filters, build_visibility_context
-from app.services.news_feed import count_unread_news_items
+from app.services.news_feed import build_visible_news_item_filter, count_unread_news_items
 
 settings = get_settings()
 
@@ -101,15 +101,7 @@ def get_processing_count(db: Session, *, user_id: int) -> dict[str, int]:
                 ]
             )
         )
-        .filter(
-            or_(
-                NewsItem.visibility_scope == "global",
-                and_(
-                    NewsItem.visibility_scope == "user",
-                    NewsItem.owner_user_id == user_id,
-                ),
-            )
-        )
+        .filter(build_visible_news_item_filter(db, user_id=user_id))
         .scalar()
         or 0
     )

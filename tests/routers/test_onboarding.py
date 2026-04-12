@@ -58,6 +58,7 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     data = response.json()
     assert data["status"] == "queued"
     assert data["task_id"] == 42
+    assert data["configured_source_count"] == 3
     assert data["has_completed_onboarding"] is True
 
     configs = (
@@ -68,6 +69,11 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     assert any(config.scraper_type == "podcast_rss" for config in configs)
     assert any(config.scraper_type == "reddit" for config in configs)
 
+    backfill_calls = [call for call in calls if call[0] == TaskType.BACKFILL_FEEDS.value]
+    assert len(backfill_calls) == 1
+    assert backfill_calls[0][1]["user_id"] == test_user.id
+    assert len(backfill_calls[0][1]["config_ids"]) == 2
+    assert backfill_calls[0][1]["count"] == 2
     assert any(call[0] == TaskType.SCRAPE.value for call in calls)
     assert any(call[0] == TaskType.ONBOARDING_DISCOVER.value for call in calls)
     db_session.refresh(test_user)

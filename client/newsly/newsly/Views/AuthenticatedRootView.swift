@@ -39,7 +39,7 @@ struct AuthenticatedRootView: View {
                         }
                     }
                     if !response.hasCompletedNewUserTutorial {
-                        onboardingFeedCount = response.inboxCountEstimate
+                        onboardingFeedCount = response.configuredSourceCount
                         presentationState = .tutorial
                     } else {
                         presentationState = .content

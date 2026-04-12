@@ -36,6 +36,7 @@ class TaskType(StrEnum):
     """Queue task types."""
 
     SCRAPE = "scrape"
+    BACKFILL_FEEDS = "backfill_feeds"
     ANALYZE_URL = "analyze_url"
     PROCESS_CONTENT = "process_content"
     ENRICH_NEWS_ITEM_ARTICLE = "enrich_news_item_article"

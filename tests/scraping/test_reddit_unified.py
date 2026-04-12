@@ -52,7 +52,7 @@ def test_reddit_scraper_uses_praw(monkeypatch: pytest.MonkeyPatch, mocker: Mocke
     mocker.patch.object(reddit_module.praw, "Reddit", return_value=mock_reddit)
 
     scraper = RedditUnifiedScraper()
-    scraper.targets = [RedditTarget(subreddit="artificial", limit=5, visibility_scope="global")]
+    scraper.targets = [RedditTarget(subreddit="artificial", limit=5, visibility_scope="user")]
 
     items = scraper.scrape()
 
@@ -63,7 +63,7 @@ def test_reddit_scraper_uses_praw(monkeypatch: pytest.MonkeyPatch, mocker: Mocke
         item["metadata"]["discussion_url"]
         == "https://www.reddit.com/r/artificial/comments/abc123/story"
     )
-    assert item["visibility_scope"] == "global"
+    assert item["visibility_scope"] == "user"
     assert item["metadata"]["aggregator"]["metadata"]["score"] == 42
 
     mock_reddit.subreddit.assert_called_once_with("artificial")

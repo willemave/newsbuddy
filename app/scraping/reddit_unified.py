@@ -72,19 +72,12 @@ class RedditUnifiedScraper(BaseScraper):
         self._reddit_client: praw.Reddit | None = None
 
     def _load_subreddit_config(self) -> list[RedditTarget]:
-        """Load subreddit configuration from user configs and YAML defaults."""
+        """Load subreddit configuration from user scraper configs only."""
         file_targets = self._load_subreddits_from_file()
-
-        config_override = os.getenv("NEWSAPP_CONFIG_DIR")
-        if config_override and file_targets:
-            logger.info("Using config override at %s; skipping DB subreddits", config_override)
-            merged = file_targets
-            db_targets: list[RedditTarget] = []
-        else:
-            db_targets = self._load_subreddits_from_db()
-            merged = [*file_targets, *db_targets]
+        db_targets = self._load_subreddits_from_db()
+        merged = db_targets
         logger.info(
-            "Loaded %s subreddits (db=%s, file=%s)",
+            "Loaded %s Reddit subreddits (db=%s, file_ignored=%s)",
             len(merged),
             len(db_targets),
             len(file_targets),
@@ -122,7 +115,7 @@ class RedditUnifiedScraper(BaseScraper):
         return targets
 
     def _load_subreddits_from_file(self) -> list[RedditTarget]:
-        """Load subreddit configuration from YAML file."""
+        """Load subreddit configuration from YAML file for observability only."""
         config_path = self.config_path
         if not config_path.exists():
             _emit_missing_config_warning(config_path)
@@ -132,35 +125,15 @@ class RedditUnifiedScraper(BaseScraper):
             with open(config_path, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
 
-            subreddits_list = config.get("subreddits", [])
-            targets: list[RedditTarget] = []
-
-            for sub in subreddits_list:
-                if isinstance(sub, dict) and "name" in sub and "limit" in sub:
-                    name = sub["name"]
-                    limit = sub["limit"]
-                    if str(name).lower() == "front":
-                        logger.info("Skipping 'front' subreddit; front page scraping disabled")
-                        continue
-                    if isinstance(limit, int) and limit > 0:
-                        targets.append(
-                            RedditTarget(
-                                subreddit=name,
-                                limit=limit,
-                                visibility_scope="global",
-                            )
-                        )
-                    else:
-                        logger.warning(f"Invalid limit for subreddit {name}: {limit}")
-                        targets.append(
-                            RedditTarget(
-                                subreddit=name,
-                                limit=10,
-                                visibility_scope="global",
-                            )
-                        )
-
-            return targets
+            configured = config.get("subreddits", [])
+            configured_count = len(configured) if isinstance(configured, list) else 0
+            if configured_count > 0:
+                logger.info(
+                    "Ignoring %s file-configured Reddit targets; "
+                    "only user-scoped Reddit scraping is enabled",
+                    configured_count,
+                )
+            return []
 
         except Exception as e:
             log_scraper_event(

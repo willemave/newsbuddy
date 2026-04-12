@@ -7,6 +7,8 @@
 
 import Foundation
 
+private let discoveryPersonalizePollingIntervalNanoseconds: UInt64 = 500_000_000
+
 @MainActor
 final class DiscoveryPersonalizeViewModel: ObservableObject {
     enum Step: Int {
@@ -185,7 +187,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
                     break
                 }
 
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(nanoseconds: discoveryPersonalizePollingIntervalNanoseconds)
             }
         }
     }

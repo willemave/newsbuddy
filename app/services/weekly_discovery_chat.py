@@ -81,7 +81,7 @@ def _build_seed(db: Session, user: User) -> WeeklyDiscoverySeed:
             row.url,
         )
         for row in recent_rows
-        if row.url
+        if row.id is not None and row.url
     ]
 
     onboarding_run = (

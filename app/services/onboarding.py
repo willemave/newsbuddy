@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import DEFAULT_NEW_FEED_LIMIT
+from app.constants import DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT, DEFAULT_NEW_FEED_LIMIT
 from app.core.logging import get_logger
 from app.models.api.common import (
     OnboardingAudioDiscoverRequest,
@@ -33,6 +33,7 @@ from app.models.api.common import (
     OnboardingVoiceParseRequest,
     OnboardingVoiceParseResponse,
 )
+from app.models.internal.feed_backfill import FeedBatchBackfillRequest
 from app.models.internal.scraper_configs import CreateUserScraperConfig
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import (
@@ -43,6 +44,7 @@ from app.models.schema import (
     OnboardingDiscoveryLane,
     OnboardingDiscoveryRun,
     OnboardingDiscoverySuggestion,
+    UserScraperConfig,
 )
 from app.models.user import User
 from app.repositories.content_repository import apply_visibility_filters, build_visibility_context
@@ -94,10 +96,11 @@ DEFAULT_SOURCE_LIMITS = {
     "substack": 8,
     "podcast_rss": 5,
     "atom": 6,
-    "reddit": 8,
+    "reddit": 5,
 }
 NEWS_SEED_LIMIT = 100
 FEED_CONTENT_SEED_LIMIT = 30
+FEED_SUGGESTION_TYPES = {"substack", "atom", "podcast_rss"}
 
 SCRAPER_SOURCE_BY_TYPE = {
     "substack": "Substack",
@@ -557,6 +560,8 @@ def complete_onboarding(
     """
     normalized_username: str | None = None
     normalized_news_list_preference_prompt: str | None = None
+    configured_source_count = 0
+    feed_config_ids_for_backfill: list[int] = []
     should_update_twitter_username = request.twitter_username is not None
     if should_update_twitter_username:
         normalized_username = normalize_twitter_username(request.twitter_username)
@@ -579,21 +584,38 @@ def complete_onboarding(
             config_payload["feed_url"] = selection.feed_url
         if "limit" not in config_payload:
             config_payload["limit"] = DEFAULT_NEW_FEED_LIMIT
+        create_data = CreateUserScraperConfig(
+            scraper_type=selection.suggestion_type,
+            display_name=selection.title,
+            config=config_payload,
+        )
 
         try:
-            create_user_scraper_config(
+            config = create_user_scraper_config(
                 db,
                 user_id=user_id,
-                data=CreateUserScraperConfig(
-                    scraper_type=selection.suggestion_type,
-                    display_name=selection.title,
-                    config=config_payload,
-                ),
+                data=create_data,
             )
             created_types.add(selection.suggestion_type)
+            configured_source_count += 1
+            if selection.suggestion_type in FEED_SUGGESTION_TYPES and config.id is not None:
+                feed_config_ids_for_backfill.append(config.id)
         except ValueError as exc:
             if "already exists" in str(exc):
                 created_types.add(selection.suggestion_type)
+                configured_source_count += 1
+                existing_config = _find_existing_user_scraper_config(
+                    db,
+                    user_id=user_id,
+                    scraper_type=create_data.scraper_type,
+                    feed_url=create_data.config["feed_url"],
+                )
+                if (
+                    selection.suggestion_type in FEED_SUGGESTION_TYPES
+                    and existing_config is not None
+                    and existing_config.id is not None
+                ):
+                    feed_config_ids_for_backfill.append(existing_config.id)
                 continue
             logger.error(
                 "Failed to create onboarding scraper config",
@@ -617,16 +639,22 @@ def complete_onboarding(
 
     if request.selected_subreddits:
         created_types.add("reddit")
-        _create_reddit_configs(db, user_id, request.selected_subreddits)
+        configured_source_count += _create_reddit_configs(db, user_id, request.selected_subreddits)
 
-    sources_to_scrape = _resolve_scraper_sources(created_types)
-    task_id = None
     queue_gateway = get_task_queue_gateway()
+    task_id = _enqueue_onboarding_feed_backfill(
+        queue_gateway,
+        user_id=user_id,
+        config_ids=feed_config_ids_for_backfill,
+    )
+    sources_to_scrape = _resolve_scraper_sources(created_types - FEED_SUGGESTION_TYPES)
     if sources_to_scrape:
-        task_id = queue_gateway.enqueue(
+        scrape_task_id = queue_gateway.enqueue(
             TaskType.SCRAPE,
             payload={"sources": sources_to_scrape},
         )
+        if task_id is None:
+            task_id = scrape_task_id
 
     if request.profile_summary:
         queue_gateway.enqueue(
@@ -680,6 +708,7 @@ def complete_onboarding(
         status="queued",
         task_id=task_id,
         inbox_count_estimate=inbox_count_estimate,
+        configured_source_count=configured_source_count,
         longform_status="loading",
         has_completed_onboarding=True,
         has_completed_new_user_tutorial=_get_tutorial_flag(db, user_id),
@@ -1675,7 +1704,7 @@ def _fast_discover_from_defaults(
     response = OnboardingFastDiscoverResponse(
         recommended_pods=curated.get("podcast_rss", [])[: DEFAULT_SOURCE_LIMITS["podcast_rss"]],
         recommended_substacks=feed_defaults[:ONBOARDING_FEED_SUGGESTION_LIMIT],
-        recommended_subreddits=curated.get("reddit", []),
+        recommended_subreddits=curated.get("reddit", [])[: DEFAULT_SOURCE_LIMITS["reddit"]],
     )
     return _ensure_response_rationales(
         response,
@@ -2012,7 +2041,8 @@ def _defaults_to_selected_sources(
     return selections
 
 
-def _create_reddit_configs(db: Session, user_id: int, subreddits: list[str]) -> None:
+def _create_reddit_configs(db: Session, user_id: int, subreddits: list[str]) -> int:
+    configured_count = 0
     for subreddit in subreddits:
         cleaned = _normalize_subreddit_name(subreddit)
         if not cleaned:
@@ -2027,17 +2057,20 @@ def _create_reddit_configs(db: Session, user_id: int, subreddits: list[str]) -> 
                     config={"subreddit": cleaned, "limit": DEFAULT_NEW_FEED_LIMIT},
                 ),
             )
+            configured_count += 1
         except ValueError as exc:
-            if "already exists" not in str(exc):
-                logger.error(
-                    "Failed to create subreddit config",
-                    extra={
-                        "component": "onboarding",
-                        "operation": "create_subreddit",
-                        "item_id": str(user_id),
-                        "context_data": {"error": str(exc), "subreddit": cleaned},
-                    },
-                )
+            if "already exists" in str(exc):
+                configured_count += 1
+                continue
+            logger.error(
+                "Failed to create subreddit config",
+                extra={
+                    "component": "onboarding",
+                    "operation": "create_subreddit",
+                    "item_id": str(user_id),
+                    "context_data": {"error": str(exc), "subreddit": cleaned},
+                },
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "Unexpected error creating subreddit config",
@@ -2048,7 +2081,45 @@ def _create_reddit_configs(db: Session, user_id: int, subreddits: list[str]) -> 
                     "context_data": {"error": str(exc), "subreddit": cleaned},
                 },
             )
-    return None
+    return configured_count
+
+
+def _find_existing_user_scraper_config(
+    db: Session,
+    *,
+    user_id: int,
+    scraper_type: str,
+    feed_url: str,
+) -> UserScraperConfig | None:
+    return (
+        db.query(UserScraperConfig)
+        .filter(UserScraperConfig.user_id == user_id)
+        .filter(UserScraperConfig.scraper_type == scraper_type)
+        .filter(UserScraperConfig.feed_url == feed_url)
+        .first()
+    )
+
+
+def _enqueue_onboarding_feed_backfill(
+    queue_gateway: Any,
+    *,
+    user_id: int,
+    config_ids: list[int],
+) -> int | None:
+    unique_config_ids = list(dict.fromkeys(config_ids))
+    if not unique_config_ids:
+        return None
+
+    request = FeedBatchBackfillRequest(
+        user_id=user_id,
+        config_ids=unique_config_ids,
+        count=DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
+    )
+    return queue_gateway.enqueue(
+        TaskType.BACKFILL_FEEDS,
+        payload=request.model_dump(),
+        dedupe=True,
+    )
 
 
 def _resolve_scraper_sources(types: set[str]) -> list[str]:

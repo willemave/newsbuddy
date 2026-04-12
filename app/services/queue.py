@@ -17,6 +17,7 @@ logger = get_logger(__name__)
 
 TASK_QUEUE_BY_TYPE: dict[TaskType, TaskQueue] = {
     TaskType.SCRAPE: TaskQueue.CONTENT,
+    TaskType.BACKFILL_FEEDS: TaskQueue.ONBOARDING,
     TaskType.ANALYZE_URL: TaskQueue.CONTENT,
     TaskType.PROCESS_CONTENT: TaskQueue.CONTENT,
     TaskType.ENRICH_NEWS_ITEM_ARTICLE: TaskQueue.CONTENT,

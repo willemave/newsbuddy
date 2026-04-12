@@ -237,6 +237,7 @@ struct OnboardingCompleteResponse: Codable, Equatable {
     let status: String
     let taskId: Int?
     let inboxCountEstimate: Int
+    let configuredSourceCount: Int
     let longformStatus: String
     let hasCompletedOnboarding: Bool
     let hasCompletedNewUserTutorial: Bool
@@ -245,6 +246,7 @@ struct OnboardingCompleteResponse: Codable, Equatable {
         case status
         case taskId = "task_id"
         case inboxCountEstimate = "inbox_count_estimate"
+        case configuredSourceCount = "configured_source_count"
         case longformStatus = "longform_status"
         case hasCompletedOnboarding = "has_completed_onboarding"
         case hasCompletedNewUserTutorial = "has_completed_new_user_tutorial"

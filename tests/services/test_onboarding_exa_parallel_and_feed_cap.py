@@ -42,7 +42,16 @@ def _many_feed_defaults() -> dict[str, list[OnboardingSuggestion]]:
             )
             for idx in range(8)
         ],
-        "reddit": [],
+        "reddit": [
+            OnboardingSuggestion(
+                suggestion_type="reddit",
+                title=f"Subreddit {idx}",
+                site_url=f"https://www.reddit.com/r/subreddit_{idx}/",
+                subreddit=f"subreddit_{idx}",
+                is_default=True,
+            )
+            for idx in range(8)
+        ],
     }
 
 
@@ -50,6 +59,7 @@ def test_fast_discover_defaults_caps_feed_suggestions_to_five() -> None:
     response = _fast_discover_from_defaults(_many_feed_defaults())
     assert len(response.recommended_substacks) == 5
     assert len(response.recommended_pods) == 5
+    assert len(response.recommended_subreddits) == 5
 
 
 def test_build_discovery_response_caps_feed_suggestions_to_five() -> None:
@@ -59,6 +69,7 @@ def test_build_discovery_response_caps_feed_suggestions_to_five() -> None:
     )
     assert len(response.recommended_substacks) == 5
     assert len(response.recommended_pods) == 5
+    assert len(response.recommended_subreddits) == 5
 
 
 def test_run_discovery_exa_queries_uses_query_metadata(monkeypatch) -> None:

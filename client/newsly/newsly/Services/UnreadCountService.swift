@@ -61,7 +61,7 @@ class UnreadCountService: ObservableObject {
     }
     
     private func startPeriodicRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
             Task {
                 await self.refreshCounts()
             }

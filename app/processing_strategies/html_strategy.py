@@ -97,7 +97,15 @@ ACCESS_GATE_HTML_MARKERS: tuple[str, ...] = (
     "cf-turnstile",
     "performance & security by cloudflare",
 )
-NEWSPAPER_FALLBACK_DOMAINS: frozenset[str] = frozenset({"ft.com", "www.ft.com"})
+NEWSPAPER_FALLBACK_DOMAIN_SUFFIXES: frozenset[str] = frozenset(
+    {
+        "africabusinesscommunities.com",
+        "ft.com",
+        "politico.com",
+        "researchgate.net",
+        "sourceforge.net",
+    }
+)
 PAYWALL_TEXT_MARKERS: tuple[str, ...] = (
     "subscribe to read",
     "subscribe to continue reading",
@@ -137,6 +145,20 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             return (urlparse(url).netloc or "").lower()
         except Exception:
             return ""
+
+    @classmethod
+    def _should_try_newspaper_fallback(cls, url: str) -> bool:
+        """Return True when the URL host is on the newspaper fallback allowlist."""
+
+        host = cls._host_for_url(url)
+        if not host:
+            return False
+
+        normalized_host = host[4:] if host.startswith("www.") else host
+        return any(
+            normalized_host == domain or normalized_host.endswith(f".{domain}")
+            for domain in NEWSPAPER_FALLBACK_DOMAIN_SUFFIXES
+        )
 
     def _detect_source(self, url: str) -> str:
         """Detect the source type from URL."""
@@ -725,9 +747,10 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
     def _newspaper_fallback_fetch(self, url: str) -> dict[str, Any] | None:
         """Use newspaper4k on a small blocked-domain allowlist before generic fallbacks."""
 
-        host = self._host_for_url(url)
-        if host not in NEWSPAPER_FALLBACK_DOMAINS:
+        if not self._should_try_newspaper_fallback(url):
             return None
+
+        host = self._host_for_url(url)
 
         try:
             import newspaper

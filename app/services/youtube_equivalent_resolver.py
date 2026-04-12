@@ -46,7 +46,6 @@ MAX_CANDIDATES_TO_VALIDATE = 5
 class YouTubeOEmbedMetadata:
     title: str | None = None
     author_name: str | None = None
-    author_url: str | None = None
     thumbnail_url: str | None = None
 
 
@@ -71,7 +70,6 @@ class _Candidate:
     title: str | None
     snippet: str | None
     source: str
-    published_at: str | None = None
     podcast_title: str | None = None
     score: float = 0.0
 
@@ -144,7 +142,7 @@ def resolve_youtube_equivalent(
     )
 
 
-def _fetch_oembed_metadata(youtube_url: str) -> YouTubeOEmbedMetadata | None:
+def _fetch_oembed_metadata(youtube_url: str) -> YouTubeOEmbedMetadata:
     canonical_url = _normalize_youtube_watch_url(youtube_url)
     try:
         response = httpx.get(
@@ -156,16 +154,15 @@ def _fetch_oembed_metadata(youtube_url: str) -> YouTubeOEmbedMetadata | None:
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict):
-            return None
+            return YouTubeOEmbedMetadata()
         return YouTubeOEmbedMetadata(
             title=_strip_or_none(payload.get("title")),
             author_name=_strip_or_none(payload.get("author_name")),
-            author_url=_strip_or_none(payload.get("author_url")),
             thumbnail_url=_strip_or_none(payload.get("thumbnail_url")),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("YouTube oEmbed lookup failed for %s: %s", youtube_url, exc)
-        return None
+        return YouTubeOEmbedMetadata()
 
 
 def _normalize_youtube_watch_url(url: str) -> str:
@@ -177,17 +174,18 @@ def _normalize_youtube_watch_url(url: str) -> str:
     if "youtube.com" not in hostname:
         return url
     if parsed.path == "/watch":
-        video_id = parse_qs(parsed.query).get("v", [None])[0]
-        return f"https://www.youtube.com/watch?v={video_id}" if video_id else url
+        raw_video_id = parse_qs(parsed.query).get("v", [None])[0]
+        watch_video_id = raw_video_id if isinstance(raw_video_id, str) else None
+        return f"https://www.youtube.com/watch?v={watch_video_id}" if watch_video_id else url
     return url
 
 
 def _build_search_query(
-    metadata: YouTubeOEmbedMetadata | None,
+    metadata: YouTubeOEmbedMetadata,
     fallback_title: str | None,
 ) -> str | None:
-    title = _strip_or_none(metadata.title) if metadata else None
-    author_name = _strip_or_none(metadata.author_name) if metadata else None
+    title = _strip_or_none(metadata.title)
+    author_name = _strip_or_none(metadata.author_name)
     fallback = _strip_or_none(fallback_title)
     base_title = title or fallback
     if not base_title:
@@ -201,11 +199,11 @@ def _build_search_query(
 def _rank_candidates(
     *,
     search_query: str,
-    metadata: YouTubeOEmbedMetadata | None,
+    metadata: YouTubeOEmbedMetadata,
 ) -> list[_Candidate]:
     raw_candidates = _gather_candidates(search_query, metadata)
-    youtube_title = metadata.title if metadata else None
-    author_name = metadata.author_name if metadata else None
+    youtube_title = metadata.title
+    author_name = metadata.author_name
     deduped: dict[str, _Candidate] = {}
 
     for candidate in raw_candidates:
@@ -217,7 +215,6 @@ def _rank_candidates(
             title=candidate.title,
             snippet=candidate.snippet,
             source=candidate.source,
-            published_at=candidate.published_at,
             podcast_title=candidate.podcast_title,
             score=similarity + author_bonus + host_bonus,
         )
@@ -230,24 +227,23 @@ def _rank_candidates(
 
 def _gather_candidates(
     search_query: str,
-    metadata: YouTubeOEmbedMetadata | None,
+    metadata: YouTubeOEmbedMetadata,
 ) -> list[_Candidate]:
     candidates: list[_Candidate] = []
 
-    for hit in search_podcast_episodes(search_query, limit=5):
+    for podcast_hit in search_podcast_episodes(search_query, limit=5):
         candidates.append(
             _Candidate(
-                url=hit.episode_url,
-                title=hit.title,
-                snippet=hit.snippet,
+                url=podcast_hit.episode_url,
+                title=podcast_hit.title,
+                snippet=podcast_hit.snippet,
                 source="podcast_search",
-                published_at=hit.published_at,
-                podcast_title=hit.podcast_title,
+                podcast_title=podcast_hit.podcast_title,
             )
         )
 
-    title = metadata.title if metadata else search_query
-    author_name = metadata.author_name if metadata else None
+    title = metadata.title or search_query
+    author_name = metadata.author_name
     natural_query = (
         "Find the same podcast episode, interview, or canonical published version outside "
         f'YouTube for "{title}".'
@@ -258,18 +254,17 @@ def _gather_candidates(
         " Prefer direct episode pages, Apple Podcasts, Spotify, Substack, or publisher pages."
     )
 
-    for hit in exa_search(
+    for exa_hit in exa_search(
         natural_query,
         num_results=5,
         exclude_domains=YOUTUBE_EXCLUDE_DOMAINS,
     ):
         candidates.append(
             _Candidate(
-                url=hit.url,
-                title=hit.title,
-                snippet=hit.snippet,
+                url=exa_hit.url,
+                title=exa_hit.title,
+                snippet=exa_hit.snippet,
                 source="exa_search",
-                published_at=hit.published_date,
             )
         )
 

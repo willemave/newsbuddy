@@ -13,6 +13,14 @@ class FeedBackfillRequest(BaseModel):
     count: int = Field(..., ge=1, le=MAX_BACKFILL_COUNT)
 
 
+class FeedBatchBackfillRequest(BaseModel):
+    """Input for backfilling multiple feeds for one user."""
+
+    user_id: int = Field(..., gt=0)
+    config_ids: list[int] = Field(..., min_length=1)
+    count: int = Field(..., ge=1, le=MAX_BACKFILL_COUNT)
+
+
 class FeedBackfillResult(BaseModel):
     """Result from a feed backfill run."""
 

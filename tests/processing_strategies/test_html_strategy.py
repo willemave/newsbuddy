@@ -332,6 +332,53 @@ def test_newspaper_fallback_fetch_for_allowlisted_domain(html_strategy: HtmlProc
     assert extracted_data["used_newspaper_fallback"] is True
 
 
+@pytest.mark.parametrize(
+    ("url", "expected_source"),
+    [
+        ("https://giftarticle.ft.com/giftarticle/actions/redeem/example", "giftarticle.ft.com"),
+        (
+            "https://www.politico.com/news/2026/04/11/example-story",
+            "www.politico.com",
+        ),
+        (
+            "https://africabusinesscommunities.com/artificial-intelligence/example",
+            "africabusinesscommunities.com",
+        ),
+        (
+            "https://www.researchgate.net/publication/123456789_example",
+            "www.researchgate.net",
+        ),
+        (
+            "https://sourceforge.net/p/project/discussion/thread/example",
+            "sourceforge.net",
+        ),
+    ],
+)
+def test_newspaper_fallback_fetch_for_allowlisted_subdomains_and_prod_hosts(
+    html_strategy: HtmlProcessorStrategy,
+    url: str,
+    expected_source: str,
+):
+    """Fallback allowlist should match subdomains and observed blocked production hosts."""
+    article = SimpleNamespace(
+        title="Recovered article",
+        text="Recovered content from newspaper fallback.",
+        authors=["Newsly"],
+        publish_date=datetime(2026, 4, 12),
+        article_html="<html><head><title>Recovered article</title></head></html>",
+    )
+
+    with patch.dict("sys.modules", {"newspaper": SimpleNamespace(article=lambda _url: article)}):
+        extracted_data = html_strategy._newspaper_fallback_fetch(  # pylint: disable=protected-access
+            url,
+        )
+
+    assert extracted_data is not None
+    assert extracted_data["text_content"] == "Recovered content from newspaper fallback."
+    assert extracted_data["source"] == expected_source
+    assert extracted_data["used_newspaper_fallback"] is True
+
+
 def test_newspaper_fallback_skips_non_allowlisted_domain(html_strategy: HtmlProcessorStrategy):
     """Newspaper fallback should only run on the blocked-domain allowlist."""
     with patch.dict("sys.modules", {"newspaper": SimpleNamespace(article=lambda _url: None)}):

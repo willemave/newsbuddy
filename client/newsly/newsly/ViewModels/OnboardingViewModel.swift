@@ -15,7 +15,7 @@ private let defaultNewsListPreferencePrompt =
     + "spammy vendor copy, repetitive hype, and low-context chatter unless they contain genuinely new information."
 
 private let onboardingDiscoveryPollingTimeoutSeconds: TimeInterval = 120
-private let onboardingDiscoveryPollingIntervalNanoseconds: UInt64 = 2_000_000_000
+private let onboardingDiscoveryPollingIntervalNanoseconds: UInt64 = 500_000_000
 
 enum OnboardingStep: Int, Codable {
     case intro
