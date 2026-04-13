@@ -51,6 +51,8 @@ from app.repositories.content_repository import apply_visibility_filters, build_
 from app.scraping.atom_unified import load_atom_feeds
 from app.scraping.substack_unified import load_substack_feeds
 from app.services.exa_client import ExaSearchResult, exa_search
+from app.services.feed_detection import FeedDetector
+from app.services.feed_resolution import resolve_feed_candidate
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_agents import get_basic_agent
 from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
@@ -108,6 +110,7 @@ SCRAPER_SOURCE_BY_TYPE = {
     "atom": "Atom",
     "reddit": "Reddit",
 }
+ONBOARDING_FEED_DETECTOR = FeedDetector(use_llm=False, use_exa_search=False)
 
 PROFILE_SYSTEM_PROMPT = (
     "You are building a short onboarding profile for a user. "
@@ -604,11 +607,12 @@ def complete_onboarding(
             if "already exists" in str(exc):
                 created_types.add(selection.suggestion_type)
                 configured_source_count += 1
-                existing_config = _find_existing_user_scraper_config(
-                    db,
-                    user_id=user_id,
-                    scraper_type=create_data.scraper_type,
-                    feed_url=create_data.config["feed_url"],
+                existing_config = (
+                    db.query(UserScraperConfig)
+                    .filter(UserScraperConfig.user_id == user_id)
+                    .filter(UserScraperConfig.scraper_type == create_data.scraper_type)
+                    .filter(UserScraperConfig.feed_url == create_data.config["feed_url"])
+                    .first()
                 )
                 if (
                     selection.suggestion_type in FEED_SUGGESTION_TYPES
@@ -642,11 +646,19 @@ def complete_onboarding(
         configured_source_count += _create_reddit_configs(db, user_id, request.selected_subreddits)
 
     queue_gateway = get_task_queue_gateway()
-    task_id = _enqueue_onboarding_feed_backfill(
-        queue_gateway,
-        user_id=user_id,
-        config_ids=feed_config_ids_for_backfill,
-    )
+    unique_feed_config_ids = list(dict.fromkeys(feed_config_ids_for_backfill))
+    task_id = None
+    if unique_feed_config_ids:
+        request_payload = FeedBatchBackfillRequest(
+            user_id=user_id,
+            config_ids=unique_feed_config_ids,
+            count=DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
+        )
+        task_id = queue_gateway.enqueue(
+            TaskType.BACKFILL_FEEDS,
+            payload=request_payload.model_dump(),
+            dedupe=True,
+        )
     sources_to_scrape = _resolve_scraper_sources(created_types - FEED_SUGGESTION_TYPES)
     if sources_to_scrape:
         scrape_task_id = queue_gateway.enqueue(
@@ -1818,15 +1830,23 @@ def _normalize_suggestions(
             )
             continue
 
-        if not feed_url:
+        resolved_feed = resolve_feed_candidate(
+            detector=ONBOARDING_FEED_DETECTOR,
+            title=item.title,
+            site_url=site_url,
+            candidate_feed_urls=[feed_url] if feed_url else [],
+            source="onboarding",
+            prefer_site_discovery=suggestion_type == "podcast_rss",
+        )
+        if not resolved_feed:
             continue
 
         normalized.append(
             OnboardingSuggestion(
                 suggestion_type=suggestion_type,
-                title=item.title,
+                title=item.title or resolved_feed.get("title"),
                 site_url=site_url,
-                feed_url=feed_url,
+                feed_url=resolved_feed["feed_url"],
                 rationale=item.rationale,
                 score=item.score,
                 is_default=False,
@@ -2082,44 +2102,6 @@ def _create_reddit_configs(db: Session, user_id: int, subreddits: list[str]) -> 
                 },
             )
     return configured_count
-
-
-def _find_existing_user_scraper_config(
-    db: Session,
-    *,
-    user_id: int,
-    scraper_type: str,
-    feed_url: str,
-) -> UserScraperConfig | None:
-    return (
-        db.query(UserScraperConfig)
-        .filter(UserScraperConfig.user_id == user_id)
-        .filter(UserScraperConfig.scraper_type == scraper_type)
-        .filter(UserScraperConfig.feed_url == feed_url)
-        .first()
-    )
-
-
-def _enqueue_onboarding_feed_backfill(
-    queue_gateway: Any,
-    *,
-    user_id: int,
-    config_ids: list[int],
-) -> int | None:
-    unique_config_ids = list(dict.fromkeys(config_ids))
-    if not unique_config_ids:
-        return None
-
-    request = FeedBatchBackfillRequest(
-        user_id=user_id,
-        config_ids=unique_config_ids,
-        count=DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
-    )
-    return queue_gateway.enqueue(
-        TaskType.BACKFILL_FEEDS,
-        payload=request.model_dump(),
-        dedupe=True,
-    )
 
 
 def _resolve_scraper_sources(types: set[str]) -> list[str]:
