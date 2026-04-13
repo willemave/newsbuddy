@@ -306,6 +306,10 @@ def _present_detail(
 
 
 def build_visible_news_item_filter(db: Session, *, user_id: int):
+    user_clause = and_(
+        NewsItem.visibility_scope == NewsItemVisibilityScope.USER.value,
+        NewsItem.owner_user_id == user_id,
+    )
     global_non_reddit_clause = and_(
         NewsItem.visibility_scope == NewsItemVisibilityScope.GLOBAL.value,
         or_(
@@ -314,17 +318,11 @@ def build_visible_news_item_filter(db: Session, *, user_id: int):
         ),
     )
     if _has_user_scoped_scraper_news(db, user_id=user_id):
-        return and_(
-            NewsItem.visibility_scope == NewsItemVisibilityScope.USER.value,
-            NewsItem.owner_user_id == user_id,
-        )
+        return user_clause
 
     return or_(
         global_non_reddit_clause,
-        and_(
-            NewsItem.visibility_scope == NewsItemVisibilityScope.USER.value,
-            NewsItem.owner_user_id == user_id,
-        ),
+        user_clause,
     )
 
 

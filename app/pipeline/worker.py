@@ -30,7 +30,6 @@ from app.services.http import NonRetryableError, get_http_service
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.queue import TaskType, get_queue_service
 from app.services.youtube_equivalent_resolver import (
-    YouTubeEquivalentResolution,
     resolve_youtube_equivalent,
 )
 from app.utils.dates import parse_date_with_tz
@@ -937,33 +936,6 @@ class ContentWorker:
                 return strategy
         return None
 
-    def _apply_youtube_resolution_metadata(
-        self,
-        *,
-        content: ContentData,
-        original_youtube_url: str,
-        resolution: YouTubeEquivalentResolution,
-    ) -> None:
-        metadata = content.metadata
-        if resolution.metadata:
-            if resolution.metadata.title and not content.title:
-                content.title = resolution.metadata.title
-            if resolution.metadata.author_name:
-                metadata.setdefault("channel_name", resolution.metadata.author_name)
-            if resolution.metadata.thumbnail_url:
-                metadata.setdefault("thumbnail_url", resolution.metadata.thumbnail_url)
-
-        metadata["youtube_video"] = True
-        metadata["video_url"] = original_youtube_url
-        metadata["resolved_from_youtube_url"] = original_youtube_url
-        metadata["youtube_equivalent_resolution"] = resolution.reason
-        if resolution.search_query:
-            metadata["youtube_equivalent_query"] = resolution.search_query
-        if resolution.similarity is not None:
-            metadata["youtube_equivalent_similarity"] = round(resolution.similarity, 4)
-        if resolution.source:
-            metadata["youtube_equivalent_source"] = resolution.source
-
     def _prepare_youtube_podcast_for_summary(
         self,
         *,
@@ -974,8 +946,7 @@ class ContentWorker:
         original_youtube_url = str(
             content.metadata.get("video_url") or content.metadata.get("audio_url") or content.url
         )
-        target_url = original_youtube_url
-        processed_url = strategy.preprocess_url(target_url)
+        processed_url = strategy.preprocess_url(original_youtube_url)
 
         try:
             download_result = strategy.download_content(processed_url)
@@ -1013,11 +984,24 @@ class ContentWorker:
                 original_youtube_url,
                 fallback_title=content.title,
             )
-            self._apply_youtube_resolution_metadata(
-                content=content,
-                original_youtube_url=original_youtube_url,
-                resolution=resolution,
-            )
+            if resolution.metadata:
+                if resolution.metadata.title and not content.title:
+                    content.title = resolution.metadata.title
+                if resolution.metadata.author_name:
+                    content.metadata.setdefault("channel_name", resolution.metadata.author_name)
+                if resolution.metadata.thumbnail_url:
+                    content.metadata.setdefault("thumbnail_url", resolution.metadata.thumbnail_url)
+
+            content.metadata["youtube_video"] = True
+            content.metadata["video_url"] = original_youtube_url
+            content.metadata["resolved_from_youtube_url"] = original_youtube_url
+            content.metadata["youtube_equivalent_resolution"] = resolution.reason
+            if resolution.search_query:
+                content.metadata["youtube_equivalent_query"] = resolution.search_query
+            if resolution.similarity is not None:
+                content.metadata["youtube_equivalent_similarity"] = round(resolution.similarity, 4)
+            if resolution.source:
+                content.metadata["youtube_equivalent_source"] = resolution.source
             if resolution.resolved_url:
                 content.url = cast(Any, resolution.resolved_url)
                 if content.source_url is None:
@@ -1093,8 +1077,8 @@ class ContentWorker:
             "video_id": extracted_data.get("video_id"),
             "platform": "youtube",
             "youtube_video": True,
-            "audio_url": content.metadata.get("audio_url") or target_url,
-            "video_url": content.metadata.get("video_url") or target_url,
+            "audio_url": content.metadata.get("audio_url") or original_youtube_url,
+            "video_url": content.metadata.get("video_url") or original_youtube_url,
         }.items():
             if value not in (None, "", {}):
                 content.metadata[key] = value
