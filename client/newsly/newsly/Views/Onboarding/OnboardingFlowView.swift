@@ -67,18 +67,21 @@ struct OnboardingFlowView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 20) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 36, weight: .medium))
-                    .foregroundColor(.watercolorSlate.opacity(0.7))
+            VStack(spacing: 28) {
+                Image("Mascot")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 180, height: 180)
+                    .shadow(color: .black.opacity(0.08), radius: 18, x: 0, y: 10)
+                    .accessibilityLabel("Newsbuddy mascot")
 
                 VStack(spacing: 10) {
-                    Text("Set up your feeds")
-                        .font(.title2.bold())
+                    Text("Hi, I'm Newsbuddy")
+                        .font(.title.bold())
                         .foregroundColor(.watercolorSlate)
-                    Text("Tell us what you follow and\nwe'll find the best sources.")
+                    Text("Tell me what you read and\nI'll round up the good stuff.")
                         .font(.callout)
-                        .foregroundColor(.watercolorSlate.opacity(0.6))
+                        .foregroundColor(.watercolorSlate.opacity(0.65))
                         .multilineTextAlignment(.center)
                 }
             }

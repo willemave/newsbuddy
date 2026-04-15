@@ -8,7 +8,7 @@ enum CLILinkError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidScannedCode:
-            return "The scanned QR code is not a valid Newsly CLI link."
+            return "The scanned QR code is not a valid Newsbuddy CLI link."
         case .missingSessionID:
             return "The scanned QR code is missing a session ID."
         case .missingApproveToken:

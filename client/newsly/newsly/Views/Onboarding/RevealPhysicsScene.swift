@@ -14,7 +14,7 @@ struct GlyphPhraseCycler {
     private var index: Int = 0
 
     init(phrase: String) {
-        let fallbackPhrase = phrase.isEmpty ? "Newsly" : phrase
+        let fallbackPhrase = phrase.isEmpty ? "Newsbuddy" : phrase
         self.characters = Array(fallbackPhrase)
     }
 

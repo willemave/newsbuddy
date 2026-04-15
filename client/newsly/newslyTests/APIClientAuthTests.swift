@@ -229,7 +229,7 @@ final class APIClientAuthTests: XCTestCase {
 
         XCTAssertEqual(
             error.userFacingMessage,
-            "Melliw News is temporarily unavailable. Please try again in a moment."
+            "Newsbuddy is temporarily unavailable. Please try again in a moment."
         )
     }
 

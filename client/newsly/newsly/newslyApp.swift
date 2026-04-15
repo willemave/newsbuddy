@@ -65,7 +65,7 @@ struct newslyApp: App {
 
         Task { @MainActor in
             guard case .authenticated = authViewModel.authState else {
-                cliLinkAlertMessage = "Sign in to Newsly before linking the CLI."
+                cliLinkAlertMessage = "Sign in to Newsbuddy before linking the CLI."
                 return
             }
 

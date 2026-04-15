@@ -38,6 +38,7 @@ class ChatSessionViewModel: ObservableObject {
     private let initialPendingMessageId: Int?
     private var pendingCouncilPrompt: String?
     private var hasTriggeredPendingCouncilStart = false
+    private var hasAppliedVoiceTranscript = false
 
     init(
         sessionId: Int,
@@ -464,6 +465,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     /// Start voice recording for chat message.
     func startVoiceRecording() async {
         guard !isRecording, !isTranscribing else { return }
+        hasAppliedVoiceTranscript = false
         if !voiceDictationAvailable {
             await checkAndRefreshVoiceDictation()
         }
@@ -493,16 +495,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
             logger.info("[ViewModel] Transcription complete | length=\(trimmedTranscription.count)")
             isRecording = false
             isTranscribing = false
-            guard !trimmedTranscription.isEmpty else {
-                errorMessage = "I didn't catch that. Try again."
-                return
-            }
-            let existingInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if existingInput.isEmpty {
-                inputText = trimmedTranscription
-            } else {
-                inputText = "\(existingInput) \(trimmedTranscription)"
-            }
+            applyVoiceTranscript(trimmedTranscription)
         } catch {
             logger.error("[ViewModel] Voice transcription error: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
@@ -544,41 +537,55 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
 
     private func configureTranscriptionCallbacks() {
         transcriptionService.onTranscriptDelta = nil
-        transcriptionService.onTranscriptFinal = nil
+        transcriptionService.onTranscriptFinal = { [weak self] transcript in
+            self?.applyVoiceTranscript(transcript)
+        }
         transcriptionService.onStopReason = { [weak self] reason in
-            Task { @MainActor in
-                guard let self else { return }
-                switch reason {
-                case .manual:
-                    return
-                case .silenceAutoStop, .cancel, .failure:
-                    self.isRecording = false
-                    self.isTranscribing = false
-                }
+            guard let self else { return }
+            switch reason {
+            case .manual:
+                return
+            case .silenceAutoStop, .cancel, .failure:
+                self.isRecording = false
+                self.isTranscribing = false
             }
         }
         transcriptionService.onError = { [weak self] message in
-            Task { @MainActor in
-                self?.errorMessage = message
-                self?.isRecording = false
-                self?.isTranscribing = false
-            }
+            self?.errorMessage = message
+            self?.isRecording = false
+            self?.isTranscribing = false
         }
         transcriptionService.onStateChange = { [weak self] state in
-            Task { @MainActor in
-                guard let self else { return }
-                switch state {
-                case .idle:
-                    self.isRecording = false
-                    self.isTranscribing = false
-                case .recording:
-                    self.isRecording = true
-                    self.isTranscribing = false
-                case .transcribing:
-                    self.isRecording = false
-                    self.isTranscribing = true
-                }
+            guard let self else { return }
+            switch state {
+            case .idle:
+                self.isRecording = false
+                self.isTranscribing = false
+            case .recording:
+                self.isRecording = true
+                self.isTranscribing = false
+            case .transcribing:
+                self.isRecording = false
+                self.isTranscribing = true
             }
+        }
+    }
+
+    private func applyVoiceTranscript(_ transcript: String) {
+        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTranscript.isEmpty else {
+            errorMessage = "I didn't catch that. Try again."
+            return
+        }
+        guard !hasAppliedVoiceTranscript else { return }
+
+        hasAppliedVoiceTranscript = true
+        errorMessage = nil
+        let existingInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if existingInput.isEmpty {
+            inputText = trimmedTranscript
+        } else {
+            inputText = "\(existingInput) \(trimmedTranscript)"
         }
     }
 }

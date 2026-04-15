@@ -133,9 +133,9 @@
     </array>
     <!-- Microphone access for voice dictation -->
     <key>NSMicrophoneUsageDescription</key>
-    <string>Newsly uses the microphone to transcribe your voice for tweet customization.</string>
+    <string>Newsbuddy uses the microphone to transcribe your voice for tweet customization.</string>
     <key>NSCameraUsageDescription</key>
-    <string>Newsly uses the camera to scan QR codes when linking the CLI.</string>
+    <string>Newsbuddy uses the camera to scan QR codes when linking the CLI.</string>
     <!-- Custom fonts -->
     <key>UIAppFonts</key>
     <array>

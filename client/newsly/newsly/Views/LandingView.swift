@@ -46,20 +46,28 @@ struct LandingView: View {
             let yOffset = WatercolorBackground.titleOscillation(time: t)
             let glowColor = WatercolorBackground.titleGlowColor(time: t)
 
-            VStack(spacing: 12) {
-                Text("Melliw News")
-                    .font(.watercolorDisplay)
-                    .foregroundColor(.watercolorSlate)
-                    .shadow(color: glowColor.opacity(0.6), radius: 16, x: 0, y: 0)
-                    .shadow(color: glowColor.opacity(0.3), radius: 32, x: 0, y: 0)
+            VStack(spacing: 24) {
+                Image("Mascot")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 220, height: 220)
                     .onTapGesture {
                         handleLogoTap()
                     }
+                    .accessibilityLabel("Newsbuddy mascot")
 
-                Text("Quiet clarity in a noisy world.\nCurated intelligence.")
-                    .font(.watercolorSubtitle)
-                    .foregroundColor(.watercolorSlate.opacity(0.7))
-                    .multilineTextAlignment(.center)
+                VStack(spacing: 10) {
+                    Text("Newsbuddy")
+                        .font(.watercolorDisplay)
+                        .foregroundColor(.watercolorSlate)
+                        .shadow(color: glowColor.opacity(0.6), radius: 16, x: 0, y: 0)
+                        .shadow(color: glowColor.opacity(0.3), radius: 32, x: 0, y: 0)
+
+                    Text("Your cuddly news companion.\nQuiet clarity in a noisy world.")
+                        .font(.watercolorSubtitle)
+                        .foregroundColor(.watercolorSlate.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                }
             }
             .offset(y: yOffset)
         }

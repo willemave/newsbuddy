@@ -27,11 +27,11 @@ fileprivate enum LinkHandlingMode: String, CaseIterable {
     var description: String {
         switch self {
         case .addContent:
-            return "Summarize the shared page in Newsly."
+            return "Summarize the shared page in Newsbuddy."
         case .addLinks:
             return "Also crawl important links found on the page."
         case .addFeed:
-            return "Subscribe to this site's feed in Newsly."
+            return "Subscribe to this site's feed in Newsbuddy."
         }
     }
 }
@@ -94,7 +94,7 @@ final class ShareViewController: UIViewController {
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.setContentHuggingPriority(.required, for: .vertical)
 
-        titleLabel.text = "How should Newsly handle this link?"
+        titleLabel.text = "How should Newsbuddy handle this link?"
         titleLabel.font = .preferredFont(forTextStyle: .headline)
         titleLabel.numberOfLines = 0
 
@@ -470,7 +470,7 @@ enum ShareError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notAuthenticated:
-            return "Session expired. Open Newsly and sign in again."
+            return "Session expired. Open Newsbuddy and sign in again."
         case .invalidURL:
             return "Invalid URL"
         case .invalidResponse:

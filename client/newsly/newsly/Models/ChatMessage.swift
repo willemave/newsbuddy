@@ -251,13 +251,12 @@ struct ChatMessage: Codable, Identifiable {
         !councilCandidates.isEmpty
     }
 
-    var uiIdentity: String {
+    var scrollIdentity: String {
         [
             String(id),
             role.rawValue,
             timestamp,
-            displayType.rawValue,
-            content
+            displayType.rawValue
         ].joined(separator: "|")
     }
 }

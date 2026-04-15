@@ -175,7 +175,7 @@ struct QuickMicOverlay: View {
 
                     if viewModel.state == .finalizingTranscript || viewModel.state == .submittingTurn {
                         QuickMicStatusBubble(
-                            title: "Newsly",
+                            title: "Newsbuddy",
                             text: viewModel.state == .finalizingTranscript
                                 ? "Transcribing your message..."
                                 : "Thinking through a concise answer...",
@@ -270,7 +270,7 @@ private struct QuickMicMessageBubble: View {
             }
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 5) {
-                Text(isUser ? "You" : "Newsly")
+                Text(isUser ? "You" : "Newsbuddy")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(isUser ? Color.accentColor.opacity(0.88) : .secondary)
 

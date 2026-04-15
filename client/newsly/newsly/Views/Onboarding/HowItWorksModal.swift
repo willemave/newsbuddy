@@ -44,7 +44,7 @@ struct HowItWorksModal: View {
             (
                 "square.and.arrow.up.fill",
                 "Share links to add feeds",
-                "Share any podcast, newsletter, or article with Newsly from your browser to add it."
+                "Share any podcast, newsletter, or article with Newsbuddy from your browser to add it."
             ),
         ])
 

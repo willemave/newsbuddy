@@ -220,7 +220,7 @@ enum AuthError: Error, LocalizedError {
         case .serverError(let statusCode, let message):
             return Self.sanitizedServerMessage(statusCode: statusCode, message: message)
         case .networkError:
-            return "We couldn't reach Melliw News. Check your connection and try again."
+            return "We couldn't reach Newsbuddy. Check your connection and try again."
         case .appleSignInFailed:
             return "Apple Sign In couldn't be completed. Please try again."
         }
@@ -274,7 +274,7 @@ enum AuthError: Error, LocalizedError {
         case 429:
             return "Too many attempts right now. Please try again in a moment."
         case 500...599:
-            return "Melliw News is temporarily unavailable. Please try again in a moment."
+            return "Newsbuddy is temporarily unavailable. Please try again in a moment."
         default:
             return "Something went wrong. Please try again."
         }

@@ -29,7 +29,7 @@ struct CLILinkScannerSheet: View {
                         Text("Camera access is required")
                             .font(.headline)
 
-                        Text("Allow camera access to scan the QR code shown by the Newsly CLI.")
+                        Text("Allow camera access to scan the QR code shown by the Newsbuddy CLI.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)

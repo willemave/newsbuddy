@@ -1438,7 +1438,7 @@ struct ContentDetailView: View {
         defer { isLoadingDiscussion = false }
 
         do {
-            let discussion = try await ContentService.shared.fetchContentDiscussion(
+            let discussion = try await ContentService.shared.refreshContentDiscussion(
                 id: content.id,
                 contentType: content.contentTypeEnum
             )

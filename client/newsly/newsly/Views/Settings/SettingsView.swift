@@ -9,6 +9,7 @@ import UIKit
 struct SettingsView: View {
     @EnvironmentObject var authViewModel: AuthenticationViewModel
     @ObservedObject private var settings = AppSettings.shared
+    private let scrollToCouncilOnAppear: Bool
     private let cliLinkService = CLILinkService()
     @State private var showingAlert = false
     @State private var alertMessage = ""
@@ -28,23 +29,38 @@ struct SettingsView: View {
     @State private var isSavingCouncilPersonas = false
     @FocusState private var isNewsListPreferencePromptFocused: Bool
 
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                accountSection
-                twitterConfigurationSection
-                displayPreferencesSection
-                councilSection
-                newsListPreferencesSection
-                sourcesSection
-                readStatusSection
+    init(scrollToCouncilOnAppear: Bool = false) {
+        self.scrollToCouncilOnAppear = scrollToCouncilOnAppear
+    }
 
-                #if DEBUG && targetEnvironment(simulator)
-                debugSection
-                #endif
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 24) {
+                    brandHeader
+                    accountSection
+                    twitterConfigurationSection
+                    displayPreferencesSection
+                    councilSection
+                    newsListPreferencesSection
+                    sourcesSection
+                    readStatusSection
+
+                    #if DEBUG && targetEnvironment(simulator)
+                    debugSection
+                    #endif
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 40)
             }
-            .padding(.top, 8)
-            .padding(.bottom, 40)
+            .onAppear {
+                guard scrollToCouncilOnAppear else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo("settings.council", anchor: .top)
+                    }
+                }
+            }
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
@@ -86,6 +102,37 @@ struct SettingsView: View {
             syncNewsListPreferencePromptWithAuthenticatedUser(force: true)
             syncCouncilPersonasWithAuthenticatedUser(force: true)
         }
+    }
+
+    // MARK: - Brand Header
+
+    private var brandHeader: some View {
+        VStack(spacing: 10) {
+            Image("Mascot")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 96, height: 96)
+                .accessibilityLabel("Newsbuddy mascot")
+
+            VStack(spacing: 2) {
+                Text("Newsbuddy")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(Color.onSurface)
+                Text(appVersionLabel)
+                    .font(.footnote)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private var appVersionLabel: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "Version \(version) (\(build))"
     }
 
     // MARK: - Account Section
@@ -300,6 +347,8 @@ struct SettingsView: View {
             .padding(.vertical, Spacing.rowVertical)
             .settingsCard()
         }
+        .id("settings.council")
+        .accessibilityIdentifier("settings.council_section")
     }
 
     private func expertColor(for index: Int) -> Color {

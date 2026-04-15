@@ -29,7 +29,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onDigDeeper: onDigDeeper)
+        Coordinator()
     }
 
     func makeUIView(context: Context) -> DigDeeperTextView {
@@ -46,12 +46,12 @@ struct SelectableMarkdownView: UIViewRepresentable {
         textView.dataDetectorTypes = [.link]
         textView.tintColor = UIColor.link.resolvedColor(with: textView.traitCollection)
         textView.linkTextAttributes = [.underlineStyle: NSUnderlineStyle.single.rawValue]
-        textView.onDigDeeper = context.coordinator.onDigDeeper
+        textView.onDigDeeper = onDigDeeper
         return textView
     }
 
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
-        uiView.onDigDeeper = context.coordinator.onDigDeeper
+        uiView.onDigDeeper = onDigDeeper
         let resolvedTextColor = textColor.resolvedColor(with: uiView.traitCollection)
         let resolvedLinkColor = UIColor.link.resolvedColor(with: uiView.traitCollection)
         let linkAppearanceSignature = context.coordinator.colorSignature(for: resolvedLinkColor)
@@ -68,13 +68,15 @@ struct SelectableMarkdownView: UIViewRepresentable {
             uiView.linkTextAttributes = [.underlineStyle: NSUnderlineStyle.single.rawValue]
         }
 
-        context.coordinator.lastRenderSignature = renderSignature
+        guard context.coordinator.lastRenderSignature != renderSignature else { return }
+
         let rendered = MarkdownNSRenderer(
             baseFont: baseFont,
             textColor: resolvedTextColor,
             traitCollection: uiView.traitCollection
         ).render(markdown)
         uiView.attributedText = rendered
+        context.coordinator.lastRenderSignature = renderSignature
         uiView.invalidateIntrinsicContentSize()
     }
 
@@ -85,13 +87,8 @@ struct SelectableMarkdownView: UIViewRepresentable {
     }
 
     class Coordinator {
-        var onDigDeeper: ((String) -> Void)?
         var lastRenderSignature: String?
         var lastLinkAppearanceSignature: String?
-
-        init(onDigDeeper: ((String) -> Void)?) {
-            self.onDigDeeper = onDigDeeper
-        }
 
         func colorSignature(for color: UIColor) -> String {
             var red: CGFloat = 0

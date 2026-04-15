@@ -1,0 +1,35 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenChatSessionId: "${CHAT_SESSION_ID}"
+- assertVisible:
+    id: knowledge.chat_input
+- assertVisible:
+    id: knowledge.start_council
+- tapOn:
+    id: knowledge.start_council
+- assertVisible:
+    text: Initial mocked assistant reply.
+- assertVisible:
+    id: knowledge.council_switcher
+- assertVisible:
+    text: ${PRIMARY_PERSONA_NAME}
+- assertVisible:
+    text: ${SECONDARY_PERSONA_NAME}
+- assertVisible:
+    text: ${PRIMARY_PERSONA_REPLY}
+- tapOn:
+    text: ${SECONDARY_PERSONA_NAME}
+- assertVisible:
+    text: ${SECONDARY_PERSONA_REPLY}

@@ -239,6 +239,7 @@ struct SelectableAttributedText: UIViewRepresentable {
 }
 
 struct ChatSessionView: View {
+    @EnvironmentObject private var authViewModel: AuthenticationViewModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var viewModel: ChatSessionViewModel
     let onShowHistory: (() -> Void)?
@@ -252,6 +253,7 @@ struct ChatSessionView: View {
     @State private var isAtBottom = false
     @State private var followLatest = true
     @State private var isContextPanelPresented = false
+    @State private var isCouncilSettingsPresented = false
 
     init(
         session: ChatSessionSummary,
@@ -350,6 +352,12 @@ struct ChatSessionView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomDock
+        }
+        .sheet(isPresented: $isCouncilSettingsPresented) {
+            NavigationStack {
+                SettingsView(scrollToCouncilOnAppear: true)
+                    .environmentObject(authViewModel)
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .navigationBarTitleDisplayMode(.inline)
@@ -505,6 +513,10 @@ struct ChatSessionView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
+                    if let error = viewModel.errorMessage, !viewModel.allMessages.isEmpty {
+                        inlineErrorBanner(error)
+                    }
+
                     if viewModel.isLoading && viewModel.allMessages.isEmpty {
                         ChatLoadingView()
                             .frame(maxWidth: .infinity)
@@ -575,12 +587,12 @@ struct ChatSessionView: View {
                         }
                         .padding(.top, 40)
                     } else {
-                        ForEach(viewModel.transcriptMessages, id: \.uiIdentity) { message in
+                        ForEach(viewModel.transcriptMessages, id: \.scrollIdentity) { message in
                             messageRow(message)
                             .id(messageScrollId(for: message))
                         }
 
-                        ForEach(viewModel.activeTurnMessages, id: \.uiIdentity) { message in
+                        ForEach(viewModel.activeTurnMessages, id: \.scrollIdentity) { message in
                             messageRow(message)
                             .id(messageScrollId(for: message))
                         }
@@ -634,6 +646,67 @@ struct ChatSessionView: View {
                 persistScrollPosition(anchorId: scrolledMessageId)
             }
         }
+    }
+
+    private func inlineErrorBanner(_ error: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.statusDestructive)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if isCouncilConfigurationError(error) {
+                    Text("Council setup required")
+                        .font(.terracottaBodySmall.weight(.semibold))
+                        .foregroundStyle(Color.onSurface)
+
+                    Text("Add at least two experts in Settings to enable council chat.")
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurface)
+
+                    Button("Add Experts") {
+                        isCouncilSettingsPresented = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(.terracottaBodySmall.weight(.semibold))
+                    .foregroundStyle(Color.terracottaPrimary)
+                    .accessibilityIdentifier("knowledge.chat_error_add_experts")
+                } else {
+                    Text(error)
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurface)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                viewModel.errorMessage = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.statusDestructive.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.statusDestructive.opacity(0.22), lineWidth: 1)
+        )
+        .padding(.horizontal, 16)
+        .accessibilityIdentifier("knowledge.chat_error_banner")
+    }
+
+    private func isCouncilConfigurationError(_ error: String?) -> Bool {
+        guard let error else { return false }
+        let normalized = error.lowercased()
+        return normalized.contains("add at least")
+            && normalized.contains("experts")
+            && normalized.contains("council")
     }
 
     @ViewBuilder
@@ -1129,10 +1202,6 @@ struct MessageBubble: View {
         }
     }
 
-    private var assistantRenderIdentity: String {
-        "\(message.id)|\(message.timestamp)|\(message.displayType.rawValue)|\(message.content)"
-    }
-
     private var messageContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             Group {
@@ -1153,7 +1222,6 @@ struct MessageBubble: View {
                         baseFont: .preferredFont(forTextStyle: .callout),
                         onDigDeeper: onDigDeeper
                     )
-                    .id(assistantRenderIdentity)
                 }
             }
             if message.isAssistant && message.hasFeedOptions {

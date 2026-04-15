@@ -1,0 +1,31 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenChatSessionId: "${CHAT_SESSION_ID}"
+- assertVisible:
+    text: Initial mocked assistant reply.
+- assertVisible:
+    id: knowledge.start_council
+- tapOn:
+    id: knowledge.start_council
+- assertVisible:
+    id: knowledge.chat_error_banner
+- assertVisible:
+    text: Council setup required
+- assertVisible:
+    id: knowledge.chat_error_add_experts
+- tapOn:
+    id: knowledge.chat_error_add_experts
+- assertVisible:
+    id: settings.council_section

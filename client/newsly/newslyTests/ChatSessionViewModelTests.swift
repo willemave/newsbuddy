@@ -80,7 +80,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.inputText, "Final transcript")
         XCTAssertFalse(viewModel.isRecording)
         XCTAssertFalse(viewModel.isTranscribing)
-        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertTrue(viewModel.allMessages.isEmpty)
     }
 
     func testStopVoiceRecordingAppendsToExistingDraft() async {
@@ -97,6 +97,23 @@ final class ChatSessionViewModelTests: XCTestCase {
         await viewModel.stopVoiceRecording()
 
         XCTAssertEqual(viewModel.inputText, "First draft second thought")
+    }
+
+    func testSilenceAutoStopPopulatesDraftWithoutManualStop() async {
+        let transcriptionService = MockChatSpeechTranscriber(transcript: "Auto transcript")
+        let viewModel = ChatSessionViewModel(
+            sessionId: 42,
+            initialVoiceDictationAvailable: true,
+            transcriptionService: transcriptionService
+        )
+
+        await viewModel.startVoiceRecording()
+        await transcriptionService.simulateSilenceAutoStop()
+
+        XCTAssertEqual(viewModel.inputText, "Auto transcript")
+        XCTAssertFalse(viewModel.isRecording)
+        XCTAssertFalse(viewModel.isTranscribing)
+        XCTAssertEqual(transcriptionService.stopCallCount, 0)
     }
 }
 
@@ -129,9 +146,23 @@ private final class MockChatSpeechTranscriber: SpeechTranscribing {
     func stop() async throws -> String {
         stopCallCount += 1
         isRecording = false
+        isTranscribing = true
+        onStateChange?(.transcribing)
+        onTranscriptFinal?(transcript)
         isTranscribing = false
+        onStopReason?(.manual)
         onStateChange?(.idle)
         return transcript
+    }
+
+    func simulateSilenceAutoStop() async {
+        isRecording = false
+        isTranscribing = true
+        onStateChange?(.transcribing)
+        onTranscriptFinal?(transcript)
+        isTranscribing = false
+        onStopReason?(.silenceAutoStop)
+        onStateChange?(.idle)
     }
 
     func cancel() {

@@ -18,7 +18,7 @@ private enum SilenceDetectionConfig {
     static let speechMarginDb: Float = 12
     static let minimumSpeechThresholdDb: Float = -42
     static let silenceHysteresisDb: Float = 6
-    static let silenceTimeoutSeconds: TimeInterval = 2
+    static let silenceTimeoutSeconds: TimeInterval = 4
     static let minimumRecordingDurationForAutoStopSeconds: TimeInterval = 0.75
 }
 
