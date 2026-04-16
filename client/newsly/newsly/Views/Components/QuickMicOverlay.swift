@@ -8,6 +8,7 @@ struct QuickMicOverlay: View {
     let onOpenChatSession: (Int) -> Void
 
     @Namespace private var micNamespace
+    @StateObject private var feedOptionActionModel = AssistantFeedOptionActionModel()
     private let bottomBarClearance: CGFloat = 104
 
     var body: some View {
@@ -159,7 +160,10 @@ struct QuickMicOverlay: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(viewModel.messages) { message in
-                        QuickMicMessageBubble(message: message)
+                        QuickMicMessageBubble(
+                            message: message,
+                            feedOptionActionModel: feedOptionActionModel
+                        )
                     }
 
                     if viewModel.state == .recordingWaveform {
@@ -246,8 +250,8 @@ struct QuickMicOverlay: View {
 
 private struct QuickMicMessageBubble: View {
     let message: ChatMessage
+    @ObservedObject var feedOptionActionModel: AssistantFeedOptionActionModel
     @Environment(\.openURL) private var openURL
-    @StateObject private var feedOptionActionModel = AssistantFeedOptionActionModel()
 
     private var isUser: Bool {
         message.role == .user

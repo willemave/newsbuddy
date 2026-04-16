@@ -61,7 +61,7 @@ struct ChatSessionHistoryView: View {
 
                         ForEach(filteredSessions) { session in
                             Button {
-                                onSelectSession(ChatSessionRoute(sessionId: session.id))
+                                onSelectSession(ChatSessionRoute(session: session))
                             } label: {
                                 ChatSessionCard(session: session)
                             }

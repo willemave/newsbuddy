@@ -72,12 +72,35 @@ def _require_booted_simulator() -> None:
         pytest.skip("No booted iOS simulator. Use tests/scripts/ios_maestro.sh.")
 
 
+def _find_maestro_binary() -> str | None:
+    binary = shutil.which("maestro")
+    if binary is not None:
+        return binary
+
+    default_binary = Path.home() / ".maestro" / "bin" / "maestro"
+    if default_binary.is_file() and os.access(default_binary, os.X_OK):
+        return str(default_binary)
+    return None
+
+
+def _require_java_runtime() -> None:
+    result = subprocess.run(
+        ["java", "-version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip("Java runtime not installed. Run tests/scripts/install_maestro.sh first.")
+
+
 @pytest.fixture
 def maestro_bin() -> str:
     """Return the Maestro CLI path or skip if unavailable."""
-    binary = shutil.which("maestro")
+    binary = _find_maestro_binary()
     if binary is None:
         pytest.skip("Maestro CLI not installed. Run tests/scripts/install_maestro.sh first.")
+    _require_java_runtime()
     return binary
 
 

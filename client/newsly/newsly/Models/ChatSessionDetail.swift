@@ -127,6 +127,14 @@ struct SelectCouncilBranchRequest: Codable {
     }
 }
 
+struct RetryCouncilBranchRequest: Codable {
+    let childSessionId: Int
+
+    enum CodingKeys: String, CodingKey {
+        case childSessionId = "child_session_id"
+    }
+}
+
 struct AssistantScreenContext: Codable, Equatable {
     private static let maxVisibleContentIds = 15
 

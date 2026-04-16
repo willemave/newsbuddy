@@ -40,6 +40,19 @@ struct UpdateChatSessionRequest: Codable {
     }
 }
 
+protocol ChatSessionServicing: AnyObject {
+    func getSession(id: Int) async throws -> ChatSessionDetail
+    func sendMessageAsync(sessionId: Int, message: String) async throws -> SendChatMessageResponse
+    func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse
+    func getInitialSuggestions(sessionId: Int) async throws -> ChatMessage
+    func startCouncil(sessionId: Int, message: String) async throws -> ChatSessionDetail
+    func selectCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail
+    func retryCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail
+    func updateSessionProvider(sessionId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary
+}
+
+extension ChatService: ChatSessionServicing {}
+
 class ChatService {
     static let shared = ChatService()
     private let client = APIClient.shared
@@ -272,6 +285,20 @@ class ChatService {
         let body = try JSONEncoder().encode(request)
         return try await client.request(
             APIEndpoints.chatCouncilSelect(sessionId: sessionId),
+            method: "POST",
+            body: body
+        )
+    }
+
+    /// Retry one council branch and return the merged parent transcript.
+    func retryCouncilBranch(
+        sessionId: Int,
+        childSessionId: Int
+    ) async throws -> ChatSessionDetail {
+        let request = RetryCouncilBranchRequest(childSessionId: childSessionId)
+        let body = try JSONEncoder().encode(request)
+        return try await client.request(
+            APIEndpoints.chatCouncilRetry(sessionId: sessionId),
             method: "POST",
             body: body
         )

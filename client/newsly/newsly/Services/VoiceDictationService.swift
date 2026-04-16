@@ -8,9 +8,11 @@
 
 import AVFoundation
 import Foundation
-import os.log
+import os
+import UIKit
 
 private let logger = Logger(subsystem: "com.newsly", category: "VoiceDictation")
+private let voicePerfSignposter = OSSignposter(subsystem: "com.newsly.chat", category: "perf")
 
 private enum SilenceDetectionConfig {
     static let meteringIntervalSeconds: TimeInterval = 0.1
@@ -22,11 +24,36 @@ private enum SilenceDetectionConfig {
     static let minimumRecordingDurationForAutoStopSeconds: TimeInterval = 0.75
 }
 
+private final class AudioRecordingSessionLease {
+    private let audioSession = AVAudioSession.sharedInstance()
+    private var isActive = false
+
+    func activate() throws {
+        try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try audioSession.setActive(true)
+        isActive = true
+        voicePerfSignposter.emitEvent("audio-session-activate")
+    }
+
+    func deactivate() {
+        guard isActive else { return }
+
+        do {
+            try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+            voicePerfSignposter.emitEvent("audio-session-deactivate")
+        } catch {
+            logger.error("Failed to deactivate audio session: \(error.localizedDescription)")
+        }
+        isActive = false
+    }
+}
+
 /// Error types for voice dictation.
 enum VoiceDictationError: LocalizedError {
     case notAuthenticated
     case recordingFailed
     case transcriptionFailed(String)
+    case transcriptionTimedOut
     case noMicrophoneAccess
     case audioSessionError(Error)
 
@@ -38,6 +65,8 @@ enum VoiceDictationError: LocalizedError {
             return "Failed to record audio"
         case .transcriptionFailed(let message):
             return "Transcription failed: \(message)"
+        case .transcriptionTimedOut:
+            return "Transcription timed out. Try a shorter recording or check your connection."
         case .noMicrophoneAccess:
             return "Microphone access denied"
         case .audioSessionError(let error):
@@ -76,6 +105,9 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
     private var silenceThresholdDb =
         SilenceDetectionConfig.minimumSpeechThresholdDb - SilenceDetectionConfig.silenceHysteresisDb
     private var isFinalizing = false
+    private var interruptionObserver: NSObjectProtocol?
+    private var routeChangeObserver: NSObjectProtocol?
+    private let audioSessionLease = AudioRecordingSessionLease()
     private let openAIService = OpenAIService.shared
 
     private override init() {
@@ -115,7 +147,16 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
     }
 
     func reset() {
-        cancelRecording()
+        clearCallbacks()
+        cancelRecording(notifyStopReason: false)
+    }
+
+    private func clearCallbacks() {
+        onTranscriptDelta = nil
+        onTranscriptFinal = nil
+        onError = nil
+        onStateChange = nil
+        onStopReason = nil
     }
 
     /// Start recording audio.
@@ -129,12 +170,11 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
             throw VoiceDictationError.noMicrophoneAccess
         }
 
-        // Configure audio session
-        let audioSession = AVAudioSession.sharedInstance()
         do {
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-            try audioSession.setActive(true)
+            try audioSessionLease.activate()
+            observeAudioNotifications()
         } catch {
+            audioSessionLease.deactivate()
             throw VoiceDictationError.audioSessionError(error)
         }
 
@@ -167,8 +207,11 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
             audioRecorder = recorder
             startMetering()
             isRecording = true
+            playRecordingStartHaptic()
             logger.info("Started recording")
         } catch {
+            audioSessionLease.deactivate()
+            removeAudioNotificationObservers()
             throw VoiceDictationError.recordingFailed
         }
     }
@@ -180,12 +223,18 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
 
     /// Cancel recording without transcribing.
     func cancelRecording() {
+        cancelRecording(notifyStopReason: true)
+    }
+
+    private func cancelRecording(notifyStopReason: Bool) {
         let wasActive = isRecording || isTranscribing || recordingURL != nil
         stopMetering()
         autoStopTask?.cancel()
         autoStopTask = nil
         audioRecorder?.stop()
         audioRecorder = nil
+        audioSessionLease.deactivate()
+        removeAudioNotificationObservers()
         isRecording = false
         isTranscribing = false
         isFinalizing = false
@@ -198,7 +247,7 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
         resetSilenceDetectionState()
         recordingStartedAt = nil
 
-        if wasActive {
+        if wasActive, notifyStopReason {
             onStopReason?(.cancel)
         }
     }
@@ -226,7 +275,11 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
         isFinalizing = true
         stopMetering()
         recorder.stop()
+        audioRecorder = nil
+        audioSessionLease.deactivate()
+        removeAudioNotificationObservers()
         isRecording = false
+        playRecordingStopHaptic()
         logger.info("Stopped recording")
 
         guard let url = recordingURL else {
@@ -238,7 +291,6 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
         defer {
             isTranscribing = false
             isFinalizing = false
-            audioRecorder = nil
             recordingStartedAt = nil
             resetSilenceDetectionState()
             if let recordingURL {
@@ -349,9 +401,13 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
 
     private func transcribeAudio(fileURL: URL) async throws -> String {
         do {
-            let transcriptionResponse = try await openAIService.transcribeAudio(fileURL: fileURL)
+            let transcriptionResponse = try await withTranscriptionDeadline(seconds: 60) {
+                try await self.openAIService.transcribeAudio(fileURL: fileURL)
+            }
             logger.info("Transcription successful: \(transcriptionResponse.text.prefix(50))...")
             return transcriptionResponse.text
+        } catch VoiceDictationError.transcriptionTimedOut {
+            throw VoiceDictationError.transcriptionTimedOut
         } catch let error as OpenAIServiceError {
             switch error {
             case .notAuthenticated:
@@ -363,6 +419,77 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
             throw VoiceDictationError.transcriptionFailed(apiError.localizedDescription)
         } catch {
             throw VoiceDictationError.transcriptionFailed(error.localizedDescription)
+        }
+    }
+
+    private func observeAudioNotifications() {
+        removeAudioNotificationObservers()
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard
+                let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                AVAudioSession.InterruptionType(rawValue: typeValue) == .began
+            else { return }
+
+            Task { @MainActor in
+                self?.cancelRecordingWithMessage("Recording paused (interruption)")
+            }
+        }
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.cancelRecordingWithMessage("Recording stopped because the audio route changed")
+            }
+        }
+    }
+
+    private func removeAudioNotificationObservers() {
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+            self.interruptionObserver = nil
+        }
+        if let routeChangeObserver {
+            NotificationCenter.default.removeObserver(routeChangeObserver)
+            self.routeChangeObserver = nil
+        }
+    }
+
+    private func cancelRecordingWithMessage(_ message: String) {
+        cancelRecording()
+        onError?(message)
+    }
+
+    private func playRecordingStartHaptic() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func playRecordingStopHaptic() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func withTranscriptionDeadline<T: Sendable>(
+        seconds: TimeInterval,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw VoiceDictationError.transcriptionTimedOut
+            }
+            guard let result = try await group.next() else {
+                throw VoiceDictationError.transcriptionTimedOut
+            }
+            group.cancelAll()
+            return result
         }
     }
 }

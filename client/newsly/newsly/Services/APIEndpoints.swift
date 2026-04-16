@@ -131,6 +131,9 @@ enum APIEndpoints {
     static func chatCouncilSelect(sessionId: Int) -> String {
         return "/api/content/chat/sessions/\(sessionId)/council/select"
     }
+    static func chatCouncilRetry(sessionId: Int) -> String {
+        return "/api/content/chat/sessions/\(sessionId)/council/retry"
+    }
     static func chatMessageStatus(messageId: Int) -> String {
         return "/api/content/chat/messages/\(messageId)/status"
     }

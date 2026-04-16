@@ -8,20 +8,28 @@
 import Foundation
 
 /// Role of a chat message sender
-enum ChatMessageRole: String, Codable {
+enum ChatMessageRole: String, Codable, Hashable, Sendable {
     case user
     case assistant
     case system
     case tool
 }
 
-enum ChatMessageDisplayType: String, Codable {
+enum ChatMessageDisplayType: String, Codable, Hashable, Sendable {
     case message
     case processSummary = "process_summary"
+
+    /// Process summaries sort before their associated message content.
+    var sortOrder: Int {
+        switch self {
+        case .processSummary: 0
+        case .message: 1
+        }
+    }
 }
 
 /// Processing status for async chat messages
-enum MessageProcessingStatus: String, Codable {
+enum MessageProcessingStatus: String, Codable, Hashable, Sendable {
     case processing
     case completed
     case failed
@@ -117,9 +125,10 @@ struct CouncilCandidate: Codable, Identifiable, Equatable {
 }
 
 /// Individual message in a chat session
-struct ChatMessage: Codable, Identifiable {
+struct ChatMessage: Codable, Identifiable, Equatable {
     let id: Int
     let sourceMessageId: Int?
+    let displayKey: String?
     let role: ChatMessageRole
     let timestamp: String
     let content: String
@@ -136,6 +145,7 @@ struct ChatMessage: Codable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)
         sourceMessageId = try container.decodeIfPresent(Int.self, forKey: .sourceMessageId)
+        displayKey = try container.decodeIfPresent(String.self, forKey: .displayKey)
         role = try container.decode(ChatMessageRole.self, forKey: .role)
         timestamp = try container.decode(String.self, forKey: .timestamp)
         content = try container.decode(String.self, forKey: .content)
@@ -153,6 +163,7 @@ struct ChatMessage: Codable, Identifiable {
     init(
         id: Int,
         sourceMessageId: Int? = nil,
+        displayKey: String? = nil,
         role: ChatMessageRole,
         timestamp: String,
         content: String,
@@ -166,6 +177,7 @@ struct ChatMessage: Codable, Identifiable {
     ) {
         self.id = id
         self.sourceMessageId = sourceMessageId
+        self.displayKey = displayKey
         self.role = role
         self.timestamp = timestamp
         self.content = content
@@ -181,6 +193,7 @@ struct ChatMessage: Codable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, role, timestamp, content, status, error
         case sourceMessageId = "source_message_id"
+        case displayKey = "display_key"
         case displayType = "display_type"
         case processLabel = "process_label"
         case feedOptions = "feed_options"
@@ -197,34 +210,7 @@ struct ChatMessage: Codable, Identifiable {
     }
 
     var formattedTime: String {
-        // Try ISO8601 with fractional seconds
-        let iso8601WithFractional = ISO8601DateFormatter()
-        iso8601WithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        var date = iso8601WithFractional.date(from: timestamp)
-
-        // Try ISO8601 without fractional seconds
-        if date == nil {
-            let iso8601 = ISO8601DateFormatter()
-            iso8601.formatOptions = [.withInternetDateTime]
-            date = iso8601.date(from: timestamp)
-        }
-
-        // Try basic ISO format
-        if date == nil {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-            formatter.timeZone = TimeZone(abbreviation: "UTC")
-            date = formatter.date(from: timestamp)
-        }
-
-        guard let date = date else {
-            return ""
-        }
-
-        let displayFormatter = DateFormatter()
-        displayFormatter.timeStyle = .short
-        displayFormatter.timeZone = TimeZone.current
-        return displayFormatter.string(from: date)
+        ChatMessageTimestampFormatter.formattedTime(from: timestamp)
     }
 
     var isUser: Bool {
@@ -250,13 +236,42 @@ struct ChatMessage: Codable, Identifiable {
     var hasCouncilCandidates: Bool {
         !councilCandidates.isEmpty
     }
+}
 
-    var scrollIdentity: String {
-        [
-            String(id),
-            role.rawValue,
-            timestamp,
-            displayType.rawValue
-        ].joined(separator: "|")
+private enum ChatMessageTimestampFormatter {
+    private static let iso8601WithFractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private static let utcMicrosecondsFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+        formatter.timeZone = TimeZone(abbreviation: "UTC")
+        return formatter
+    }()
+
+    private static let displayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.timeZone = TimeZone.current
+        return formatter
+    }()
+
+    static func formattedTime(from timestamp: String) -> String {
+        let date =
+            iso8601WithFractionalFormatter.date(from: timestamp)
+            ?? iso8601Formatter.date(from: timestamp)
+            ?? utcMicrosecondsFormatter.date(from: timestamp)
+
+        guard let date else { return "" }
+        return displayFormatter.string(from: date)
     }
 }

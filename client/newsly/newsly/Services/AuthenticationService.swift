@@ -74,6 +74,7 @@ final class AuthenticationService: NSObject {
     func logout() {
         KeychainManager.shared.clearAll()
         SharedContainer.userDefaults.removeObject(forKey: "accessToken")
+        NotificationCenter.default.post(name: .authDidLogOut, object: nil)
     }
 
     /// Get current user from backend

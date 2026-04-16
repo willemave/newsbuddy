@@ -48,8 +48,19 @@ class ActiveChatSessionManager: ObservableObject {
 
     private var pollingTasks: [Int: Task<Void, Never>] = [:]  // sessionId -> task
     private var sessionIdsByContentId: [Int: [Int]] = [:]  // contentId -> newest-first session IDs
+    private var authDidLogOutObserver: NSObjectProtocol?
 
-    private init() {}
+    private init() {
+        authDidLogOutObserver = NotificationCenter.default.addObserver(
+            forName: .authDidLogOut,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.reset()
+            }
+        }
+    }
 
     /// Start tracking a new chat session
     func startTracking(
@@ -58,6 +69,14 @@ class ActiveChatSessionManager: ObservableObject {
         contentTitle: String,
         messageId: Int
     ) {
+        if let existing = activeSessions[session.id], existing.messageId == messageId {
+            logger.info("Already tracking session \(session.id) for message \(messageId)")
+            return
+        }
+
+        pollingTasks[session.id]?.cancel()
+        pollingTasks.removeValue(forKey: session.id)
+
         let activeSession = ActiveChatSession(
             id: session.id,
             contentId: contentId,
@@ -91,6 +110,17 @@ class ActiveChatSessionManager: ObservableObject {
         }
     }
 
+    func reset() {
+        for task in pollingTasks.values {
+            task.cancel()
+        }
+        pollingTasks.removeAll()
+        activeSessions.removeAll()
+        completedSessions.removeAll()
+        sessionIdsByContentId.removeAll()
+        logger.info("Reset all active chat tracking state")
+    }
+
     /// Mark a completed session as viewed (dismisses banner)
     func markAsViewed(sessionId: Int) {
         guard let session = completedSessions.removeValue(forKey: sessionId) else { return }
@@ -118,7 +148,7 @@ class ActiveChatSessionManager: ObservableObject {
 
     /// Check if there's an active or completed session for this content
     func hasActiveSession(forContentId contentId: Int) -> Bool {
-        return activeSessions[contentId] != nil || completedSessions[contentId] != nil
+        getSession(forContentId: contentId) != nil
     }
 
     /// Number of sessions currently processing (for tab badge)

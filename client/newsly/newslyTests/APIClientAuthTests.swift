@@ -102,6 +102,19 @@ final class APIClientAuthTests: XCTestCase {
     }
 
     func testRequestThrowsUnauthorizedWhenRefreshUnavailable() async {
+        let logoutExpectation = expectation(description: "terminal refresh failure posts logout notification")
+        logoutExpectation.assertForOverFulfill = false
+        let observer = NotificationCenter.default.addObserver(
+            forName: .authDidLogOut,
+            object: nil,
+            queue: nil
+        ) { _ in
+            logoutExpectation.fulfill()
+        }
+        defer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+
         let session = makeSession()
         let tokenStore = MockTokenStore(
             accessToken: nil,
@@ -143,6 +156,7 @@ final class APIClientAuthTests: XCTestCase {
         }
 
         XCTAssertEqual(refresher.refreshCallCount, 1)
+        await fulfillment(of: [logoutExpectation], timeout: 1)
     }
 
     func testTokenRefreshServicePersistsRotatedTokens() async throws {

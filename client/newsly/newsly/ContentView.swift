@@ -263,7 +263,7 @@ private extension View {
                         }
                         : nil
                 )
-                .id(route.sessionId)
+                .id(route.stableKey)
             }
             .navigationDestination(for: SessionHistoryRoute.self) { _ in
                 ChatSessionHistoryView(onSelectSession: { route in

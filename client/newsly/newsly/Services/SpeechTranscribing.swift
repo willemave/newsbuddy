@@ -93,11 +93,17 @@ private final class E2EFakeSpeechTranscriber: SpeechTranscribing {
     }
 
     func cancel() {
-        reset()
+        isRecording = false
+        isTranscribing = false
         onStopReason?(.cancel)
     }
 
     func reset() {
+        onTranscriptDelta = nil
+        onTranscriptFinal = nil
+        onError = nil
+        onStateChange = nil
+        onStopReason = nil
         isRecording = false
         isTranscribing = false
     }

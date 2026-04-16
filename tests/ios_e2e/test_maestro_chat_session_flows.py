@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-from app.models.schema import ChatSession
+from app.models.schema import ChatMessage, ChatSession
 from app.services.chat_agent import ChatRunResult, save_messages
 
 pytestmark = [pytest.mark.integration, pytest.mark.ios_e2e]
@@ -128,3 +128,65 @@ def test_chat_session_council_failure_surfaces_error_banner(
             "ERROR_TEXT": "Add at least two experts in Settings before using the council",
         },
     )
+
+
+def test_chat_session_long_transcript_scroll_preserves_jump_to_latest(
+    run_ios_flow,
+    test_user,
+    chat_session_factory,
+    db_session,
+    completed_chat_processors_factory,
+    monkeypatch,
+) -> None:
+    """Long transcripts should stay scrollable and preserve jump-to-latest behavior."""
+    latest_assistant = "Scroll matrix assistant turn 24"
+    older_user = "Scroll matrix user turn 12"
+    follow_up = "Scroll matrix follow-up"
+    follow_up_reply = "Scroll matrix follow-up reply"
+    session = chat_session_factory(
+        user=test_user,
+        title="Long Transcript Scroll Session",
+        session_type="knowledge_chat",
+    )
+    for turn in range(1, 25):
+        save_messages(
+            db_session,
+            session.id,
+            [
+                ModelRequest(parts=[UserPromptPart(content=f"Scroll matrix user turn {turn}")]),
+                ModelResponse(parts=[TextPart(content=f"Scroll matrix assistant turn {turn}")]),
+            ],
+            display_user_prompt=f"Scroll matrix user turn {turn}",
+        )
+
+    _fake_process_message_async, _fake_process_assistant_turn_async = (
+        completed_chat_processors_factory(assistant_reply=follow_up_reply)
+    )
+    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+
+    run_ios_flow(
+        "chat_session_long_transcript_scroll.yaml",
+        extra_env={
+            "CHAT_SESSION_ID": str(session.id),
+            "LATEST_ASSISTANT": latest_assistant,
+            "OLDER_USER": older_user,
+            "FOLLOW_UP": follow_up,
+            "FOLLOW_UP_REPLY": follow_up_reply,
+        },
+    )
+
+    db_session.expire_all()
+    message = (
+        db_session.query(ChatMessage)
+        .filter(ChatMessage.session_id == session.id)
+        .order_by(ChatMessage.id.desc())
+        .first()
+    )
+    assert message is not None
+    assert message.status == "completed"
+    assert follow_up in (message.message_list or "")
+    assert follow_up_reply in (message.message_list or "")

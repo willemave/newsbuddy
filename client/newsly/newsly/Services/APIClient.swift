@@ -278,6 +278,7 @@ class APIClient {
                             sentAuthHeader: sentAuthHeader,
                             reason: "refresh_token_unavailable_or_expired"
                         )
+                        notifyAuthDidLogOut()
                         throw APIError.unauthorized
                     default:
                         throw APIError.networkError(authError)
@@ -429,6 +430,7 @@ class APIClient {
                     sentAuthHeader: false,
                     reason: "fetch_token_refresh_failed"
                 )
+                notifyAuthDidLogOut()
                 throw APIError.unauthorized
             default:
                 throw APIError.networkError(authError)
@@ -529,12 +531,17 @@ class APIClient {
 
         NotificationCenter.default.post(name: .authenticationRequired, object: nil, userInfo: userInfo)
     }
+
+    private func notifyAuthDidLogOut() {
+        NotificationCenter.default.post(name: .authDidLogOut, object: nil)
+    }
 }
 
 // MARK: - Notification Extensions
 
 extension Notification.Name {
     static let authenticationRequired = Notification.Name("authenticationRequired")
+    static let authDidLogOut = Notification.Name("authDidLogOut")
 }
 
 // MARK: - Combine bridge

@@ -125,7 +125,7 @@ struct StructuredSummaryView: View {
         }
         .sheet(item: $topicSession) { session in
             NavigationStack {
-                ChatSessionView(session: session)
+                ChatSessionView(route: ChatSessionRoute(session: session))
             }
         }
     }

@@ -1,0 +1,36 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenChatSessionId: "${CHAT_SESSION_ID}"
+- assertVisible:
+    id: knowledge.chat_input
+- assertVisible:
+    text: "${LATEST_ASSISTANT}"
+- scrollUntilVisible:
+    element: "${OLDER_USER}"
+    direction: UP
+    timeout: 15000
+    visibilityPercentage: 50
+    centerElement: true
+- tapOn:
+    id: knowledge.chat_input
+- inputText: "${FOLLOW_UP}"
+- tapOn:
+    id: knowledge.chat_send
+- assertVisible:
+    text: "Jump to latest"
+- tapOn:
+    text: "Jump to latest"
+- assertVisible:
+    text: "${FOLLOW_UP_REPLY}"
