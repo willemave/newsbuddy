@@ -20,10 +20,48 @@ def test_recently_read_scoped_to_user(
     content_one = content_factory(
         url="https://example.com/read-by-current",
         title="Read by Current User",
+        content_metadata={
+            "summary": {
+                "title": "Read by Current User",
+                "overview": (
+                    "This overview is long enough to satisfy the minimum length requirement "
+                    "for structured summaries."
+                ),
+                "bullet_points": [
+                    {"text": "Key point one", "category": "key_finding"},
+                    {"text": "Key point two", "category": "methodology"},
+                    {"text": "Key point three", "category": "conclusion"},
+                ],
+                "quotes": [],
+                "topics": ["Testing"],
+            },
+            "summary_kind": "long_structured",
+            "summary_version": 1,
+            "image_generated_at": "2026-01-01T00:00:00Z",
+        },
     )
     content_two = content_factory(
         url="https://example.com/read-by-other",
         title="Read by Other User",
+        content_metadata={
+            "summary": {
+                "title": "Read by Other User",
+                "overview": (
+                    "This overview is long enough to satisfy the minimum length requirement "
+                    "for structured summaries."
+                ),
+                "bullet_points": [
+                    {"text": "Key point one", "category": "key_finding"},
+                    {"text": "Key point two", "category": "methodology"},
+                    {"text": "Key point three", "category": "conclusion"},
+                ],
+                "quotes": [],
+                "topics": ["Testing"],
+            },
+            "summary_kind": "long_structured",
+            "summary_version": 1,
+            "image_generated_at": "2026-01-01T00:00:00Z",
+        },
     )
 
     timestamp = datetime.now(UTC)

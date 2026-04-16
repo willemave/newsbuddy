@@ -50,14 +50,39 @@ def resolve_image_urls(domain_content: ContentData) -> tuple[str | None, str | N
     return image_url, thumbnail_url
 
 
+def is_ready_for_long_form_summary(domain_content: ContentData) -> bool:
+    """Return True when long-form content has enough summary data for feed display."""
+    if domain_content.content_type == ContentType.ARTICLE:
+        if domain_content.structured_summary and domain_content.bullet_points:
+            return True
+        return bool(domain_content.short_summary or domain_content.summary)
+
+    if domain_content.content_type == ContentType.PODCAST:
+        if domain_content.structured_summary:
+            return True
+        return bool(domain_content.short_summary or domain_content.summary)
+
+    return True
+
+
+def has_generated_long_form_artwork(domain_content: ContentData) -> bool:
+    """Return True when long-form content has a generated Newsly artwork asset."""
+    if domain_content.content_type not in {ContentType.ARTICLE, ContentType.PODCAST}:
+        return False
+    metadata = domain_content.metadata or {}
+    return bool(metadata.get("image_generated_at"))
+
+
 def is_ready_for_list(domain_content: ContentData, image_url: str | None) -> bool:
     """Return True when content has enough data to appear in list views."""
     _ = image_url
-    if domain_content.content_type != ContentType.ARTICLE:
+    if domain_content.content_type == ContentType.NEWS:
         return True
-    if domain_content.structured_summary and domain_content.bullet_points:
-        return True
-    return bool(domain_content.short_summary or domain_content.summary)
+
+    if not is_ready_for_long_form_summary(domain_content):
+        return False
+
+    return has_generated_long_form_artwork(domain_content)
 
 
 def can_subscribe_for_feed(

@@ -80,6 +80,70 @@ def test_validate_feed_candidate_rejects_html_article() -> None:
     assert result is None
 
 
+def test_validate_feed_candidate_uses_quiet_probe_flags() -> None:
+    rss_payload = b'<?xml version="1.0"?><rss><channel><title>Test Feed</title></channel></rss>'
+    observed: dict[str, object] = {}
+
+    class DummyHttpService:
+        def head(
+            self,
+            url: str,
+            allow_statuses=None,
+            *,
+            log_client_errors: bool = True,
+            log_exceptions: bool = True,
+        ):  # noqa: ANN001
+            observed["head"] = {
+                "url": url,
+                "allow_statuses": allow_statuses,
+                "log_client_errors": log_client_errors,
+                "log_exceptions": log_exceptions,
+            }
+            return SimpleNamespace(status_code=200)
+
+        def fetch(
+            self,
+            url: str,
+            *,
+            log_client_errors: bool = True,
+            log_exceptions: bool = True,
+        ):  # noqa: ANN001
+            observed["fetch"] = {
+                "url": url,
+                "log_client_errors": log_client_errors,
+                "log_exceptions": log_exceptions,
+            }
+            return SimpleNamespace(
+                headers={"content-type": "application/rss+xml"},
+                content=rss_payload,
+            )
+
+    detector = feed_detection.FeedDetector(
+        use_llm=False,
+        use_exa_search=False,
+        http_service=cast(Any, DummyHttpService()),
+    )
+
+    result = detector._validate_feed_candidate("https://example.com/rss.xml")
+
+    assert result == {
+        "feed_url": "https://example.com/rss.xml",
+        "feed_format": "rss",
+        "title": "Test Feed",
+    }
+    assert observed["head"] == {
+        "url": "https://example.com/rss.xml",
+        "allow_statuses": {405},
+        "log_client_errors": False,
+        "log_exceptions": False,
+    }
+    assert observed["fetch"] == {
+        "url": "https://example.com/rss.xml",
+        "log_client_errors": False,
+        "log_exceptions": False,
+    }
+
+
 def test_classify_feed_type_with_llm_persists_usage(
     db_session,
     vendor_usage_db,

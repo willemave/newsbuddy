@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import HttpUrl, TypeAdapter
 
@@ -53,6 +54,48 @@ def _select_http_url(raw_url: str, metadata: dict[str, Any], content_type: str) 
     return raw_url
 
 
+def _select_news_article_url(
+    raw_url: str | None,
+    source_url: str | None,
+    metadata: dict[str, Any],
+) -> str | None:
+    candidates: list[str | None] = [
+        source_url,
+        metadata.get("final_url_after_redirects"),
+        metadata.get("final_url"),
+        metadata.get("url"),
+        raw_url,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str) and is_http_url(candidate):
+            return candidate
+    return None
+
+
+def _backfill_news_article_metadata(db_content: DBContent, metadata: dict[str, Any]) -> None:
+    if db_content.content_type != ContentType.NEWS.value:
+        return
+
+    article = metadata.get("article")
+    if isinstance(article, dict) and isinstance(article.get("url"), str):
+        return
+
+    article_url = _select_news_article_url(db_content.url, db_content.source_url, metadata)
+    if article_url is None:
+        return
+
+    parsed = urlparse(article_url)
+    source_domain = metadata.get("source") if isinstance(metadata.get("source"), str) else None
+    if not source_domain:
+        source_domain = parsed.netloc or None
+
+    article_metadata = article if isinstance(article, dict) else {}
+    article_metadata.setdefault("url", article_url)
+    article_metadata.setdefault("title", db_content.title)
+    article_metadata.setdefault("source_domain", source_domain)
+    metadata["article"] = article_metadata
+
+
 def content_to_domain(db_content: DBContent) -> ContentData:
     """Convert database Content to normalized ContentData."""
     try:
@@ -73,6 +116,7 @@ def content_to_domain(db_content: DBContent) -> ContentData:
             metadata["platform"] = db_content.platform
         if db_content.source and metadata.get("source") is None:
             metadata["source"] = db_content.source
+        _backfill_news_article_metadata(db_content, metadata)
         _normalize_summary_metadata(metadata, content_type)
 
         resolved_url = _select_http_url(

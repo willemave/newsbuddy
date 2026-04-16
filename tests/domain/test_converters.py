@@ -134,6 +134,27 @@ class TestContentToDomain:
 
         assert str(domain_content.url) == "https://x.com/i/status/123#newsly-digest-user-1"
 
+    def test_convert_news_backfills_missing_article_metadata(self):
+        """Legacy news rows without article metadata should stay mappable."""
+        db_content = DBContent(
+            id=1002,
+            content_type=ContentType.NEWS.value,
+            url="https://news.ycombinator.com/item?id=123",
+            source_url="https://example.com/story",
+            title="Example Story",
+            source="example.com",
+            status=ContentStatus.COMPLETED.value,
+            content_metadata={},
+        )
+
+        domain_content = content_to_domain(db_content)
+
+        assert domain_content.metadata["article"] == {
+            "url": "https://example.com/story",
+            "title": "Example Story",
+            "source_domain": "example.com",
+        }
+
 
 class TestDomainToContent:
     """Test converting domain ContentData to database Content."""

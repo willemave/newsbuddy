@@ -64,9 +64,7 @@ def search_seeded_content(content_factory, status_entry_factory, test_user):
             source="Misc",
             classification="skip",
             status="completed",
-            content_metadata={
-                "summary": {"title": "Skip This", "overview": "Not relevant"}
-            },
+            content_metadata={"summary": {"title": "Skip This", "overview": "Not relevant"}},
         ),
     ]
     for item in items:
@@ -90,6 +88,60 @@ class TestSearchAPI:
 
         for content in response.json()["contents"]:
             assert content["content_type"] == "article"
+
+    def test_search_keeps_long_form_results_without_generated_artwork(
+        self,
+        client,
+        content_factory,
+        status_entry_factory,
+        test_user,
+    ) -> None:
+        article = content_factory(
+            content_type="article",
+            url="https://example.com/no-art-search-article",
+            title="Backend Search Visibility",
+            source="Example Source",
+            status="completed",
+            content_metadata={
+                "summary": {
+                    "title": "Backend Search Visibility",
+                    "overview": (
+                        "This long-form article should stay searchable even before generated "
+                        "artwork finishes, because search is not an inbox/feed surface."
+                    ),
+                    "bullet_points": [
+                        {
+                            "text": (
+                                "Search should continue to return summary-ready long-form items."
+                            ),
+                            "category": "key_finding",
+                        },
+                        {
+                            "text": (
+                                "Artwork gating should remain limited to inbox/feed visibility."
+                            ),
+                            "category": "context",
+                        },
+                        {
+                            "text": (
+                                "History and library surfaces should not inherit feed-only gating."
+                            ),
+                            "category": "conclusion",
+                        },
+                    ],
+                    "topics": ["Search", "Feeds"],
+                },
+                "summary_kind": "long_structured",
+                "summary_version": 1,
+            },
+        )
+        status_entry_factory(user=test_user, content=article, status="inbox")
+
+        response = client.get("/api/content/search", params={"q": "Visibility"})
+        assert response.status_code == 200
+
+        titles = {content["title"] for content in response.json()["contents"]}
+        assert "Backend Search Visibility" in titles
 
     def test_search_validation(self, client) -> None:
         response = client.get("/api/content/search", params={"q": "a"})

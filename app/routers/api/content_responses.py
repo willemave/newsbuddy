@@ -161,6 +161,11 @@ def build_fallback_content_summary_response(
     raw_status = content.status
     if raw_content_type is None or raw_url is None or raw_status is None:
         return None
+    if raw_content_type in {
+        ContentType.ARTICLE.value,
+        ContentType.PODCAST.value,
+    } and not metadata.get("image_generated_at"):
+        return None
     classification = None
     if content.classification in {
         ContentClassification.TO_READ.value,
@@ -170,7 +175,10 @@ def build_fallback_content_summary_response(
 
     image_url: str | None = None
     thumbnail_url: str | None = None
-    if content.content_type == ContentType.ARTICLE.value and metadata.get("image_generated_at"):
+    if content.content_type in {
+        ContentType.ARTICLE.value,
+        ContentType.PODCAST.value,
+    } and metadata.get("image_generated_at"):
         image_url = build_content_image_url(content_id)
         thumbnail_url = build_thumbnail_url(content_id)
     elif content.content_type == ContentType.PODCAST.value:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import UTC, datetime
 from itertools import count
 from typing import Any
@@ -631,10 +632,24 @@ def content_samples() -> dict[str, dict[str, Any]]:
     return load_fixture("content_samples")
 
 
+def _with_completed_long_form_artwork(sample: dict[str, Any]) -> dict[str, Any]:
+    """Return a sample copy with generated artwork metadata for visible long-form fixtures."""
+    if sample.get("status") != "completed":
+        return sample
+    if sample.get("content_type") not in {"article", "podcast"}:
+        return sample
+
+    normalized = deepcopy(sample)
+    metadata = dict(normalized.get("content_metadata") or {})
+    metadata.setdefault("image_generated_at", "2026-01-01T00:00:00Z")
+    normalized["content_metadata"] = metadata
+    return normalized
+
+
 @pytest.fixture
 def sample_article_long(content_samples: dict[str, Any]) -> dict[str, Any]:
     """Get a long-form article sample."""
-    return content_samples["article_long_form"]
+    return _with_completed_long_form_artwork(content_samples["article_long_form"])
 
 
 @pytest.fixture
@@ -646,7 +661,7 @@ def sample_article_short(content_samples: dict[str, Any]) -> dict[str, Any]:
 @pytest.fixture
 def sample_podcast(content_samples: dict[str, Any]) -> dict[str, Any]:
     """Get a podcast episode sample with full processing."""
-    return content_samples["podcast_interview"]
+    return _with_completed_long_form_artwork(content_samples["podcast_interview"])
 
 
 @pytest.fixture

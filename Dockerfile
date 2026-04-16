@@ -7,7 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     NEWSLY_DATA_ROOT=/data \
     PGDATA=/data/postgres \
     POSTGRES_PORT=5432 \
-    PORT=8000
+    PORT=8000 \
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
@@ -26,11 +28,15 @@ RUN apt-get update \
         util-linux \
     && rm -rf /var/lib/apt/lists/*
 
+RUN pip install --upgrade pip uv
+
+COPY pyproject.toml uv.lock README.md /app/
+
+RUN uv sync --frozen --no-dev --no-editable --no-install-project
+
 COPY . /app
 
-RUN pip install --upgrade pip \
-    && pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.11.0+cpu" \
-    && pip install . \
+RUN uv sync --frozen --no-dev --no-editable \
     && python -m playwright install --with-deps chromium \
     && chmod +x /app/docker/*.sh /app/scripts/*.sh
 

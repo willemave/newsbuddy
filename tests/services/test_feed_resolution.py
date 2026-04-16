@@ -140,3 +140,57 @@ def test_resolve_feed_candidate_can_prefer_site_discovery_over_guessed_feed() ->
         "feed_format": "rss",
         "title": "Creative Coding Weekly",
     }
+
+
+def test_resolve_feed_candidate_fetches_site_quietly_when_supported() -> None:
+    observed: dict[str, object] = {}
+
+    class DummyHttpService:
+        def fetch(
+            self,
+            url: str,
+            *,
+            log_client_errors: bool = True,
+            log_exceptions: bool = True,
+        ):  # noqa: ANN001
+            observed["url"] = url
+            observed["log_client_errors"] = log_client_errors
+            observed["log_exceptions"] = log_exceptions
+            return SimpleNamespace(
+                url="https://example.com/show",
+                text="<html>podcast page</html>",
+            )
+
+    class DummyDetector:
+        def __init__(self) -> None:
+            self.http_service = DummyHttpService()
+
+        def validate_feed_url(self, feed_url: str) -> dict[str, str] | None:
+            return None
+
+        def detect_from_links(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+            return {
+                "detected_feed": {
+                    "url": "https://example.com/fixed.rss",
+                    "format": "rss",
+                    "title": "Creative Coding Weekly",
+                }
+            }
+
+    result = resolve_feed_candidate(
+        detector=cast(Any, DummyDetector()),
+        title="Creative Coding Weekly",
+        site_url="https://example.com/show",
+        candidate_feed_urls=[],
+    )
+
+    assert result == {
+        "feed_url": "https://example.com/fixed.rss",
+        "feed_format": "rss",
+        "title": "Creative Coding Weekly",
+    }
+    assert observed == {
+        "url": "https://example.com/show",
+        "log_client_errors": False,
+        "log_exceptions": False,
+    }

@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -73,6 +74,22 @@ def is_ssl_error(error: Exception) -> bool:
     )
 
 
+def is_dns_resolution_error(error: Exception) -> bool:
+    """Check if a connection error came from hostname resolution."""
+    error_str = str(error).lower()
+    return any(
+        dns_term in error_str
+        for dns_term in [
+            "nodename nor servname provided",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "no address associated with hostname",
+            "getaddrinfo failed",
+            "failed to resolve",
+        ]
+    )
+
+
 def categorize_http_error(error: httpx.HTTPStatusError) -> Exception:
     """Categorize HTTP errors into retryable vs non-retryable."""
     status_code = error.response.status_code
@@ -86,6 +103,51 @@ def categorize_http_error(error: httpx.HTTPStatusError) -> Exception:
 
     # Default to non-retryable for unknown status codes
     return NonRetryableError(f"Unknown status code {status_code}: {error}")
+
+
+def fetch_quiet_compat(
+    http_service: Any,
+    url: str,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """Fetch with quiet probe flags when the injected service supports them."""
+    kwargs: dict[str, Any] = {
+        "log_client_errors": False,
+        "log_exceptions": False,
+    }
+    if headers is not None:
+        kwargs["headers"] = headers
+    try:
+        return http_service.fetch(url, **kwargs)
+    except TypeError:
+        if headers is None:
+            return http_service.fetch(url)
+        return http_service.fetch(url, headers=headers)
+
+
+def head_quiet_compat(
+    http_service: Any,
+    url: str,
+    headers: dict[str, str] | None = None,
+    allow_statuses: set[int] | None = None,
+) -> httpx.Response:
+    """HEAD with quiet probe flags when the injected service supports them."""
+    kwargs: dict[str, Any] = {
+        "log_client_errors": False,
+        "log_exceptions": False,
+    }
+    if headers is not None:
+        kwargs["headers"] = headers
+    if allow_statuses is not None:
+        kwargs["allow_statuses"] = allow_statuses
+    try:
+        return http_service.head(url, **kwargs)
+    except TypeError:
+        if headers is not None:
+            return http_service.head(url, headers=headers, allow_statuses=allow_statuses)
+        if allow_statuses is not None:
+            return http_service.head(url, allow_statuses=allow_statuses)
+        return http_service.head(url)
 
 
 class HttpService:
@@ -126,13 +188,22 @@ class HttpService:
         wait=wait_exponential(multiplier=1, min=2, max=8),
         retry=retry_if_not_exception_type((NonRetryableError, httpx.HTTPStatusError)),
     )
-    def fetch(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+    def fetch(
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
+        *,
+        log_client_errors: bool = True,
+        log_exceptions: bool = True,
+    ) -> httpx.Response:
         """
         Fetch a URL with intelligent retry logic.
 
         Args:
             url: URL to fetch
             headers: Additional headers
+            log_client_errors: Whether to log 4xx responses as errors
+            log_exceptions: Whether to log exception stack traces
 
         Returns:
             httpx.Response object
@@ -154,18 +225,21 @@ class HttpService:
             except httpx.HTTPStatusError as e:
                 # Categorize HTTP errors
                 categorized_error = categorize_http_error(e)
+                status_code = e.response.status_code
 
-                # Log the error
-                logger.error(
-                    "HTTP error %s for %s",
-                    e.response.status_code,
-                    url,
-                    extra={
-                        "component": "http_service",
-                        "operation": "http_fetch",
-                        "context_data": {"url": url, "status_code": e.response.status_code},
-                    },
-                )
+                if status_code >= 500 or log_client_errors:
+                    level = logging.ERROR if status_code >= 500 else logging.DEBUG
+                    logger.log(
+                        level,
+                        "HTTP error %s for %s",
+                        status_code,
+                        url,
+                        extra={
+                            "component": "http_service",
+                            "operation": "http_fetch",
+                            "context_data": {"url": url, "status_code": status_code},
+                        },
+                    )
 
                 # Raise categorized error (may be NonRetryableError)
                 raise categorized_error from e
@@ -185,30 +259,67 @@ class HttpService:
                     )
                     raise NonRetryableError(f"SSL error: {e}") from e
 
-                # Regular connection errors can be retried
-                logger.exception(
-                    "Connection error for %s: %s",
-                    url,
-                    e,
-                    extra={
-                        "component": "http_service",
-                        "operation": "http_fetch",
-                        "context_data": {"url": url, "error_type": "connection_error"},
-                    },
-                )
+                if is_dns_resolution_error(e):
+                    log_method = logger.warning if log_exceptions else logger.debug
+                    log_method(
+                        "DNS resolution error for %s: %s",
+                        url,
+                        e,
+                        extra={
+                            "component": "http_service",
+                            "operation": "http_fetch",
+                            "context_data": {"url": url, "error_type": "dns_resolution_error"},
+                        },
+                    )
+                    raise NonRetryableError(f"DNS resolution error: {e}") from e
+
+                if log_exceptions:
+                    logger.exception(
+                        "Connection error for %s: %s",
+                        url,
+                        e,
+                        extra={
+                            "component": "http_service",
+                            "operation": "http_fetch",
+                            "context_data": {"url": url, "error_type": "connection_error"},
+                        },
+                    )
+                else:
+                    logger.debug(
+                        "Connection error for %s: %s",
+                        url,
+                        e,
+                        extra={
+                            "component": "http_service",
+                            "operation": "http_fetch",
+                            "context_data": {"url": url, "error_type": "connection_error"},
+                        },
+                    )
                 raise
 
             except Exception as e:
-                logger.exception(
-                    "HTTP fetch error for %s: %s",
-                    url,
-                    e,
-                    extra={
-                        "component": "http_service",
-                        "operation": "http_fetch",
-                        "context_data": {"url": url},
-                    },
-                )
+                if log_exceptions:
+                    logger.exception(
+                        "HTTP fetch error for %s: %s",
+                        url,
+                        e,
+                        extra={
+                            "component": "http_service",
+                            "operation": "http_fetch",
+                            "context_data": {"url": url},
+                        },
+                    )
+                else:
+                    logger.debug(
+                        "HTTP fetch error for %s: %s",
+                        url,
+                        e,
+                        extra={
+                            "component": "http_service",
+                            "operation": "http_fetch",
+                            "context_data": {"url": url},
+                        },
+                    )
                 raise
 
     @retry(
@@ -288,6 +399,20 @@ class HttpService:
                         },
                     )
                     raise NonRetryableError(f"SSL error: {e}") from e
+
+                if is_dns_resolution_error(e):
+                    log_method = logger.warning if log_exceptions else logger.debug
+                    log_method(
+                        "DNS resolution error for HEAD %s: %s",
+                        url,
+                        e,
+                        extra={
+                            "component": "http_service",
+                            "operation": "http_head",
+                            "context_data": {"url": url, "error_type": "dns_resolution_error"},
+                        },
+                    )
+                    raise NonRetryableError(f"DNS resolution error: {e}") from e
 
                 if log_exceptions:
                     logger.exception(
@@ -412,7 +537,19 @@ class HttpService:
                     )
                     raise NonRetryableError(f"SSL error: {e}") from e
 
-                # Regular connection errors can be retried
+                if is_dns_resolution_error(e):
+                    logger.warning(
+                        "DNS resolution error for %s: %s",
+                        url,
+                        e,
+                        extra={
+                            "component": "http_service",
+                            "operation": "http_fetch",
+                            "context_data": {"url": url, "error_type": "dns_resolution_error"},
+                        },
+                    )
+                    raise NonRetryableError(f"DNS resolution error: {e}") from e
+
                 logger.exception(
                     "Connection error for %s: %s",
                     url,

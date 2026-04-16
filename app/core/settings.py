@@ -32,7 +32,6 @@ def _default_images_base_dir() -> Path:
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
         case_sensitive=False,
         extra="ignore",  # Ignore extra fields from existing .env
     )

@@ -17,7 +17,7 @@ from app.constants import SELF_SUBMISSION_SOURCE
 from app.core.logging import get_logger
 from app.models.metadata import ContentType
 from app.services.exa_client import ExaClientError, exa_search
-from app.services.http import HttpService
+from app.services.http import HttpService, fetch_quiet_compat, head_quiet_compat
 from app.services.llm_agents import get_basic_agent
 from app.services.vendor_usage import record_model_usage
 
@@ -568,18 +568,11 @@ class FeedDetector:
 
     def _validate_feed_candidate(self, feed_url: str) -> dict[str, str] | None:
         try:
-            try:
-                head_response = self.http_service.head(
-                    feed_url,
-                    allow_statuses={405},
-                    log_client_errors=False,
-                    log_exceptions=False,
-                )
-            except TypeError:
-                try:
-                    head_response = self.http_service.head(feed_url, allow_statuses={405})
-                except TypeError:
-                    head_response = self.http_service.head(feed_url)
+            head_response = head_quiet_compat(
+                self.http_service,
+                feed_url,
+                allow_statuses={405},
+            )
         except Exception as e:  # noqa: BLE001
             logger.debug(
                 "Feed candidate HEAD failed: %s",
@@ -607,7 +600,7 @@ class FeedDetector:
             )
 
         try:
-            response = self.http_service.fetch(feed_url)
+            response = fetch_quiet_compat(self.http_service, feed_url)
         except Exception as e:  # noqa: BLE001
             logger.debug(
                 "Feed candidate fetch failed: %s",

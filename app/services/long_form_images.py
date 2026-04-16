@@ -7,7 +7,7 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
-from app.models.content_display import is_ready_for_list
+from app.models.content_display import is_ready_for_long_form_summary
 from app.models.content_mapper import content_to_domain
 from app.models.contracts import TaskStatus
 from app.models.metadata import ContentStatus, ContentType
@@ -108,7 +108,7 @@ def is_visible_long_form_image_candidate(db: Session, content: Content) -> bool:
             domain_content = content_to_domain(content)
         except Exception:  # noqa: BLE001
             return False
-        if not is_ready_for_list(domain_content, None):
+        if not is_ready_for_long_form_summary(domain_content):
             return False
     return True
 

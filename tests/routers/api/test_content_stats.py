@@ -236,26 +236,26 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
         url="https://example.com/article-unread",
         content_type=ContentType.ARTICLE.value,
         status=ContentStatus.COMPLETED.value,
-        content_metadata={},
+        content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
     )
     completed_podcast_read = Content(
         url="https://example.com/podcast-read",
         content_type=ContentType.PODCAST.value,
         status=ContentStatus.COMPLETED.value,
-        content_metadata={},
+        content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
     )
     completed_article_saved = Content(
         url="https://example.com/article-knowledge",
         content_type=ContentType.ARTICLE.value,
         status=ContentStatus.COMPLETED.value,
-        content_metadata={},
+        content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
     )
     completed_youtube = Content(
         url="https://youtube.com/watch?v=xyz",
         content_type=ContentType.UNKNOWN.value,
         platform="youtube",
         status=ContentStatus.COMPLETED.value,
-        content_metadata={},
+        content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
     )
     completed_news = Content(
         url="https://example.com/news",
@@ -343,6 +343,85 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
     assert payload["unread_count"] == 3
     assert payload["saved_to_knowledge_count"] == 1
     assert payload["processing_count"] == 2
+
+
+def test_long_form_stats_hide_completed_items_until_generated_artwork_is_ready(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    hidden_article = Content(
+        url="https://example.com/article-awaiting-art",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={
+            "summary": {
+                "title": "Awaiting Art",
+                "overview": (
+                    "This overview is long enough to satisfy the minimum length requirement "
+                    "for structured summaries."
+                ),
+                "bullet_points": [
+                    {"text": "Key point one", "category": "key_finding"},
+                    {"text": "Key point two", "category": "methodology"},
+                    {"text": "Key point three", "category": "conclusion"},
+                ],
+                "quotes": [],
+                "topics": ["Testing"],
+            },
+            "summary_kind": "long_structured",
+            "summary_version": 1,
+        },
+    )
+    visible_article = Content(
+        url="https://example.com/article-visible-art",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={
+            "summary": {
+                "title": "Visible Art",
+                "overview": (
+                    "This overview is long enough to satisfy the minimum length requirement "
+                    "for structured summaries."
+                ),
+                "bullet_points": [
+                    {"text": "Key point one", "category": "key_finding"},
+                    {"text": "Key point two", "category": "methodology"},
+                    {"text": "Key point three", "category": "conclusion"},
+                ],
+                "quotes": [],
+                "topics": ["Testing"],
+            },
+            "summary_kind": "long_structured",
+            "summary_version": 1,
+            "image_generated_at": "2026-01-01T00:00:00Z",
+        },
+    )
+
+    db_session.add_all([hidden_article, visible_article])
+    db_session.commit()
+    db_session.refresh(hidden_article)
+    db_session.refresh(visible_article)
+
+    _add_inbox_status(db_session, test_user.id, hidden_article.id)
+    _add_inbox_status(db_session, test_user.id, visible_article.id)
+    _add_active_task(
+        db_session,
+        content_id=hidden_article.id,
+        task_type="generate_image",
+        status="pending",
+    )
+    db_session.commit()
+
+    response = client.get("/api/content/stats/long-form")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["total_count"] == 1
+    assert payload["read_count"] == 0
+    assert payload["unread_count"] == 1
+    assert payload["saved_to_knowledge_count"] == 0
+    assert payload["processing_count"] == 1
 
 
 def test_unread_counts_use_visible_news_items(client, db_session, test_user) -> None:
