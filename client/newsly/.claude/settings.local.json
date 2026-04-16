@@ -11,8 +11,8 @@
       "Bash(mv:*)",
       "Bash(python:*)",
       "Bash(alembic:*)",
-      "Bash(PYTHONPATH=/Users/willem/Development/news_app alembic -c /Users/willem/Development/news_app/alembic.ini upgrade head)",
-      "Bash(PYTHONPATH=/Users/willem/Development/news_app alembic -c /Users/willem/Development/news_app/alembic.ini current)",
+      "Bash(PYTHONPATH=/Users/willem/Development/newsbuddy alembic -c /Users/willem/Development/newsbuddy/alembic.ini upgrade head)",
+      "Bash(PYTHONPATH=/Users/willem/Development/newsbuddy alembic -c /Users/willem/Development/newsbuddy/alembic.ini current)",
       "Bash(sqlite3:*)"
     ],
     "deny": []
