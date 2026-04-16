@@ -15,10 +15,12 @@ Change-oriented docs that used to live under `docs/plans/`, `docs/specs/`, and `
 - `codebase-hardening-2026-03/`
 - `codebase-refactoring/`
 - `dig-deeper-selection-menu/`
+- `ios-chat-stability-2026-04/`
 - `llm-call-sites/`
 - `news-button-navigation-2025-11/`
 - `news-grouped-view-2025-10/`
 - `news-screenshot-thumbnail/`
+- `onboarding-fast-news-2026-04/`
 - `onboarding-speech-realtime/`
 - `pipeline-reliability/`
 - `podcast-sources-2025-11/`
