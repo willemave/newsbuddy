@@ -59,7 +59,7 @@ flowchart LR
   Workers --> Strategies["Processing strategies"]
   Workers --> Summarizer["ContentSummarizer"]
   Workers --> Discussion["Discussion fetcher"]
-  Workers --> ImageGen["Gemini image generation"]
+  Workers --> ImageGen["Gemini + Runware image generation"]
   Workers --> Discovery["Discovery / onboarding workflows"]
   Workers --> XSync["X integration sync"]
 
