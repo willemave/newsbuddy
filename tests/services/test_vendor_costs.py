@@ -207,3 +207,28 @@ def test_record_vendor_usage_tracks_request_and_resource_costs(db_session) -> No
     assert persisted.request_count == 2
     assert persisted.resource_count == 3
     assert persisted.cost_usd == 0.15402
+
+
+def test_estimate_vendor_cost_uses_runware_unit_pricing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        vendor_costs,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "exa_search_request_cost_usd": 0.03,
+                "exa_content_result_cost_usd": 0.03134,
+                "x_posts_read_cost_usd": 0.005,
+                "x_users_read_cost_usd": 0.01,
+            },
+        )(),
+    )
+
+    cost = vendor_costs.estimate_vendor_cost_usd(
+        provider="runware",
+        model="runware:101@1",
+        usage={"request_count": 1},
+    )
+
+    assert cost == 0.0038
