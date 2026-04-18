@@ -113,6 +113,46 @@ def test_fix_sanitize_content_metadata_apply_uses_remote_helper(monkeypatch, tmp
     assert captured["payload"] == {"content_id": 12, "limit": 100}
 
 
+def test_fix_regenerate_images_preview_uses_remote_helper(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    args = build_parser().parse_args(
+        ["fix", "regenerate-images", "--content-id", "12", "--content-id", "13", "--limit", "4"]
+    )
+
+    def fake_invoke_remote(action, *, config, payload):
+        captured["action"] = action
+        captured["payload"] = payload
+        return {"selected_count": 2}
+
+    monkeypatch.setattr("admin.cli._invoke_remote", fake_invoke_remote)
+
+    result = _handle_fix(args, config=_config(tmp_path))
+
+    assert result.data == {"selected_count": 2}
+    assert captured["action"] == "fix.preview-regenerate-images"
+    assert captured["payload"] == {"content_ids": [12, 13], "limit": 4}
+
+
+def test_fix_regenerate_images_apply_uses_remote_helper(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    args = build_parser().parse_args(
+        ["fix", "--apply", "--yes", "regenerate-images", "--content-id", "12"]
+    )
+
+    def fake_invoke_remote(action, *, config, payload):
+        captured["action"] = action
+        captured["payload"] = payload
+        return {"updated_count": 1}
+
+    monkeypatch.setattr("admin.cli._invoke_remote", fake_invoke_remote)
+
+    result = _handle_fix(args, config=_config(tmp_path))
+
+    assert result.data == {"updated_count": 1}
+    assert captured["action"] == "fix.regenerate-images"
+    assert captured["payload"] == {"content_ids": [12], "limit": 20}
+
+
 def test_fix_run_scraper_preview_does_not_execute(monkeypatch, tmp_path):
     args = build_parser().parse_args(["fix", "run-scraper", "--scraper", "HackerNews"])
 

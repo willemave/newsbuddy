@@ -22,8 +22,10 @@ from admin.remote_ops import (
     logs_range,
     logs_search,
     logs_tail,
+    preview_regenerate_images,
     preview_reset_content,
     preview_sanitize_content_metadata,
+    regenerate_images,
     sanitize_content_metadata,
     usage_by_content,
     usage_by_user,
@@ -157,6 +159,12 @@ def _dispatch(action: str, *, context: RemoteContext, payload: dict[str, Any]) -
             ),
             limit=int(payload.get("limit", 100)),
         )
+    if action == "fix.preview-regenerate-images":
+        return preview_regenerate_images(
+            context,
+            content_ids=_parse_content_ids(payload.get("content_ids")),
+            limit=int(payload.get("limit", 20)),
+        )
     if action == "fix.sanitize-content-metadata":
         return sanitize_content_metadata(
             context,
@@ -164,6 +172,12 @@ def _dispatch(action: str, *, context: RemoteContext, payload: dict[str, Any]) -
                 int(payload["content_id"]) if payload.get("content_id") is not None else None
             ),
             limit=int(payload.get("limit", 100)),
+        )
+    if action == "fix.regenerate-images":
+        return regenerate_images(
+            context,
+            content_ids=_parse_content_ids(payload.get("content_ids")),
+            limit=int(payload.get("limit", 20)),
         )
     raise ValueError(f"Unsupported remote action: {action}")
 
@@ -221,6 +235,14 @@ def _resolve_runtime_database_url(configured_url: str) -> str:
     if not password:
         return configured_url
     return f"postgresql+psycopg://{user}:{password}@127.0.0.1:{port}/{database}"
+
+
+def _parse_content_ids(raw: Any) -> list[int] | None:
+    if raw in (None, ""):
+        return None
+    if not isinstance(raw, list):
+        raise ValueError("content_ids must be a list of integers")
+    return [int(value) for value in raw]
 
 
 def _print_payload(payload: dict[str, Any]) -> None:

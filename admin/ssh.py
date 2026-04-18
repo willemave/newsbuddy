@@ -121,9 +121,11 @@ def _resolve_container_database_url(config: AdminConfig) -> str:
 
 def run_remote_script(config: AdminConfig, script_args: list[str]) -> dict[str, Any]:
     """Run a trusted script inside the Docker container."""
+    runtime_env = _build_script_runtime_env(config)
     remote_command = _build_docker_exec_command(
         config,
         ["python", *script_args],
+        env=runtime_env,
     )
     completed = _run_ssh_command(
         config,
@@ -164,12 +166,39 @@ def run_remote_docker_logs(
     }
 
 
-def _build_docker_exec_command(config: AdminConfig, command: list[str]) -> str:
+def _build_docker_exec_command_with_env(
+    config: AdminConfig,
+    quoted_command: str,
+    *,
+    env: dict[str, str] | None,
+) -> str:
+    docker_parts = ["sudo", "docker", "exec", "-i"]
+    for key, value in (env or {}).items():
+        docker_parts.extend(["-e", shlex.quote(f"{key}={value}")])
+    docker_parts.append(shlex.quote(config.docker_service_name))
+    docker_parts.append(quoted_command)
+    return f"cd {shlex.quote(config.app_dir)} && {' '.join(docker_parts)}"
+
+
+def _build_script_runtime_env(config: AdminConfig) -> dict[str, str]:
+    try:
+        database_url = _resolve_container_database_url(config)
+    except RemoteCommandError:
+        return {}
+    return {
+        "NEWSLY_ENV_FILE": "/tmp/empty.env",
+        "DATABASE_URL": database_url,
+    }
+
+
+def _build_docker_exec_command(
+    config: AdminConfig,
+    command: list[str],
+    *,
+    env: dict[str, str] | None = None,
+) -> str:
     quoted = " ".join(shlex.quote(part) for part in command)
-    return (
-        f"cd {shlex.quote(config.app_dir)} && "
-        f"sudo docker exec -i {shlex.quote(config.docker_service_name)} {quoted}"
-    )
+    return _build_docker_exec_command_with_env(config, quoted, env=env)
 
 
 def rsync_from_remote(config: AdminConfig, *, remote_path: str, local_path: Path) -> dict[str, Any]:

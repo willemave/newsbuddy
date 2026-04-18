@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
 import requests
 from google import genai
@@ -41,10 +42,8 @@ RUNWARE_API_URL = "https://api.runware.ai/v1"
 RUNWARE_INFOGRAPHIC_WIDTH = 1024
 RUNWARE_INFOGRAPHIC_HEIGHT = 576
 RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT = (
-    "readable text, words, letters, numbers, captions, labels, headlines, logos, "
-    "watermarks, screenshots, website UI, app interface, chart axes, poster, document "
-    "page, printed page, magazine spread, dashboard, phone screen, tablet screen, "
-    "desktop monitor, laptop, computer, office workstation, car, vehicle, factory machine"
+    "readable text, labels, logos, watermarks, screenshots, interface, dashboard, "
+    "phone screen, laptop, monitor"
 )
 
 # Image size settings
@@ -277,9 +276,9 @@ Create a refined, elegant thumbnail image."""
 
 
 def _build_infographic_prompt(content: ContentData) -> str:
-    """Build prompt for no-text editorial infographic explainer."""
+    """Build the production FLUX.1 dev infographic prompt."""
     summary = content.metadata.get("summary", {})
-    title = str(summary.get("title") or content.display_title).strip()
+    title = _clamp_text(str(summary.get("title") or content.display_title).strip(), max_chars=180)
     overview = (
         summary.get("summary")
         or summary.get("overview")
@@ -287,7 +286,6 @@ def _build_infographic_prompt(content: ContentData) -> str:
         or summary.get("takeaway")
         or ""
     )
-    overview_text = " ".join(str(overview).split()).strip()
 
     key_points: list[str] = []
     for item in (summary.get("key_points") or summary.get("bullet_points") or [])[:4]:
@@ -297,49 +295,56 @@ def _build_infographic_prompt(content: ContentData) -> str:
             value = item
         if not value:
             continue
-        cleaned = " ".join(str(value).split()).strip()
+        cleaned = _clamp_text(" ".join(str(value).split()).strip(), max_chars=220)
         if cleaned:
             key_points.append(cleaned)
 
+    overview_text = _clamp_text(" ".join(str(overview).split()).strip(), max_chars=240)
     if not key_points and overview_text:
-        key_points.append(overview_text[:240])
+        key_points.append(overview_text)
 
     story_lines = "\n".join(f"- {point}" for point in key_points) or "- Use the title as context."
-    tech_story = _is_tech_or_ai_story(" ".join([title, overview_text, *key_points]))
-    tech_instruction = (
-        "- For AI, software, or automation stories, lean slightly near-future and systems-"
-        "oriented, but explain the story through physical artifacts and spatial flow rather "
-        "than screens.\n"
-        if tech_story
-        else ""
-    )
 
     return (
-        "Create a no-text editorial infographic that explains the article content through "
-        "image alone.\n\n"
-        "Visual requirements:\n"
-        "- Modern, clean editorial illustration style.\n"
-        "- 16:9 aspect ratio optimized for mobile display.\n"
-        "- No readable text, letters, labels, captions, logos, or watermarks.\n"
-        "- No screenshots, app interfaces, dashboards, or literal UI.\n"
-        "- Use connected artifacts, shelves, packages, books, envelopes, sketch tools, "
-        "tokens, plinths, and symbolic objects.\n"
-        "- Make the story understandable at a glance through clear hierarchy, grouping, "
-        "connectors, and cause-and-effect flow.\n"
-        "- Keep it information-dense but organized, with 3 to 5 major elements.\n"
-        "- Prefer editorial object systems and cutaway structure over generic office scenes.\n"
-        f"{tech_instruction}"
-        "- The story context below is reference only and must not appear as rendered words "
-        "in the image.\n\n"
-        "Preferred composition:\n"
-        "- Explain the article as a no-text process chain using editorial objects only.\n"
-        "- Show how one object leads to the next through left-to-right or circular flow.\n"
-        "- Avoid machines, vehicles, and generic factory imagery.\n\n"
+        "Create an infographic that describes the article.\n\n"
+        "Style requirements:\n"
+        "- Modern, clean editorial illustration style\n"
+        "- Subtle, muted color palette with good contrast\n"
+        "- Conceptual representation of the theme\n"
+        "- Suitable for a news app\n"
+        "- Do not use text, letters, labels, captions, logos, or watermarks\n"
+        "- The description below is context only and must not appear as rendered words "
+        "in the image\n"
+        "- 16:9 aspect ratio optimized for mobile display\n\n"
+        f"Description: {title}\n\n"
+        "Benchmark-specific art direction:\n"
+        "- Use one dominant visual metaphor or one coherent scene, not a collage.\n"
+        "- Choose a single focal subject that communicates the story instantly at "
+        "thumbnail size.\n"
+        "- Compose for a 16:9 editorial card with strong negative space and clear "
+        "foreground/background separation.\n"
+        "- Keep the image bold, graphic, and readable on mobile.\n"
+        "- Prefer simplified shapes, restrained detail, and deliberate lighting over "
+        "photo-busy realism.\n"
+        "- No text, captions, UI chrome, newspaper layout, screenshots, logos, or watermarks.\n"
+        "- Avoid generic stock-photo business scenes and multiple unrelated subjects "
+        "competing for attention.\n"
+        "- Use a refined editorial palette with 2 to 4 dominant colors.\n\n"
         f"Story title: {title}\n"
-        f"Overview: {overview_text or 'N/A'}\n"
         "Key facts to encode visually:\n"
-        f"{story_lines}\n"
+        f"{story_lines}\n\n"
+        "Output goal:\n"
+        "Create a premium editorial illustration for Newsly that feels distinctive, modern, "
+        "and immediately legible."
     )
+
+
+def _clamp_text(text: str, *, max_chars: int) -> str:
+    normalized = " ".join(text.split()).strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    truncated = normalized[: max_chars - 1].rstrip(" ,;:-")
+    return f"{truncated}…"
 
 
 def _is_tech_or_ai_story(text: str) -> bool:
@@ -742,7 +747,7 @@ class ImageGenerationService:
                 json=[
                     {
                         "taskType": "imageInference",
-                        "taskUUID": f"newsly-infographic-{content_id}",
+                        "taskUUID": str(uuid4()),
                         "includeCost": True,
                         "outputType": "URL",
                         "outputFormat": "PNG",

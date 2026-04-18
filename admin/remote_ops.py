@@ -8,8 +8,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from uuid import uuid4
 
+import requests
 from sqlalchemy import create_engine, func, inspect, text
 from sqlalchemy.orm import sessionmaker
 
@@ -22,13 +24,31 @@ from admin.log_parsing import (
 )
 from admin.sql_guard import validate_readonly_sql
 from app.core.redaction import redact_value
-from app.models.schema import Content, ProcessingTask, VendorUsageRecord
+from app.models.content_mapper import content_to_domain
+from app.models.schema import Content, ContentStatusEntry, ProcessingTask, VendorUsageRecord
 from app.models.user import User
+from app.services.content_metadata_merge import refresh_merge_content_metadata
+from app.services.image_generation import (
+    RUNWARE_API_URL,
+    RUNWARE_INFOGRAPHIC_HEIGHT,
+    RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
+    RUNWARE_INFOGRAPHIC_WIDTH,
+    ImageGenerationService,
+    get_image_generation_service,
+    record_vendor_usage_out_of_band,
+)
+from app.services.long_form_images import (
+    has_active_generate_image_task,
+    has_generated_long_form_image,
+    is_visible_long_form_image_candidate,
+)
+from app.utils.image_urls import build_content_image_url, build_thumbnail_url
 
 DEFAULT_ROW_LIMIT = 200
 MAX_ROW_LIMIT = 1000
 ESCAPED_NUL_JSON_PATTERN = r"%\\u0000%"
 _ALLOWED_CONTROL_CHARACTERS = {"\n", "\r", "\t"}
+ADMIN_IMAGE_REPAIR_PAYLOAD = {"source": "admin.fix.regenerate-images", "manual": True}
 
 
 @dataclass(frozen=True)
@@ -371,6 +391,26 @@ def sanitize_content_metadata(
     )
 
 
+def preview_regenerate_images(
+    context: RemoteContext,
+    *,
+    content_ids: list[int] | None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Preview long-form image regeneration candidates."""
+    return _regenerate_images(context, content_ids=content_ids, limit=limit, apply=False)
+
+
+def regenerate_images(
+    context: RemoteContext,
+    *,
+    content_ids: list[int] | None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Regenerate long-form images directly against the live runtime DB."""
+    return _regenerate_images(context, content_ids=content_ids, limit=limit, apply=True)
+
+
 def logs_list(context: RemoteContext) -> dict[str, Any]:
     """List available structured and service log files."""
     sources: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -582,6 +622,308 @@ def _sanitize_content_metadata_rows(
             }
     finally:
         engine.dispose()
+
+
+def _regenerate_images(
+    context: RemoteContext,
+    *,
+    content_ids: list[int] | None,
+    limit: int,
+    apply: bool,
+) -> dict[str, Any]:
+    bounded_limit = _bounded_limit(limit)
+    engine = create_engine(context.database_url, pool_pre_ping=True)
+    session_factory = sessionmaker(bind=engine)
+    try:
+        with session_factory() as session:
+            selected_content_ids = _resolve_image_regeneration_content_ids(
+                session,
+                content_ids=content_ids,
+                limit=bounded_limit,
+            )
+            rows = [
+                _build_image_regeneration_row(session, content_id)
+                for content_id in selected_content_ids
+            ]
+            candidates = [
+                row
+                for row in rows
+                if row["eligible"] and not row["has_generated_image"] and not row["has_active_task"]
+            ]
+            if not apply:
+                return {
+                    "applied": False,
+                    "requested_content_ids": content_ids or [],
+                    "limit": bounded_limit,
+                    "matched_total": len(rows),
+                    "selected_count": len(candidates),
+                    "rows": rows,
+                }
+
+            results: list[dict[str, Any]] = []
+            service = get_image_generation_service()
+            _patch_runware_uuid_if_needed(service)
+            for candidate in candidates:
+                results.append(
+                    _regenerate_one_content_image(
+                        session,
+                        service=service,
+                        content_id=int(candidate["content_id"]),
+                    )
+                )
+
+            session.commit()
+            return {
+                "applied": True,
+                "requested_content_ids": content_ids or [],
+                "limit": bounded_limit,
+                "matched_total": len(rows),
+                "selected_count": len(candidates),
+                "updated_count": sum(1 for row in results if row["status"] == "completed"),
+                "rows": rows,
+                "results": results,
+            }
+    finally:
+        engine.dispose()
+
+
+def _resolve_image_regeneration_content_ids(
+    session,
+    *,
+    content_ids: list[int] | None,
+    limit: int,
+) -> list[int]:
+    if content_ids:
+        unique_ids = list(dict.fromkeys(int(content_id) for content_id in content_ids))
+        rows = session.query(Content.id).filter(Content.id.in_(unique_ids)).all()
+        existing_ids = {int(row.id) for row in rows}
+        return [content_id for content_id in unique_ids if content_id in existing_ids]
+
+    failed_rows = (
+        session.query(
+            ProcessingTask.content_id,
+            func.max(ProcessingTask.id).label("latest_task_id"),
+        )
+        .filter(ProcessingTask.task_type == "generate_image")
+        .filter(ProcessingTask.status == "failed")
+        .filter(ProcessingTask.content_id.is_not(None))
+        .group_by(ProcessingTask.content_id)
+        .order_by(func.max(ProcessingTask.id).desc())
+        .limit(limit)
+        .all()
+    )
+    return [int(row.content_id) for row in failed_rows if row.content_id is not None]
+
+
+def _build_image_regeneration_row(session, content_id: int) -> dict[str, Any]:
+    content = session.query(Content).filter(Content.id == content_id).first()
+    if content is None:
+        return {
+            "content_id": content_id,
+            "exists": False,
+            "eligible": False,
+            "has_generated_image": False,
+        }
+
+    latest_task = (
+        session.query(ProcessingTask)
+        .filter(ProcessingTask.content_id == content_id)
+        .filter(ProcessingTask.task_type == "generate_image")
+        .order_by(ProcessingTask.id.desc())
+        .first()
+    )
+    inbox_count = int(
+        session.query(func.count(ContentStatusEntry.id))
+        .filter(ContentStatusEntry.content_id == content_id)
+        .filter(ContentStatusEntry.status == "inbox")
+        .scalar()
+        or 0
+    )
+    return {
+        "content_id": content_id,
+        "exists": True,
+        "content_type": content.content_type,
+        "content_status": content.status,
+        "classification": content.classification,
+        "inbox_rows": inbox_count,
+        "eligible": is_visible_long_form_image_candidate(session, content),
+        "has_generated_image": has_generated_long_form_image(content),
+        "has_active_task": has_active_generate_image_task(session, content_id),
+        "latest_task_id": latest_task.id if latest_task is not None else None,
+        "latest_task_status": latest_task.status if latest_task is not None else None,
+        "latest_task_error": latest_task.error_message if latest_task is not None else None,
+    }
+
+
+def _patch_runware_uuid_if_needed(service: ImageGenerationService) -> None:
+    if service.infographic_provider != "runware":
+        return
+
+    def _generate_runware_infographic(
+        self,
+        *,
+        prompt: str,
+        content_id: int,
+    ) -> tuple[bytes, str]:
+        if not self.runware_api_key:
+            raise ValueError("RUNWARE_API_KEY not configured for infographic generation.")
+
+        for model in self.infographic_models:
+            response = requests.post(
+                RUNWARE_API_URL,
+                headers={
+                    "Authorization": f"Bearer {self.runware_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=[
+                    {
+                        "taskType": "imageInference",
+                        "taskUUID": str(uuid4()),
+                        "includeCost": True,
+                        "outputType": "URL",
+                        "outputFormat": "PNG",
+                        "positivePrompt": prompt,
+                        "negativePrompt": RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
+                        "model": model,
+                        "numberResults": 1,
+                        "width": RUNWARE_INFOGRAPHIC_WIDTH,
+                        "height": RUNWARE_INFOGRAPHIC_HEIGHT,
+                    }
+                ],
+                timeout=180,
+            )
+            payload = response.json()
+            if response.status_code >= 400:
+                errors = payload.get("errors") or []
+                if errors:
+                    message = errors[0].get("message") or str(errors[0])
+                    raise RuntimeError(f"Runware error: {message}")
+                response.raise_for_status()
+
+            errors = payload.get("errors") or []
+            if errors:
+                message = errors[0].get("message") or str(errors[0])
+                raise RuntimeError(f"Runware error: {message}")
+
+            data = payload.get("data") or []
+            if not data:
+                raise RuntimeError("Runware did not return inference data.")
+
+            result = data[0]
+            image_url = result.get("imageURL") or result.get("imageUrl") or result.get("image_url")
+            if not isinstance(image_url, str) or not image_url:
+                raise RuntimeError("Runware did not return an image URL.")
+
+            image_bytes = self._download_file(image_url)
+            record_vendor_usage_out_of_band(
+                provider="runware",
+                model=model,
+                feature="image_generation",
+                operation="image_generation.infographic",
+                source="admin_fix",
+                usage={"request_count": 1},
+                content_id=content_id,
+                metadata={
+                    "image_type": "infographic",
+                    "provider": "runware",
+                    "response_cost_usd": result.get("cost"),
+                    "image_url": image_url,
+                    "task_uuid_fix_applied": True,
+                },
+            )
+            return image_bytes, model
+
+        raise RuntimeError("No infographic generation models configured.")
+
+    any_service = cast(Any, service)
+    any_service._generate_runware_infographic = _generate_runware_infographic.__get__(
+        service,
+        ImageGenerationService,
+    )
+
+
+def _regenerate_one_content_image(
+    session,
+    *,
+    service: ImageGenerationService,
+    content_id: int,
+) -> dict[str, Any]:
+    content = session.query(Content).filter(Content.id == content_id).first()
+    if content is None:
+        return {"content_id": content_id, "status": "missing"}
+
+    task = ProcessingTask(
+        task_type="generate_image",
+        content_id=content_id,
+        payload=dict(ADMIN_IMAGE_REPAIR_PAYLOAD),
+        status="processing",
+        queue_name="image",
+        started_at=datetime.now(UTC).replace(tzinfo=None),
+        locked_at=datetime.now(UTC).replace(tzinfo=None),
+        locked_by="admin-fix",
+        retry_count=0,
+    )
+    session.add(task)
+    session.flush()
+
+    try:
+        result = service.generate_image(content_to_domain(content))
+        if not result.success:
+            task.status = "failed"
+            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            task.error_message = result.error_message
+            task.locked_at = None
+            task.locked_by = None
+            task.lease_expires_at = None
+            session.flush()
+            return {
+                "content_id": content_id,
+                "task_id": task.id,
+                "status": "failed",
+                "error_message": result.error_message,
+            }
+
+        base_metadata = dict(content.content_metadata or {})
+        metadata = dict(base_metadata)
+        metadata["image_generated_at"] = datetime.now(UTC).isoformat()
+        metadata["image_url"] = build_content_image_url(content_id)
+        if result.thumbnail_path:
+            metadata["thumbnail_url"] = build_thumbnail_url(content_id)
+        content.content_metadata = refresh_merge_content_metadata(
+            session,
+            content_id=content.id,
+            base_metadata=base_metadata,
+            updated_metadata=metadata,
+        )
+
+        task.status = "completed"
+        task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+        task.error_message = None
+        task.locked_at = None
+        task.locked_by = None
+        task.lease_expires_at = None
+        session.flush()
+        return {
+            "content_id": content_id,
+            "task_id": task.id,
+            "status": "completed",
+            "image_path": str(result.image_path),
+            "thumbnail_path": str(result.thumbnail_path) if result.thumbnail_path else None,
+        }
+    except Exception as exc:  # noqa: BLE001
+        task.status = "failed"
+        task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+        task.error_message = str(exc)
+        task.locked_at = None
+        task.locked_by = None
+        task.lease_expires_at = None
+        session.flush()
+        return {
+            "content_id": content_id,
+            "task_id": task.id,
+            "status": "error",
+            "error_message": str(exc),
+        }
 
 
 def _count_malformed_content_rows(connection, *, content_id: int | None) -> int:

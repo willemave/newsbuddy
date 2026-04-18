@@ -6,7 +6,7 @@ import subprocess
 from typing import Any, cast
 
 from admin.config import AdminConfig
-from admin.ssh import run_remote_docker_logs, run_remote_module
+from admin.ssh import run_remote_docker_logs, run_remote_module, run_remote_script
 
 
 def _config() -> AdminConfig:
@@ -98,4 +98,42 @@ def test_run_remote_docker_logs_builds_expected_ssh_command(monkeypatch) -> None
         "ssh",
         "willem@host",
         "cd /opt/news_app && sudo docker logs --timestamps --tail 25 newsly",
+    ]
+
+
+def test_run_remote_script_injects_runtime_database_url(monkeypatch) -> None:
+    captured: dict[str, object] = {"calls": []}
+
+    def fake_run(*args, **kwargs):
+        command = args[0]
+        cast(list[list[str]], captured["calls"]).append(command)
+        if command[2].endswith("sudo docker exec newsly env"):
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=(
+                    "DATABASE_URL=postgresql+psycopg://newsly:change-me@127.0.0.1:5432/newsly\n"
+                    "POSTGRES_PASSWORD=secret\n"
+                    "POSTGRES_USER=newsly\n"
+                    "POSTGRES_PORT=5432\n"
+                    "POSTGRES_DB=newsly\n"
+                ),
+                stderr="",
+            )
+        captured["args"] = command
+        return subprocess.CompletedProcess(command, 0, stdout="done\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = run_remote_script(_config(), ["scripts/example.py"])
+
+    assert result["stdout"] == "done\n"
+    assert cast(list[str], captured["args"]) == [
+        "ssh",
+        "willem@host",
+        (
+            "cd /opt/news_app && sudo docker exec -i -e NEWSLY_ENV_FILE=/tmp/empty.env "
+            "-e DATABASE_URL=postgresql+psycopg://newsly:secret@127.0.0.1:5432/newsly "
+            "newsly python scripts/example.py"
+        ),
     ]

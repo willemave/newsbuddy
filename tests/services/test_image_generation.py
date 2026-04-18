@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from uuid import UUID
 
 from pydantic import HttpUrl, TypeAdapter
 
@@ -191,15 +192,17 @@ def test_generate_infographic_retries_with_fallback_model_on_not_found(
     assert captured_models == ["missing-model", "gemini-2.5-flash-image"]
 
 
-def test_build_infographic_prompt_builds_no_text_explainer() -> None:
+def test_build_infographic_prompt_builds_long_gemini_editorial_style() -> None:
     prompt = image_generation._build_infographic_prompt(_build_article_content())
 
-    assert "Create a no-text editorial infographic" in prompt
+    assert "Create an infographic that describes the article." in prompt
+    assert "Benchmark-specific art direction:" in prompt
+    assert "Use one dominant visual metaphor or one coherent scene" in prompt
+    assert "Create a premium editorial illustration for Newsly" in prompt
+    assert "Description: Example article" in prompt
     assert "Story title: Example article" in prompt
     assert "Key facts to encode visually:" in prompt
-    assert "Use connected artifacts" in prompt
-    assert "Preferred composition:" in prompt
-    assert "The story context below is reference only" in prompt
+    assert "The description below is context only" in prompt
 
 
 def test_generate_infographic_uses_runware_provider(
@@ -283,3 +286,4 @@ def test_generate_infographic_uses_runware_provider(
     assert payload[0]["width"] == image_generation.RUNWARE_INFOGRAPHIC_WIDTH
     assert payload[0]["height"] == image_generation.RUNWARE_INFOGRAPHIC_HEIGHT
     assert payload[0]["negativePrompt"] == image_generation.RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT
+    UUID(str(payload[0]["taskUUID"]))

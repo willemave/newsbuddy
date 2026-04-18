@@ -282,6 +282,22 @@ def _handle_fix(args: argparse.Namespace, *, config: AdminConfig) -> CommandResu
             warnings=warnings,
         )
 
+    if args.fix_command == "regenerate-images":
+        payload = {
+            "content_ids": args.content_ids,
+            "limit": args.limit,
+        }
+        action = "fix.regenerate-images" if args.apply else "fix.preview-regenerate-images"
+        warnings = (
+            []
+            if args.apply
+            else ["Preview only; add --apply --yes to regenerate images immediately."]
+        )
+        return CommandResult(
+            data=_invoke_remote(action, config=config, payload=payload),
+            warnings=warnings,
+        )
+
     if args.fix_command == "reset-content" and not args.apply:
         payload = {
             "cancel_only": bool(args.cancel_only),
@@ -692,6 +708,13 @@ def _build_fix_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser
     )
     sanitize_parser.add_argument("--content-id", type=int, default=None)
     sanitize_parser.add_argument("--limit", type=int, default=100)
+
+    regenerate_parser = fix_subparsers.add_parser(
+        "regenerate-images",
+        help="Preview or repair failed long-form image generations",
+    )
+    regenerate_parser.add_argument("--content-id", dest="content_ids", action="append", type=int)
+    regenerate_parser.add_argument("--limit", type=int, default=20)
 
     run_scraper_parser = fix_subparsers.add_parser("run-scraper", help="Run selected scrapers")
     run_scraper_parser.add_argument("--scraper", dest="scrapers", action="append", required=True)
