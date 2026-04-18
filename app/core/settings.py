@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     google_api_key: str | None = None
     google_cloud_project: str | None = None
     google_cloud_location: str = "global"
-    image_generation_model: str = "gemini-2.5-flash-image"
+    image_generation_model: str = "gemini-3.1-flash-image-preview"
     image_generation_fallback_model: str | None = None
     infographic_generation_provider: Literal["google", "runware"] = "google"
     infographic_generation_model: str | None = None

@@ -1,18 +1,20 @@
 """
-AI image generation service using Google Gemini.
+AI image generation service using Google Gemini and Runware.
 
 Generates two types of images:
-- News thumbnails: Simple 1:1 images using gemini-3.1-flash-image-preview
-- Infographics: Complex 16:9 editorial images using gemini-3.1-flash-image-preview
+- News thumbnails: Simple 1:1 images using a configured Gemini image model
+- Infographics: Complex 16:9 editorial images using a configured provider
 """
 
 import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from typing import cast
 
+import requests
 from google import genai
 from google.genai.types import GenerateContentConfig, ImageConfig
 from PIL import Image
@@ -33,10 +35,17 @@ from app.utils.image_paths import (
 
 logger = get_logger(__name__)
 
-# Model for image generation
-IMAGE_GENERATION_MODEL = "gemini-3.1-flash-image-preview"
-NEWS_THUMBNAIL_MODEL = IMAGE_GENERATION_MODEL
-INFOGRAPHIC_MODEL = IMAGE_GENERATION_MODEL
+DEFAULT_IMAGE_GENERATION_MODEL = "gemini-3.1-flash-image-preview"
+DEFAULT_RUNWARE_INFOGRAPHIC_MODEL = "runware:101@1"
+RUNWARE_API_URL = "https://api.runware.ai/v1"
+RUNWARE_INFOGRAPHIC_WIDTH = 1024
+RUNWARE_INFOGRAPHIC_HEIGHT = 576
+RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT = (
+    "readable text, words, letters, numbers, captions, labels, headlines, logos, "
+    "watermarks, screenshots, website UI, app interface, chart axes, poster, document "
+    "page, printed page, magazine spread, dashboard, phone screen, tablet screen, "
+    "desktop monitor, laptop, computer, office workstation, car, vehicle, factory machine"
+)
 
 # Image size settings
 INFOGRAPHIC_IMAGE_SIZE = "512"
@@ -268,50 +277,93 @@ Create a refined, elegant thumbnail image."""
 
 
 def _build_infographic_prompt(content: ContentData) -> str:
-    """Build prompt for complex editorial infographic."""
+    """Build prompt for no-text editorial infographic explainer."""
     summary = content.metadata.get("summary", {})
-    title = summary.get("title") or content.display_title
+    title = str(summary.get("title") or content.display_title).strip()
+    overview = (
+        summary.get("summary")
+        or summary.get("overview")
+        or summary.get("hook")
+        or summary.get("takeaway")
+        or ""
+    )
+    overview_text = " ".join(str(overview).split()).strip()
 
-    # Extract key points (first 3)
-    key_points = []
-    for bp in (summary.get("key_points") or summary.get("bullet_points", []))[:3]:
-        text = bp.get("text") if isinstance(bp, dict) else bp
-        if text:
-            key_points.append(text)
-    if not key_points:
-        for insight in summary.get("insights", [])[:3]:
-            if isinstance(insight, dict) and insight.get("insight"):
-                key_points.append(insight["insight"])
+    key_points: list[str] = []
+    for item in (summary.get("key_points") or summary.get("bullet_points") or [])[:4]:
+        if isinstance(item, dict):
+            value = item.get("text") or item.get("point") or item.get("insight")
+        else:
+            value = item
+        if not value:
+            continue
+        cleaned = " ".join(str(value).split()).strip()
+        if cleaned:
+            key_points.append(cleaned)
 
-    # Extract quotes (first 2)
-    quotes = []
-    for q in summary.get("quotes", [])[:2]:
-        text = q.get("text") if isinstance(q, dict) else q
-        if text:
-            quotes.append(text)
-    if not quotes:
-        for insight in summary.get("insights", [])[:2]:
-            if isinstance(insight, dict) and insight.get("supporting_quote"):
-                quotes.append(insight["supporting_quote"])
+    if not key_points and overview_text:
+        key_points.append(overview_text[:240])
 
-    parts = [f"Title: {title}"]
-    if key_points:
-        parts.append("Key points: " + "; ".join(key_points))
-    if quotes:
-        parts.append("Quotes: " + "; ".join(quotes))
+    story_lines = "\n".join(f"- {point}" for point in key_points) or "- Use the title as context."
+    tech_story = _is_tech_or_ai_story(" ".join([title, overview_text, *key_points]))
+    tech_instruction = (
+        "- For AI, software, or automation stories, lean slightly near-future and systems-"
+        "oriented, but explain the story through physical artifacts and spatial flow rather "
+        "than screens.\n"
+        if tech_story
+        else ""
+    )
 
-    return f"""Create an infographic that explains the article at a glance.
+    return (
+        "Create a no-text editorial infographic that explains the article content through "
+        "image alone.\n\n"
+        "Visual requirements:\n"
+        "- Modern, clean editorial illustration style.\n"
+        "- 16:9 aspect ratio optimized for mobile display.\n"
+        "- No readable text, letters, labels, captions, logos, or watermarks.\n"
+        "- No screenshots, app interfaces, dashboards, or literal UI.\n"
+        "- Use connected artifacts, shelves, packages, books, envelopes, sketch tools, "
+        "tokens, plinths, and symbolic objects.\n"
+        "- Make the story understandable at a glance through clear hierarchy, grouping, "
+        "connectors, and cause-and-effect flow.\n"
+        "- Keep it information-dense but organized, with 3 to 5 major elements.\n"
+        "- Prefer editorial object systems and cutaway structure over generic office scenes.\n"
+        f"{tech_instruction}"
+        "- The story context below is reference only and must not appear as rendered words "
+        "in the image.\n\n"
+        "Preferred composition:\n"
+        "- Explain the article as a no-text process chain using editorial objects only.\n"
+        "- Show how one object leads to the next through left-to-right or circular flow.\n"
+        "- Avoid machines, vehicles, and generic factory imagery.\n\n"
+        f"Story title: {title}\n"
+        f"Overview: {overview_text or 'N/A'}\n"
+        "Key facts to encode visually:\n"
+        f"{story_lines}\n"
+    )
 
-{chr(10).join(parts)}
 
-Style requirements:
-- Modern, clean editorial illustration style
-- Subtle, muted color palette with good contrast
-- Conceptual representation of the theme
-- Suitable for a news app
-- No text or logos in the image
-- 16:9 aspect ratio optimized for mobile display
-"""
+def _is_tech_or_ai_story(text: str) -> bool:
+    normalized = text.lower()
+    keywords = (
+        "ai",
+        "artificial intelligence",
+        "software",
+        "automation",
+        "agent",
+        "agents",
+        "tool",
+        "tools",
+        "mcp",
+        "token",
+        "tokens",
+        "notion",
+        "future",
+        "workflow",
+        "system",
+        "factory",
+        "compute",
+    )
+    return any(keyword in normalized for keyword in keywords)
 
 
 # ============================================================================
@@ -340,28 +392,59 @@ class ImageGenerationService:
 
     def __init__(self) -> None:
         settings = get_settings()
-        if settings.google_cloud_project:
-            self.client = genai.Client(
-                vertexai=True,
-                project=settings.google_cloud_project,
-                location=settings.google_cloud_location,
-            )
-        else:
-            if not settings.google_api_key:
-                raise ValueError("GOOGLE_API_KEY not configured for Vertex image generation.")
-            self.client = genai.Client(vertexai=True, api_key=settings.google_api_key)
+        self.news_thumbnail_models = _resolve_image_models(
+            settings.image_generation_model,
+            settings.image_generation_fallback_model,
+        )
+        self.infographic_provider = settings.infographic_generation_provider
+        infographic_primary_model = settings.infographic_generation_model or (
+            DEFAULT_RUNWARE_INFOGRAPHIC_MODEL
+            if self.infographic_provider == "runware"
+            else settings.image_generation_model
+        )
+        infographic_fallback_model = settings.infographic_generation_fallback_model or (
+            None
+            if self.infographic_provider == "runware"
+            else settings.image_generation_fallback_model
+        )
+        self.infographic_models = _resolve_image_models(
+            infographic_primary_model,
+            infographic_fallback_model,
+        )
+        self.runware_api_key = settings.runware_api_key
+        self.google_cloud_project = settings.google_cloud_project
+        self.google_cloud_location = settings.google_cloud_location
+        self.google_api_key = settings.google_api_key
+        self._google_client: genai.Client | None = None
         # Ensure output directories exist
         get_news_thumbnails_dir().mkdir(parents=True, exist_ok=True)
         get_content_images_dir().mkdir(parents=True, exist_ok=True)
         get_thumbnails_dir().mkdir(parents=True, exist_ok=True)
 
         logger.info(
-            "Initialized Vertex image generation service "
-            "with models: news=%s, infographic=%s size=%s",
-            NEWS_THUMBNAIL_MODEL,
-            INFOGRAPHIC_MODEL,
+            "Initialized image generation service "
+            "with news_models=%s infographic_provider=%s infographic_models=%s size=%s",
+            ",".join(self.news_thumbnail_models),
+            self.infographic_provider,
+            ",".join(self.infographic_models),
             INFOGRAPHIC_IMAGE_SIZE,
         )
+
+    def _get_google_client(self) -> genai.Client:
+        if self._google_client is not None:
+            return self._google_client
+        if self.google_cloud_project:
+            self._google_client = genai.Client(
+                vertexai=True,
+                project=self.google_cloud_project,
+                location=self.google_cloud_location,
+            )
+            return self._google_client
+        if self.google_api_key:
+            self._google_client = genai.Client(vertexai=True, api_key=self.google_api_key)
+            return self._google_client
+        raise ValueError("Google image generation client is not configured.")
+        return self._google_client
 
     def generate_thumbnail(self, source_path: Path, content_id: int) -> Path | None:
         """Generate a thumbnail from a full-size image using Pillow.
@@ -454,62 +537,28 @@ class ImageGenerationService:
             prompt = _build_news_thumbnail_prompt(content)
             logger.debug("News thumbnail prompt for %s: %s", content_id, prompt[:200])
 
-            with langfuse_generation_context(
-                name="queue.image_generation.news_thumbnail",
-                model=NEWS_THUMBNAIL_MODEL,
-                input_data=prompt,
-                metadata={"source": "queue", "content_id": content_id},
-            ) as generation:
-                response = self.client.models.generate_content(
-                    model=NEWS_THUMBNAIL_MODEL,
-                    contents=prompt,
-                    config=GenerateContentConfig(
-                        response_modalities=["IMAGE"],
-                        image_config=ImageConfig(aspect_ratio="1:1"),
-                    ),
-                )
-                usage_details = extract_google_usage_details(response)
-                if generation is not None:
-                    generation.update(
-                        output="generated_news_thumbnail",
-                        usage_details=usage_details,
-                    )
-                if usage_details:
-                    record_vendor_usage_out_of_band(
-                        provider="google",
-                        model=NEWS_THUMBNAIL_MODEL,
-                        feature="image_generation",
-                        operation="image_generation.news_thumbnail",
-                        source="queue",
-                        usage=cast(dict[str, int | None], usage_details),
-                        content_id=content_id,
-                        metadata={"image_type": "news_thumbnail"},
-                    )
+            response, resolved_model = self._generate_image_response(
+                models=self.news_thumbnail_models,
+                prompt=prompt,
+                image_config=ImageConfig(aspect_ratio="1:1"),
+                trace_name="queue.image_generation.news_thumbnail",
+                usage_operation="image_generation.news_thumbnail",
+                usage_metadata={"image_type": "news_thumbnail"},
+                content_id=content_id,
+            )
 
             image_path = get_news_thumbnails_dir() / f"{content_id}.png"
-            image_saved = False
-
-            if response.candidates and response.candidates[0].content:
-                for part in response.candidates[0].content.parts or []:
-                    if (
-                        part.inline_data
-                        and part.inline_data.mime_type
-                        and part.inline_data.mime_type.startswith("image/")
-                    ):
-                        image_bytes = part.inline_data.data
-                        if image_bytes is None:
-                            continue
-                        image_path.write_bytes(image_bytes)
-                        image_saved = True
-                        break
-
-            if not image_saved:
-                raise ValueError("No image generated in response")
+            self._write_generated_image(response, image_path)
 
             # Generate thumbnail from the full-size image
             thumbnail_path = self.generate_thumbnail(image_path, content_id)
 
-            logger.info("Generated news thumbnail for %s at %s", content_id, image_path)
+            logger.info(
+                "Generated news thumbnail for %s at %s using %s",
+                content_id,
+                image_path,
+                resolved_model,
+            )
 
             return ImageGenerationResult(
                 content_id=content_id,
@@ -544,68 +593,41 @@ class ImageGenerationService:
             prompt = _build_infographic_prompt(content)
             logger.debug("Infographic prompt for %s: %s", content_id, prompt[:200])
 
-            with langfuse_generation_context(
-                name="queue.image_generation.infographic",
-                model=INFOGRAPHIC_MODEL,
-                input_data=prompt,
-                metadata={"source": "queue", "content_id": content_id},
-            ) as generation:
-                response = self.client.models.generate_content(
-                    model=INFOGRAPHIC_MODEL,
-                    contents=prompt,
-                    config=GenerateContentConfig(
-                        response_modalities=["IMAGE"],
-                        image_config=ImageConfig(
-                            aspect_ratio="16:9",
-                            image_size=INFOGRAPHIC_IMAGE_SIZE,
-                        ),
-                    ),
-                )
-                usage_details = extract_google_usage_details(response)
-                if generation is not None:
-                    generation.update(
-                        output="generated_infographic",
-                        usage_details=usage_details,
-                    )
-                if usage_details:
-                    record_vendor_usage_out_of_band(
-                        provider="google",
-                        model=INFOGRAPHIC_MODEL,
-                        feature="image_generation",
-                        operation="image_generation.infographic",
-                        source="queue",
-                        usage=cast(dict[str, int | None], usage_details),
-                        content_id=content_id,
-                        metadata={
-                            "image_type": "infographic",
-                            "image_size": INFOGRAPHIC_IMAGE_SIZE,
-                        },
-                    )
-
             image_path = get_content_images_dir() / f"{content_id}.png"
-            image_saved = False
-
-            if response.candidates and response.candidates[0].content:
-                for part in response.candidates[0].content.parts or []:
-                    if (
-                        part.inline_data
-                        and part.inline_data.mime_type
-                        and part.inline_data.mime_type.startswith("image/")
-                    ):
-                        image_bytes = part.inline_data.data
-                        if image_bytes is None:
-                            continue
-                        image_path.write_bytes(image_bytes)
-                        image_saved = True
-                        break
-
-            if not image_saved:
-                raise ValueError("No image generated in response")
+            if self.infographic_provider == "runware":
+                image_bytes, resolved_model = self._generate_runware_infographic(
+                    prompt=prompt,
+                    content_id=content_id,
+                )
+                image_path.write_bytes(image_bytes)
+            else:
+                response, resolved_model = self._generate_image_response(
+                    models=self.infographic_models,
+                    prompt=prompt,
+                    image_config=ImageConfig(
+                        aspect_ratio="16:9",
+                        image_size=INFOGRAPHIC_IMAGE_SIZE,
+                    ),
+                    trace_name="queue.image_generation.infographic",
+                    usage_operation="image_generation.infographic",
+                    usage_metadata={
+                        "image_type": "infographic",
+                        "image_size": INFOGRAPHIC_IMAGE_SIZE,
+                        "provider": "google",
+                    },
+                    content_id=content_id,
+                )
+                self._write_generated_image(response, image_path)
 
             # Generate thumbnail from the full-size image
             thumbnail_path = self.generate_thumbnail(image_path, content_id)
 
-            logger.info("Generated infographic for %s at %s", content_id, image_path)
+            logger.info(
+                "Generated infographic for %s at %s using %s",
+                content_id,
+                image_path,
+                resolved_model,
+            )
 
             return ImageGenerationResult(
                 content_id=content_id,
@@ -631,6 +653,198 @@ class ImageGenerationService:
                 success=False,
                 error_message=str(e),
             )
+
+    def _generate_image_response(
+        self,
+        *,
+        models: list[str],
+        prompt: str,
+        image_config: ImageConfig,
+        trace_name: str,
+        usage_operation: str,
+        usage_metadata: dict[str, object],
+        content_id: int,
+    ) -> tuple[object, str]:
+        client = self._get_google_client()
+        for index, model in enumerate(models):
+            try:
+                with langfuse_generation_context(
+                    name=trace_name,
+                    model=model,
+                    input_data=prompt,
+                    metadata={"source": "queue", "content_id": content_id, "attempt": index + 1},
+                ) as generation:
+                    response = client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=GenerateContentConfig(
+                            response_modalities=["IMAGE"],
+                            image_config=image_config,
+                        ),
+                    )
+                    usage_details = extract_google_usage_details(response)
+                    if generation is not None:
+                        generation.update(
+                            output="generated_image",
+                            usage_details=usage_details,
+                        )
+                    if usage_details:
+                        record_vendor_usage_out_of_band(
+                            provider="google",
+                            model=model,
+                            feature="image_generation",
+                            operation=usage_operation,
+                            source="queue",
+                            usage=cast(dict[str, int | None], usage_details),
+                            content_id=content_id,
+                            metadata=usage_metadata,
+                        )
+                return response, model
+            except Exception as exc:
+                fallback_model = models[index + 1] if index + 1 < len(models) else None
+                if fallback_model and _is_model_unavailable_error(exc):
+                    logger.warning(
+                        "Image generation model %s unavailable for content %s; retrying with %s",
+                        model,
+                        content_id,
+                        fallback_model,
+                        extra={
+                            "component": "image_generation",
+                            "operation": usage_operation,
+                            "item_id": content_id,
+                            "context_data": {
+                                "failed_model": model,
+                                "fallback_model": fallback_model,
+                            },
+                        },
+                    )
+                    continue
+                raise
+
+        raise RuntimeError("No image generation models configured")
+
+    def _generate_runware_infographic(
+        self,
+        *,
+        prompt: str,
+        content_id: int,
+    ) -> tuple[bytes, str]:
+        if not self.runware_api_key:
+            raise ValueError("RUNWARE_API_KEY not configured for infographic generation.")
+
+        for model in self.infographic_models:
+            response = requests.post(
+                RUNWARE_API_URL,
+                headers={
+                    "Authorization": f"Bearer {self.runware_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=[
+                    {
+                        "taskType": "imageInference",
+                        "taskUUID": f"newsly-infographic-{content_id}",
+                        "includeCost": True,
+                        "outputType": "URL",
+                        "outputFormat": "PNG",
+                        "positivePrompt": prompt,
+                        "negativePrompt": RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
+                        "model": model,
+                        "numberResults": 1,
+                        "width": RUNWARE_INFOGRAPHIC_WIDTH,
+                        "height": RUNWARE_INFOGRAPHIC_HEIGHT,
+                    }
+                ],
+                timeout=180,
+            )
+            payload = response.json()
+            if response.status_code >= 400:
+                errors = payload.get("errors") or []
+                if errors:
+                    message = errors[0].get("message") or str(errors[0])
+                    raise RuntimeError(f"Runware error: {message}")
+                response.raise_for_status()
+
+            errors = payload.get("errors") or []
+            if errors:
+                message = errors[0].get("message") or str(errors[0])
+                raise RuntimeError(f"Runware error: {message}")
+
+            data = payload.get("data") or []
+            if not data:
+                raise RuntimeError("Runware did not return inference data.")
+
+            result = data[0]
+            image_url = result.get("imageURL") or result.get("imageUrl") or result.get("image_url")
+            if not isinstance(image_url, str) or not image_url:
+                raise RuntimeError("Runware did not return an image URL.")
+
+            image_bytes = self._download_file(image_url)
+            record_vendor_usage_out_of_band(
+                provider="runware",
+                model=model,
+                feature="image_generation",
+                operation="image_generation.infographic",
+                source="queue",
+                usage={"request_count": 1},
+                content_id=content_id,
+                metadata={
+                    "image_type": "infographic",
+                    "provider": "runware",
+                    "response_cost_usd": result.get("cost"),
+                    "image_url": image_url,
+                },
+            )
+            return image_bytes, model
+
+        raise RuntimeError("No infographic generation models configured.")
+
+    def _write_generated_image(self, response: object, image_path: Path) -> None:
+        candidates = getattr(response, "candidates", None) or []
+        if candidates and getattr(candidates[0], "content", None):
+            for part in getattr(candidates[0].content, "parts", None) or []:
+                inline_data = getattr(part, "inline_data", None)
+                mime_type = getattr(inline_data, "mime_type", None)
+                if inline_data and mime_type and mime_type.startswith("image/"):
+                    image_bytes = getattr(inline_data, "data", None)
+                    if image_bytes is None:
+                        continue
+                    image_path.write_bytes(image_bytes)
+                    return
+
+        raise ValueError("No image generated in response")
+
+    def _download_file(self, url: str) -> bytes:
+        response = requests.get(url, timeout=120)
+        response.raise_for_status()
+        image_bytes = response.content
+        with Image.open(BytesIO(image_bytes)) as img:
+            img.verify()
+        return image_bytes
+
+
+def _resolve_image_models(primary_model: str, fallback_model: str | None) -> list[str]:
+    models: list[str] = []
+    for model in (primary_model, fallback_model):
+        normalized = _normalize_model_name(model)
+        if normalized and normalized not in models:
+            models.append(normalized)
+
+    if not models:
+        raise ValueError("At least one image generation model must be configured.")
+
+    return models
+
+
+def _normalize_model_name(model: str | None) -> str | None:
+    if model is None:
+        return None
+    normalized = model.strip()
+    return normalized or None
+
+
+def _is_model_unavailable_error(exc: Exception) -> bool:
+    message = str(exc).upper()
+    return "404" in message or "NOT_FOUND" in message or "REQUESTED ENTITY WAS NOT FOUND" in message
 
 
 # Module-level singleton

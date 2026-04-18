@@ -412,6 +412,7 @@ def _resolve_unit_pricing(*, provider: str, model: str) -> UnitPricing | None:
         "exa:contents": UnitPricing(resource_usd=settings.exa_content_result_cost_usd),
         "x:posts.read": UnitPricing(resource_usd=settings.x_posts_read_cost_usd),
         "x:users.read": UnitPricing(resource_usd=settings.x_users_read_cost_usd),
+        "runware:runware:101@1": UnitPricing(request_usd=0.0038),
     }
     for candidate in _pricing_candidates(provider=provider, model=model):
         if candidate in unit_pricing:
