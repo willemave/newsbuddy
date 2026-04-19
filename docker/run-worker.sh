@@ -11,6 +11,8 @@ cd /app
 queue_name="$1"
 worker_slot="$2"
 
+/app/docker/wait-for-bootstrap.sh
+
 exec python scripts/run_workers.py \
   --queue "${queue_name}" \
   --worker-slot "${worker_slot}" \

@@ -44,7 +44,7 @@ VOLUME ["/data"]
 
 EXPOSE 8000 5432
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+HEALTHCHECK --interval=10s --timeout=10s --start-period=20s --retries=5 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 
 ENTRYPOINT ["/app/docker/entrypoint.sh"]

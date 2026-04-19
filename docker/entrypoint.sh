@@ -10,6 +10,7 @@ export POSTGRES_USER="${POSTGRES_USER:-newsly}"
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-newsly}"
 export POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 export PORT="${PORT:-8000}"
+export NEWSLY_BOOTSTRAP_READY_FILE="${NEWSLY_BOOTSTRAP_READY_FILE:-/tmp/newsly-bootstrap.ready}"
 
 mkdir -p "${PGDATA}" "${NEWSLY_APP_DATA_ROOT}" /var/run/postgresql
 chown -R postgres:postgres "${PGDATA}" /var/run/postgresql
@@ -62,43 +63,7 @@ host all all ::/0 scram-sha-256
 EOF
 fi
 
-runuser -u postgres -- "${postgres_bin_dir}/pg_ctl" -D "${PGDATA}" -w start
-
-sql_literal() {
-  local value="${1//\'/\'\'}"
-  printf "'%s'" "${value}"
-}
-
-db_name_sql="$(sql_literal "${POSTGRES_DB}")"
-db_user_sql="$(sql_literal "${POSTGRES_USER}")"
-db_password_sql="$(sql_literal "${POSTGRES_PASSWORD}")"
-
-bootstrap_sql=$(cat <<EOF
-DO \$do\$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${db_user_sql}) THEN
-        EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', ${db_user_sql}, ${db_password_sql});
-    ELSE
-        EXECUTE format('ALTER ROLE %I LOGIN PASSWORD %L', ${db_user_sql}, ${db_password_sql});
-    END IF;
-END \$do\$;
-SELECT format('CREATE DATABASE %I OWNER %I', ${db_name_sql}, ${db_user_sql})
-WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = ${db_name_sql}) \gexec
-EOF
-)
-
-export PGHOST="${PGHOST:-/var/run/postgresql}"
-export PGPORT="${POSTGRES_PORT}"
-
-printf '%s\n' "${bootstrap_sql}" | runuser -u postgres -- env \
-  PGHOST="${PGHOST}" \
-  PGPORT="${PGPORT}" \
-  psql -v ON_ERROR_STOP=1 postgres
-
-cd "${APP_HOME}"
-python -m alembic upgrade head
-
-runuser -u postgres -- "${postgres_bin_dir}/pg_ctl" -D "${PGDATA}" -m fast -w stop
+rm -f "${NEWSLY_BOOTSTRAP_READY_FILE}"
 
 supervisord_conf="/app/docker/supervisord.conf"
 case "${NEWSLY_RUNTIME_MODE}" in

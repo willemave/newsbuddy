@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+/app/docker/wait-for-bootstrap.sh
+
 cd /app
 
 exec python -m uvicorn app.main:app \
