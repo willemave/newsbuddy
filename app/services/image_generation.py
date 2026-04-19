@@ -478,7 +478,6 @@ class ImageGenerationService:
 
     def __init__(self) -> None:
         settings = get_settings()
-        self.settings = settings
         self.news_thumbnail_models = _resolve_image_models(
             settings.image_generation_model,
             settings.image_generation_fallback_model,
@@ -537,7 +536,6 @@ class ImageGenerationService:
             self._google_client = genai.Client(vertexai=True, api_key=self.google_api_key)
             return self._google_client
         raise ValueError("Google image generation client is not configured.")
-        return self._google_client
 
     def generate_thumbnail(self, source_path: Path, content_id: int) -> Path | None:
         """Generate a thumbnail from a full-size image using Pillow.
@@ -584,25 +582,6 @@ class ImageGenerationService:
             )
             return None
 
-    def get_image_url(self, content_id: int, content_type: str = "article") -> str | None:
-        """Get the URL for a content's image if it exists."""
-        if content_type == "news":
-            path = get_news_thumbnails_dir() / f"{content_id}.png"
-            if path.exists():
-                return f"/static/images/news_thumbnails/{content_id}.png"
-        else:
-            path = get_content_images_dir() / f"{content_id}.png"
-            if path.exists():
-                return f"/static/images/content/{content_id}.png"
-        return None
-
-    def get_thumbnail_url(self, content_id: int) -> str | None:
-        """Get the URL for a content's thumbnail if it exists."""
-        path = get_thumbnails_dir() / f"{content_id}.png"
-        if path.exists():
-            return f"/static/images/thumbnails/{content_id}.png"
-        return None
-
     def generate_image(self, content: ContentData) -> ImageGenerationResult:
         """Generate an image for content, dispatching by content type."""
         content_id = content.id or 0
@@ -619,8 +598,7 @@ class ImageGenerationService:
 
         if content.content_type == ContentType.NEWS:
             return self._generate_news_thumbnail(content)
-        else:
-            return self._generate_infographic(content)
+        return self._generate_infographic(content)
 
     def _generate_news_thumbnail(self, content: ContentData) -> ImageGenerationResult:
         """Generate a subtle 1:1 thumbnail for news content."""
@@ -641,7 +619,7 @@ class ImageGenerationService:
             )
 
             image_path = get_news_thumbnails_dir() / f"{content_id}.png"
-            self._write_generated_image(response, image_path)
+            image_path.write_bytes(self._extract_generated_image_bytes(response))
 
             # Generate thumbnail from the full-size image
             thumbnail_path = self.generate_thumbnail(image_path, content_id)
@@ -694,13 +672,19 @@ class ImageGenerationService:
 
             for quality_attempt in range(INFOGRAPHIC_TEXT_RETRY_ATTEMPTS + 1):
                 try:
-                    image_bytes, resolved_model = self._generate_infographic_image_bytes(
-                        prompt=active_prompt,
-                        content_id=content_id,
-                        provider=provider_used,
-                    )
+                    if provider_used == "runware":
+                        image_bytes, resolved_model = self._generate_runware_infographic(
+                            prompt=active_prompt,
+                            content_id=content_id,
+                        )
+                    else:
+                        image_bytes, resolved_model = self._generate_google_infographic_bytes(
+                            prompt=active_prompt,
+                            content_id=content_id,
+                            fallback_from_runware=provider_used != self.infographic_provider,
+                        )
                 except RunwareGenerationError as exc:
-                    if not self._can_fallback_to_google(exc):
+                    if not (exc.fallback_allowed and self._google_is_configured()):
                         raise
                     logger.warning(
                         "Runware failed for content %s; falling back to Google",
@@ -718,10 +702,10 @@ class ImageGenerationService:
                         },
                     )
                     provider_used = "google"
-                    image_bytes, resolved_model = self._generate_infographic_image_bytes(
+                    image_bytes, resolved_model = self._generate_google_infographic_bytes(
                         prompt=active_prompt,
                         content_id=content_id,
-                        provider=provider_used,
+                        fallback_from_runware=True,
                     )
 
                 text_check = self._detect_readable_text_in_image(
@@ -795,24 +779,6 @@ class ImageGenerationService:
                 success=False,
                 error_message=str(e),
             )
-
-    def _generate_infographic_image_bytes(
-        self,
-        *,
-        prompt: str,
-        content_id: int,
-        provider: str,
-    ) -> tuple[bytes, str]:
-        if provider == "runware":
-            return self._generate_runware_infographic(
-                prompt=prompt,
-                content_id=content_id,
-            )
-        return self._generate_google_infographic_bytes(
-            prompt=prompt,
-            content_id=content_id,
-            fallback_from_runware=provider != self.infographic_provider,
-        )
 
     def _generate_google_infographic_bytes(
         self,
@@ -928,7 +894,15 @@ class ImageGenerationService:
                         model=model,
                         task_uuid=task_uuid,
                     )
-                    result = self._extract_runware_result(payload, task_uuid=task_uuid)
+                    data = payload.get("data") or []
+                    if not data:
+                        raise RunwareGenerationError(
+                            "Runware did not return inference data.",
+                            task_uuid=task_uuid,
+                            retryable=False,
+                            fallback_allowed=True,
+                        )
+                    result = cast(dict[str, Any], data[0])
                     image_url = (
                         result.get("imageURL") or result.get("imageUrl") or result.get("image_url")
                     )
@@ -1003,11 +977,19 @@ class ImageGenerationService:
                     "Content-Type": "application/json",
                 },
                 json=[
-                    self._build_runware_inference_payload(
-                        prompt=prompt,
-                        model=model,
-                        task_uuid=task_uuid,
-                    )
+                    {
+                        "taskType": "imageInference",
+                        "taskUUID": task_uuid,
+                        "includeCost": True,
+                        "outputType": "URL",
+                        "outputFormat": "PNG",
+                        "positivePrompt": prompt,
+                        "negativePrompt": RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
+                        "model": model,
+                        "numberResults": 1,
+                        "width": RUNWARE_INFOGRAPHIC_WIDTH,
+                        "height": RUNWARE_INFOGRAPHIC_HEIGHT,
+                    }
                 ],
                 timeout=180,
             )
@@ -1039,48 +1021,6 @@ class ImageGenerationService:
             )
 
         return payload
-
-    def _build_runware_inference_payload(
-        self,
-        *,
-        prompt: str,
-        model: str,
-        task_uuid: str,
-    ) -> dict[str, object]:
-        return {
-            "taskType": "imageInference",
-            "taskUUID": task_uuid,
-            "includeCost": True,
-            "outputType": "URL",
-            "outputFormat": "PNG",
-            "positivePrompt": prompt,
-            "negativePrompt": RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
-            "model": model,
-            "numberResults": 1,
-            "width": RUNWARE_INFOGRAPHIC_WIDTH,
-            "height": RUNWARE_INFOGRAPHIC_HEIGHT,
-        }
-
-    def _extract_runware_result(
-        self,
-        payload: dict[str, Any],
-        *,
-        task_uuid: str,
-    ) -> dict[str, Any]:
-        data = payload.get("data") or []
-        if not data:
-            raise RunwareGenerationError(
-                "Runware did not return inference data.",
-                task_uuid=task_uuid,
-                retryable=False,
-                fallback_allowed=True,
-            )
-        return cast(dict[str, Any], data[0])
-
-    def _can_fallback_to_google(self, exc: RunwareGenerationError) -> bool:
-        if not exc.fallback_allowed:
-            return False
-        return self._google_is_configured()
 
     def _google_is_configured(self) -> bool:
         return bool(self.google_cloud_project or self.google_api_key)
@@ -1138,9 +1078,6 @@ class ImageGenerationService:
                 },
             )
             return None
-
-    def _write_generated_image(self, response: object, image_path: Path) -> None:
-        image_path.write_bytes(self._extract_generated_image_bytes(response))
 
     def _extract_generated_image_bytes(self, response: object) -> bytes:
         candidates = getattr(response, "candidates", None) or []
