@@ -6,18 +6,19 @@ Generates two types of images:
 - Infographics: Complex 16:9 editorial images using a configured provider
 """
 
+import json
 import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 import requests
 from google import genai
-from google.genai.types import GenerateContentConfig, ImageConfig
+from google.genai.types import GenerateContentConfig, ImageConfig, Part
 from PIL import Image
 
 from app.core.logging import get_logger
@@ -42,9 +43,14 @@ RUNWARE_API_URL = "https://api.runware.ai/v1"
 RUNWARE_INFOGRAPHIC_WIDTH = 1024
 RUNWARE_INFOGRAPHIC_HEIGHT = 576
 RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT = (
-    "readable text, labels, logos, watermarks, screenshots, interface, dashboard, "
-    "phone screen, laptop, monitor"
+    "readable text, words, letters, numbers, captions, labels, headlines, logos, "
+    "watermarks, screenshots, website UI, app interface, chart axes, poster, document "
+    "page, printed page, magazine spread, dashboard, phone screen, tablet screen, "
+    "desktop monitor, laptop, computer, office workstation"
 )
+IMAGE_TEXT_DETECTION_MODEL = "gemini-3.1-flash-lite-preview"
+RUNWARE_INLINE_RETRY_ATTEMPTS = 2
+INFOGRAPHIC_TEXT_RETRY_ATTEMPTS = 1
 
 # Image size settings
 INFOGRAPHIC_IMAGE_SIZE = "512"
@@ -62,6 +68,38 @@ class ImageGenerationResult:
     success: bool
     error_message: str | None = None
     thumbnail_path: str | None = None
+
+
+@dataclass(frozen=True)
+class ImageTextCheck:
+    """Result from the readable-text quality check."""
+
+    has_readable_text: bool
+    reason: str = ""
+    confidence: float | None = None
+
+
+class RunwareGenerationError(RuntimeError):
+    """Structured Runware failure that can drive local retries and fallback."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        parameter: str | None = None,
+        status_code: int | None = None,
+        task_uuid: str | None = None,
+        retryable: bool = True,
+        fallback_allowed: bool = True,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.parameter = parameter
+        self.status_code = status_code
+        self.task_uuid = task_uuid
+        self.retryable = retryable
+        self.fallback_allowed = fallback_allowed
 
 
 # ============================================================================
@@ -276,7 +314,7 @@ Create a refined, elegant thumbnail image."""
 
 
 def _build_infographic_prompt(content: ContentData) -> str:
-    """Build the production FLUX.1 dev infographic prompt."""
+    """Build a compact no-text editorial brief for long-form images."""
     summary = content.metadata.get("summary", {})
     title = _clamp_text(str(summary.get("title") or content.display_title).strip(), max_chars=180)
     overview = (
@@ -303,39 +341,82 @@ def _build_infographic_prompt(content: ContentData) -> str:
     if not key_points and overview_text:
         key_points.append(overview_text)
 
-    story_lines = "\n".join(f"- {point}" for point in key_points) or "- Use the title as context."
+    visual_brief = _build_infographic_visual_brief(
+        title=title,
+        overview=overview_text,
+        key_points=key_points,
+    )
 
     return (
-        "Create an infographic that describes the article.\n\n"
-        "Style requirements:\n"
-        "- Modern, clean editorial illustration style\n"
-        "- Subtle, muted color palette with good contrast\n"
-        "- Conceptual representation of the theme\n"
-        "- Suitable for a news app\n"
-        "- Do not use text, letters, labels, captions, logos, or watermarks\n"
-        "- The description below is context only and must not appear as rendered words "
-        "in the image\n"
-        "- 16:9 aspect ratio optimized for mobile display\n\n"
-        f"Description: {title}\n\n"
-        "Benchmark-specific art direction:\n"
-        "- Use one dominant visual metaphor or one coherent scene, not a collage.\n"
-        "- Choose a single focal subject that communicates the story instantly at "
-        "thumbnail size.\n"
-        "- Compose for a 16:9 editorial card with strong negative space and clear "
-        "foreground/background separation.\n"
-        "- Keep the image bold, graphic, and readable on mobile.\n"
-        "- Prefer simplified shapes, restrained detail, and deliberate lighting over "
-        "photo-busy realism.\n"
-        "- No text, captions, UI chrome, newspaper layout, screenshots, logos, or watermarks.\n"
-        "- Avoid generic stock-photo business scenes and multiple unrelated subjects "
-        "competing for attention.\n"
-        "- Use a refined editorial palette with 2 to 4 dominant colors.\n\n"
-        f"Story title: {title}\n"
-        "Key facts to encode visually:\n"
-        f"{story_lines}\n\n"
+        "Create a premium no-text editorial illustration for Newsly.\n\n"
+        "Hard constraints:\n"
+        "- No readable text, letters, numbers, labels, captions, logos, or watermarks\n"
+        "- No poster layout, newspaper layout, document pages, magazine spreads, "
+        "screenshots, dashboards, or UI chrome\n"
+        "- 16:9 aspect ratio optimized for mobile display\n"
+        "- One dominant visual metaphor or one coherent scene, never a collage\n"
+        "- One focal subject with strong negative space and clear "
+        "foreground/background separation\n"
+        "- Bold, graphic, and immediately legible at thumbnail size\n"
+        "- Refined editorial palette with 2 to 4 dominant colors\n\n"
+        "Visual brief:\n"
+        f"- Story context: {visual_brief['story_context']}\n"
+        f"- Primary subject: {visual_brief['primary_subject']}\n"
+        f"- Visual metaphor: {visual_brief['visual_metaphor']}\n"
+        f"- Scene direction: {visual_brief['scene_direction']}\n"
+        f"- Supporting cues: {visual_brief['supporting_cues']}\n\n"
         "Output goal:\n"
-        "Create a premium editorial illustration for Newsly that feels distinctive, modern, "
-        "and immediately legible."
+        "Create a distinctive editorial image that communicates the story instantly "
+        "without rendering any words."
+    )
+
+
+def _build_infographic_visual_brief(
+    *,
+    title: str,
+    overview: str,
+    key_points: list[str],
+) -> dict[str, str]:
+    context_clues = [point for point in key_points[:3] if point]
+    if overview:
+        context_clues.insert(0, overview)
+    clue_text = _clamp_text(" ; ".join(context_clues) or title, max_chars=280)
+    subject_seed = key_points[0] if key_points else overview or title
+    subject = _clamp_text(subject_seed, max_chars=120)
+    if _is_tech_or_ai_story(" ".join([title, overview, *key_points])):
+        metaphor = "a tangible system of signals, tools, and pressure rather than a literal UI"
+        scene_direction = (
+            "an editorial still life or physical scene that implies software, "
+            "networks, or automation without screens"
+        )
+    else:
+        metaphor = "a single symbolic scene that turns the story theme into a physical moment"
+        scene_direction = (
+            "a calm but high-contrast editorial composition with one hero "
+            "subject and a few supporting elements"
+        )
+    return {
+        "story_context": clue_text,
+        "primary_subject": subject,
+        "visual_metaphor": metaphor,
+        "scene_direction": scene_direction,
+        "supporting_cues": clue_text,
+    }
+
+
+def _tighten_infographic_prompt_for_text_retry(prompt: str, *, reason: str) -> str:
+    retry_reason = _clamp_text(
+        reason or "readable text was visible in the previous attempt",
+        max_chars=160,
+    )
+    return (
+        f"{prompt}\n\n"
+        "Regeneration note:\n"
+        f"- Previous attempt failed quality review because {retry_reason}\n"
+        "- Regenerate with zero readable text anywhere in the image\n"
+        "- Avoid posters, signs, documents, labels, captions, book covers, screens, or UI panels\n"
+        "- If typography would normally appear in the scene, replace it with "
+        "abstract shapes or blank surfaces"
     )
 
 
@@ -397,7 +478,12 @@ class ImageGenerationService:
 
     def __init__(self) -> None:
         settings = get_settings()
+        self.settings = settings
         self.news_thumbnail_models = _resolve_image_models(
+            settings.image_generation_model,
+            settings.image_generation_fallback_model,
+        )
+        self.google_infographic_models = _resolve_image_models(
             settings.image_generation_model,
             settings.image_generation_fallback_model,
         )
@@ -428,10 +514,12 @@ class ImageGenerationService:
 
         logger.info(
             "Initialized image generation service "
-            "with news_models=%s infographic_provider=%s infographic_models=%s size=%s",
+            "with news_models=%s infographic_provider=%s infographic_models=%s "
+            "google_infographic_models=%s size=%s",
             ",".join(self.news_thumbnail_models),
             self.infographic_provider,
             ",".join(self.infographic_models),
+            ",".join(self.google_infographic_models),
             INFOGRAPHIC_IMAGE_SIZE,
         )
 
@@ -599,39 +687,88 @@ class ImageGenerationService:
             logger.debug("Infographic prompt for %s: %s", content_id, prompt[:200])
 
             image_path = get_content_images_dir() / f"{content_id}.png"
-            if self.infographic_provider == "runware":
-                image_bytes, resolved_model = self._generate_runware_infographic(
-                    prompt=prompt,
+            active_prompt = prompt
+            provider_used = self.infographic_provider
+            resolved_model = ""
+            image_bytes = b""
+
+            for quality_attempt in range(INFOGRAPHIC_TEXT_RETRY_ATTEMPTS + 1):
+                try:
+                    image_bytes, resolved_model = self._generate_infographic_image_bytes(
+                        prompt=active_prompt,
+                        content_id=content_id,
+                        provider=provider_used,
+                    )
+                except RunwareGenerationError as exc:
+                    if not self._can_fallback_to_google(exc):
+                        raise
+                    logger.warning(
+                        "Runware failed for content %s; falling back to Google",
+                        content_id,
+                        extra={
+                            "component": "image_generation",
+                            "operation": "generate_infographic",
+                            "item_id": content_id,
+                            "context_data": {
+                                "runware_status_code": exc.status_code,
+                                "runware_code": exc.code,
+                                "runware_parameter": exc.parameter,
+                                "runware_task_uuid": exc.task_uuid,
+                            },
+                        },
+                    )
+                    provider_used = "google"
+                    image_bytes, resolved_model = self._generate_infographic_image_bytes(
+                        prompt=active_prompt,
+                        content_id=content_id,
+                        provider=provider_used,
+                    )
+
+                text_check = self._detect_readable_text_in_image(
+                    image_bytes=image_bytes,
                     content_id=content_id,
+                    provider=provider_used,
+                    provider_model=resolved_model,
                 )
-                image_path.write_bytes(image_bytes)
-            else:
-                response, resolved_model = self._generate_image_response(
-                    models=self.infographic_models,
-                    prompt=prompt,
-                    image_config=ImageConfig(
-                        aspect_ratio="16:9",
-                        image_size=INFOGRAPHIC_IMAGE_SIZE,
-                    ),
-                    trace_name="queue.image_generation.infographic",
-                    usage_operation="image_generation.infographic",
-                    usage_metadata={
-                        "image_type": "infographic",
-                        "image_size": INFOGRAPHIC_IMAGE_SIZE,
-                        "provider": "google",
+                if text_check is None or not text_check.has_readable_text:
+                    break
+                if quality_attempt >= INFOGRAPHIC_TEXT_RETRY_ATTEMPTS:
+                    raise RuntimeError(
+                        "Generated image contains readable text; "
+                        f"reason={text_check.reason or 'quality check failed'}"
+                    )
+                logger.warning(
+                    "Generated infographic failed readable-text check for content %s; retrying",
+                    content_id,
+                    extra={
+                        "component": "image_generation",
+                        "operation": "generate_infographic",
+                        "item_id": content_id,
+                        "context_data": {
+                            "provider": provider_used,
+                            "provider_model": resolved_model,
+                            "text_check_reason": text_check.reason,
+                            "text_check_confidence": text_check.confidence,
+                            "quality_attempt": quality_attempt + 1,
+                        },
                     },
-                    content_id=content_id,
                 )
-                self._write_generated_image(response, image_path)
+                active_prompt = _tighten_infographic_prompt_for_text_retry(
+                    prompt,
+                    reason=text_check.reason,
+                )
+
+            image_path.write_bytes(image_bytes)
 
             # Generate thumbnail from the full-size image
             thumbnail_path = self.generate_thumbnail(image_path, content_id)
 
             logger.info(
-                "Generated infographic for %s at %s using %s",
+                "Generated infographic for %s at %s using %s via %s",
                 content_id,
                 image_path,
                 resolved_model,
+                provider_used,
             )
 
             return ImageGenerationResult(
@@ -658,6 +795,50 @@ class ImageGenerationService:
                 success=False,
                 error_message=str(e),
             )
+
+    def _generate_infographic_image_bytes(
+        self,
+        *,
+        prompt: str,
+        content_id: int,
+        provider: str,
+    ) -> tuple[bytes, str]:
+        if provider == "runware":
+            return self._generate_runware_infographic(
+                prompt=prompt,
+                content_id=content_id,
+            )
+        return self._generate_google_infographic_bytes(
+            prompt=prompt,
+            content_id=content_id,
+            fallback_from_runware=provider != self.infographic_provider,
+        )
+
+    def _generate_google_infographic_bytes(
+        self,
+        *,
+        prompt: str,
+        content_id: int,
+        fallback_from_runware: bool,
+    ) -> tuple[bytes, str]:
+        response, resolved_model = self._generate_image_response(
+            models=self.google_infographic_models,
+            prompt=prompt,
+            image_config=ImageConfig(
+                aspect_ratio="16:9",
+                image_size=INFOGRAPHIC_IMAGE_SIZE,
+            ),
+            trace_name="queue.image_generation.infographic",
+            usage_operation="image_generation.infographic",
+            usage_metadata={
+                "image_type": "infographic",
+                "image_size": INFOGRAPHIC_IMAGE_SIZE,
+                "provider": "google",
+                "fallback_from_runware": fallback_from_runware,
+            },
+            content_id=content_id,
+        )
+        return self._extract_generated_image_bytes(response), resolved_model
 
     def _generate_image_response(
         self,
@@ -737,7 +918,84 @@ class ImageGenerationService:
         if not self.runware_api_key:
             raise ValueError("RUNWARE_API_KEY not configured for infographic generation.")
 
+        last_error: RunwareGenerationError | None = None
         for model in self.infographic_models:
+            for attempt in range(RUNWARE_INLINE_RETRY_ATTEMPTS):
+                task_uuid = str(uuid4())
+                try:
+                    payload = self._post_runware_inference(
+                        prompt=prompt,
+                        model=model,
+                        task_uuid=task_uuid,
+                    )
+                    result = self._extract_runware_result(payload, task_uuid=task_uuid)
+                    image_url = (
+                        result.get("imageURL") or result.get("imageUrl") or result.get("image_url")
+                    )
+                    if not isinstance(image_url, str) or not image_url:
+                        raise RunwareGenerationError(
+                            "Runware did not return an image URL.",
+                            task_uuid=task_uuid,
+                            retryable=False,
+                            fallback_allowed=True,
+                        )
+
+                    image_bytes = self._download_file(image_url)
+                    record_vendor_usage_out_of_band(
+                        provider="runware",
+                        model=model,
+                        feature="image_generation",
+                        operation="image_generation.infographic",
+                        source="queue",
+                        usage={"request_count": 1},
+                        content_id=content_id,
+                        metadata={
+                            "image_type": "infographic",
+                            "provider": "runware",
+                            "response_cost_usd": result.get("cost"),
+                            "image_url": image_url,
+                            "task_uuid": task_uuid,
+                            "inline_attempt": attempt + 1,
+                        },
+                    )
+                    return image_bytes, model
+                except RunwareGenerationError as exc:
+                    last_error = exc
+                    logger.warning(
+                        "Runware infographic attempt failed for content %s",
+                        content_id,
+                        extra={
+                            "component": "image_generation",
+                            "operation": "generate_infographic.runware",
+                            "item_id": content_id,
+                            "context_data": {
+                                "model": model,
+                                "attempt": attempt + 1,
+                                "task_uuid": exc.task_uuid or task_uuid,
+                                "status_code": exc.status_code,
+                                "code": exc.code,
+                                "parameter": exc.parameter,
+                                "retryable": exc.retryable,
+                                "error_message": str(exc),
+                            },
+                        },
+                    )
+                    if exc.retryable and attempt + 1 < RUNWARE_INLINE_RETRY_ATTEMPTS:
+                        continue
+                    break
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("No infographic generation models configured.")
+
+    def _post_runware_inference(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        task_uuid: str,
+    ) -> dict[str, Any]:
+        try:
             response = requests.post(
                 RUNWARE_API_URL,
                 headers={
@@ -745,65 +1003,146 @@ class ImageGenerationService:
                     "Content-Type": "application/json",
                 },
                 json=[
-                    {
-                        "taskType": "imageInference",
-                        "taskUUID": str(uuid4()),
-                        "includeCost": True,
-                        "outputType": "URL",
-                        "outputFormat": "PNG",
-                        "positivePrompt": prompt,
-                        "negativePrompt": RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
-                        "model": model,
-                        "numberResults": 1,
-                        "width": RUNWARE_INFOGRAPHIC_WIDTH,
-                        "height": RUNWARE_INFOGRAPHIC_HEIGHT,
-                    }
+                    self._build_runware_inference_payload(
+                        prompt=prompt,
+                        model=model,
+                        task_uuid=task_uuid,
+                    )
                 ],
                 timeout=180,
             )
-            payload = response.json()
-            if response.status_code >= 400:
-                errors = payload.get("errors") or []
-                if errors:
-                    message = errors[0].get("message") or str(errors[0])
-                    raise RuntimeError(f"Runware error: {message}")
-                response.raise_for_status()
+        except requests.RequestException as exc:
+            raise RunwareGenerationError(
+                f"Runware request failed: {exc}",
+                task_uuid=task_uuid,
+                retryable=True,
+                fallback_allowed=True,
+            ) from exc
 
-            errors = payload.get("errors") or []
-            if errors:
-                message = errors[0].get("message") or str(errors[0])
-                raise RuntimeError(f"Runware error: {message}")
+        try:
+            payload = cast(dict[str, Any], response.json())
+        except ValueError as exc:
+            raise RunwareGenerationError(
+                "Runware returned a non-JSON response.",
+                status_code=response.status_code,
+                task_uuid=task_uuid,
+                retryable=response.status_code >= 500,
+                fallback_allowed=response.status_code >= 400,
+            ) from exc
 
-            data = payload.get("data") or []
-            if not data:
-                raise RuntimeError("Runware did not return inference data.")
+        errors = payload.get("errors") or []
+        if response.status_code >= 400 or errors:
+            raise _build_runware_generation_error(
+                errors[0] if errors else None,
+                status_code=response.status_code,
+                task_uuid=task_uuid,
+            )
 
-            result = data[0]
-            image_url = result.get("imageURL") or result.get("imageUrl") or result.get("image_url")
-            if not isinstance(image_url, str) or not image_url:
-                raise RuntimeError("Runware did not return an image URL.")
+        return payload
 
-            image_bytes = self._download_file(image_url)
-            record_vendor_usage_out_of_band(
-                provider="runware",
-                model=model,
-                feature="image_generation",
-                operation="image_generation.infographic",
-                source="queue",
-                usage={"request_count": 1},
-                content_id=content_id,
-                metadata={
-                    "image_type": "infographic",
-                    "provider": "runware",
-                    "response_cost_usd": result.get("cost"),
-                    "image_url": image_url,
+    def _build_runware_inference_payload(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        task_uuid: str,
+    ) -> dict[str, object]:
+        return {
+            "taskType": "imageInference",
+            "taskUUID": task_uuid,
+            "includeCost": True,
+            "outputType": "URL",
+            "outputFormat": "PNG",
+            "positivePrompt": prompt,
+            "negativePrompt": RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
+            "model": model,
+            "numberResults": 1,
+            "width": RUNWARE_INFOGRAPHIC_WIDTH,
+            "height": RUNWARE_INFOGRAPHIC_HEIGHT,
+        }
+
+    def _extract_runware_result(
+        self,
+        payload: dict[str, Any],
+        *,
+        task_uuid: str,
+    ) -> dict[str, Any]:
+        data = payload.get("data") or []
+        if not data:
+            raise RunwareGenerationError(
+                "Runware did not return inference data.",
+                task_uuid=task_uuid,
+                retryable=False,
+                fallback_allowed=True,
+            )
+        return cast(dict[str, Any], data[0])
+
+    def _can_fallback_to_google(self, exc: RunwareGenerationError) -> bool:
+        if not exc.fallback_allowed:
+            return False
+        return self._google_is_configured()
+
+    def _google_is_configured(self) -> bool:
+        return bool(self.google_cloud_project or self.google_api_key)
+
+    def _detect_readable_text_in_image(
+        self,
+        *,
+        image_bytes: bytes,
+        content_id: int,
+        provider: str,
+        provider_model: str,
+    ) -> ImageTextCheck | None:
+        if not self._google_is_configured():
+            return None
+
+        prompt = (
+            "Inspect this generated editorial illustration for readable text. "
+            "Return JSON with keys has_readable_text (boolean), reason (string), and "
+            "confidence (number from 0 to 1). Mark has_readable_text true if you can see "
+            "any readable words, letters, numbers, labels, captions, signs, poster text, "
+            "document text, or UI text."
+        )
+        try:
+            response = self._get_google_client().models.generate_content(
+                model=IMAGE_TEXT_DETECTION_MODEL,
+                contents=cast(
+                    Any,
+                    [Part.from_bytes(data=image_bytes, mime_type="image/png"), prompt],
+                ),
+                config=GenerateContentConfig(
+                    temperature=0,
+                    response_mime_type="application/json",
+                    max_output_tokens=200,
+                ),
+            )
+            payload = json.loads(getattr(response, "text", "") or "{}")
+            return ImageTextCheck(
+                has_readable_text=bool(payload.get("has_readable_text")),
+                reason=str(payload.get("reason") or ""),
+                confidence=_coerce_optional_float(payload.get("confidence")),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Readable-text quality check failed for content %s: %s",
+                content_id,
+                exc,
+                extra={
+                    "component": "image_generation",
+                    "operation": "detect_generated_text",
+                    "item_id": content_id,
+                    "context_data": {
+                        "provider": provider,
+                        "provider_model": provider_model,
+                    },
                 },
             )
-            return image_bytes, model
-
-        raise RuntimeError("No infographic generation models configured.")
+            return None
 
     def _write_generated_image(self, response: object, image_path: Path) -> None:
+        image_path.write_bytes(self._extract_generated_image_bytes(response))
+
+    def _extract_generated_image_bytes(self, response: object) -> bytes:
         candidates = getattr(response, "candidates", None) or []
         if candidates and getattr(candidates[0], "content", None):
             for part in getattr(candidates[0].content, "parts", None) or []:
@@ -813,8 +1152,7 @@ class ImageGenerationService:
                     image_bytes = getattr(inline_data, "data", None)
                     if image_bytes is None:
                         continue
-                    image_path.write_bytes(image_bytes)
-                    return
+                    return cast(bytes, image_bytes)
 
         raise ValueError("No image generated in response")
 
@@ -845,6 +1183,45 @@ def _normalize_model_name(model: str | None) -> str | None:
         return None
     normalized = model.strip()
     return normalized or None
+
+
+def _build_runware_generation_error(
+    error: dict[str, Any] | None,
+    *,
+    status_code: int | None,
+    task_uuid: str,
+) -> RunwareGenerationError:
+    error = error or {}
+    message = str(error.get("message") or "Runware request failed.")
+    code = error.get("code")
+    parameter = error.get("parameter")
+    retryable = bool(
+        (status_code or 0) >= 500
+        or status_code == 429
+        or parameter == "taskUUID"
+        or "taskuuid" in message.lower()
+    )
+    fallback_allowed = bool((status_code or 0) >= 400 or parameter == "taskUUID")
+    return RunwareGenerationError(
+        f"Runware error: {message}",
+        code=str(code) if code is not None else None,
+        parameter=str(parameter) if parameter is not None else None,
+        status_code=status_code,
+        task_uuid=task_uuid,
+        retryable=retryable,
+        fallback_allowed=fallback_allowed,
+    )
+
+
+def _coerce_optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (int, float, str)):
+            return float(value)
+        return None
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_model_unavailable_error(exc: Exception) -> bool:

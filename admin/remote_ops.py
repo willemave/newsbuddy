@@ -8,10 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast
-from uuid import uuid4
+from typing import Any
 
-import requests
 from sqlalchemy import create_engine, func, inspect, text
 from sqlalchemy.orm import sessionmaker
 
@@ -28,15 +26,7 @@ from app.models.content_mapper import content_to_domain
 from app.models.schema import Content, ContentStatusEntry, ProcessingTask, VendorUsageRecord
 from app.models.user import User
 from app.services.content_metadata_merge import refresh_merge_content_metadata
-from app.services.image_generation import (
-    RUNWARE_API_URL,
-    RUNWARE_INFOGRAPHIC_HEIGHT,
-    RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
-    RUNWARE_INFOGRAPHIC_WIDTH,
-    ImageGenerationService,
-    get_image_generation_service,
-    record_vendor_usage_out_of_band,
-)
+from app.services.image_generation import ImageGenerationService, get_image_generation_service
 from app.services.long_form_images import (
     has_active_generate_image_task,
     has_generated_long_form_image,
@@ -662,7 +652,6 @@ def _regenerate_images(
 
             results: list[dict[str, Any]] = []
             service = get_image_generation_service()
-            _patch_runware_uuid_if_needed(service)
             for candidate in candidates:
                 results.append(
                     _regenerate_one_content_image(
@@ -753,93 +742,6 @@ def _build_image_regeneration_row(session, content_id: int) -> dict[str, Any]:
         "latest_task_status": latest_task.status if latest_task is not None else None,
         "latest_task_error": latest_task.error_message if latest_task is not None else None,
     }
-
-
-def _patch_runware_uuid_if_needed(service: ImageGenerationService) -> None:
-    if service.infographic_provider != "runware":
-        return
-
-    def _generate_runware_infographic(
-        self,
-        *,
-        prompt: str,
-        content_id: int,
-    ) -> tuple[bytes, str]:
-        if not self.runware_api_key:
-            raise ValueError("RUNWARE_API_KEY not configured for infographic generation.")
-
-        for model in self.infographic_models:
-            response = requests.post(
-                RUNWARE_API_URL,
-                headers={
-                    "Authorization": f"Bearer {self.runware_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=[
-                    {
-                        "taskType": "imageInference",
-                        "taskUUID": str(uuid4()),
-                        "includeCost": True,
-                        "outputType": "URL",
-                        "outputFormat": "PNG",
-                        "positivePrompt": prompt,
-                        "negativePrompt": RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
-                        "model": model,
-                        "numberResults": 1,
-                        "width": RUNWARE_INFOGRAPHIC_WIDTH,
-                        "height": RUNWARE_INFOGRAPHIC_HEIGHT,
-                    }
-                ],
-                timeout=180,
-            )
-            payload = response.json()
-            if response.status_code >= 400:
-                errors = payload.get("errors") or []
-                if errors:
-                    message = errors[0].get("message") or str(errors[0])
-                    raise RuntimeError(f"Runware error: {message}")
-                response.raise_for_status()
-
-            errors = payload.get("errors") or []
-            if errors:
-                message = errors[0].get("message") or str(errors[0])
-                raise RuntimeError(f"Runware error: {message}")
-
-            data = payload.get("data") or []
-            if not data:
-                raise RuntimeError("Runware did not return inference data.")
-
-            result = data[0]
-            image_url = result.get("imageURL") or result.get("imageUrl") or result.get("image_url")
-            if not isinstance(image_url, str) or not image_url:
-                raise RuntimeError("Runware did not return an image URL.")
-
-            image_bytes = self._download_file(image_url)
-            record_vendor_usage_out_of_band(
-                provider="runware",
-                model=model,
-                feature="image_generation",
-                operation="image_generation.infographic",
-                source="admin_fix",
-                usage={"request_count": 1},
-                content_id=content_id,
-                metadata={
-                    "image_type": "infographic",
-                    "provider": "runware",
-                    "response_cost_usd": result.get("cost"),
-                    "image_url": image_url,
-                    "task_uuid_fix_applied": True,
-                },
-            )
-            return image_bytes, model
-
-        raise RuntimeError("No infographic generation models configured.")
-
-    any_service = cast(Any, service)
-    any_service._generate_runware_infographic = _generate_runware_infographic.__get__(
-        service,
-        ImageGenerationService,
-    )
 
 
 def _regenerate_one_content_image(
