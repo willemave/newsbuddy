@@ -8,7 +8,8 @@
 import SwiftUI
 
 struct ProcessingStatsView: View {
-    @StateObject private var statsService = LongFormStatsService.shared
+    @StateObject private var processingCountService = ProcessingCountService.shared
+    @StateObject private var unreadCountService = UnreadCountService.shared
     @StateObject private var sourcesViewModel = ScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
     )
@@ -19,42 +20,21 @@ struct ProcessingStatsView: View {
                 statRow(
                     title: "Processing",
                     subtitle: "Pending or running",
-                    count: statsService.processingCount,
+                    count: processingCountService.longFormProcessingCount,
                     icon: "clock.arrow.circlepath",
                     color: .teal
                 )
                 statRow(
                     title: "Unread",
                     subtitle: "Ready to read",
-                    count: statsService.unreadCount,
+                    count: unreadCountService.longFormCount,
                     icon: "tray",
                     color: .blue
-                )
-                statRow(
-                    title: "Read",
-                    subtitle: "Completed",
-                    count: statsService.readCount,
-                    icon: "checkmark.circle.fill",
-                    color: .green
-                )
-                statRow(
-                    title: "Saved to Knowledge",
-                    subtitle: "Markdown-backed library items",
-                    count: statsService.savedToKnowledgeCount,
-                    icon: "books.vertical.fill",
-                    color: .yellow
-                )
-                statRow(
-                    title: "Total",
-                    subtitle: "In your long-form inbox",
-                    count: statsService.totalCount,
-                    icon: "doc.text",
-                    color: .gray
                 )
             } header: {
                 Text("Long-form")
             } footer: {
-                Text("Counts include articles, podcasts, and YouTube.")
+                Text("Counts include articles and podcasts.")
             }
 
             if !articleSources.isEmpty || !podcastSources.isEmpty {
@@ -94,9 +74,10 @@ struct ProcessingStatsView: View {
         .navigationTitle("Processing Stats")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            async let statsRefresh: Void = statsService.refreshStats()
+            async let unreadRefresh: Void = unreadCountService.refreshCounts()
+            async let processingRefresh: Void = processingCountService.refreshCount()
             async let sourcesRefresh: Void = sourcesViewModel.loadConfigs()
-            _ = await (statsRefresh, sourcesRefresh)
+            _ = await (unreadRefresh, processingRefresh, sourcesRefresh)
         }
     }
 

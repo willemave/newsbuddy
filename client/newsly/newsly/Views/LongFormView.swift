@@ -13,7 +13,7 @@ struct LongFormView: View {
     let onSelect: (ContentDetailRoute) -> Void
 
     @StateObject private var processingCountService = ProcessingCountService.shared
-    @StateObject private var longFormStatsService = LongFormStatsService.shared
+    @StateObject private var unreadCountService = UnreadCountService.shared
     @StateObject private var sourcesViewModel = ScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
     )
@@ -198,10 +198,10 @@ struct LongFormView: View {
 
     @ViewBuilder
     private var longFormEmptyState: some View {
-        if longFormStatsService.totalCount == 0 && !longFormSources.isEmpty {
+        if totalProcessedSourceItems == 0 && !longFormSources.isEmpty {
             longFormBootstrapState
         } else if processingCountService.longFormProcessingCount > 0
-            && longFormStatsService.totalCount == 0
+            && totalProcessedSourceItems == 0
         {
             VStack(spacing: 16) {
                 Spacer()
@@ -212,7 +212,7 @@ struct LongFormView: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if longFormStatsService.unreadCount == 0 && longFormStatsService.totalCount > 0 {
+        } else if unreadCountService.longFormCount == 0 && totalProcessedSourceItems > 0 {
             EmptyStateView(
                 icon: "checkmark.circle",
                 title: "You're All Caught Up",
@@ -422,11 +422,6 @@ struct LongFormView: View {
 
     @MainActor
     private func refreshLongFormSurface(forceReload: Bool) async {
-        async let statsRefresh: Void = longFormStatsService.refreshStats()
-        async let processingRefresh: Void = processingCountService.refreshCount()
-        async let sourcesRefresh: Void = sourcesViewModel.loadConfigs()
-        _ = await (statsRefresh, processingRefresh, sourcesRefresh)
-
         if forceReload {
             if viewModel.currentItems().isEmpty {
                 viewModel.refreshUnreadFeed()
@@ -436,6 +431,11 @@ struct LongFormView: View {
         } else {
             viewModel.ensureUnreadFeedLoaded()
         }
+
+        async let unreadRefresh: Void = unreadCountService.refreshCounts()
+        async let processingRefresh: Void = refreshProcessingCountIfNeeded()
+        async let sourcesRefresh: Void = refreshSourcesIfNeeded()
+        _ = await (unreadRefresh, processingRefresh, sourcesRefresh)
     }
 
     @MainActor
@@ -452,5 +452,19 @@ struct LongFormView: View {
             guard shouldPollLongForm else { break }
             await refreshLongFormSurface(forceReload: true)
         }
+    }
+
+    @MainActor
+    private func refreshProcessingCountIfNeeded() async {
+        guard viewModel.currentItems().isEmpty || processingCountService.longFormProcessingCount > 0 else {
+            return
+        }
+        await processingCountService.refreshCount()
+    }
+
+    @MainActor
+    private func refreshSourcesIfNeeded() async {
+        guard sourcesViewModel.configs.isEmpty else { return }
+        await sourcesViewModel.loadConfigs()
     }
 }
