@@ -42,7 +42,7 @@ if [ "$SKIP_ADMIN_TEST" = "false" ]; then
 
   echo ""
   echo "2️⃣  Testing admin-protected route..."
-  ADMIN_ROUTE=$(curl -s -X GET "$BASE_URL/admin/conversational/health" \
+  ADMIN_ROUTE=$(curl -s -X GET "$BASE_URL/admin/" \
     -b /tmp/admin_cookies.txt \
     -w "%{http_code}" \
     -o /dev/null)

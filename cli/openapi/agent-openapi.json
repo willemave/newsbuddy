@@ -25,53 +25,6 @@
         "title": "AccessTokenResponse",
         "type": "object"
       },
-      "AdminConversationalHealthResponse": {
-        "description": "Readiness flags for admin conversational features.",
-        "properties": {
-          "agent_id": {
-            "description": "Configured ElevenLabs agent ID",
-            "nullable": true,
-            "title": "Agent Id",
-            "type": "string"
-          },
-          "agent_text_only": {
-            "description": "Whether text-only mode is requested",
-            "title": "Agent Text Only",
-            "type": "boolean"
-          },
-          "elevenlabs_api_configured": {
-            "description": "Whether ELEVENLABS_API_KEY is set",
-            "title": "Elevenlabs Api Configured",
-            "type": "boolean"
-          },
-          "elevenlabs_package_available": {
-            "description": "Whether the elevenlabs SDK can be imported",
-            "title": "Elevenlabs Package Available",
-            "type": "boolean"
-          },
-          "readiness_reasons": {
-            "description": "Reasons why readiness is false.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Readiness Reasons",
-            "type": "array"
-          },
-          "ready": {
-            "description": "Whether the conversational feature is ready",
-            "title": "Ready",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "elevenlabs_api_configured",
-          "elevenlabs_package_available",
-          "agent_text_only",
-          "ready"
-        ],
-        "title": "AdminConversationalHealthResponse",
-        "type": "object"
-      },
       "AdminEvalRunRequest": {
         "description": "Request payload for running an admin eval batch.",
         "properties": {

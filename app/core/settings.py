@@ -114,11 +114,6 @@ class Settings(BaseSettings):
     elevenlabs_agent_turn_timeout_seconds: int = 25
     exa_search_request_cost_usd: float | None = Field(default=0.03, ge=0.0)
     exa_content_result_cost_usd: float | None = Field(default=0.03134, ge=0.0)
-    admin_conversational_session_ttl_minutes: int = 120
-    admin_conversational_max_turns: int = 20
-    admin_conversational_ws_max_queue: int = 500
-    admin_conversational_trace_logging: bool = True
-    admin_conversational_trace_max_chars: int = 1200
 
     # Langfuse tracing
     langfuse_enabled: bool = True

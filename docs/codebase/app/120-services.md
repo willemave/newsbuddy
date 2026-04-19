@@ -17,7 +17,7 @@ Business-logic layer for LLM access, content analysis and submission, chat, disc
 | File | Key symbols | Notes |
 |---|---|---|
 | `app/services/__init__.py` | n/a | Service layer modules. |
-| `app/services/admin_conversational_agent.py` | `SessionTurn`, `SessionState`, `AgentConversationRuntime`, `KnowledgeHit`, `WebHit`, `elevenlabs_sdk_available`, `build_health_flags`, `create_or_get_session_state`, `append_turn`, `get_turn_history`, +10 more | ElevenLabs-backed admin conversational streaming service. |
+| `app/services/knowledge_search.py` | `KnowledgeHit`, `search_knowledge` | Saved-knowledge lookup helpers shared by assistant features. |
 | `app/services/admin_eval.py` | `ModelPricing`, `AdminEvalRunRequest`, `EvalSourcePayload`, `get_default_pricing`, `select_eval_samples`, `run_admin_eval`, `build_eval_source_payload` | Admin-only LLM eval helpers for summary and title comparison. |
 | `app/services/anthropic_llm.py` | `AnthropicSummarizationService`, `get_anthropic_summarization_service` | Anthropic summarization via pydantic-ai. |
 | `app/services/apple_podcasts.py` | `ApplePodcastResolution`, `resolve_apple_podcast_episode` | Helpers for resolving Apple Podcasts episode metadata. |

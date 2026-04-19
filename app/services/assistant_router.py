@@ -35,7 +35,6 @@ from app.repositories.search_repository import (
     search_news,
     search_subscription_feeds,
 )
-from app.services.admin_conversational_agent import search_knowledge as search_knowledge_hits
 from app.services.assistant_feed_finder import find_feed_options as find_feed_options_service
 from app.services.chat_agent import (
     _log_chat_usage,
@@ -46,6 +45,7 @@ from app.services.chat_agent import (
 )
 from app.services.content_submission import submit_user_content
 from app.services.exa_client import exa_search
+from app.services.knowledge_search import search_knowledge as search_knowledge_hits
 from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_models import (
     DEFAULT_MODEL,

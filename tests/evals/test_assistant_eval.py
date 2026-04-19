@@ -8,7 +8,7 @@ from typing import Any, cast
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 
 from app.services import assistant_eval
-from app.services.admin_conversational_agent import search_knowledge
+from app.services.knowledge_search import search_knowledge
 
 
 def test_load_assistant_eval_suite_parses_yaml(tmp_path: Path) -> None:

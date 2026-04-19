@@ -94,7 +94,7 @@ The app currently mounts:
 - `/auth`
   - Apple Sign In, token refresh, `/me`, profile updates, admin login/logout.
 - `/admin`
-  - Dashboard, eval tooling, API key management, onboarding lane preview, conversational admin interface.
+  - Dashboard, eval tooling, API key management, onboarding lane preview.
 - `/admin/logs` and `/admin/errors`
   - Log browser and error reset utilities.
 - `/api/content`
@@ -592,8 +592,6 @@ Representative routes:
 - onboarding lane preview
 - eval summaries and eval run trigger
 - API key management
-- conversational admin UI
-- conversational health
 - log browser and error reset tools
 
 ## 9. Queue and Worker Architecture
@@ -1125,7 +1123,6 @@ Capabilities visible in `app/routers/admin.py`:
 - onboarding lane preview
 - eval execution and summaries
 - API key creation/revocation
-- conversational admin assistant and health checks
 
 This is not a separate frontend application. Templates are rendered via Jinja in `app/templates/`.
 

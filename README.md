@@ -228,20 +228,6 @@ The container exposes:
 
 Set `NEWSLY_RUNTIME_MODE=server` in `.env.docker.local` to skip workers, the queue watchdog, and the scheduler while keeping the API server and embedded Postgres.
 
-### SQLite To PostgreSQL Migration
-
-```bash
-# Copy your existing SQLite file into the mounted local data directory
-mkdir -p docker/local-data
-cp /path/to/news_app.db docker/local-data/news_app.db
-
-# Start the stack first so embedded Postgres is ready
-docker compose --env-file .env.docker.local up --build -d
-
-# Restore or seed PostgreSQL directly before first start.
-# Legacy SQLite migration tooling has been removed.
-```
-
 ### Local Start Scripts
 
 For native local development, use the unified launcher with `.env`:

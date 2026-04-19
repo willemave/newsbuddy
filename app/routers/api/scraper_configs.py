@@ -72,7 +72,7 @@ def _serialize_scraper_config(
 
 
 @router.get("/", response_model=list[ScraperConfigResponse])
-async def list_scraper_configs(
+def list_scraper_configs(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     scraper_type: str | None = Query(None, alias="type"),
@@ -110,7 +110,7 @@ async def list_scraper_configs(
 
 
 @router.post("/", response_model=ScraperConfigResponse, status_code=status.HTTP_201_CREATED)
-async def create_scraper_config(
+def create_scraper_config(
     payload: CreateUserScraperConfig,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -130,7 +130,7 @@ async def create_scraper_config(
 
 
 @router.put("/{config_id}", response_model=ScraperConfigResponse)
-async def update_scraper_config(
+def update_scraper_config(
     config_id: int,
     payload: UpdateUserScraperConfig,
     db: Annotated[Session, Depends(get_db_session)],
@@ -151,7 +151,7 @@ async def update_scraper_config(
 
 
 @router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_scraper_config_endpoint(
+def delete_scraper_config_endpoint(
     config_id: int,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -166,7 +166,7 @@ async def delete_scraper_config_endpoint(
 @router.post(
     "/subscribe", response_model=ScraperConfigResponse, status_code=status.HTTP_201_CREATED
 )
-async def subscribe_to_feed(
+def subscribe_to_feed(
     payload: SubscribeToFeedRequest,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],

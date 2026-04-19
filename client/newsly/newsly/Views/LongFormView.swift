@@ -12,13 +12,13 @@ struct LongFormView: View {
     let isActive: Bool
     let onSelect: (ContentDetailRoute) -> Void
 
-    @StateObject private var processingCountService = ProcessingCountService.shared
     @StateObject private var unreadCountService = UnreadCountService.shared
     @StateObject private var sourcesViewModel = ScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
     )
     @State private var showMarkAllConfirmation = false
     @State private var isProcessingBulk = false
+    @State private var hasLoadedBootstrapSources = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -198,20 +198,8 @@ struct LongFormView: View {
 
     @ViewBuilder
     private var longFormEmptyState: some View {
-        if totalProcessedSourceItems == 0 && !longFormSources.isEmpty {
+        if shouldShowBootstrapState {
             longFormBootstrapState
-        } else if processingCountService.longFormProcessingCount > 0
-            && totalProcessedSourceItems == 0
-        {
-            VStack(spacing: 16) {
-                Spacer()
-                ProgressView()
-                Text("Preparing \(processingCountService.longFormProcessingCount) long-form items")
-                    .font(.listSubtitle)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if unreadCountService.longFormCount == 0 && totalProcessedSourceItems > 0 {
             EmptyStateView(
                 icon: "checkmark.circle",
@@ -231,6 +219,18 @@ struct LongFormView: View {
         sourcesViewModel.configs
             .filter { $0.isActive }
             .sorted(by: compareSources)
+    }
+
+    private var shouldUseBootstrapSourceState: Bool {
+        viewModel.currentItems().isEmpty && unreadCountService.longFormCount == 0
+    }
+
+    private var shouldShowBootstrapState: Bool {
+        guard shouldUseBootstrapSourceState else { return false }
+        if sourcesViewModel.isLoading {
+            return true
+        }
+        return hasLoadedBootstrapSources && totalProcessedSourceItems == 0 && !longFormSources.isEmpty
     }
 
     private var sourcesReadyCount: Int {
@@ -432,10 +432,8 @@ struct LongFormView: View {
             viewModel.ensureUnreadFeedLoaded()
         }
 
-        async let unreadRefresh: Void = unreadCountService.refreshCounts()
-        async let processingRefresh: Void = refreshProcessingCountIfNeeded()
-        async let sourcesRefresh: Void = refreshSourcesIfNeeded()
-        _ = await (unreadRefresh, processingRefresh, sourcesRefresh)
+        await unreadCountService.refreshCounts()
+        await refreshSourcesIfNeeded()
     }
 
     @MainActor
@@ -455,16 +453,10 @@ struct LongFormView: View {
     }
 
     @MainActor
-    private func refreshProcessingCountIfNeeded() async {
-        guard viewModel.currentItems().isEmpty || processingCountService.longFormProcessingCount > 0 else {
-            return
-        }
-        await processingCountService.refreshCount()
-    }
-
-    @MainActor
     private func refreshSourcesIfNeeded() async {
-        guard sourcesViewModel.configs.isEmpty else { return }
+        guard shouldUseBootstrapSourceState else { return }
+        guard !hasLoadedBootstrapSources else { return }
+        hasLoadedBootstrapSources = true
         await sourcesViewModel.loadConfigs()
     }
 }

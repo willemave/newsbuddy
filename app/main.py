@@ -9,8 +9,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
-from app.core.db import init_db
+from app.core.db import get_engine, init_db
 from app.core.deps import AdminAuthRequired
 from app.core.logging import setup_logging
 from app.core.observability import (
@@ -340,10 +341,41 @@ async def root_redirect():
     return RedirectResponse(url="/admin", status_code=status.HTTP_303_SEE_OTHER)
 
 
+def _check_database_health() -> None:
+    """Run a lightweight database round-trip for readiness checks."""
+    with get_engine().connect() as connection:
+        connection.execute(text("SELECT 1"))
+
+
 # Health check
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": settings.app_name}
+    try:
+        _check_database_health()
+    except Exception:
+        logger.exception(
+            "Health check failed",
+            extra=build_log_extra(
+                component="health",
+                operation="readiness",
+                event_name="health.readiness",
+                status="failed",
+            ),
+        )
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "unhealthy",
+                "service": settings.app_name,
+                "checks": {"database": "unhealthy"},
+            },
+        )
+
+    return {
+        "status": "healthy",
+        "service": settings.app_name,
+        "checks": {"database": "healthy"},
+    }
 
 
 if __name__ == "__main__":

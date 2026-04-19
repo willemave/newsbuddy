@@ -1,23 +1,18 @@
 """Admin router for administrative functionality."""
 
-import asyncio
-import base64
-import contextlib
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
-from uuid import uuid4
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session
 
 from app.commands import create_api_key, revoke_api_key
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import ADMIN_SESSION_COOKIE, require_admin
-from app.core.settings import get_settings
-from app.models.api.admin_conversational import AdminConversationalHealthResponse
+from app.core.deps import require_admin
 from app.models.api.common import (
     OnboardingAudioDiscoverRequest,
     OnboardingAudioLanePreviewResponse,
@@ -31,71 +26,60 @@ from app.models.internal.admin_eval import (
 from app.models.schema import Content, OnboardingDiscoveryRun, ProcessingTask
 from app.models.user import User
 from app.queries import list_api_keys
-from app.services.admin_conversational_agent import (
-    AgentConversationRuntime,
-    build_available_knowledge_context,
-    build_health_flags,
-    close_agent_session,
-    create_or_get_session_state,
-    search_knowledge,
-    search_web,
-    serialize_knowledge_hits,
-    serialize_web_hits,
-    start_agent_session,
-    stream_agent_turn,
-)
 from app.services.admin_eval import get_default_pricing, run_admin_eval
 from app.services.onboarding import preview_audio_lane_plan
 from app.templates import templates
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 TASK_STATUS_ORDER = ("pending", "processing", "failed", "completed")
+DASHBOARD_STATS_RANGE_OPTIONS = (
+    ("24h", "24h", timedelta(hours=24)),
+    ("7d", "7d", timedelta(days=7)),
+    ("30d", "30d", timedelta(days=30)),
+    ("all", "All time", None),
+)
 
 
-def _has_valid_admin_session(websocket: WebSocket) -> bool:
-    """Validate admin auth cookie for websocket endpoints."""
-    from app.routers.auth import admin_sessions
-
-    session_token = websocket.cookies.get(ADMIN_SESSION_COOKIE)
-    return bool(session_token and session_token in admin_sessions)
-
-
-async def _send_ws_event(websocket: WebSocket, payload: dict[str, Any]) -> bool:
-    """Send websocket event and indicate whether the connection is still open."""
-    try:
-        await websocket.send_json(payload)
-        return True
-    except (RuntimeError, WebSocketDisconnect):
-        return False
+def _normalize_dashboard_stats_range(stats_range: str | None) -> str:
+    """Return a supported dashboard stats range value."""
+    allowed_values = {value for value, _, _ in DASHBOARD_STATS_RANGE_OPTIONS}
+    if stats_range in allowed_values:
+        return str(stats_range)
+    return "24h"
 
 
-async def _close_agent_runtime(runtime: AgentConversationRuntime) -> None:
-    """Close a runtime even if the websocket task is cancelled during shutdown."""
-    try:
-        await asyncio.to_thread(close_agent_session, runtime)
-    except asyncio.CancelledError:
-        close_agent_session(runtime)
-        raise
+def _get_dashboard_stats_cutoff(stats_range: str, *, now: datetime) -> datetime | None:
+    """Return the timestamp cutoff for the selected dashboard stats range."""
+    for value, _label, delta in DASHBOARD_STATS_RANGE_OPTIONS:
+        if value == stats_range:
+            if delta is None:
+                return None
+            return now - delta
+    return now - timedelta(hours=24)
 
 
-class _TurnEventEmitter:
-    """Thread-safe event bridge from worker thread to async websocket queue."""
+def _build_dashboard_stats_range_links(
+    request: Request, *, selected_stats_range: str
+) -> list[dict[str, Any]]:
+    """Build dashboard stats range tabs while preserving other query params."""
+    base_params = dict(request.query_params)
+    options: list[dict[str, Any]] = []
 
-    def __init__(self, event_loop: asyncio.AbstractEventLoop, queue: asyncio.Queue[dict[str, Any]]):
-        self._event_loop = event_loop
-        self._queue = queue
+    for value, label, _delta in DASHBOARD_STATS_RANGE_OPTIONS:
+        params = {**base_params, "stats_range": value}
+        href = request.url.path
+        if params:
+            href = f"{href}?{urlencode(params)}"
+        options.append(
+            {
+                "value": value,
+                "label": label,
+                "href": href,
+                "active": value == selected_stats_range,
+            }
+        )
 
-    def __call__(self, event: dict[str, Any]) -> None:
-        def enqueue() -> None:
-            if self._queue.full() and event.get("type") in {"assistant_delta", "audio_chunk_raw"}:
-                return
-            if self._queue.full():
-                with contextlib.suppress(asyncio.QueueEmpty):
-                    self._queue.get_nowait()
-            with contextlib.suppress(asyncio.QueueFull):
-                self._queue.put_nowait(event)
-
-        self._event_loop.call_soon_threadsafe(enqueue)
+    return options
 
 
 def _normalize_task_error_type(error_message: str | None) -> str:
@@ -221,6 +205,14 @@ def _build_recent_failure_rows(
     return rows, total
 
 
+def _count_failed_tasks(db: Session, *, cutoff: datetime | None) -> int:
+    """Count failed tasks for the selected summary range."""
+    query = db.query(func.count(ProcessingTask.id)).filter(ProcessingTask.status == "failed")
+    if cutoff is not None:
+        query = query.filter(ProcessingTask.completed_at >= cutoff)
+    return int(query.scalar() or 0)
+
+
 def _build_scraper_health(db: Session, recent_cutoff: datetime) -> dict[str, Any]:
     """Return empty scraper event aggregates after EventLog removal."""
     return {
@@ -314,33 +306,52 @@ def admin_dashboard(
     _: None = Depends(require_admin),
     event_type: str | None = None,
     limit: int = 50,
+    stats_range: str = "24h",
 ):
     """Admin dashboard with system statistics and event logs."""
-    recent_cutoff = datetime.now(UTC) - timedelta(hours=24)
+    now = datetime.now(UTC)
+    recent_cutoff = now - timedelta(hours=24)
+    selected_stats_range = _normalize_dashboard_stats_range(stats_range)
+    stats_cutoff = _get_dashboard_stats_cutoff(selected_stats_range, now=now)
+    stats_range_links = _build_dashboard_stats_range_links(
+        request,
+        selected_stats_range=selected_stats_range,
+    )
+    stats_range_label = next(
+        label
+        for value, label, _delta in DASHBOARD_STATS_RANGE_OPTIONS
+        if value == selected_stats_range
+    )
 
     # Content statistics
-    content_stats_result = (
-        db.query(Content.content_type, func.count(Content.id).label("count"))
-        .group_by(Content.content_type)
-        .all()
-    )
+    content_stats_query = db.query(Content.content_type, func.count(Content.id).label("count"))
+    total_content_query = db.query(func.count(Content.id))
+    if stats_cutoff is not None:
+        content_stats_query = content_stats_query.filter(Content.created_at >= stats_cutoff)
+        total_content_query = total_content_query.filter(Content.created_at >= stats_cutoff)
+
+    content_stats_result = content_stats_query.group_by(Content.content_type).all()
     content_stats = {row.content_type: row.count for row in content_stats_result}
-    total_content = db.query(func.count(Content.id)).scalar() or 0
+    total_content = int(total_content_query.scalar() or 0)
 
     # Task statistics
-    task_stats_result = (
-        db.query(ProcessingTask.status, func.count(ProcessingTask.id).label("count"))
-        .group_by(ProcessingTask.status)
-        .all()
-    )
+    task_stats_query = db.query(ProcessingTask.status, func.count(ProcessingTask.id).label("count"))
+    if stats_cutoff is not None:
+        task_stats_query = task_stats_query.filter(ProcessingTask.created_at >= stats_cutoff)
+
+    task_stats_result = task_stats_query.group_by(ProcessingTask.status).all()
     task_stats = {row.status: row.count for row in task_stats_result}
-    total_tasks = db.query(func.count(ProcessingTask.id)).scalar() or 0
-    recent_tasks = (
-        db.query(func.count(ProcessingTask.id))
-        .filter(ProcessingTask.created_at >= recent_cutoff)
-        .scalar()
+    total_tasks = int(
+        (
+            db.query(func.count(ProcessingTask.id))
+            .filter(ProcessingTask.created_at >= stats_cutoff)
+            .scalar()
+            if stats_cutoff is not None
+            else db.query(func.count(ProcessingTask.id)).scalar()
+        )
         or 0
     )
+    summary_failure_total = _count_failed_tasks(db, cutoff=stats_cutoff)
 
     # Dashboard readouts
     queue_status_rows = _build_queue_status_rows(db)
@@ -376,7 +387,10 @@ def admin_dashboard(
             "total_content": total_content,
             "task_stats": task_stats,
             "total_tasks": total_tasks,
-            "recent_tasks": recent_tasks,
+            "summary_failure_total": summary_failure_total,
+            "selected_stats_range": selected_stats_range,
+            "selected_stats_range_label": stats_range_label,
+            "stats_range_links": stats_range_links,
             "queue_status_rows": queue_status_rows,
             "phase_status_rows": phase_status_rows,
             "recent_failure_rows": recent_failure_rows,
@@ -523,330 +537,3 @@ def admin_api_keys_revoke(
     """Revoke an API key and return to the admin list."""
     revoke_api_key.execute(db, api_key_id=api_key_id)
     return RedirectResponse(url="/admin/api-keys", status_code=303)
-
-
-@router.get("/conversational", response_class=HTMLResponse)
-def admin_conversational_page(
-    request: Request,
-    _: None = Depends(require_admin),
-) -> HTMLResponse:
-    """Render admin conversational prototype UI."""
-    return templates.TemplateResponse(
-        request,
-        "admin_conversational.html",
-        {
-            "request": request,
-        },
-    )
-
-
-@router.get("/conversational/health", response_model=AdminConversationalHealthResponse)
-def admin_conversational_health(
-    _: None = Depends(require_admin),
-) -> AdminConversationalHealthResponse:
-    """Report readiness for admin conversational features."""
-    return AdminConversationalHealthResponse(**build_health_flags())
-
-
-@router.websocket("/conversational/ws")
-async def admin_conversational_ws(
-    websocket: WebSocket,
-    db: Annotated[Session, Depends(get_readonly_db_session)],
-) -> None:
-    """Websocket endpoint for streaming admin conversational turns."""
-    if not _has_valid_admin_session(websocket):
-        await websocket.close(code=4401)
-        return
-
-    await websocket.accept()
-    settings = get_settings()
-    max_queue_size = max(10, settings.admin_conversational_ws_max_queue)
-    selected_user_id: int | None = None
-    session_id: str | None = None
-    runtime: AgentConversationRuntime | None = None
-
-    try:
-        while True:
-            try:
-                message = await websocket.receive_json()
-            except WebSocketDisconnect:
-                return
-            except Exception:
-                is_open = await _send_ws_event(
-                    websocket,
-                    {
-                        "type": "error",
-                        "code": "invalid_payload",
-                        "message": "Expected JSON message payload.",
-                    },
-                )
-                if not is_open:
-                    return
-                continue
-
-            message_type = str(message.get("type", "")).strip().lower()
-            if message_type == "ping":
-                is_open = await _send_ws_event(websocket, {"type": "pong"})
-                if not is_open:
-                    return
-                continue
-
-            if message_type == "init":
-                raw_user_id = message.get("user_id")
-                raw_session_id = message.get("session_id")
-                requested_session_id = raw_session_id if isinstance(raw_session_id, str) else None
-                try:
-                    user_id = int(raw_user_id)
-                except (TypeError, ValueError):
-                    is_open = await _send_ws_event(
-                        websocket,
-                        {
-                            "type": "error",
-                            "code": "invalid_user_id",
-                            "message": "user_id must be a positive integer.",
-                        },
-                    )
-                    if not is_open:
-                        return
-                    continue
-
-                if user_id <= 0:
-                    is_open = await _send_ws_event(
-                        websocket,
-                        {
-                            "type": "error",
-                            "code": "invalid_user_id",
-                            "message": "user_id must be a positive integer.",
-                        },
-                    )
-                    if not is_open:
-                        return
-                    continue
-
-                user_exists = db.query(User.id).filter(User.id == user_id).first()
-                if user_exists is None:
-                    is_open = await _send_ws_event(
-                        websocket,
-                        {
-                            "type": "error",
-                            "code": "user_not_found",
-                            "message": "Selected user_id does not exist.",
-                        },
-                    )
-                    if not is_open:
-                        return
-                    continue
-
-                try:
-                    state = create_or_get_session_state(requested_session_id, user_id)
-                except ValueError as exc:
-                    is_open = await _send_ws_event(
-                        websocket,
-                        {
-                            "type": "error",
-                            "code": "invalid_session",
-                            "message": str(exc),
-                        },
-                    )
-                    if not is_open:
-                        return
-                    continue
-
-                if runtime is not None:
-                    with contextlib.suppress(Exception):
-                        await _close_agent_runtime(runtime)
-                    runtime = None
-
-                bootstrap_context = build_available_knowledge_context(
-                    db=db,
-                    user_id=user_id,
-                    limit=100,
-                )
-
-                try:
-                    runtime = await asyncio.to_thread(
-                        start_agent_session,
-                        state.session_id,
-                        user_id,
-                        bootstrap_context,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    selected_user_id = None
-                    session_id = None
-                    is_open = await _send_ws_event(
-                        websocket,
-                        {
-                            "type": "error",
-                            "code": "agent_session_error",
-                            "message": str(exc),
-                        },
-                    )
-                    if not is_open:
-                        return
-                    continue
-
-                selected_user_id = user_id
-                session_id = state.session_id
-                is_open = await _send_ws_event(
-                    websocket,
-                    {
-                        "type": "ready",
-                        "session_id": session_id,
-                    },
-                )
-                if not is_open:
-                    return
-                continue
-
-            if message_type != "user_message":
-                is_open = await _send_ws_event(
-                    websocket,
-                    {
-                        "type": "error",
-                        "code": "unknown_event",
-                        "message": f"Unsupported event type: {message_type or 'empty'}",
-                    },
-                )
-                if not is_open:
-                    return
-                continue
-
-            if selected_user_id is None or session_id is None or runtime is None:
-                is_open = await _send_ws_event(
-                    websocket,
-                    {
-                        "type": "error",
-                        "code": "session_not_initialized",
-                        "message": "Send init event before user_message.",
-                    },
-                )
-                if not is_open:
-                    return
-                continue
-
-            text = str(message.get("text", "")).strip()
-            if not text:
-                is_open = await _send_ws_event(
-                    websocket,
-                    {
-                        "type": "error",
-                        "code": "empty_message",
-                        "message": "text is required.",
-                    },
-                )
-                if not is_open:
-                    return
-                continue
-
-            turn_id = str(message.get("turn_id") or f"turn_{uuid4().hex}")
-            is_open = await _send_ws_event(websocket, {"type": "turn_started", "turn_id": turn_id})
-            if not is_open:
-                return
-
-            knowledge_hits = search_knowledge(db=db, user_id=selected_user_id, query=text, limit=5)
-            web_hits = await asyncio.to_thread(search_web, text, 5)
-            is_open = await _send_ws_event(
-                websocket,
-                {
-                    "type": "sources",
-                    "turn_id": turn_id,
-                    "knowledge_hits": serialize_knowledge_hits(knowledge_hits),
-                    "web_hits": serialize_web_hits(web_hits),
-                },
-            )
-            if not is_open:
-                return
-
-            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=max_queue_size)
-            event_loop = asyncio.get_running_loop()
-            emit_event = _TurnEventEmitter(event_loop, queue)
-            current_runtime = runtime
-
-            def run_turn(
-                local_runtime: AgentConversationRuntime = current_runtime,
-                local_text: str = text,
-                local_turn_id: str = turn_id,
-                local_knowledge_hits=knowledge_hits,
-                local_web_hits=web_hits,
-                local_emit_event: _TurnEventEmitter = emit_event,
-            ) -> None:
-                try:
-                    stream_agent_turn(
-                        runtime=local_runtime,
-                        user_text=local_text,
-                        turn_id=local_turn_id,
-                        emit_event=local_emit_event,
-                        knowledge_hits=local_knowledge_hits,
-                        web_hits=local_web_hits,
-                    )
-                    local_emit_event({"type": "_internal_done"})
-                except TimeoutError as exc:
-                    local_emit_event(
-                        {
-                            "type": "_internal_error",
-                            "code": "turn_timeout",
-                            "message": str(exc),
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    local_emit_event(
-                        {
-                            "type": "_internal_error",
-                            "code": "agent_error",
-                            "message": str(exc),
-                        }
-                    )
-
-            worker_task = asyncio.create_task(asyncio.to_thread(run_turn))
-
-            while True:
-                event = await queue.get()
-                event_type = event.get("type")
-
-                if event_type == "_internal_done":
-                    is_open = await _send_ws_event(
-                        websocket,
-                        {"type": "turn_complete", "turn_id": turn_id},
-                    )
-                    break
-
-                if event_type == "_internal_error":
-                    is_open = await _send_ws_event(
-                        websocket,
-                        {
-                            "type": "error",
-                            "turn_id": turn_id,
-                            "code": str(event.get("code", "agent_error")),
-                            "message": str(event.get("message", "Turn failed.")),
-                        },
-                    )
-                    break
-
-                if event_type == "audio_chunk_raw":
-                    audio_bytes = event.get("audio_bytes")
-                    if isinstance(audio_bytes, (bytes, bytearray)):
-                        payload = {
-                            "type": "audio_chunk",
-                            "turn_id": turn_id,
-                            "seq": int(event.get("seq", 0)),
-                            "mime_type": str(event.get("mime_type", "application/octet-stream")),
-                            "chunk_b64": base64.b64encode(bytes(audio_bytes)).decode("ascii"),
-                        }
-                        is_open = await _send_ws_event(websocket, payload)
-                        if not is_open:
-                            break
-                    continue
-
-                is_open = await _send_ws_event(websocket, event)
-                if not is_open:
-                    break
-
-            with contextlib.suppress(Exception):
-                await worker_task
-
-            if not is_open:
-                return
-    finally:
-        if runtime is not None:
-            with contextlib.suppress(Exception):
-                close_agent_session(runtime)

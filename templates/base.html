@@ -61,11 +61,6 @@
                     {% if '/onboarding/' in current_path %}active{% else %}text-gray-600 hover:text-gray-900 hover:bg-gray-100{% endif %}">
             Lane Preview
           </a>
-          <a href="/admin/conversational"
-             class="admin-nav-link px-3 py-1.5 text-sm rounded-md transition-colors
-                    {% if current_path.startswith('/admin/conversational') %}active{% else %}text-gray-600 hover:text-gray-900 hover:bg-gray-100{% endif %}">
-            Conversational
-          </a>
           <a href="/admin/logs"
              class="admin-nav-link px-3 py-1.5 text-sm rounded-md transition-colors
                     {% if current_path.startswith('/admin/logs') %}active{% else %}text-gray-600 hover:text-gray-900 hover:bg-gray-100{% endif %}">
@@ -100,7 +95,6 @@
         <a href="/admin" class="block px-3 py-2 rounded-md text-sm {% if current_path == '/admin/' or current_path == '/admin' %}bg-blue-50 text-blue-700 font-medium{% else %}text-gray-700 hover:bg-gray-100{% endif %}">Dashboard</a>
         <a href="/admin/evals/summaries" class="block px-3 py-2 rounded-md text-sm {% if '/evals/' in current_path %}bg-blue-50 text-blue-700 font-medium{% else %}text-gray-700 hover:bg-gray-100{% endif %}">Evals</a>
         <a href="/admin/onboarding/lane-preview" class="block px-3 py-2 rounded-md text-sm {% if '/onboarding/' in current_path %}bg-blue-50 text-blue-700 font-medium{% else %}text-gray-700 hover:bg-gray-100{% endif %}">Lane Preview</a>
-        <a href="/admin/conversational" class="block px-3 py-2 rounded-md text-sm {% if current_path.startswith('/admin/conversational') %}bg-blue-50 text-blue-700 font-medium{% else %}text-gray-700 hover:bg-gray-100{% endif %}">Conversational</a>
         <a href="/admin/logs" class="block px-3 py-2 rounded-md text-sm {% if current_path.startswith('/admin/logs') %}bg-blue-50 text-blue-700 font-medium{% else %}text-gray-700 hover:bg-gray-100{% endif %}">Logs</a>
         <a href="/admin/errors" class="block px-3 py-2 rounded-md text-sm {% if '/errors' in current_path %}bg-blue-50 text-blue-700 font-medium{% else %}text-gray-700 hover:bg-gray-100{% endif %}">Errors</a>
         <div class="border-t border-gray-100 pt-2 mt-2">

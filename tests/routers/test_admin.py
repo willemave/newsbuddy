@@ -1,6 +1,7 @@
 """Tests for admin router dashboard pages."""
 
-from datetime import UTC, datetime
+import re
+from datetime import UTC, datetime, timedelta
 
 from app.core.deps import require_admin
 from app.main import app
@@ -12,6 +13,11 @@ def _override_admin_dependency(test_user):
         return test_user
 
     return _override_require_admin
+
+
+def _has_tag_text(body: str, text: str) -> bool:
+    """Return whether the rendered HTML contains the given text node content."""
+    return re.search(rf">\s*{re.escape(text)}\s*<", body) is not None
 
 
 def test_admin_dashboard_renders_sections(client, db_session, test_user):
@@ -52,6 +58,119 @@ def test_admin_dashboard_renders_sections(client, db_session, test_user):
         assert "Queue Status" in response.text
         assert "Task Phases" in response.text
         assert "Scraper Health (24h)" in response.text
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+
+
+def test_admin_dashboard_defaults_summary_stats_to_24h(client, db_session, test_user):
+    """Dashboard summary stats should default to the last 24 hours."""
+    app.dependency_overrides[require_admin] = _override_admin_dependency(test_user)
+    try:
+        now = datetime.now(UTC)
+        older = now - timedelta(days=3)
+        db_session.add_all(
+            [
+                Content(
+                    content_type="article",
+                    url="https://example.com/recent-article",
+                    title="Recent Article",
+                    source="test",
+                    status="completed",
+                    created_at=now,
+                ),
+                Content(
+                    content_type="news",
+                    url="https://example.com/old-news",
+                    title="Old News",
+                    source="test",
+                    status="completed",
+                    created_at=older,
+                ),
+                ProcessingTask(
+                    task_type="summarize",
+                    content_id=1,
+                    status="processing",
+                    created_at=now,
+                ),
+                ProcessingTask(
+                    task_type="generate_image",
+                    content_id=1,
+                    status="failed",
+                    created_at=older,
+                    completed_at=older,
+                    error_message="old failure",
+                ),
+            ]
+        )
+        db_session.commit()
+
+        response = client.get("/admin/")
+        assert response.status_code == 200
+        body = response.text
+
+        assert "Content 24h" in body
+        assert "Tasks 24h" in body
+        assert "Failures 24h" in body
+        assert _has_tag_text(body, "article")
+        assert not _has_tag_text(body, "news")
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+
+
+def test_admin_dashboard_all_time_summary_stats_include_older_records(
+    client, db_session, test_user
+):
+    """Dashboard summary stats should include older records when all time is selected."""
+    app.dependency_overrides[require_admin] = _override_admin_dependency(test_user)
+    try:
+        now = datetime.now(UTC)
+        older = now - timedelta(days=3)
+        db_session.add_all(
+            [
+                Content(
+                    content_type="article",
+                    url="https://example.com/recent-article-all",
+                    title="Recent Article",
+                    source="test",
+                    status="completed",
+                    created_at=now,
+                ),
+                Content(
+                    content_type="news",
+                    url="https://example.com/old-news-all",
+                    title="Old News",
+                    source="test",
+                    status="completed",
+                    created_at=older,
+                ),
+                ProcessingTask(
+                    task_type="summarize",
+                    content_id=1,
+                    status="processing",
+                    created_at=now,
+                ),
+                ProcessingTask(
+                    task_type="generate_image",
+                    content_id=1,
+                    status="failed",
+                    created_at=older,
+                    completed_at=older,
+                    error_message="old failure",
+                ),
+            ]
+        )
+        db_session.commit()
+
+        response = client.get("/admin/?stats_range=all")
+        assert response.status_code == 200
+        body = response.text
+
+        assert "Content All time" in body
+        assert "Tasks All time" in body
+        assert "Failures All time" in body
+        assert _has_tag_text(body, "article")
+        assert _has_tag_text(body, "news")
+        assert _has_tag_text(body, "failed")
     finally:
         app.dependency_overrides.pop(require_admin, None)
 
