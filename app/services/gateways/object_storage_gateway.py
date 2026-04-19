@@ -13,6 +13,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from app.core.settings import get_settings
+from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 StorageProvider = Literal["local", "s3_compatible"]
 
@@ -147,14 +148,44 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
             ),
         )
 
+    def _record_usage(
+        self,
+        *,
+        model: str,
+        operation: str,
+        key: str,
+        size_bytes: int | None = None,
+    ) -> None:
+        """Persist one S3-compatible storage API call."""
+        record_vendor_usage_out_of_band(
+            provider="s3_compatible",
+            model=model,
+            feature="object_storage",
+            operation=operation,
+            source="backend",
+            usage={"request_count": 1},
+            metadata={
+                "bucket": self._bucket,
+                "key": key,
+                "size_bytes": size_bytes,
+            },
+        )
+
     def put_text(self, *, key: str, text: str, content_type: str) -> StoredObjectMetadata:
+        body = text.encode("utf-8")
         self._client.put_object(
             Bucket=self._bucket,
             Key=key,
-            Body=text.encode("utf-8"),
+            Body=body,
             ContentType=content_type,
         )
-        return self.head(key=key) or StoredObjectMetadata(
+        self._record_usage(
+            model="put_object",
+            operation="object_storage.put_text",
+            key=key,
+            size_bytes=len(body),
+        )
+        return self._head(key=key, record_usage=False) or StoredObjectMetadata(
             provider=self.provider,
             bucket=self._bucket,
             key=key,
@@ -163,6 +194,12 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
     def get_text(self, *, key: str) -> str:
         response = self._client.get_object(Bucket=self._bucket, Key=key)
         body = response["Body"].read()
+        self._record_usage(
+            model="get_object",
+            operation="object_storage.get_text",
+            key=key,
+            size_bytes=len(body),
+        )
         return body.decode("utf-8")
 
     def exists(self, *, key: str) -> bool:
@@ -170,8 +207,12 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
 
     def delete(self, *, key: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=key)
+        self._record_usage(model="delete_object", operation="object_storage.delete", key=key)
 
     def head(self, *, key: str) -> StoredObjectMetadata | None:
+        return self._head(key=key, record_usage=True)
+
+    def _head(self, *, key: str, record_usage: bool) -> StoredObjectMetadata | None:
         try:
             response = self._client.head_object(Bucket=self._bucket, Key=key)
         except ClientError as exc:
@@ -179,6 +220,13 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
             if error_code in {"404", "NoSuchKey", "NotFound"}:
                 return None
             raise
+        if record_usage:
+            self._record_usage(
+                model="head_object",
+                operation="object_storage.head",
+                key=key,
+                size_bytes=response.get("ContentLength"),
+            )
         return StoredObjectMetadata(
             provider=self.provider,
             bucket=self._bucket,
@@ -193,7 +241,12 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
             Key=destination_key,
             CopySource={"Bucket": self._bucket, "Key": source_key},
         )
-        return self.head(key=destination_key) or StoredObjectMetadata(
+        self._record_usage(
+            model="copy_object",
+            operation="object_storage.copy",
+            key=destination_key,
+        )
+        return self._head(key=destination_key, record_usage=False) or StoredObjectMetadata(
             provider=self.provider,
             bucket=self._bucket,
             key=destination_key,

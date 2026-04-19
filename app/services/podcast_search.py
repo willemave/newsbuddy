@@ -18,6 +18,7 @@ from app.core.settings import get_settings
 from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.content_submission import normalize_url
 from app.services.exa_client import exa_search
+from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 logger = get_logger(__name__)
 
@@ -386,6 +387,13 @@ def _search_listen_notes(query: str, limit: int) -> list[PodcastEpisodeSearchHit
             )
         )
 
+    _record_podcast_usage(
+        provider="listen_notes",
+        model="episode_search",
+        operation="podcast_search.listen_notes_search",
+        request_count=1,
+        resource_count=len(hits),
+    )
     return hits
 
 
@@ -459,6 +467,16 @@ def _spotify_search(token: str, query: str, limit: int) -> dict[str, object] | N
         response.raise_for_status()
         payload = response.json()
         if isinstance(payload, dict):
+            episodes = payload.get("episodes")
+            items = episodes.get("items", []) if isinstance(episodes, dict) else []
+            resource_count = len(items) if isinstance(items, list) else 0
+            _record_podcast_usage(
+                provider="spotify",
+                model="episode_search",
+                operation="podcast_search.spotify_search",
+                request_count=1,
+                resource_count=resource_count,
+            )
             return payload
         return None
 
@@ -495,6 +513,13 @@ def _get_spotify_token() -> str | None:
             _SPOTIFY_TOKEN = _SpotifyToken(
                 access_token=access_token,
                 expires_at_epoch=time.time() + max(60, expires_in),
+            )
+            _record_podcast_usage(
+                provider="spotify",
+                model="oauth_token",
+                operation="podcast_search.spotify_token",
+                request_count=1,
+                resource_count=1,
             )
             return access_token
 
@@ -563,6 +588,13 @@ def _search_podcast_index(query: str, limit: int) -> list[PodcastEpisodeSearchHi
     feeds = search_payload.get("feeds", [])
     if not isinstance(feeds, list):
         return []
+    _record_podcast_usage(
+        provider="podcast_index",
+        model="search_byterm",
+        operation="podcast_search.podcast_index_search",
+        request_count=1,
+        resource_count=len(feeds),
+    )
 
     hits: list[PodcastEpisodeSearchHit] = []
     for feed in feeds[:3]:
@@ -581,6 +613,13 @@ def _search_podcast_index(query: str, limit: int) -> list[PodcastEpisodeSearchHi
         items = episodes_payload.get("items", [])
         if not isinstance(items, list):
             continue
+        _record_podcast_usage(
+            provider="podcast_index",
+            model="episodes_byfeedid",
+            operation="podcast_search.podcast_index_episodes",
+            request_count=1,
+            resource_count=len(items),
+        )
 
         for item in items:
             if not isinstance(item, dict):
@@ -674,6 +713,28 @@ def _http_get_json(
         if isinstance(payload, dict):
             return payload
     return {}
+
+
+def _record_podcast_usage(
+    *,
+    provider: str,
+    model: str,
+    operation: str,
+    request_count: int,
+    resource_count: int = 0,
+) -> None:
+    """Persist external podcast search provider usage when keyed APIs are called."""
+    record_vendor_usage_out_of_band(
+        provider=provider,
+        model=model,
+        feature="podcast_search",
+        operation=operation,
+        source="api",
+        usage={
+            "request_count": request_count,
+            "resource_count": resource_count,
+        },
+    )
 
 
 def _normalize_http_url(raw_url: str | None) -> str | None:

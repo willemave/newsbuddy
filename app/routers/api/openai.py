@@ -43,6 +43,7 @@ def transcribe_audio(
         transcript, language = get_openai_transcription_service().transcribe_audio_from_buffer(
             file.file,
             filename,
+            user_id=current_user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

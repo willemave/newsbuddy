@@ -119,9 +119,16 @@ def test_content_narration_returns_audio_bytes(
     captured: dict[str, object] = {}
 
     class _FakeTtsService:
-        def synthesize_mp3(self, *, text: str, item_id: int | None = None) -> bytes:
+        def synthesize_mp3(
+            self,
+            *,
+            text: str,
+            item_id: int | None = None,
+            user_id: int | None = None,
+        ) -> bytes:
             captured["text"] = text
             captured["item_id"] = item_id
+            captured["user_id"] = user_id
             return b"fake-content-mp3"
 
     monkeypatch.setattr(
@@ -138,6 +145,7 @@ def test_content_narration_returns_audio_bytes(
     assert response.headers["content-type"].startswith("audio/mpeg")
     assert response.content == b"fake-content-mp3"
     assert captured["item_id"] == content.id
+    assert captured["user_id"] is not None
     assert "Here is the full summary for" in str(captured["text"])
 
 

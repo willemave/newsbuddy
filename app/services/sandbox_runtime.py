@@ -13,6 +13,7 @@ from typing import Any
 
 from app.core.settings import get_settings
 from app.services.personal_markdown_library import get_personal_markdown_user_root
+from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 SEARCH_TOKEN_STOPWORDS = {
     "a",
@@ -174,9 +175,7 @@ class E2BPersonalLibrarySandboxSession(PersonalLibrarySandboxSession):
         try:
             from e2b_code_interpreter import Sandbox
         except ImportError as exc:  # pragma: no cover - exercised when dependency missing
-            raise SandboxRuntimeUnavailableError(
-                "e2b-code-interpreter is not installed"
-            ) from exc
+            raise SandboxRuntimeUnavailableError("e2b-code-interpreter is not installed") from exc
 
         create_kwargs: dict[str, Any] = {
             "timeout": settings.chat_sandbox_timeout_seconds,
@@ -189,6 +188,19 @@ class E2BPersonalLibrarySandboxSession(PersonalLibrarySandboxSession):
         self._sandbox = Sandbox.create(**create_kwargs)
         self._library_root = PurePosixPath(settings.chat_sandbox_library_root)
         self._max_output_chars = settings.chat_sandbox_max_output_chars
+        record_vendor_usage_out_of_band(
+            provider="e2b",
+            model=settings.chat_sandbox_template or "default",
+            feature="chat_sandbox",
+            operation="chat_sandbox.e2b_create",
+            source="chat",
+            usage={"request_count": 1},
+            user_id=self.user_id,
+            metadata={
+                "allow_internet_access": settings.chat_sandbox_allow_internet_access,
+                "timeout_seconds": settings.chat_sandbox_timeout_seconds,
+            },
+        )
         self._hydrate()
 
     def list_files(self, *, subpath: str = "", limit: int = 200) -> str:

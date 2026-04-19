@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.models.schema import VendorUsageRecord
 from app.services.openai_llm import MAX_FILE_SIZE_BYTES, OpenAITranscriptionService
 
 
@@ -210,6 +211,45 @@ class TestOpenAITranscriptionService:
         assert transcript == "This is the transcribed text"
         assert language == "en"
         mock_client.audio.transcriptions.create.assert_called_once()
+
+    @patch("app.services.openai_llm.os.path.getsize")
+    @patch("app.services.openai_llm.OpenAI")
+    @patch("app.services.openai_llm.settings")
+    def test_transcribe_audio_records_vendor_usage(
+        self,
+        mock_get_settings,
+        mock_openai,
+        mock_getsize,
+        db_session,
+        vendor_usage_db,
+    ):
+        """Transcription requests should persist a vendor usage row."""
+        del vendor_usage_db
+        mock_get_settings.openai_api_key = "test-key"
+
+        mock_client = MagicMock()
+        mock_transcription = MagicMock()
+        mock_transcription.text = "This is the transcribed text"
+        mock_transcription.language = "en"
+        mock_client.audio.transcriptions.create.return_value = mock_transcription
+        mock_openai.return_value = mock_client
+
+        service = OpenAITranscriptionService()
+        mock_getsize.return_value = 10 * 1024 * 1024
+
+        with patch("builtins.open", create=True) as mock_open_file:
+            mock_file = MagicMock()
+            mock_open_file.return_value.__enter__.return_value = mock_file
+            transcript, language = service.transcribe_audio(Path("test.mp3"), user_id=7)
+
+        assert transcript == "This is the transcribed text"
+        assert language == "en"
+        row = db_session.query(VendorUsageRecord).one()
+        assert row.provider == "openai"
+        assert row.model == "gpt-4o-transcribe"
+        assert row.feature == "transcription"
+        assert row.user_id == 7
+        assert row.request_count == 1
 
     @patch("app.services.openai_llm.subprocess.run")
     @patch("app.services.openai_llm.os.path.getsize")

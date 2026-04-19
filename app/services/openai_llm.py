@@ -15,6 +15,7 @@ from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
+from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 try:
     from langfuse.openai import OpenAI
@@ -194,6 +195,34 @@ class OpenAITranscriptionService:
 
         return prompt
 
+    def _record_transcription_usage(
+        self,
+        *,
+        file_path: Path,
+        language: str | None,
+        prompt: str,
+        user_id: int | None,
+        chunk_count: int = 1,
+    ) -> None:
+        """Persist one transcription usage record."""
+        record_vendor_usage_out_of_band(
+            provider="openai",
+            model=self.model_name,
+            feature="transcription",
+            operation="transcription.openai",
+            source="api",
+            usage={"request_count": 1},
+            user_id=user_id,
+            metadata={
+                "file_name": file_path.name,
+                "audio_format": self._get_audio_format(file_path),
+                "audio_size_bytes": os.path.getsize(file_path),
+                "language": language,
+                "chunk_count": chunk_count,
+                "prompt_chars": len(prompt),
+            },
+        )
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _transcribe_single_file(self, file_path: Path, prompt: str) -> tuple[str, str | None]:
         """Transcribe a single audio file."""
@@ -223,14 +252,26 @@ class OpenAITranscriptionService:
 
             return transcript, language
 
-    def transcribe_audio(self, audio_file_path: Path) -> tuple[str, str | None]:
+    def transcribe_audio(
+        self,
+        audio_file_path: Path,
+        *,
+        user_id: int | None = None,
+    ) -> tuple[str, str | None]:
         """Transcribe audio file using OpenAI Whisper API."""
         try:
             prompt = self._get_transcription_prompt(audio_file_path)
             logger.info(f"Using transcription prompt: {prompt}")
 
             if self._check_file_size(audio_file_path):
-                return self._transcribe_single_file(audio_file_path, prompt)
+                transcript, language = self._transcribe_single_file(audio_file_path, prompt)
+                self._record_transcription_usage(
+                    file_path=audio_file_path,
+                    language=language,
+                    prompt=prompt,
+                    user_id=user_id,
+                )
+                return transcript, language
 
             logger.info(f"File exceeds {MAX_FILE_SIZE_MB}MB limit, splitting into chunks")
 
@@ -269,6 +310,13 @@ class OpenAITranscriptionService:
                     f"Total length: {len(full_transcript)} chars"
                 )
 
+                self._record_transcription_usage(
+                    file_path=audio_file_path,
+                    language=detected_language,
+                    prompt=prompt,
+                    user_id=user_id,
+                    chunk_count=len(chunk_paths),
+                )
                 return full_transcript, detected_language
 
             finally:
@@ -287,7 +335,11 @@ class OpenAITranscriptionService:
             raise
 
     def transcribe_audio_from_buffer(
-        self, audio_buffer: BinaryIO, filename: str
+        self,
+        audio_buffer: BinaryIO,
+        filename: str,
+        *,
+        user_id: int | None = None,
     ) -> tuple[str, str | None]:
         """Transcribe audio from a file buffer using OpenAI Whisper API."""
         try:
@@ -298,7 +350,7 @@ class OpenAITranscriptionService:
                 tmp_path = Path(tmp_file.name)
 
             try:
-                return self.transcribe_audio(tmp_path)
+                return self.transcribe_audio(tmp_path, user_id=user_id)
             finally:
                 if tmp_path.exists():
                     tmp_path.unlink()

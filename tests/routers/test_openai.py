@@ -3,9 +3,10 @@ from __future__ import annotations
 
 def test_audio_transcription_endpoint(client, monkeypatch):
     class FakeTranscriptionService:
-        def transcribe_audio_from_buffer(self, audio_buffer, filename):
+        def transcribe_audio_from_buffer(self, audio_buffer, filename, *, user_id=None):
             assert audio_buffer.read() == b"audio-bytes"
             assert filename == "clip.m4a"
+            assert user_id is not None
             return ("transcribed text", "en")
 
     monkeypatch.setattr(
@@ -24,7 +25,8 @@ def test_audio_transcription_endpoint(client, monkeypatch):
 
 def test_audio_transcription_endpoint_maps_unexpected_errors_to_bad_gateway(client, monkeypatch):
     class FakeTranscriptionService:
-        def transcribe_audio_from_buffer(self, audio_buffer, filename):
+        def transcribe_audio_from_buffer(self, audio_buffer, filename, *, user_id=None):
+            del audio_buffer, filename, user_id
             raise Exception("upstream connection failed")
 
     monkeypatch.setattr(

@@ -66,6 +66,7 @@ def get_narration(
             audio_bytes = get_digest_narration_tts_service().synthesize_mp3(
                 text=payload.narration_text,
                 item_id=payload.target_id,
+                user_id=current_user.id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc

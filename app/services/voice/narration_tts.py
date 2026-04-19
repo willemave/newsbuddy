@@ -6,6 +6,7 @@ from importlib.util import find_spec
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
+from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 try:  # pragma: no cover - import availability covered by readiness checks
     from elevenlabs import VoiceSettings
@@ -23,7 +24,13 @@ class DigestNarrationTtsService:
     def __init__(self) -> None:
         self._settings = get_settings()
 
-    def synthesize_mp3(self, *, text: str, item_id: int | None = None) -> bytes:
+    def synthesize_mp3(
+        self,
+        *,
+        text: str,
+        item_id: int | None = None,
+        user_id: int | None = None,
+    ) -> bytes:
         """Generate MP3 narration audio for one digest.
 
         Args:
@@ -79,6 +86,23 @@ class DigestNarrationTtsService:
 
         if not audio_bytes:
             raise RuntimeError("Digest narration audio was empty")
+
+        record_vendor_usage_out_of_band(
+            provider="elevenlabs",
+            model=self._settings.elevenlabs_digest_tts_model,
+            feature="narration_tts",
+            operation="digest_narration_tts.synthesize_mp3",
+            source="api",
+            usage={"request_count": 1},
+            user_id=user_id,
+            metadata={
+                "target_id": item_id,
+                "voice_id": self._settings.elevenlabs_tts_voice_id,
+                "output_format": self._settings.elevenlabs_digest_tts_output_format,
+                "text_chars": len(normalized),
+                "audio_bytes": len(audio_bytes),
+            },
+        )
 
         return bytes(audio_bytes)
 
