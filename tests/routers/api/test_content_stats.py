@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import (
     Content,
-    ContentKnowledgeSave,
     ContentReadStatus,
     ContentStatusEntry,
     NewsItem,
@@ -244,8 +243,8 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
         status=ContentStatus.COMPLETED.value,
         content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
     )
-    completed_article_saved = Content(
-        url="https://example.com/article-knowledge",
+    completed_article_extra = Content(
+        url="https://example.com/article-extra",
         content_type=ContentType.ARTICLE.value,
         status=ContentStatus.COMPLETED.value,
         content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
@@ -286,7 +285,7 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
         [
             completed_article_unread,
             completed_podcast_read,
-            completed_article_saved,
+            completed_article_extra,
             completed_youtube,
             completed_news,
             processing_article,
@@ -298,7 +297,7 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
     for content in (
         completed_article_unread,
         completed_podcast_read,
-        completed_article_saved,
+        completed_article_extra,
         completed_youtube,
         completed_news,
         processing_article,
@@ -309,7 +308,7 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
 
     _add_inbox_status(db_session, test_user.id, completed_article_unread.id)
     _add_inbox_status(db_session, test_user.id, completed_podcast_read.id)
-    _add_inbox_status(db_session, test_user.id, completed_article_saved.id)
+    _add_inbox_status(db_session, test_user.id, completed_article_extra.id)
     _add_inbox_status(db_session, test_user.id, completed_youtube.id)
     _add_inbox_status(db_session, test_user.id, completed_news.id)
     _add_inbox_status(db_session, test_user.id, processing_article.id)
@@ -326,31 +325,21 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
             content_id=completed_podcast_read.id,
         )
     )
-    db_session.add(
-        ContentKnowledgeSave(
-            user_id=test_user.id,
-            content_id=completed_article_saved.id,
-        )
-    )
     db_session.commit()
 
     response = client.get("/api/content/stats/long-form")
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["total_count"] == 4
-    assert payload["read_count"] == 1
     assert payload["unread_count"] == 3
-    assert payload["saved_to_knowledge_count"] == 1
-    assert payload["processing_count"] == 2
 
 
-def test_long_form_stats_hide_completed_items_until_generated_artwork_is_ready(
+def test_long_form_stats_count_completed_long_form_without_generated_artwork_metadata(
     client,
     db_session,
     test_user,
 ) -> None:
-    hidden_article = Content(
+    metadata_free_article = Content(
         url="https://example.com/article-awaiting-art",
         content_type=ContentType.ARTICLE.value,
         status=ContentStatus.COMPLETED.value,
@@ -398,30 +387,20 @@ def test_long_form_stats_hide_completed_items_until_generated_artwork_is_ready(
         },
     )
 
-    db_session.add_all([hidden_article, visible_article])
+    db_session.add_all([metadata_free_article, visible_article])
     db_session.commit()
-    db_session.refresh(hidden_article)
+    db_session.refresh(metadata_free_article)
     db_session.refresh(visible_article)
 
-    _add_inbox_status(db_session, test_user.id, hidden_article.id)
+    _add_inbox_status(db_session, test_user.id, metadata_free_article.id)
     _add_inbox_status(db_session, test_user.id, visible_article.id)
-    _add_active_task(
-        db_session,
-        content_id=hidden_article.id,
-        task_type="generate_image",
-        status="pending",
-    )
     db_session.commit()
 
     response = client.get("/api/content/stats/long-form")
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["total_count"] == 1
-    assert payload["read_count"] == 0
-    assert payload["unread_count"] == 1
-    assert payload["saved_to_knowledge_count"] == 0
-    assert payload["processing_count"] == 1
+    assert payload["unread_count"] == 2
 
 
 def test_unread_counts_use_visible_news_items(client, db_session, test_user) -> None:

@@ -23,5 +23,5 @@ def get_processing_count(db: Session, *, user_id: int) -> ProcessingCountRespons
 
 
 def get_long_form_stats(db: Session, *, user_id: int) -> LongFormStatsResponse:
-    """Return long-form stats response."""
+    """Return unread long-form count response."""
     return LongFormStatsResponse(**stats_repository.get_long_form_stats(db, user_id=user_id))

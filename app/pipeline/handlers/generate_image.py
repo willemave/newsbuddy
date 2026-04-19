@@ -10,6 +10,7 @@ from app.models.schema import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.content_metadata_merge import refresh_merge_content_metadata
+from app.services.content_status_state_machine import ContentStatusStateMachine
 from app.services.queue import TaskType
 
 logger = get_logger(__name__)
@@ -52,6 +53,14 @@ class GenerateImageHandler:
                 result = image_service.generate_image(domain_content)
 
                 if result.success:
+                    content_type = content.content_type
+                    if not content_type:
+                        logger.error(
+                            "Cannot complete generated image for content %s without content_type",
+                            content_id,
+                        )
+                        return TaskResult.fail("Missing content type for generated image update")
+
                     base_metadata = dict(content.content_metadata or {})
                     metadata = dict(base_metadata)
                     metadata["image_generated_at"] = datetime.now(UTC).isoformat()
@@ -64,6 +73,11 @@ class GenerateImageHandler:
                         base_metadata=base_metadata,
                         updated_metadata=metadata,
                     )
+                    content.status = ContentStatusStateMachine.status_after_generated_artwork(
+                        content_type=content_type,
+                        current_status=content.status,
+                    ).value
+                    content.processed_at = datetime.now(UTC).replace(tzinfo=None)
                     db.commit()
 
                     logger.info(

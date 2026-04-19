@@ -29,8 +29,12 @@ from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.content_bodies import get_content_body_resolver, sync_content_body_storage
 from app.services.content_metadata_merge import refresh_merge_content_metadata
+from app.services.content_status_state_machine import ContentStatusStateMachine
 from app.services.dig_deeper import enqueue_dig_deeper_task
-from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
+from app.services.long_form_images import (
+    enqueue_visible_long_form_image_if_needed,
+    has_generated_long_form_image,
+)
 from app.services.queue import TaskType
 from app.services.summarization_templates import (
     resolve_editorial_summary_version,
@@ -315,7 +319,10 @@ class SummarizeHandler:
                         base_metadata=latest_metadata,
                         updated_metadata=merged_metadata,
                     )
-                    content.status = ContentStatus.COMPLETED.value
+                    content.status = ContentStatusStateMachine.status_after_summary(
+                        content_type=content.content_type,
+                        artwork_ready=has_generated_long_form_image(content),
+                    ).value
                     content.processed_at = datetime.now(UTC)
                     db.commit()
                     logger.info(
@@ -467,7 +474,10 @@ class SummarizeHandler:
                         updated_metadata=metadata,
                     )
                     sync_content_body_storage(db, content=content)
-                    content.status = ContentStatus.COMPLETED.value
+                    content.status = ContentStatusStateMachine.status_after_summary(
+                        content_type=content.content_type,
+                        artwork_ready=has_generated_long_form_image(content),
+                    ).value
                     content.processed_at = datetime.now(UTC)
                     db.commit()
 

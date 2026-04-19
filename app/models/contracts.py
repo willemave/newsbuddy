@@ -20,6 +20,7 @@ class ContentStatus(StrEnum):
     NEW = "new"
     PENDING = "pending"
     PROCESSING = "processing"
+    AWAITING_IMAGE = "awaiting_image"
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.models.api.common import ContentListResponse
-from app.models.content_display import is_ready_for_list, resolve_image_urls
+from app.models.content_display import resolve_image_urls
 from app.models.content_mapper import content_to_domain
 from app.models.metadata import ContentType
 from app.models.pagination import PaginationMetadata
@@ -91,8 +91,6 @@ def execute(
                 contents.append(fallback)
             continue
         image_url, thumbnail_url = resolve_image_urls(domain_content)
-        if not is_ready_for_list(domain_content, image_url):
-            continue
         contents.append(
             build_content_summary_response(
                 content=content,

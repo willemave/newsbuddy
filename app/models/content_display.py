@@ -65,26 +65,6 @@ def is_ready_for_long_form_summary(domain_content: ContentData) -> bool:
     return True
 
 
-def has_generated_long_form_artwork(domain_content: ContentData) -> bool:
-    """Return True when long-form content has a generated Newsly artwork asset."""
-    if domain_content.content_type not in {ContentType.ARTICLE, ContentType.PODCAST}:
-        return False
-    metadata = domain_content.metadata or {}
-    return bool(metadata.get("image_generated_at"))
-
-
-def is_ready_for_list(domain_content: ContentData, image_url: str | None) -> bool:
-    """Return True when content has enough data to appear in list views."""
-    _ = image_url
-    if domain_content.content_type == ContentType.NEWS:
-        return True
-
-    if not is_ready_for_long_form_summary(domain_content):
-        return False
-
-    return has_generated_long_form_artwork(domain_content)
-
-
 def can_subscribe_for_feed(
     domain_content: ContentData,
     detected_feed_data: dict[str, Any] | None,

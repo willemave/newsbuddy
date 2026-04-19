@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 from app.models.content_display import is_ready_for_long_form_summary
 from app.models.content_mapper import content_to_domain
 from app.models.contracts import TaskStatus
-from app.models.metadata import ContentStatus, ContentType
+from app.models.metadata import ContentType
 from app.models.schema import Content, ContentStatusEntry, ProcessingTask
+from app.services.content_status_state_machine import ContentStatusStateMachine
 from app.services.queue import QueueService, TaskType
 from app.utils.image_paths import get_content_images_dir
 
@@ -50,17 +51,6 @@ class QueueEnqueuer(Protocol):
         """Enqueue a task and return its task id."""
 
 
-def is_long_form_image_content_type(content_type: str | None) -> bool:
-    """Return True when a content type can have generated long-form images."""
-    return bool(content_type and content_type in LONG_FORM_IMAGE_CONTENT_TYPES)
-
-
-def has_summary_for_generated_image(content: Content) -> bool:
-    """Return True when content has summary data suitable for image prompts."""
-    metadata = content.content_metadata or {}
-    return bool(metadata.get("summary"))
-
-
 def has_generated_long_form_image(content: Content) -> bool:
     """Return True when content already has a generated image asset."""
     metadata = content.content_metadata or {}
@@ -81,27 +71,24 @@ def has_active_generate_image_task(db: Session, content_id: int) -> bool:
     )
 
 
-def is_visible_in_any_long_form_inbox(db: Session, content_id: int) -> bool:
-    """Return True when content appears in at least one user's inbox."""
-    return bool(
-        db.query(ContentStatusEntry.id)
-        .filter(ContentStatusEntry.content_id == content_id)
-        .filter(ContentStatusEntry.status == "inbox")
-        .first()
-    )
-
-
 def is_visible_long_form_image_candidate(db: Session, content: Content) -> bool:
     """Return True when content should participate in generated image flows."""
-    if not is_long_form_image_content_type(content.content_type):
+    if not content.content_type or content.content_type not in LONG_FORM_IMAGE_CONTENT_TYPES:
         return False
-    if content.status != ContentStatus.COMPLETED.value:
+    if not ContentStatusStateMachine.status_allows_artwork_enqueue(content.status):
         return False
     if content.classification == "skip":
         return False
-    if not is_visible_in_any_long_form_inbox(db, _require_content_id(content)):
+    if (
+        not db.query(ContentStatusEntry.id)
+        .filter(
+            ContentStatusEntry.content_id == _require_content_id(content),
+            ContentStatusEntry.status == "inbox",
+        )
+        .first()
+    ):
         return False
-    if not has_summary_for_generated_image(content):
+    if not (content.content_metadata or {}).get("summary"):
         return False
     if content.content_type == ContentType.ARTICLE.value:
         try:

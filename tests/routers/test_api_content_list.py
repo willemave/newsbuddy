@@ -60,7 +60,7 @@ def _add_inbox_status(db_session, user_id: int | None, content_id: int | None) -
     )
 
 
-def test_list_filters_articles_without_keypoints_or_summary(
+def test_list_keeps_completed_articles_visible_without_generated_image(
     client,
     db_session,
     test_user,
@@ -109,8 +109,8 @@ def test_list_filters_articles_without_keypoints_or_summary(
     ids = {item["id"] for item in response.json()["contents"]}
 
     assert ready_article.id in ids
-    assert missing_summary.id not in ids
-    assert missing_image.id not in ids
+    assert missing_summary.id in ids
+    assert missing_image.id in ids
 
 
 def test_list_keeps_article_with_short_summary_even_without_bullet_points(
@@ -189,7 +189,7 @@ def test_list_hides_news_images_even_when_metadata_has_urls(
     assert returned_item["thumbnail_url"] is None
 
 
-def test_podcast_stays_hidden_until_generated_image_is_ready(
+def test_podcast_uses_provider_thumbnail_before_generated_image_is_ready(
     client,
     db_session,
     test_user,
@@ -216,8 +216,9 @@ def test_podcast_stays_hidden_until_generated_image_is_ready(
 
     response = client.get("/api/content/", params={"content_type": "podcast"})
     assert response.status_code == 200
-    ids = {item["id"] for item in response.json()["contents"]}
-    assert podcast.id not in ids
+    returned_item = next(item for item in response.json()["contents"] if item["id"] == podcast.id)
+    assert returned_item["image_url"] == "https://cdn.example.com/provider-thumb.png"
+    assert returned_item["thumbnail_url"] is None
 
 
 def test_podcast_prefers_generated_image_over_provider_thumbnail(

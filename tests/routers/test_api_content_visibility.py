@@ -193,3 +193,41 @@ def test_api_excludes_digest_only_news(client, db_session: Session, test_user):
     ids = {item["id"] for item in response.json()["contents"]}
 
     assert hidden_digest_item.id not in ids
+
+
+def test_api_keeps_long_form_visible_even_with_digest_only_metadata(
+    client,
+    db_session: Session,
+    test_user,
+):
+    """Long-form visibility should ignore digest metadata once status is completed."""
+    article = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://example.com/article-digest-visibility",
+        title="Visible article",
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={
+            "digest_visibility": CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
+            "summary": _article_summary_payload("Visible article"),
+            "summary_kind": "long_structured",
+            "summary_version": 1,
+        },
+    )
+
+    db_session.add(article)
+    db_session.commit()
+    db_session.refresh(article)
+    db_session.add(
+        ContentStatusEntry(
+            user_id=test_user.id,
+            content_id=article.id,
+            status="inbox",
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/content/", params={"content_type": "article"})
+    assert response.status_code == 200
+    ids = {item["id"] for item in response.json()["contents"]}
+
+    assert article.id in ids

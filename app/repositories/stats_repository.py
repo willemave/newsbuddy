@@ -13,7 +13,6 @@ from app.models.contracts import TaskType
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import (
     Content,
-    ContentKnowledgeSave,
     ContentReadStatus,
     ContentStatusEntry,
     NewsItem,
@@ -43,10 +42,6 @@ def _build_active_processing_filter(now_utc: datetime) -> ColumnElement[bool]:
         Content.checked_out_at >= now_utc - timedelta(minutes=settings.checkout_timeout_minutes),
     )
     return or_(active_task_exists, fresh_checkout)
-
-
-def _build_has_generated_long_form_artwork_filter() -> ColumnElement[bool]:
-    return Content.content_metadata["image_generated_at"].as_string().is_not(None)
 
 
 def _build_active_generate_image_filter() -> ColumnElement[bool]:
@@ -93,7 +88,6 @@ def get_processing_count(db: Session, *, user_id: int) -> dict[str, int]:
     now_utc = datetime.now(UTC).replace(tzinfo=None)
     active_processing_filter = _build_active_processing_filter(now_utc)
     active_generate_image_filter = _build_active_generate_image_filter()
-    has_generated_artwork_filter = _build_has_generated_long_form_artwork_filter()
     long_form_selector = or_(
         Content.content_type.in_(long_form_types),
         and_(Content.platform == "youtube", Content.content_type != ContentType.NEWS.value),
@@ -115,8 +109,7 @@ def get_processing_count(db: Session, *, user_id: int) -> dict[str, int]:
         .filter(ContentStatusEntry.user_id == user_id)
         .filter(ContentStatusEntry.status == "inbox")
         .filter(long_form_selector)
-        .filter(Content.status == ContentStatus.COMPLETED.value)
-        .filter(~has_generated_artwork_filter)
+        .filter(Content.status == ContentStatus.AWAITING_IMAGE.value)
         .filter(active_generate_image_filter)
         .scalar()
         or 0
@@ -144,12 +137,8 @@ def get_processing_count(db: Session, *, user_id: int) -> dict[str, int]:
 
 
 def get_long_form_stats(db: Session, *, user_id: int) -> dict[str, int]:
-    """Return long-form stats for the user."""
+    """Return unread long-form stats for the user."""
     long_form_types = {ContentType.ARTICLE.value, ContentType.PODCAST.value}
-    now_utc = datetime.now(UTC).replace(tzinfo=None)
-    active_processing_filter = _build_active_processing_filter(now_utc)
-    active_generate_image_filter = _build_active_generate_image_filter()
-    has_generated_artwork_filter = _build_has_generated_long_form_artwork_filter()
     inbox_filter = (
         ContentStatusEntry.user_id == user_id,
         ContentStatusEntry.status == "inbox",
@@ -162,77 +151,20 @@ def get_long_form_stats(db: Session, *, user_id: int) -> dict[str, int]:
         Content.status == ContentStatus.COMPLETED.value,
         (Content.classification != "skip") | (Content.classification.is_(None)),
     )
-    completed_visible_filter = (*completed_filter, has_generated_artwork_filter)
     read_exists = exists(
         select(ContentReadStatus.id).where(
             ContentReadStatus.user_id == user_id,
             ContentReadStatus.content_id == Content.id,
         )
     )
-    knowledge_save_exists = exists(
-        select(ContentKnowledgeSave.id).where(
-            ContentKnowledgeSave.user_id == user_id,
-            ContentKnowledgeSave.content_id == Content.id,
-        )
-    )
-    processing_statuses = [
-        ContentStatus.NEW.value,
-        ContentStatus.PENDING.value,
-        ContentStatus.PROCESSING.value,
-    ]
 
     return {
-        "total_count": int(
-            db.query(func.count(Content.id))
-            .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
-            .filter(*inbox_filter)
-            .filter(*completed_visible_filter)
-            .scalar()
-            or 0
-        ),
-        "read_count": int(
-            db.query(func.count(Content.id))
-            .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
-            .filter(*inbox_filter)
-            .filter(*completed_visible_filter)
-            .filter(read_exists)
-            .scalar()
-            or 0
-        ),
         "unread_count": int(
             db.query(func.count(Content.id))
             .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
             .filter(*inbox_filter)
-            .filter(*completed_visible_filter)
+            .filter(*completed_filter)
             .filter(~read_exists)
-            .scalar()
-            or 0
-        ),
-        "saved_to_knowledge_count": int(
-            db.query(func.count(Content.id))
-            .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
-            .filter(*inbox_filter)
-            .filter(*completed_visible_filter)
-            .filter(knowledge_save_exists)
-            .scalar()
-            or 0
-        ),
-        "processing_count": int(
-            db.query(func.count(Content.id))
-            .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
-            .filter(*inbox_filter)
-            .filter(Content.status.in_(processing_statuses))
-            .filter(active_processing_filter)
-            .scalar()
-            or 0
-        )
-        + int(
-            db.query(func.count(Content.id))
-            .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
-            .filter(*inbox_filter)
-            .filter(Content.status == ContentStatus.COMPLETED.value)
-            .filter(~has_generated_artwork_filter)
-            .filter(active_generate_image_filter)
             .scalar()
             or 0
         ),

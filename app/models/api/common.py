@@ -710,18 +710,9 @@ class ProcessingCountResponse(BaseModel):
 
 
 class LongFormStatsResponse(BaseModel):
-    """Response containing long-form content stats for a user."""
+    """Response containing unread long-form count for a user."""
 
-    total_count: int = Field(..., description="Total long-form items in the inbox")
     unread_count: int = Field(..., description="Unread long-form items")
-    read_count: int = Field(..., description="Read long-form items")
-    saved_to_knowledge_count: int = Field(
-        ...,
-        description="Long-form items saved to the user's knowledge library",
-    )
-    processing_count: int = Field(
-        ..., description="Long-form items pending or processing for the user"
-    )
 
 
 class ConvertNewsResponse(BaseModel):

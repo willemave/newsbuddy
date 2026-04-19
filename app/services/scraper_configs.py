@@ -194,6 +194,7 @@ def get_scraper_config_stats(
         ContentStatus.NEW.value,
         ContentStatus.PENDING.value,
         ContentStatus.PROCESSING.value,
+        ContentStatus.AWAITING_IMAGE.value,
     }
     completed_status = ContentStatus.COMPLETED.value
     processing_cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(

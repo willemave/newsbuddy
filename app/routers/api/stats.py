@@ -63,15 +63,12 @@ def get_processing_count(
 @router.get(
     "/long-form",
     response_model=LongFormStatsResponse,
-    summary="Get long-form content stats",
-    description=(
-        "Return long-form stats for the authenticated user, including totals, read/unread, "
-        "knowledge saves, and processing counts."
-    ),
+    summary="Get long-form unread count",
+    description=("Return unread long-form count for the authenticated user."),
 )
 def get_long_form_stats(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> LongFormStatsResponse:
-    """Return long-form content stats for the authenticated user."""
+    """Return unread long-form count for the authenticated user."""
     return get_stats.get_long_form_stats(db, user_id=_require_user_id(current_user))

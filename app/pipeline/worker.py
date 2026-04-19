@@ -24,10 +24,12 @@ from app.processing_strategies.registry import get_strategy_registry
 from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
 from app.services.content_bodies import sync_content_body_storage
 from app.services.content_metadata_merge import refresh_merge_content_metadata
+from app.services.content_status_state_machine import ContentStatusStateMachine
 from app.services.exa_client import ExaClientError, exa_get_contents
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.http import NonRetryableError, get_http_service
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
+from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.queue import TaskType, get_queue_service
 from app.services.youtube_equivalent_resolver import (
     resolve_youtube_equivalent,
@@ -248,7 +250,10 @@ class ContentWorker:
                                 current_payload,
                             )
                         )
-                    content.status = ContentStatus.COMPLETED
+                    content.status = ContentStatusStateMachine.status_after_summary(
+                        content_type=content.content_type,
+                        artwork_ready=bool(content.metadata.get("image_generated_at")),
+                    )
                     content.processed_at = datetime.now(UTC)
                     enqueue_summarize_task = False
                     logger.info(
@@ -287,6 +292,15 @@ class ContentWorker:
                     content.id,
                     content.content_type.value,
                 )
+            elif (
+                state_persisted
+                and content.id is not None
+                and content.status == ContentStatus.AWAITING_IMAGE
+            ):
+                with get_db() as db:
+                    db_content = db.query(Content).filter(Content.id == content.id).first()
+                    if db_content is not None:
+                        enqueue_visible_long_form_image_if_needed(db, db_content)
 
             return success
 

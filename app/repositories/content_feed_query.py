@@ -95,11 +95,11 @@ def build_user_feed_query(
     digest_visibility = Content.content_metadata["digest_visibility"].as_string()
     query = query.filter(
         or_(
+            Content.content_type != ContentType.NEWS.value,
             digest_visibility.is_(None),
             digest_visibility != CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
         )
     )
-
     if mode == "inbox":
         query = query.outerjoin(
             ContentStatusEntry,
