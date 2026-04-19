@@ -402,7 +402,7 @@ Note: This should be run BEFORE the Alembic migration that deletes session data.
                 f"(skipped {total_skipped} duplicates)"
             )
             print("\n⚠️  NEXT STEP: Run the Alembic migration to update table schema:")
-            print("   python -m alembic upgrade head")
+            print("   python -m alembic -c migrations/alembic.ini upgrade head")
 
 
 if __name__ == "__main__":

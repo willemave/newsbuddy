@@ -383,7 +383,7 @@ Chat is server-stored, not client-authoritative.
 
 ### 7.5 Schema evolution
 
-Alembic migration history in `alembic/versions/` shows the app’s major feature evolution:
+Alembic migration history in `migrations/alembic/versions/` shows the app’s major feature evolution:
 
 - initial content + user schema
 - read/favorite state and user-based tracking
@@ -1175,7 +1175,7 @@ Representative scripts under `scripts/`:
 
 - `scripts/init_database.py`
 - `scripts/check_and_run_migrations.sh`
-- Alembic migrations under `alembic/`
+- Alembic migrations under `migrations/alembic/`
 
 ### 21.3 Discovery and sync
 

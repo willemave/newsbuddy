@@ -228,8 +228,8 @@ app/routers/content.py                  # Admin auth
 app/routers/admin.py                    # Admin auth
 app/routers/logs.py                     # Admin auth
 app/main.py                             # Mount auth router
-alembic/versions/*_create_users.py      # Users table
-alembic/versions/*_migrate_to_user.py   # session_id → user_id
+migrations/alembic/versions/*_create_users.py      # Users table
+migrations/alembic/versions/*_migrate_to_user.py   # session_id → user_id
 app/tests/conftest.py                   # Auth fixtures
 ```
 

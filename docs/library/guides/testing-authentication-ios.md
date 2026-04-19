@@ -7,7 +7,7 @@ Since Apple Sign In requires a real device with an Apple ID, we've built a **Deb
 ## Prerequisites
 
 1. **Backend Running**: Ensure your FastAPI backend is running on `localhost:8000`
-2. **Database Setup**: Run migrations with `alembic upgrade head`
+2. **Database Setup**: Run migrations with `alembic -c migrations/alembic.ini upgrade head`
 3. **Environment Variables**: Ensure `JWT_SECRET_KEY` and `ADMIN_PASSWORD` are set in `.env`
 
 ## Testing Method 1: Using Debug Menu (Recommended)

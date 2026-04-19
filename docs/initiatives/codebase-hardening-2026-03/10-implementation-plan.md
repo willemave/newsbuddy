@@ -159,7 +159,7 @@ Apple token signature verification is disabled, admin sessions are stored in-mem
 - `app/main.py`
 - `app/routers/auth.py`
 - `app/models/schema.py` or a dedicated session model module
-- `alembic/versions/*` for admin session persistence if DB-backed
+- `migrations/alembic/versions/*` for admin session persistence if DB-backed
 - `tests/core/test_security.py`
 - `tests/core/test_deps_admin.py`
 - `tests/routers/test_auth.py`

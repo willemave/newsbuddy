@@ -352,7 +352,7 @@ That fallback should remain until we intentionally decide every user must have e
 
 ### Migration
 
-- `alembic upgrade head`
+- `alembic -c migrations/alembic.ini upgrade head`
 - verify rows in `user_scraper_configs`
 - verify re-running the migration is idempotent
 

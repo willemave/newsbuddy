@@ -298,10 +298,10 @@ ruff check .
 ruff format .
 
 # Create a new migration
-alembic revision -m "describe your change"
+alembic -c migrations/alembic.ini revision -m "describe your change"
 
 # Apply migrations
-alembic upgrade head
+alembic -c migrations/alembic.ini upgrade head
 ```
 
 ### Project Structure
@@ -320,6 +320,8 @@ app/
 └── core/              # Settings, DB, auth
 client/
 └── newsly/            # SwiftUI iOS app + Share Extension
+migrations/
+└── alembic/           # Alembic env, templates, and schema history
 ```
 
 ### Deployment

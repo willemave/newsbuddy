@@ -60,7 +60,7 @@ For processing changes, follow this order:
 
 ```bash
 uv sync && . .venv/bin/activate
-alembic upgrade head
+alembic -c migrations/alembic.ini upgrade head
 scripts/dev.sh
 ruff check .
 ruff format .

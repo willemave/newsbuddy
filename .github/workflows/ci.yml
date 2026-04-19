@@ -106,7 +106,7 @@ jobs:
         run: uv sync --frozen --group dev
 
       - name: Run migrations
-        run: uv run alembic upgrade head
+        run: uv run alembic -c migrations/alembic.ini upgrade head
 
       - name: Run pytest
         run: uv run pytest tests/ -q

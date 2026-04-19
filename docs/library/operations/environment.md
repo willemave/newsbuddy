@@ -56,8 +56,8 @@ source .venv/bin/activate  # Activate venv
 
 ### Database
 ```bash
-alembic upgrade head       # Apply migrations
-alembic revision -m "..."  # Create migration
+alembic -c migrations/alembic.ini upgrade head       # Apply migrations
+alembic -c migrations/alembic.ini revision -m "..."  # Create migration
 ```
 
 ### Code Quality
@@ -73,7 +73,7 @@ pytest tests/ -v       # Run tests
 # Reserve Docker for staging/production-style runs.
 uv sync && . .venv/bin/activate
 ./scripts/setup_local_postgres.sh
-alembic upgrade head
+alembic -c migrations/alembic.ini upgrade head
 scripts/start_server.sh              # API server
 scripts/start_workers.sh             # Task workers
 scripts/start_scrapers.sh            # Content scrapers

@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ALEMBIC_CONFIG_PATH="${PROJECT_ROOT}/migrations/alembic.ini"
 
 usage() {
   cat <<'EOF'
@@ -106,13 +107,13 @@ check_database_connection() {
 }
 
 run_migrations() {
-  if [[ ! -f "${PROJECT_ROOT}/alembic.ini" ]]; then
-    echo "ERROR: alembic.ini not found in ${PROJECT_ROOT}" >&2
+  if [[ ! -f "${ALEMBIC_CONFIG_PATH}" ]]; then
+    echo "ERROR: alembic config not found at ${ALEMBIC_CONFIG_PATH}" >&2
     exit 1
   fi
 
   echo "Running database migrations..."
-  python -m alembic upgrade head
+  python -m alembic -c "${ALEMBIC_CONFIG_PATH}" upgrade head
 }
 
 ensure_playwright_chromium() {
