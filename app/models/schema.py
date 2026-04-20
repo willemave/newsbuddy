@@ -678,6 +678,38 @@ class UserIntegrationSyncState(Base):
     )
 
 
+class UserIntegrationSyncedItem(Base):
+    """Per-connection ledger of externally synced items."""
+
+    __tablename__ = "user_integration_synced_items"
+
+    id = Column(Integer, primary_key=True)
+    connection_id = Column(Integer, nullable=False, index=True)
+    channel = Column(String(50), nullable=False, index=True)
+    external_item_id = Column(String(255), nullable=False, index=True)
+    content_id = Column(Integer, nullable=True, index=True)
+    item_url = Column(String(2048), nullable=True)
+    first_synced_at = Column(DateTime, default=_utcnow, nullable=False)
+    last_seen_at = Column(DateTime, default=_utcnow, nullable=False)
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "connection_id",
+            "channel",
+            "external_item_id",
+            name="uq_user_integration_synced_item",
+        ),
+        Index(
+            "idx_user_integration_synced_item_lookup",
+            "connection_id",
+            "channel",
+            "last_seen_at",
+        ),
+    )
+
+
 class UserApiKey(Base):
     """API key for machine-to-machine access on behalf of a user."""
 

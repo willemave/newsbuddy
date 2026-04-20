@@ -2,7 +2,7 @@
 
 > Canonical architecture reference for the FastAPI backend, DB-backed processing pipeline, discovery and chat systems, and the SwiftUI iOS client.
 
-**Last Updated:** 2026-04-09
+**Last Updated:** 2026-04-19
 **Repository Root:** `newsbuddy/`
 **Primary Runtime:** Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, pydantic-ai
 **Primary Clients:** SwiftUI iOS app, iOS Share Extension, Jinja admin UI, machine-facing agent/CLI APIs
@@ -987,6 +987,7 @@ Capabilities:
 - start and exchange OAuth flow
 - store encrypted access/refresh tokens
 - fetch bookmarks and persist bookmark-derived tweet snapshots
+- persist a per-user synced-item ledger for bookmark history
 - support downstream tweet lookup, thread lookup, linked tweet lookup, and linked article resolution
 - persist sync cursors and summaries
 
@@ -999,6 +1000,7 @@ Related storage:
 
 - `user_integration_connections`
 - `user_integration_sync_state`
+- `user_integration_synced_items`
 
 Related APIs:
 

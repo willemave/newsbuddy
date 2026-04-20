@@ -6,7 +6,13 @@ import pytest
 
 import app.services.x_integration as x_integration
 from app.core.settings import get_settings
-from app.models.schema import Content, NewsItem, UserIntegrationConnection, UserIntegrationSyncState
+from app.models.schema import (
+    Content,
+    NewsItem,
+    UserIntegrationConnection,
+    UserIntegrationSyncedItem,
+    UserIntegrationSyncState,
+)
 from app.services.token_crypto import decrypt_token
 from app.services.x_api import XTokenResponse, XTweet, XTweetsPage, XUser
 from app.services.x_integration import (
@@ -190,8 +196,14 @@ def test_sync_x_sources_syncs_bookmarks_only(
     assert summary.channels["bookmarks"].created == 1
 
     content = db_session.query(Content).one()
+    synced_item = db_session.query(UserIntegrationSyncedItem).one()
     assert content.url == "https://x.com/i/status/101"
     assert (content.content_metadata or {})["tweet_snapshot_source"] == "x_bookmarks_sync"
+    assert synced_item.connection_id == connection.id
+    assert synced_item.channel == "bookmarks"
+    assert synced_item.external_item_id == "101"
+    assert synced_item.content_id == content.id
+    assert synced_item.item_url == "https://x.com/i/status/101"
     assert db_session.query(NewsItem).count() == 0
 
 
@@ -357,6 +369,144 @@ def test_sync_x_sources_persists_bookmark_tweet_snapshot_for_later_resolution(
     assert metadata["tweet_snapshot_source"] == "x_bookmarks_sync"
 
 
+def test_sync_x_sources_records_synced_item_when_reusing_existing_content(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read"],
+    )
+    db_session.add(connection)
+    db_session.flush()
+    existing = Content(
+        url="https://x.com/i/status/101",
+        source_url="https://x.com/i/status/101",
+        content_type="unknown",
+        title=None,
+        source="self",
+        platform="twitter",
+        is_aggregate=False,
+        status="new",
+        classification="to_read",
+        content_metadata={
+            "source": "self",
+            "submitted_by_user_id": test_user.id,
+            "submitted_via": "x_bookmarks",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_valid_access_token",
+        lambda *_args, **_kwargs: "token",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_provider_user_id",
+        lambda *_args, **_kwargs: "42",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration.fetch_bookmarks",
+        lambda **_kwargs: XTweetsPage(tweets=[_tweet("101", "Bookmark me again")]),
+    )
+
+    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    synced_item = db_session.query(UserIntegrationSyncedItem).one()
+    assert summary.status == "success"
+    assert summary.channels["bookmarks"].reused == 1
+    assert synced_item.connection_id == connection.id
+    assert synced_item.channel == "bookmarks"
+    assert synced_item.external_item_id == "101"
+    assert synced_item.content_id == existing.id
+    assert synced_item.item_url == "https://x.com/i/status/101"
+
+
+def test_sync_x_sources_reuses_existing_ledger_entry_without_resubmitting_content(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read"],
+    )
+    db_session.add(connection)
+    db_session.flush()
+    existing = Content(
+        url="https://x.com/i/status/101",
+        source_url="https://x.com/i/status/101",
+        content_type="unknown",
+        title=None,
+        source="self",
+        platform="twitter",
+        is_aggregate=False,
+        status="new",
+        classification="to_read",
+        content_metadata={
+            "source": "self",
+            "submitted_by_user_id": test_user.id,
+            "submitted_via": "x_bookmarks",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(existing)
+    db_session.flush()
+    db_session.add(
+        UserIntegrationSyncedItem(
+            connection_id=connection.id,
+            channel="bookmarks",
+            external_item_id="101",
+            content_id=existing.id,
+            item_url="https://x.com/i/status/101",
+            first_synced_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1),
+            last_seen_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1),
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_valid_access_token",
+        lambda *_args, **_kwargs: "token",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_provider_user_id",
+        lambda *_args, **_kwargs: "42",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration.fetch_bookmarks",
+        lambda **_kwargs: XTweetsPage(tweets=[_tweet("101", "Bookmark me again")]),
+    )
+
+    def fail_submit(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("existing ledger entry should skip content submission")
+
+    monkeypatch.setattr(
+        "app.services.x_integration.submit_user_content",
+        fail_submit,
+    )
+
+    before_seen_at = (
+        db_session.query(UserIntegrationSyncedItem.last_seen_at)
+        .filter_by(connection_id=connection.id, channel="bookmarks", external_item_id="101")
+        .scalar()
+    )
+
+    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    synced_item = db_session.query(UserIntegrationSyncedItem).one()
+    db_session.refresh(existing)
+
+    assert summary.status == "success"
+    assert summary.channels["bookmarks"].reused == 1
+    assert synced_item.content_id == existing.id
+    assert synced_item.last_seen_at > before_seen_at
+    assert (existing.content_metadata or {})["tweet_snapshot_source"] == "x_bookmarks_sync"
+
+
 def test_sync_x_sources_skips_recent_scheduled_runs(db_session, test_user, monkeypatch):
     """Scheduled sync should no-op when the last run is still within the cooldown window."""
     connection = _build_connection(
@@ -387,6 +537,65 @@ def test_sync_x_sources_skips_recent_scheduled_runs(db_session, test_user, monke
     assert summary.status == "skipped_recently"
     assert summary.fetched == 0
     assert summary.channels == {}
+
+
+def test_sync_x_sources_failure_does_not_consume_scheduled_retry_window(
+    db_session,
+    test_user,
+    monkeypatch,
+):
+    """A failed scheduled run should not turn the queue retry into skipped_recently."""
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read"],
+    )
+    db_session.add(connection)
+    db_session.commit()
+
+    monkeypatch.setattr(get_settings(), "x_sync_min_interval_minutes", 60)
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_valid_access_token",
+        lambda *_args, **_kwargs: "token",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_provider_user_id",
+        lambda *_args, **_kwargs: "42",
+    )
+
+    attempts = iter(
+        [
+            RuntimeError("X API 400: invalid_request"),
+            XTweetsPage(tweets=[_tweet("101", "Recovered bookmark")]),
+        ]
+    )
+
+    def fake_fetch_bookmarks(**_kwargs):  # noqa: ANN003
+        result = next(attempts)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(
+        "app.services.x_integration.fetch_bookmarks",
+        fake_fetch_bookmarks,
+    )
+
+    with pytest.raises(RuntimeError, match="invalid_request"):
+        sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    sync_state = (
+        db_session.query(UserIntegrationSyncState).filter_by(connection_id=connection.id).one()
+    )
+    assert sync_state.last_status == "failed"
+    assert sync_state.last_synced_at is None
+
+    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    db_session.refresh(sync_state)
+    assert summary.status == "success"
+    assert summary.channels["bookmarks"].accepted == 1
+    assert sync_state.last_status == "success"
+    assert sync_state.last_synced_at is not None
 
 
 def test_ensure_valid_access_token_deactivates_connection_on_unrecoverable_refresh_error(

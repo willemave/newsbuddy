@@ -17,7 +17,12 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.content_submission import SubmitContentRequest
-from app.models.schema import Content, UserIntegrationConnection, UserIntegrationSyncState
+from app.models.schema import (
+    Content,
+    UserIntegrationConnection,
+    UserIntegrationSyncedItem,
+    UserIntegrationSyncState,
+)
 from app.models.user import User
 from app.services.content_submission import submit_user_content
 from app.services.token_crypto import decrypt_token, encrypt_token
@@ -399,6 +404,7 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
             bookmark_summary = _sync_bookmark_channel(
                 db,
                 user=user,
+                connection_id=_require_connection_id(connection),
                 access_token=access_token,
                 provider_user_id=provider_user_id,
                 existing_sync_metadata=existing_sync_metadata,
@@ -439,7 +445,6 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
         )
 
     except XReauthRequiredError as exc:
-        sync_state.last_synced_at = _now_naive_utc()
         sync_state.last_status = "reauth_required"
         sync_state.last_error = str(exc)[:2000]
         db.commit()
@@ -454,7 +459,6 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
             channels={},
         )
     except Exception as exc:  # noqa: BLE001
-        sync_state.last_synced_at = _now_naive_utc()
         sync_state.last_status = "failed"
         sync_state.last_error = str(exc)[:2000]
         db.commit()
@@ -470,6 +474,7 @@ def _sync_bookmark_channel(
     db: Session,
     *,
     user: User,
+    connection_id: int,
     access_token: str,
     provider_user_id: str,
     existing_sync_metadata: dict[str, Any],
@@ -517,11 +522,59 @@ def _sync_bookmark_channel(
 
     created = 0
     reused = 0
+    synced_items_by_external_id = _load_synced_items_by_external_id(
+        db,
+        connection_id=connection_id,
+        channel=BOOKMARKS_CHANNEL,
+        external_item_ids=[tweet.id for tweet in collected_new],
+    )
+    synced_content_ids = {
+        int(synced_item.content_id)
+        for synced_item in synced_items_by_external_id.values()
+        if synced_item.content_id is not None
+    }
+    reusable_content_ids = (
+        {
+            int(content_id)
+            for (content_id,) in db.query(Content.id)
+            .filter(Content.id.in_(synced_content_ids))
+            .all()
+        }
+        if synced_content_ids
+        else set()
+    )
     for tweet in reversed(collected_new):
+        tweet_url = str(URL_ADAPTER.validate_python(canonical_tweet_url(tweet.id)))
+        existing_synced_item = synced_items_by_external_id.get(tweet.id)
+        existing_content_id = (
+            int(existing_synced_item.content_id)
+            if existing_synced_item is not None
+            and existing_synced_item.content_id in reusable_content_ids
+            else None
+        )
+        if existing_content_id is not None:
+            _persist_bookmark_tweet_snapshot(
+                db,
+                content_id=existing_content_id,
+                tweet=tweet,
+                included_tweets=included_tweets,
+            )
+            synced_items_by_external_id[tweet.id] = _upsert_synced_item(
+                db,
+                synced_item=existing_synced_item,
+                connection_id=connection_id,
+                channel=BOOKMARKS_CHANNEL,
+                external_item_id=tweet.id,
+                content_id=existing_content_id,
+                item_url=tweet_url,
+            )
+            reused += 1
+            continue
+
         result = submit_user_content(
             db,
             SubmitContentRequest(
-                url=URL_ADAPTER.validate_python(canonical_tweet_url(tweet.id)),
+                url=URL_ADAPTER.validate_python(tweet_url),
                 content_type=None,
                 title=None,
                 platform="twitter",
@@ -540,10 +593,21 @@ def _sync_bookmark_channel(
             tweet=tweet,
             included_tweets=included_tweets,
         )
+        synced_items_by_external_id[tweet.id] = _upsert_synced_item(
+            db,
+            synced_item=existing_synced_item,
+            connection_id=connection_id,
+            channel=BOOKMARKS_CHANNEL,
+            external_item_id=tweet.id,
+            content_id=result.content_id,
+            item_url=tweet_url,
+        )
         if result.already_exists:
             reused += 1
         else:
             created += 1
+    if collected_new:
+        db.commit()
 
     return XSyncChannelSummary(
         status="success",
@@ -583,7 +647,56 @@ def _persist_bookmark_tweet_snapshot(
             snapshot_source="x_bookmarks_sync",
         ),
     }
-    db.commit()
+
+
+def _load_synced_items_by_external_id(
+    db: Session,
+    *,
+    connection_id: int,
+    channel: str,
+    external_item_ids: list[str],
+) -> dict[str, UserIntegrationSyncedItem]:
+    cleaned_ids = sorted({item_id.strip() for item_id in external_item_ids if item_id.strip()})
+    if not cleaned_ids:
+        return {}
+
+    rows = (
+        db.query(UserIntegrationSyncedItem)
+        .filter(UserIntegrationSyncedItem.connection_id == connection_id)
+        .filter(UserIntegrationSyncedItem.channel == channel)
+        .filter(UserIntegrationSyncedItem.external_item_id.in_(cleaned_ids))
+        .all()
+    )
+    return {row.external_item_id: row for row in rows if row.external_item_id is not None}
+
+
+def _upsert_synced_item(
+    db: Session,
+    *,
+    synced_item: UserIntegrationSyncedItem | None,
+    connection_id: int,
+    channel: str,
+    external_item_id: str,
+    content_id: int,
+    item_url: str,
+) -> UserIntegrationSyncedItem:
+    now = _now_naive_utc()
+    if synced_item is None:
+        synced_item = UserIntegrationSyncedItem(
+            connection_id=connection_id,
+            channel=channel,
+            external_item_id=external_item_id,
+            content_id=content_id,
+            item_url=item_url,
+            first_synced_at=now,
+            last_seen_at=now,
+        )
+        db.add(synced_item)
+        return synced_item
+    synced_item.content_id = content_id
+    synced_item.item_url = item_url
+    synced_item.last_seen_at = now
+    return synced_item
 
 
 def _get_channel_state(sync_metadata: dict[str, Any], channel: str) -> dict[str, Any]:
