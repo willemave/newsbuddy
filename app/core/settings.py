@@ -112,8 +112,10 @@ class Settings(BaseSettings):
     elevenlabs_agent_id: str = "agent_4701khf4v6jef3vskb8sd2a30m36"
     elevenlabs_agent_text_only: bool = True
     elevenlabs_agent_turn_timeout_seconds: int = 25
-    exa_search_request_cost_usd: float | None = Field(default=0.03, ge=0.0)
-    exa_content_result_cost_usd: float | None = Field(default=0.03134, ge=0.0)
+    exa_search_request_cost_usd: float | None = Field(default=0.007, ge=0.0)
+    exa_content_result_cost_usd: float | None = Field(default=0.001, ge=0.0)
+    exa_summary_result_cost_usd: float | None = Field(default=0.001, ge=0.0)
+    exa_search_included_results: int = Field(default=10, ge=0)
 
     # Langfuse tracing
     langfuse_enabled: bool = True

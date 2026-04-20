@@ -17,7 +17,7 @@ from app.services.llm_models import resolve_model_provider
 
 logger = get_logger("vendor.cost")
 
-PRICING_VERSION = "2026-04-14"
+PRICING_VERSION = "2026-04-20"
 USD = "USD"
 
 
@@ -162,6 +162,7 @@ def record_vendor_usage(
         provider=provider_name,
         model=model,
         usage=normalized_usage,
+        metadata=metadata,
     )
     record = VendorUsageRecord(
         provider=provider_name,
@@ -316,6 +317,7 @@ def estimate_vendor_cost_usd(
     provider: str,
     model: str,
     usage: dict[str, int | None],
+    metadata: dict[str, Any] | None = None,
 ) -> float | None:
     """Estimate USD cost from token or unit pricing registries."""
     normalized_usage = _normalize_usage(usage)
@@ -333,6 +335,7 @@ def estimate_vendor_cost_usd(
         model=model,
         request_count=normalized_usage.get("request_count"),
         resource_count=normalized_usage.get("resource_count"),
+        metadata=metadata,
     )
 
     contributions = [value for value in (token_cost, unit_cost) if value is not None]
@@ -376,7 +379,18 @@ def _estimate_unit_cost_usd(
     model: str,
     request_count: int | None,
     resource_count: int | None,
+    metadata: dict[str, Any] | None = None,
 ) -> float | None:
+    exa_cost = _estimate_exa_unit_cost_usd(
+        provider=provider,
+        model=model,
+        request_count=request_count,
+        resource_count=resource_count,
+        metadata=metadata,
+    )
+    if exa_cost is not None:
+        return exa_cost
+
     pricing = _resolve_unit_pricing(provider=provider, model=model)
     if pricing is None:
         return None
@@ -395,6 +409,67 @@ def _estimate_unit_cost_usd(
     return round(total, 8)
 
 
+def _estimate_exa_unit_cost_usd(
+    *,
+    provider: str,
+    model: str,
+    request_count: int | None,
+    resource_count: int | None,
+    metadata: dict[str, Any] | None,
+) -> float | None:
+    if provider != "exa":
+        return None
+
+    settings = get_settings()
+    normalized_metadata = metadata if isinstance(metadata, dict) else {}
+    requests = request_count if request_count is not None and request_count > 0 else 1
+
+    if model == "search":
+        requested_results = _coerce_int(normalized_metadata.get("requested_num_results"))
+        if requested_results is None:
+            requested_results = resource_count or 0
+
+        base_cost = requests * (settings.exa_search_request_cost_usd or 0.0)
+        included_results = max(settings.exa_search_included_results, 0)
+        additional_results = max(requested_results - included_results, 0)
+        additional_result_cost = (
+            requests * additional_results * (settings.exa_content_result_cost_usd or 0.0)
+        )
+
+        includes_summary = normalized_metadata.get("includes_summary")
+        if includes_summary is None:
+            includes_summary = True
+        summary_result_count = requested_results if includes_summary else 0
+        summary_cost = (
+            requests * summary_result_count * (settings.exa_summary_result_cost_usd or 0.0)
+        )
+        return round(base_cost + additional_result_cost + summary_cost, 8)
+
+    if model == "contents":
+        requested_pages = _coerce_int(normalized_metadata.get("url_count"))
+        if requested_pages is None:
+            requested_pages = resource_count
+        if requested_pages is None:
+            return None
+
+        requested_content_types = normalized_metadata.get("content_types_requested")
+        content_type_count = (
+            len(requested_content_types) if isinstance(requested_content_types, list) else 1
+        )
+        if content_type_count <= 0:
+            content_type_count = 1
+
+        total = (
+            requests
+            * requested_pages
+            * content_type_count
+            * (settings.exa_content_result_cost_usd or 0.0)
+        )
+        return round(total, 8)
+
+    return None
+
+
 def _resolve_model_pricing(*, provider: str, model: str) -> ModelPricing | None:
     for candidate in _pricing_candidates(provider=provider, model=model):
         if candidate in MODEL_PRICING:
@@ -405,11 +480,6 @@ def _resolve_model_pricing(*, provider: str, model: str) -> ModelPricing | None:
 def _resolve_unit_pricing(*, provider: str, model: str) -> UnitPricing | None:
     settings = get_settings()
     unit_pricing: dict[str, UnitPricing] = {
-        "exa:search": UnitPricing(
-            request_usd=settings.exa_search_request_cost_usd,
-            resource_usd=settings.exa_content_result_cost_usd,
-        ),
-        "exa:contents": UnitPricing(resource_usd=settings.exa_content_result_cost_usd),
         "x:posts.read": UnitPricing(resource_usd=settings.x_posts_read_cost_usd),
         "x:users.read": UnitPricing(resource_usd=settings.x_users_read_cost_usd),
         "runware:runware:101@1": UnitPricing(request_usd=0.0038),

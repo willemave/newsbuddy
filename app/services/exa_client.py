@@ -294,6 +294,8 @@ def exa_search(
                 "query": query[:500],
                 "requested_num_results": num_results,
                 "returned_num_results": len(results),
+                "includes_summary": True,
+                "includes_text": True,
                 "category": category,
                 "include_domains": include_domains,
                 "exclude_domains": effective_excludes,
@@ -369,6 +371,7 @@ def exa_get_contents(
             metadata={
                 "url_count": len(clean_urls),
                 "returned_num_results": len(results),
+                "content_types_requested": ["text"],
                 "max_characters": max_characters,
                 "livecrawl": livecrawl,
                 "max_age_hours": max_age_hours,

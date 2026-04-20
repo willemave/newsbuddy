@@ -6,7 +6,6 @@ Generates two types of images:
 - Infographics: Complex 16:9 editorial images using a configured provider
 """
 
-import json
 import math
 import re
 from collections import Counter
@@ -18,7 +17,7 @@ from uuid import uuid4
 
 import requests
 from google import genai
-from google.genai.types import GenerateContentConfig, ImageConfig, Part
+from google.genai.types import GenerateContentConfig, ImageConfig
 from PIL import Image
 
 from app.core.logging import get_logger
@@ -48,9 +47,7 @@ RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT = (
     "page, printed page, magazine spread, dashboard, phone screen, tablet screen, "
     "desktop monitor, laptop, computer, office workstation"
 )
-IMAGE_TEXT_DETECTION_MODEL = "gemini-3.1-flash-lite-preview"
 RUNWARE_INLINE_RETRY_ATTEMPTS = 2
-INFOGRAPHIC_TEXT_RETRY_ATTEMPTS = 1
 
 # Image size settings
 INFOGRAPHIC_IMAGE_SIZE = "512"
@@ -68,15 +65,6 @@ class ImageGenerationResult:
     success: bool
     error_message: str | None = None
     thumbnail_path: str | None = None
-
-
-@dataclass(frozen=True)
-class ImageTextCheck:
-    """Result from the readable-text quality check."""
-
-    has_readable_text: bool
-    reason: str = ""
-    confidence: float | None = None
 
 
 class RunwareGenerationError(RuntimeError):
@@ -404,22 +392,6 @@ def _build_infographic_visual_brief(
     }
 
 
-def _tighten_infographic_prompt_for_text_retry(prompt: str, *, reason: str) -> str:
-    retry_reason = _clamp_text(
-        reason or "readable text was visible in the previous attempt",
-        max_chars=160,
-    )
-    return (
-        f"{prompt}\n\n"
-        "Regeneration note:\n"
-        f"- Previous attempt failed quality review because {retry_reason}\n"
-        "- Regenerate with zero readable text anywhere in the image\n"
-        "- Avoid posters, signs, documents, labels, captions, book covers, screens, or UI panels\n"
-        "- If typography would normally appear in the scene, replace it with "
-        "abstract shapes or blank surfaces"
-    )
-
-
 def _clamp_text(text: str, *, max_chars: int) -> str:
     normalized = " ".join(text.split()).strip()
     if len(normalized) <= max_chars:
@@ -665,24 +637,14 @@ class ImageGenerationService:
             logger.debug("Infographic prompt for %s: %s", content_id, prompt[:200])
 
             image_path = get_content_images_dir() / f"{content_id}.png"
-            active_prompt = prompt
             provider_used = self.infographic_provider
             resolved_model = ""
-            image_bytes = b""
-
-            for quality_attempt in range(INFOGRAPHIC_TEXT_RETRY_ATTEMPTS + 1):
+            if provider_used == "runware":
                 try:
-                    if provider_used == "runware":
-                        image_bytes, resolved_model = self._generate_runware_infographic(
-                            prompt=active_prompt,
-                            content_id=content_id,
-                        )
-                    else:
-                        image_bytes, resolved_model = self._generate_google_infographic_bytes(
-                            prompt=active_prompt,
-                            content_id=content_id,
-                            fallback_from_runware=provider_used != self.infographic_provider,
-                        )
+                    image_bytes, resolved_model = self._generate_runware_infographic(
+                        prompt=prompt,
+                        content_id=content_id,
+                    )
                 except RunwareGenerationError as exc:
                     if not (exc.fallback_allowed and self._google_is_configured()):
                         raise
@@ -703,43 +665,15 @@ class ImageGenerationService:
                     )
                     provider_used = "google"
                     image_bytes, resolved_model = self._generate_google_infographic_bytes(
-                        prompt=active_prompt,
+                        prompt=prompt,
                         content_id=content_id,
                         fallback_from_runware=True,
                     )
-
-                text_check = self._detect_readable_text_in_image(
-                    image_bytes=image_bytes,
+            else:
+                image_bytes, resolved_model = self._generate_google_infographic_bytes(
+                    prompt=prompt,
                     content_id=content_id,
-                    provider=provider_used,
-                    provider_model=resolved_model,
-                )
-                if text_check is None or not text_check.has_readable_text:
-                    break
-                if quality_attempt >= INFOGRAPHIC_TEXT_RETRY_ATTEMPTS:
-                    raise RuntimeError(
-                        "Generated image contains readable text; "
-                        f"reason={text_check.reason or 'quality check failed'}"
-                    )
-                logger.warning(
-                    "Generated infographic failed readable-text check for content %s; retrying",
-                    content_id,
-                    extra={
-                        "component": "image_generation",
-                        "operation": "generate_infographic",
-                        "item_id": content_id,
-                        "context_data": {
-                            "provider": provider_used,
-                            "provider_model": resolved_model,
-                            "text_check_reason": text_check.reason,
-                            "text_check_confidence": text_check.confidence,
-                            "quality_attempt": quality_attempt + 1,
-                        },
-                    },
-                )
-                active_prompt = _tighten_infographic_prompt_for_text_retry(
-                    prompt,
-                    reason=text_check.reason,
+                    fallback_from_runware=False,
                 )
 
             image_path.write_bytes(image_bytes)
@@ -1025,60 +959,6 @@ class ImageGenerationService:
     def _google_is_configured(self) -> bool:
         return bool(self.google_cloud_project or self.google_api_key)
 
-    def _detect_readable_text_in_image(
-        self,
-        *,
-        image_bytes: bytes,
-        content_id: int,
-        provider: str,
-        provider_model: str,
-    ) -> ImageTextCheck | None:
-        if not self._google_is_configured():
-            return None
-
-        prompt = (
-            "Inspect this generated editorial illustration for readable text. "
-            "Return JSON with keys has_readable_text (boolean), reason (string), and "
-            "confidence (number from 0 to 1). Mark has_readable_text true if you can see "
-            "any readable words, letters, numbers, labels, captions, signs, poster text, "
-            "document text, or UI text."
-        )
-        try:
-            response = self._get_google_client().models.generate_content(
-                model=IMAGE_TEXT_DETECTION_MODEL,
-                contents=cast(
-                    Any,
-                    [Part.from_bytes(data=image_bytes, mime_type="image/png"), prompt],
-                ),
-                config=GenerateContentConfig(
-                    temperature=0,
-                    response_mime_type="application/json",
-                    max_output_tokens=200,
-                ),
-            )
-            payload = json.loads(getattr(response, "text", "") or "{}")
-            return ImageTextCheck(
-                has_readable_text=bool(payload.get("has_readable_text")),
-                reason=str(payload.get("reason") or ""),
-                confidence=_coerce_optional_float(payload.get("confidence")),
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Readable-text quality check failed for content %s: %s",
-                content_id,
-                exc,
-                extra={
-                    "component": "image_generation",
-                    "operation": "detect_generated_text",
-                    "item_id": content_id,
-                    "context_data": {
-                        "provider": provider,
-                        "provider_model": provider_model,
-                    },
-                },
-            )
-            return None
-
     def _extract_generated_image_bytes(self, response: object) -> bytes:
         candidates = getattr(response, "candidates", None) or []
         if candidates and getattr(candidates[0], "content", None):
@@ -1148,17 +1028,6 @@ def _build_runware_generation_error(
         retryable=retryable,
         fallback_allowed=fallback_allowed,
     )
-
-
-def _coerce_optional_float(value: object) -> float | None:
-    if value is None:
-        return None
-    try:
-        if isinstance(value, (int, float, str)):
-            return float(value)
-        return None
-    except (TypeError, ValueError):
-        return None
 
 
 def _is_model_unavailable_error(exc: Exception) -> bool:

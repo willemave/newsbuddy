@@ -107,8 +107,6 @@ def test_generate_infographic_uses_lowest_supported_image_size(
 
     service = image_generation.ImageGenerationService()
     monkeypatch.setattr(service, "generate_thumbnail", lambda source_path, content_id: None)
-    monkeypatch.setattr(service, "_detect_readable_text_in_image", lambda **_: None)
-
     result = service.generate_image(_build_article_content())
     config = cast(Any, captured["config"])
 
@@ -186,8 +184,6 @@ def test_generate_infographic_retries_with_fallback_model_on_not_found(
 
     service = image_generation.ImageGenerationService()
     monkeypatch.setattr(service, "generate_thumbnail", lambda source_path, content_id: None)
-    monkeypatch.setattr(service, "_detect_readable_text_in_image", lambda **_: None)
-
     result = service.generate_image(_build_article_content())
 
     assert result.success is True
@@ -278,8 +274,6 @@ def test_generate_infographic_uses_runware_provider(
 
     service = image_generation.ImageGenerationService()
     monkeypatch.setattr(service, "generate_thumbnail", lambda source_path, content_id: None)
-    monkeypatch.setattr(service, "_detect_readable_text_in_image", lambda **_: None)
-
     result = service.generate_image(_build_article_content())
 
     assert result.success is True
@@ -380,101 +374,9 @@ def test_generate_infographic_falls_back_to_google_when_runware_rejected(
 
     service = image_generation.ImageGenerationService()
     monkeypatch.setattr(service, "generate_thumbnail", lambda source_path, content_id: None)
-    monkeypatch.setattr(service, "_detect_readable_text_in_image", lambda **_: None)
-
     result = service.generate_image(_build_article_content())
 
     assert result.success is True
     assert len(runware_calls) == image_generation.RUNWARE_INLINE_RETRY_ATTEMPTS
     assert google_calls == ["gemini-2.5-flash-image"]
     assert all(payload[0]["taskUUID"] for payload in runware_calls)
-
-
-def test_generate_infographic_retries_when_quality_check_detects_text(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    prompts: list[str] = []
-    quality_checks = iter(
-        [
-            image_generation.ImageTextCheck(
-                has_readable_text=True,
-                reason="a poster headline was visible",
-                confidence=0.92,
-            ),
-            image_generation.ImageTextCheck(has_readable_text=False),
-        ]
-    )
-
-    class DummyModels:
-        def generate_content(self, *, model, contents, config):
-            del model, config
-            prompts.append(cast(str, contents))
-            return SimpleNamespace(
-                usage_metadata=None,
-                candidates=[
-                    SimpleNamespace(
-                        content=SimpleNamespace(
-                            parts=[
-                                SimpleNamespace(
-                                    inline_data=SimpleNamespace(
-                                        mime_type="image/png",
-                                        data=b"retry-png",
-                                    )
-                                )
-                            ]
-                        )
-                    )
-                ],
-            )
-
-    class DummyClient:
-        def __init__(self, **_kwargs) -> None:
-            self.models = DummyModels()
-
-    monkeypatch.setattr(
-        image_generation,
-        "get_settings",
-        lambda: SimpleNamespace(
-            google_cloud_project=None,
-            google_cloud_location="global",
-            google_api_key="test-key",
-            image_generation_model="gemini-2.5-flash-image",
-            image_generation_fallback_model=None,
-            infographic_generation_provider="google",
-            infographic_generation_model=None,
-            infographic_generation_fallback_model=None,
-            runware_api_key=None,
-        ),
-    )
-    monkeypatch.setattr(image_generation.genai, "Client", DummyClient)
-    monkeypatch.setattr(
-        image_generation,
-        "get_news_thumbnails_dir",
-        lambda: tmp_path / "news_thumbnails",
-    )
-    monkeypatch.setattr(
-        image_generation,
-        "get_content_images_dir",
-        lambda: tmp_path / "content",
-    )
-    monkeypatch.setattr(
-        image_generation,
-        "get_thumbnails_dir",
-        lambda: tmp_path / "thumbnails",
-    )
-
-    service = image_generation.ImageGenerationService()
-    monkeypatch.setattr(service, "generate_thumbnail", lambda source_path, content_id: None)
-    monkeypatch.setattr(
-        service,
-        "_detect_readable_text_in_image",
-        lambda **_: next(quality_checks),
-    )
-
-    result = service.generate_image(_build_article_content())
-
-    assert result.success is True
-    assert len(prompts) == 2
-    assert "Regeneration note:" in prompts[1]
-    assert "poster headline was visible" in prompts[1]

@@ -191,22 +191,96 @@ def test_estimate_vendor_cost_uses_snapshot_aliases(monkeypatch) -> None:
     assert cost == 0.006
 
 
-def test_record_vendor_usage_tracks_request_and_resource_costs(db_session) -> None:
+def test_record_vendor_usage_tracks_exa_search_costs(db_session) -> None:
     record = vendor_costs.record_vendor_usage(
         db_session,
         provider="exa",
         model="search",
         feature="assistant",
         operation="assistant.search_web",
-        usage={"request_count": 2, "resource_count": 3},
+        usage={"request_count": 1, "resource_count": 8},
+        metadata={"requested_num_results": 8, "includes_summary": True},
     )
     db_session.commit()
 
     assert record is not None
     persisted = db_session.query(VendorUsageRecord).filter(VendorUsageRecord.id == record.id).one()
-    assert persisted.request_count == 2
-    assert persisted.resource_count == 3
-    assert persisted.cost_usd == 0.15402
+    assert persisted.request_count == 1
+    assert persisted.resource_count == 8
+    assert persisted.cost_usd == 0.015
+
+
+def test_record_vendor_usage_tracks_exa_contents_costs(db_session) -> None:
+    record = vendor_costs.record_vendor_usage(
+        db_session,
+        provider="exa",
+        model="contents",
+        feature="assistant",
+        operation="assistant.get_contents",
+        usage={"request_count": 1, "resource_count": 2},
+        metadata={"url_count": 2, "content_types_requested": ["text", "summary"]},
+    )
+    db_session.commit()
+
+    assert record is not None
+    persisted = db_session.query(VendorUsageRecord).filter(VendorUsageRecord.id == record.id).one()
+    assert persisted.cost_usd == 0.004
+
+
+def test_estimate_vendor_cost_uses_bundled_exa_search_pricing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        vendor_costs,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "exa_search_request_cost_usd": 0.007,
+                "exa_content_result_cost_usd": 0.001,
+                "exa_summary_result_cost_usd": 0.001,
+                "exa_search_included_results": 10,
+                "x_posts_read_cost_usd": 0.005,
+                "x_users_read_cost_usd": 0.01,
+            },
+        )(),
+    )
+
+    cost = vendor_costs.estimate_vendor_cost_usd(
+        provider="exa",
+        model="search",
+        usage={"request_count": 1, "resource_count": 0},
+        metadata={"requested_num_results": 5, "includes_summary": True},
+    )
+
+    assert cost == 0.012
+
+
+def test_estimate_vendor_cost_uses_exa_additional_result_pricing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        vendor_costs,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "exa_search_request_cost_usd": 0.007,
+                "exa_content_result_cost_usd": 0.001,
+                "exa_summary_result_cost_usd": 0.001,
+                "exa_search_included_results": 10,
+                "x_posts_read_cost_usd": 0.005,
+                "x_users_read_cost_usd": 0.01,
+            },
+        )(),
+    )
+
+    cost = vendor_costs.estimate_vendor_cost_usd(
+        provider="exa",
+        model="search",
+        usage={"request_count": 1, "resource_count": 0},
+        metadata={"requested_num_results": 12, "includes_summary": False},
+    )
+
+    assert cost == 0.009
 
 
 def test_estimate_vendor_cost_uses_runware_unit_pricing(monkeypatch) -> None:
@@ -217,8 +291,10 @@ def test_estimate_vendor_cost_uses_runware_unit_pricing(monkeypatch) -> None:
             "Settings",
             (),
             {
-                "exa_search_request_cost_usd": 0.03,
-                "exa_content_result_cost_usd": 0.03134,
+                "exa_search_request_cost_usd": 0.007,
+                "exa_content_result_cost_usd": 0.001,
+                "exa_summary_result_cost_usd": 0.001,
+                "exa_search_included_results": 10,
                 "x_posts_read_cost_usd": 0.005,
                 "x_users_read_cost_usd": 0.01,
             },
