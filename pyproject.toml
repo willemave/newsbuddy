@@ -49,6 +49,7 @@ dependencies = [
     "boto3>=1.42.49",
     "e2b-code-interpreter>=1.0.0",
     "newspaper4k[cloudflare]>=0.9.5",
+    "pypdf>=5.4.0",
 ]
 
 [project.scripts]
