@@ -25,7 +25,7 @@ Common options:
 Examples:
   scripts/start_services.sh all --env-file .env
   scripts/start_services.sh server --port 8000 --reload
-  scripts/start_services.sh workers --content-workers 2 --media-workers 1
+  scripts/start_services.sh workers --content-workers 2 --media-workers 1 --image-workers 1
   scripts/start_services.sh migrate --env-file .env
 EOF
 }
@@ -209,6 +209,7 @@ start_workers() {
   local stats_interval="30"
   local content_workers=""
   local media_workers=""
+  local image_workers=""
   local onboarding_workers=""
   local twitter_workers=""
   local chat_workers=""
@@ -237,6 +238,10 @@ start_workers() {
         ;;
       --media-workers|--transcribe-workers)
         media_workers="$2"
+        shift 2
+        ;;
+      --image-workers)
+        image_workers="$2"
         shift 2
         ;;
       --onboarding-workers)
@@ -274,6 +279,7 @@ start_workers() {
 
   content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 2)}"
   media_workers="${media_workers:-$(dotenv_get MEDIA_WORKER_PROCS "$(dotenv_get TRANSCRIBE_WORKER_PROCS 1)")}"
+  image_workers="${image_workers:-$(dotenv_get IMAGE_WORKER_PROCS 1)}"
   onboarding_workers="${onboarding_workers:-$(dotenv_get ONBOARDING_WORKER_PROCS 1)}"
   twitter_workers="${twitter_workers:-$(dotenv_get TWITTER_WORKER_PROCS 1)}"
   chat_workers="${chat_workers:-$(dotenv_get CHAT_WORKER_PROCS 1)}"
@@ -289,6 +295,7 @@ start_workers() {
 
   if ! [[ "${content_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${media_workers}" =~ ^[0-9]+$ ]] || \
+     ! [[ "${image_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${onboarding_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${twitter_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${chat_workers}" =~ ^[0-9]+$ ]]; then
@@ -296,7 +303,7 @@ start_workers() {
     exit 1
   fi
 
-  local total_workers=$((content_workers + media_workers + onboarding_workers + twitter_workers + chat_workers))
+  local total_workers=$((content_workers + media_workers + image_workers + onboarding_workers + twitter_workers + chat_workers))
   if [[ "${total_workers}" -le 0 ]]; then
     echo "ERROR: at least one worker must be enabled" >&2
     exit 1
@@ -335,6 +342,7 @@ start_workers() {
 
   launch_worker_pool content "${content_workers}"
   launch_worker_pool media "${media_workers}"
+  launch_worker_pool image "${image_workers}"
   launch_worker_pool onboarding "${onboarding_workers}"
   launch_worker_pool twitter "${twitter_workers}"
   launch_worker_pool chat "${chat_workers}"
@@ -473,6 +481,7 @@ start_all() {
   local crontab_path="${PROJECT_ROOT}/docker/crontab"
   local content_workers=""
   local media_workers=""
+  local image_workers=""
   local onboarding_workers=""
   local twitter_workers=""
   local chat_workers=""
@@ -518,6 +527,10 @@ start_all() {
         media_workers="$2"
         shift 2
         ;;
+      --image-workers)
+        image_workers="$2"
+        shift 2
+        ;;
       --onboarding-workers)
         onboarding_workers="$2"
         shift 2
@@ -557,6 +570,7 @@ start_all() {
 
   content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 2)}"
   media_workers="${media_workers:-$(dotenv_get MEDIA_WORKER_PROCS "$(dotenv_get TRANSCRIBE_WORKER_PROCS 1)")}"
+  image_workers="${image_workers:-$(dotenv_get IMAGE_WORKER_PROCS 1)}"
   onboarding_workers="${onboarding_workers:-$(dotenv_get ONBOARDING_WORKER_PROCS 1)}"
   twitter_workers="${twitter_workers:-$(dotenv_get TWITTER_WORKER_PROCS 1)}"
   chat_workers="${chat_workers:-$(dotenv_get CHAT_WORKER_PROCS 1)}"
@@ -603,6 +617,7 @@ start_all() {
     --env-file "${ENV_FILE}"
     --content-workers "${content_workers}"
     --media-workers "${media_workers}"
+    --image-workers "${image_workers}"
     --onboarding-workers "${onboarding_workers}"
     --twitter-workers "${twitter_workers}"
     --chat-workers "${chat_workers}"
