@@ -24,6 +24,7 @@ from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
 from app.models.metadata import (
     ArticleMetadata,
     ContentStatus,
+    InsightReportMetadata,
     NewsMetadata,
     PodcastMetadata,
     StructuredSummary,
@@ -118,7 +119,9 @@ class Content(Base):
             logger.error(f"Unexpected error validating metadata: {e}")
             return value
 
-    def get_validated_metadata(self) -> ArticleMetadata | PodcastMetadata | NewsMetadata | None:
+    def get_validated_metadata(
+        self,
+    ) -> ArticleMetadata | PodcastMetadata | NewsMetadata | InsightReportMetadata | None:
         """Get metadata as validated Pydantic model."""
         if not self.content_metadata:
             return None

@@ -11,6 +11,7 @@ class ContentType(StrEnum):
     ARTICLE = "article"
     PODCAST = "podcast"
     NEWS = "news"
+    INSIGHT_REPORT = "insight_report"
     UNKNOWN = "unknown"
 
 
@@ -53,6 +54,7 @@ class TaskType(StrEnum):
     ONBOARDING_DISCOVER = "onboarding_discover"
     DIG_DEEPER = "dig_deeper"
     SYNC_INTEGRATION = "sync_integration"
+    GENERATE_INSIGHT_REPORT = "generate_insight_report"
 
 
 class TaskQueue(StrEnum):
