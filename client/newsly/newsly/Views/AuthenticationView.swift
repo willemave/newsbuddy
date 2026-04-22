@@ -25,7 +25,7 @@ struct AuthenticationView: View {
                     .font(.system(size: 60))
                     .foregroundColor(.blue)
 
-                Text("WillemNews")
+                Text("Newsbuddy")
                     .font(.largeTitle)
                     .fontWeight(.bold)
             }
@@ -70,7 +70,7 @@ struct AuthenticationView: View {
         }
     }
 
-    /// Handle tap on WillemNews icon - show debug menu after 3 taps within 2 seconds
+    /// Handle tap on Newsbuddy icon - show debug menu after 3 taps within 2 seconds
     private func handleLogoTap() {
         let now = Date()
 

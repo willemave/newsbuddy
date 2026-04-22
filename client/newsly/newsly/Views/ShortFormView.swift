@@ -47,7 +47,7 @@ struct ShortFormView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, Spacing.screenHorizontal)
                         .padding(.top, 16)
-                        .padding(.bottom, 12)
+                        .padding(.bottom, 24)
 
                     shortNewsQuickActions(items: items)
                         .padding(.bottom, 20)

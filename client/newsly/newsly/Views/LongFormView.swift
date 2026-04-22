@@ -37,7 +37,7 @@ struct LongFormView: View {
                         ScrollView {
                             LazyVStack(spacing: 0) {
                                 // Editorial header
-                                Text("Longread")
+                                Text("Long read")
                                     .font(.terracottaDisplayLarge)
                                     .foregroundStyle(Color.onSurface)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -64,7 +64,6 @@ struct LongFormView: View {
                                     }
                                 }
                             }
-                            .padding(.vertical, 12)
                         }
                         .refreshable {
                             await refreshLongFormSurface(forceReload: true)
@@ -292,7 +291,7 @@ struct LongFormView: View {
     private var longFormBootstrapState: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Longread")
+                Text("Long read")
                     .font(.terracottaDisplayLarge)
                     .foregroundStyle(Color.onSurface)
                     .frame(maxWidth: .infinity, alignment: .leading)

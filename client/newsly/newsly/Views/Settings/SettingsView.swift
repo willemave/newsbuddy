@@ -27,6 +27,7 @@ struct SettingsView: View {
     @State private var newExpertName = ""
     @State private var hasUnsavedCouncilPersonaEdits = false
     @State private var isSavingCouncilPersonas = false
+    @State private var xConnection: XConnectionResponse?
     @FocusState private var isNewsListPreferencePromptFocused: Bool
 
     init(scrollToCouncilOnAppear: Bool = false) {
@@ -97,10 +98,12 @@ struct SettingsView: View {
         .onChange(of: authViewModel.authState) { _, _ in
             syncNewsListPreferencePromptWithAuthenticatedUser(force: true)
             syncCouncilPersonasWithAuthenticatedUser(force: true)
+            Task { await loadXConnectionState(force: true) }
         }
         .task {
             syncNewsListPreferencePromptWithAuthenticatedUser(force: true)
             syncCouncilPersonasWithAuthenticatedUser(force: true)
+            await loadXConnectionState(force: true)
         }
     }
 
@@ -199,7 +202,8 @@ struct SettingsView: View {
                     SettingsRow(
                         icon: "at",
                         iconColor: .blue,
-                        title: "X / Twitter"
+                        title: "X / Twitter",
+                        subtitle: xConnection?.settingsSubtitle
                     )
                 }
                 .buttonStyle(.plain)
@@ -784,6 +788,22 @@ struct SettingsView: View {
         }
 
         showingAlert = true
+    }
+
+    @MainActor
+    private func loadXConnectionState(force: Bool) async {
+        guard case .authenticated = authViewModel.authState else {
+            xConnection = nil
+            return
+        }
+        if !force, xConnection != nil {
+            return
+        }
+        do {
+            xConnection = try await XIntegrationService.shared.fetchConnection()
+        } catch {
+            xConnection = nil
+        }
     }
 }
 

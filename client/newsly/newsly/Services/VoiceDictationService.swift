@@ -161,6 +161,9 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
 
     /// Start recording audio.
     func startRecording() async throws {
+        if !isAvailable {
+            _ = await openAIService.refreshTranscriptionAvailability()
+        }
         guard isAvailable else {
             throw VoiceDictationError.notAuthenticated
         }
