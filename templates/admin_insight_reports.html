@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="space-y-6">
+  <div>
+    <h1>Insight Reports</h1>
+    <p>
+      Manual trigger + nightly eligibility view. Users become eligible for the
+      nightly cron when they have accumulated at least
+      <strong>{{ min_saves_threshold }}</strong> new knowledge saves since their
+      last report. Default synthesis model: <code>{{ synthesis_model }}</code>
+      (effort <code>{{ effort }}</code>).
+    </p>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>User</th>
+        <th>Active</th>
+        <th>Total saves</th>
+        <th>New saves</th>
+        <th>Last report</th>
+        <th>Pending task</th>
+        <th>Eligible</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <div>{{ row.email }}</div>
+          <div><small>#{{ row.user_id }}</small></div>
+        </td>
+        <td>{{ "yes" if row.is_active else "no" }}</td>
+        <td>{{ row.total_saves }}</td>
+        <td>{{ row.new_saves }}</td>
+        <td>
+          {% if row.last_report_content_id %}
+          #{{ row.last_report_content_id }} — {{ row.last_report_at }}
+          {% else %}
+          none
+          {% endif %}
+        </td>
+        <td>
+          {% if row.pending_task_id %}
+          #{{ row.pending_task_id }}
+          {% else %}
+          -
+          {% endif %}
+        </td>
+        <td>{{ "yes" if row.eligible else "no" }}</td>
+        <td>
+          <form method="post" action="/admin/insight-reports/trigger">
+            <input type="hidden" name="user_id" value="{{ row.user_id }}" />
+            <button type="submit" {% if row.pending_task_id %}disabled{% endif %}>
+              Trigger
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
