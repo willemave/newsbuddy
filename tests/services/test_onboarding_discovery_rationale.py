@@ -26,15 +26,6 @@ def _curated_defaults() -> dict[str, list[OnboardingSuggestion]]:
             )
         ],
         "atom": [],
-        "podcast_rss": [
-            OnboardingSuggestion(
-                suggestion_type="podcast_rss",
-                title="Example Podcast",
-                feed_url="https://example.com/podcast.xml",
-                site_url="https://example.com",
-                is_default=True,
-            )
-        ],
         "reddit": [
             OnboardingSuggestion(
                 suggestion_type="reddit",
@@ -70,7 +61,7 @@ def test_format_discovery_prompt_includes_curated_fill_ins() -> None:
     assert "web_results:" in prompt
     assert "curated_fill_ins:" in prompt
     assert "feeds:" in prompt
-    assert "podcasts:" in prompt
+    assert "podcasts:" not in prompt
     assert "reddit:" in prompt
     assert "subreddit: MachineLearning" in prompt
 

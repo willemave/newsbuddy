@@ -89,7 +89,6 @@ ENRICH_EXA_RESULTS = 12
 DISCOVERY_PROMPT_MAX_WEB_RESULTS = 200
 DISCOVERY_PROMPT_SNIPPET_CHARS = 280
 DISCOVERY_PROMPT_MAX_FILL_IN_FEEDS = 8
-DISCOVERY_PROMPT_MAX_FILL_IN_PODCASTS = 6
 DISCOVERY_PROMPT_MAX_FILL_IN_REDDIT = 8
 ONBOARDING_FEED_SUGGESTION_LIMIT = 5
 EXA_DISCOVERY_MAX_WORKERS = 8
@@ -125,7 +124,10 @@ FAST_DISCOVER_SYSTEM_PROMPT = (
     "Use the profile summary, topics, search snippets, and curated fill-in candidates "
     "to suggest Substack/Atom feeds, podcast RSS feeds, and relevant subreddits. "
     "Prioritize sources grounded in web_results first; "
-    "use curated_fill_ins as backups when needed. "
+    "use curated_fill_ins as backups for feeds and reddit when needed. "
+    "Podcast suggestions must come from web_results only — do not fabricate podcasts "
+    "and do not reuse feeds/reddit fill-ins as podcasts. "
+    "If web_results contain no suitable podcast RSS feeds, return zero podcasts. "
     "Every suggestion must include a concise, specific rationale sentence. "
     "Prefer sources with clear RSS URLs when possible. "
     "For feed-like sources, always provide a best-effort feed_url when available. "
@@ -1668,7 +1670,6 @@ def _curated_fill_in_candidates(
     feed_defaults = curated.get("substack", []) + curated.get("atom", [])
     return {
         "feeds": feed_defaults[:DISCOVERY_PROMPT_MAX_FILL_IN_FEEDS],
-        "podcasts": curated.get("podcast_rss", [])[:DISCOVERY_PROMPT_MAX_FILL_IN_PODCASTS],
         "reddit": curated.get("reddit", [])[:DISCOVERY_PROMPT_MAX_FILL_IN_REDDIT],
     }
 
@@ -1714,7 +1715,7 @@ def _format_discovery_prompt(
 
     lines.extend(["", "curated_fill_ins:"])
     fill_ins = curated_fill_ins or {}
-    for section_name in ("feeds", "podcasts", "reddit"):
+    for section_name in ("feeds", "reddit"):
         section_items = fill_ins.get(section_name, [])
         lines.append(f"{section_name}:")
         if not section_items:
@@ -1732,7 +1733,7 @@ def _fast_discover_from_defaults(
 ) -> OnboardingFastDiscoverResponse:
     feed_defaults = curated.get("substack", []) + curated.get("atom", [])
     response = OnboardingFastDiscoverResponse(
-        recommended_pods=curated.get("podcast_rss", [])[: DEFAULT_SOURCE_LIMITS["podcast_rss"]],
+        recommended_pods=[],
         recommended_substacks=feed_defaults[:ONBOARDING_FEED_SUGGESTION_LIMIT],
         recommended_subreddits=curated.get("reddit", [])[: DEFAULT_SOURCE_LIMITS["reddit"]],
     )
@@ -1758,7 +1759,7 @@ def _build_discovery_response(
     )
     podcasts = _merge_suggestions(
         _normalize_suggestions(output.podcasts, "podcast_rss"),
-        curated.get("podcast_rss", []),
+        [],
         DEFAULT_SOURCE_LIMITS["podcast_rss"],
     )
     subreddits = _merge_suggestions(
@@ -1927,7 +1928,6 @@ def _extract_subreddit(site_url: str | None) -> str | None:
 def _load_curated_defaults() -> dict[str, list[OnboardingSuggestion]]:
     defaults: dict[str, list[OnboardingSuggestion]] = {
         "substack": _load_substack_defaults(),
-        "podcast_rss": _load_podcast_defaults(),
         "atom": _load_atom_defaults(),
         "reddit": _load_reddit_defaults(),
     }
@@ -1985,38 +1985,6 @@ def _load_atom_defaults() -> list[OnboardingSuggestion]:
     return suggestions
 
 
-def _load_podcast_defaults() -> list[OnboardingSuggestion]:
-    path = resolve_config_path("PODCAST_CONFIG_PATH", "podcasts.yml")
-    if not path.exists():
-        return []
-    try:
-        with open(path, encoding="utf-8") as handle:
-            payload = yaml.safe_load(handle) or {}
-    except Exception:
-        logger.warning("Failed to load podcast defaults", exc_info=True)
-        return []
-
-    feeds = payload.get("feeds") or []
-    suggestions: list[OnboardingSuggestion] = []
-    for feed in feeds:
-        if not isinstance(feed, dict):
-            continue
-        feed_url = (feed.get("url") or "").strip()
-        if not feed_url:
-            continue
-        suggestions.append(
-            OnboardingSuggestion(
-                suggestion_type="podcast_rss",
-                title=feed.get("name"),
-                feed_url=feed_url,
-                site_url=feed_url,
-                rationale=_extract_curated_rationale(feed),
-                is_default=True,
-            )
-        )
-    return suggestions
-
-
 def _load_reddit_defaults() -> list[OnboardingSuggestion]:
     path = resolve_config_path("REDDIT_CONFIG_PATH", "reddit.yml")
     if not path.exists():
@@ -2054,14 +2022,11 @@ def _defaults_to_selected_sources(
 ) -> list[OnboardingSelectedSource]:
     selections: list[OnboardingSelectedSource] = []
     feed_selections = 0
-    for suggestion_type in ("substack", "podcast_rss", "atom"):
+    for suggestion_type in ("substack", "atom"):
         defaults = curated.get(suggestion_type, [])
-        if suggestion_type in {"substack", "atom"}:
-            limit = ONBOARDING_FEED_SUGGESTION_LIMIT - feed_selections
-            if limit <= 0:
-                continue
-        else:
-            limit = DEFAULT_SOURCE_LIMITS[suggestion_type]
+        limit = ONBOARDING_FEED_SUGGESTION_LIMIT - feed_selections
+        if limit <= 0:
+            continue
         for suggestion in defaults[:limit]:
             selected_type = _normalize_selected_suggestion_type(suggestion.suggestion_type)
             if selected_type is None:
@@ -2074,8 +2039,7 @@ def _defaults_to_selected_sources(
                     config={"feed_url": suggestion.feed_url or ""},
                 )
             )
-            if suggestion_type in {"substack", "atom"}:
-                feed_selections += 1
+            feed_selections += 1
     return selections
 
 

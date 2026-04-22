@@ -58,7 +58,7 @@ def _many_feed_defaults() -> dict[str, list[OnboardingSuggestion]]:
 def test_fast_discover_defaults_caps_feed_suggestions_to_five() -> None:
     response = _fast_discover_from_defaults(_many_feed_defaults())
     assert len(response.recommended_substacks) == 5
-    assert len(response.recommended_pods) == 5
+    assert len(response.recommended_pods) == 0
     assert len(response.recommended_subreddits) == 5
 
 
@@ -68,7 +68,7 @@ def test_build_discovery_response_caps_feed_suggestions_to_five() -> None:
         _many_feed_defaults(),
     )
     assert len(response.recommended_substacks) == 5
-    assert len(response.recommended_pods) == 5
+    assert len(response.recommended_pods) == 0
     assert len(response.recommended_subreddits) == 5
 
 
