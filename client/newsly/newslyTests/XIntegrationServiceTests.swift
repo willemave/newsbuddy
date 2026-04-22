@@ -3,6 +3,49 @@ import XCTest
 @testable import newsly
 
 final class XIntegrationServiceTests: XCTestCase {
+    func testConnectionPresentationMarksReauthAsReconnectRequired() {
+        let response = XConnectionResponse(
+            provider: "x",
+            connected: false,
+            isActive: false,
+            providerUserID: "123",
+            providerUsername: "willemaw",
+            scopes: ["tweet.read", "users.read", "bookmark.read", "offline.access"],
+            lastSyncedAt: nil,
+            lastStatus: "failed",
+            lastError: "X API 400: invalid_request",
+            twitterUsername: "willemaw"
+        )
+
+        XCTAssertTrue(response.needsAttention)
+        XCTAssertEqual(response.settingsSubtitle, "Reconnect required")
+        XCTAssertEqual(response.connectActionTitle, "Reconnect X")
+        XCTAssertEqual(
+            response.issueMessage,
+            "Your saved X session expired or was rejected. Reconnect your account to restore bookmark sync."
+        )
+        XCTAssertEqual(response.issueDetails, "X API 400: invalid_request")
+    }
+
+    func testConnectionPresentationPrefersUsernameWhenHealthy() {
+        let response = XConnectionResponse(
+            provider: "x",
+            connected: true,
+            isActive: true,
+            providerUserID: "123",
+            providerUsername: "willemaw",
+            scopes: ["tweet.read", "users.read", "bookmark.read", "offline.access"],
+            lastSyncedAt: nil,
+            lastStatus: "success",
+            lastError: nil,
+            twitterUsername: "willemaw"
+        )
+
+        XCTAssertFalse(response.needsAttention)
+        XCTAssertEqual(response.settingsSubtitle, "@willemaw")
+        XCTAssertEqual(response.connectActionTitle, "Connect X")
+    }
+
     func testStartOAuthNormalizesUsernameBeforeSending() async throws {
         let client = MockXIntegrationAPIClient()
         client.startResponse = XOAuthStartResponse(

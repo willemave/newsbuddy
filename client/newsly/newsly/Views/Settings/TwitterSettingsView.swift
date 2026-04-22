@@ -73,6 +73,11 @@ struct TwitterSettingsView: View {
         VStack(spacing: 0) {
             SectionHeader(title: "Connection")
 
+            if let xConnection, xConnection.needsAttention {
+                connectionIssueCard(connection: xConnection)
+                SectionDivider()
+            }
+
             if isXConnected {
                 Button {
                     Task { await disconnectX() }
@@ -99,8 +104,9 @@ struct TwitterSettingsView: View {
                     SettingsRow(
                         icon: "link.badge.plus",
                         iconColor: .green,
-                        title: "Connect X",
-                        subtitle: "Authorize bookmarks, follows, and lists from your X account"
+                        title: xConnection?.connectActionTitle ?? "Connect X",
+                        subtitle: xConnection?.connectActionSubtitle
+                            ?? "Authorize bookmarks, follows, and lists from your X account"
                     ) {
                         if isUpdatingXConnection {
                             ProgressView()
@@ -153,10 +159,46 @@ struct TwitterSettingsView: View {
         if let username = xConnection?.providerUsername, !username.isEmpty {
             return "@\(username)"
         }
-        if let lastStatus = xConnection?.lastStatus, !lastStatus.isEmpty {
-            return "Status: \(lastStatus)"
+        if let subtitle = xConnection?.settingsSubtitle, !subtitle.isEmpty {
+            return subtitle
         }
         return "Connected"
+    }
+
+    @ViewBuilder
+    private func connectionIssueCard(connection: XConnectionResponse) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Color.statusDestructive)
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(connection.issueTitle)
+                        .font(.listTitle.weight(.semibold))
+                        .foregroundStyle(Color.onSurface)
+
+                    Text(connection.issueMessage)
+                        .font(.listCaption)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+
+                    if let details = connection.issueDetails {
+                        Text(details)
+                            .font(.caption)
+                            .foregroundStyle(Color.statusDestructive)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.vertical, Spacing.rowVertical)
+        .background(
+            Color.statusDestructive.opacity(0.1),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.vertical, 12)
     }
 
     private func normalizedTwitterUsernameDraft() -> String? {

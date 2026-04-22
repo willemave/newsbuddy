@@ -65,6 +65,101 @@ struct XConnectionResponse: Codable {
     }
 }
 
+extension XConnectionResponse {
+    var needsAttention: Bool {
+        if connected {
+            return false
+        }
+        if lastError?.isEmpty == false {
+            return true
+        }
+        if let lastStatus, !lastStatus.isEmpty, lastStatus != "never_synced" {
+            return true
+        }
+        return !isActive && providerUsername != nil
+    }
+
+    var settingsSubtitle: String? {
+        if needsAttention {
+            return issueSummary
+        }
+        if let providerUsername, !providerUsername.isEmpty {
+            return "@\(providerUsername)"
+        }
+        if let lastStatus, !lastStatus.isEmpty, lastStatus != "never_synced" {
+            return "Status: \(formattedStatus(lastStatus))"
+        }
+        return nil
+    }
+
+    var issueSummary: String {
+        if isReauthRequired {
+            return "Reconnect required"
+        }
+        if let lastStatus, !lastStatus.isEmpty, lastStatus != "never_synced" {
+            return formattedStatus(lastStatus)
+        }
+        return "Connection problem"
+    }
+
+    var issueTitle: String {
+        if isReauthRequired {
+            return "Reconnect X to resume bookmark sync"
+        }
+        return "X bookmark sync needs attention"
+    }
+
+    var issueMessage: String {
+        if isReauthRequired {
+            return "Your saved X session expired or was rejected. Reconnect your account to restore bookmark sync."
+        }
+        if !isActive {
+            return "This X connection is inactive, so bookmarked posts cannot sync into your long-form feed."
+        }
+        return "Newsly could not complete X bookmark sync. Reconnect your account if this keeps happening."
+    }
+
+    var issueDetails: String? {
+        guard let lastError, !lastError.isEmpty else { return nil }
+        if isReauthRequired && lastError.localizedCaseInsensitiveContains("reauthentication") {
+            return nil
+        }
+        return lastError
+    }
+
+    var connectActionTitle: String {
+        needsAttention ? "Reconnect X" : "Connect X"
+    }
+
+    var connectActionSubtitle: String {
+        if needsAttention {
+            return "Reconnect bookmarks, follows, and lists from your X account"
+        }
+        return "Authorize bookmarks, follows, and lists from your X account"
+    }
+
+    private var isReauthRequired: Bool {
+        if lastStatus == "reauth_required" {
+            return true
+        }
+        guard let lastError else { return false }
+        let lowered = lastError.lowercased()
+        return lowered.contains("invalid_request")
+            || lowered.contains("invalid_grant")
+            || lowered.contains("reauth")
+    }
+
+    private func formattedStatus(_ value: String) -> String {
+        value
+            .split(separator: "_")
+            .map { segment in
+                let lowered = segment.lowercased()
+                return lowered.prefix(1).uppercased() + lowered.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+}
+
 enum XIntegrationError: LocalizedError {
     case invalidAuthorizeURL
     case missingCallbackCode
