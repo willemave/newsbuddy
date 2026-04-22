@@ -901,6 +901,84 @@ def test_enrich_news_item_article_uses_stored_tweet_metadata_without_x_refetch(
     assert extraction["source"] == "metadata"
 
 
+def test_enrich_news_item_article_passes_context_to_strategy(db_session) -> None:
+    item = NewsItem(
+        ingest_key="news-item-strategy-context",
+        visibility_scope="user",
+        owner_user_id=1,
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="strategy-context-1",
+        article_url="https://example.com/story-10",
+        canonical_story_url="https://example.com/story-10",
+        article_title="Example story 10",
+        raw_metadata={"rss_content": "<p>Recovered RSS content for enrichment.</p>"},
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    class _FakeStrategy:
+        def __init__(self) -> None:
+            self.last_context: dict[str, Any] | None = None
+
+        def preprocess_url(self, url: str) -> str:
+            return url
+
+        def download_content(self, url: str) -> str:
+            return f"<html>{url}</html>"
+
+        def extract_data(
+            self,
+            _content: str,
+            url: str,
+            context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            self.last_context = dict(context or {})
+            return {
+                "title": "Recovered article title",
+                "text_content": "Recovered RSS content for enrichment.",
+                "content_type": "html",
+                "source": "example.com",
+                "final_url_after_redirects": url,
+                "gate_page_reason": "access gate detected: challenge/JS wall content",
+                "used_rss_fallback": True,
+                "extraction_error": None,
+            }
+
+        def prepare_for_llm(self, extracted_data: dict[str, Any]) -> dict[str, Any]:
+            return {"content_to_summarize": extracted_data["text_content"]}
+
+    class _FakeRegistry:
+        def __init__(self, strategy: _FakeStrategy) -> None:
+            self._strategy = strategy
+
+        def get_strategy(self, url: str) -> _FakeStrategy:
+            assert url == "https://example.com/story-10"
+            return self._strategy
+
+    strategy = _FakeStrategy()
+
+    result = enrich_news_item_article(
+        db_session,
+        news_item_id=_require_id(item.id),
+        strategy_registry=_FakeRegistry(strategy),  # type: ignore[arg-type]
+    )
+
+    db_session.refresh(item)
+    assert result.success is True
+    assert result.status == "completed"
+    assert strategy.last_context is not None
+    assert strategy.last_context["content_id"] == item.id
+    assert strategy.last_context["existing_metadata"]["rss_content"] == (
+        "<p>Recovered RSS content for enrichment.</p>"
+    )
+    extraction = _metadata(_metadata(item.raw_metadata)["article_extraction"])
+    assert extraction["status"] == "completed"
+
+
 def test_process_news_item_includes_resolved_article_body_in_prompt(
     db_session,
     monkeypatch,

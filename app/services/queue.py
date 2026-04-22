@@ -33,6 +33,7 @@ TASK_QUEUE_BY_TYPE: dict[TaskType, TaskQueue] = {
     TaskType.ONBOARDING_DISCOVER: TaskQueue.ONBOARDING,
     TaskType.DIG_DEEPER: TaskQueue.CHAT,
     TaskType.SYNC_INTEGRATION: TaskQueue.TWITTER,
+    TaskType.GENERATE_INSIGHT_REPORT: TaskQueue.CONTENT,
 }
 
 DEDUPABLE_CONTENT_TASK_TYPES: set[TaskType] = {

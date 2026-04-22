@@ -25,6 +25,7 @@ from app.pipeline.handlers.download_audio import DownloadAudioHandler
 from app.pipeline.handlers.enrich_news_item_article import EnrichNewsItemArticleHandler
 from app.pipeline.handlers.fetch_discussion import FetchDiscussionHandler
 from app.pipeline.handlers.generate_image import GenerateImageHandler
+from app.pipeline.handlers.generate_insight_report import GenerateInsightReportHandler
 from app.pipeline.handlers.onboarding_discover import OnboardingDiscoverHandler
 from app.pipeline.handlers.process_content import ProcessContentHandler
 from app.pipeline.handlers.process_news_item import ProcessNewsItemHandler
@@ -169,6 +170,7 @@ class SequentialTaskProcessor:
             OnboardingDiscoverHandler(),
             DigDeeperHandler(),
             SyncIntegrationHandler(),
+            GenerateInsightReportHandler(),
         ]
 
     def _idle_wait(self, timeout_seconds: float) -> None:
