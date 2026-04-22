@@ -1,8 +1,6 @@
 import asyncio
 import inspect
-import re
 from datetime import UTC, datetime
-from html import unescape
 from typing import Any, cast
 
 from sqlalchemy.exc import IntegrityError
@@ -25,7 +23,6 @@ from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
 from app.services.content_bodies import sync_content_body_storage
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.content_status_state_machine import ContentStatusStateMachine
-from app.services.exa_client import ExaClientError, exa_get_contents
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.http import NonRetryableError, get_http_service
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
@@ -142,47 +139,6 @@ class ContentWorker:
             previous_payload,
         )
         return previous_payload_fingerprint == current_fingerprint
-
-    @staticmethod
-    def _normalize_rss_content_text(raw_rss_content: str) -> str:
-        """Convert RSS HTML-ish content into compact plain text."""
-        without_scripts = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", raw_rss_content)
-        without_tags = re.sub(r"(?is)<[^>]+>", " ", without_scripts)
-        return re.sub(r"\s+", " ", unescape(without_tags)).strip()
-
-    @classmethod
-    def _get_rss_fallback_text(cls, metadata: dict[str, Any]) -> str:
-        """Return fallback text from RSS payload when present."""
-        rss_content = metadata.get("rss_content")
-        if not isinstance(rss_content, str) or not rss_content.strip():
-            return ""
-
-        normalized = cls._normalize_rss_content_text(rss_content)
-        return normalized if normalized else rss_content.strip()
-
-    @staticmethod
-    def _normalize_exa_fallback_text(raw_text: str) -> str:
-        return re.sub(r"\s+", " ", raw_text).strip()
-
-    def _get_exa_fallback_text(self, url: str) -> str:
-        """Return fallback article text from Exa when available."""
-        results = exa_get_contents(
-            [url],
-            max_characters=None,
-            livecrawl="always",
-            raise_on_error=True,
-        )
-        if not results:
-            return ""
-
-        primary = results[0]
-        for candidate in (primary.text, primary.summary):
-            if not isinstance(candidate, str) or not candidate.strip():
-                continue
-            normalized = self._normalize_exa_fallback_text(candidate)
-            if normalized:
-                return normalized
-        return ""
 
     def process_content(self, content_id: int, worker_id: str) -> bool:
         """
@@ -344,6 +300,12 @@ class ContentWorker:
 
             # Preprocess URL if needed
             processed_url = strategy.preprocess_url(target_url)
+            existing_metadata = content.metadata or {}
+            extraction_context = {
+                "content_id": content.id,
+                "existing_metadata": existing_metadata,
+                "original_url": str(content.url),
+            }
 
             # Download content using strategy (HTML strategy uses crawl4ai)
             try:
@@ -361,9 +323,19 @@ class ContentWorker:
             try:
                 # Handle async methods from YouTubeStrategy
                 if asyncio.iscoroutinefunction(strategy.extract_data):
-                    extracted_data = asyncio.run(strategy.extract_data(raw_content, processed_url))
+                    extracted_data = asyncio.run(
+                        strategy.extract_data(
+                            raw_content,
+                            processed_url,
+                            context=extraction_context,
+                        )
+                    )
                 else:
-                    extracted_data = strategy.extract_data(raw_content, processed_url)
+                    extracted_data = strategy.extract_data(
+                        raw_content,
+                        processed_url,
+                        context=extraction_context,
+                    )
             except NonRetryableError as e:
                 logger.warning(
                     "Non-retryable extraction error for %s: %s",
@@ -382,86 +354,6 @@ class ContentWorker:
                     content.source_url = str(content.url)
                 content.url = delegated_url
                 return self._process_article(content)
-
-            existing_metadata = content.metadata or {}
-            gate_page_detected = bool(extracted_data.get("gate_page_detected"))
-            gate_page_reason = extracted_data.get("extraction_error")
-            if gate_page_detected:
-                exa_fallback_text = ""
-                try:
-                    exa_fallback_text = self._get_exa_fallback_text(str(content.url))
-                except ExaClientError as exc:
-                    logger.error(
-                        "Access gate Exa fallback failed for content %s",
-                        content.id,
-                        extra={
-                            "component": "content_worker",
-                            "operation": "process_article",
-                            "item_id": str(content.id),
-                            "context_data": {
-                                "url": str(content.url),
-                                "gate_reason": gate_page_reason,
-                                "error": str(exc),
-                            },
-                        },
-                    )
-
-                if exa_fallback_text:
-                    logger.warning(
-                        "Access gate detected for content %s; using Exa fallback",
-                        content.id,
-                        extra={
-                            "component": "content_worker",
-                            "operation": "process_article",
-                            "item_id": str(content.id),
-                            "context_data": {
-                                "url": str(content.url),
-                                "fallback_text_len": len(exa_fallback_text),
-                                "gate_reason": gate_page_reason,
-                            },
-                        },
-                    )
-                    extracted_data["text_content"] = exa_fallback_text
-                    extracted_data["used_exa_fallback"] = True
-                    extracted_data["exa_fallback_length"] = len(exa_fallback_text)
-                    extracted_data["gate_page_reason"] = gate_page_reason
-                    extracted_data["extraction_error"] = None
-
-                rss_fallback_text = self._get_rss_fallback_text(existing_metadata)
-                if not exa_fallback_text and rss_fallback_text:
-                    logger.warning(
-                        "Access gate detected for content %s; using rss_content fallback",
-                        content.id,
-                        extra={
-                            "component": "content_worker",
-                            "operation": "process_article",
-                            "item_id": str(content.id),
-                            "context_data": {
-                                "url": str(content.url),
-                                "fallback_text_len": len(rss_fallback_text),
-                                "gate_reason": gate_page_reason,
-                            },
-                        },
-                    )
-                    extracted_data["text_content"] = rss_fallback_text
-                    extracted_data["used_rss_fallback"] = True
-                    extracted_data["rss_fallback_length"] = len(rss_fallback_text)
-                    extracted_data["gate_page_reason"] = gate_page_reason
-                    extracted_data["extraction_error"] = None
-                elif not exa_fallback_text:
-                    logger.warning(
-                        "Access gate detected for content %s and no rss fallback is available",
-                        content.id,
-                        extra={
-                            "component": "content_worker",
-                            "operation": "process_article",
-                            "item_id": str(content.id),
-                            "context_data": {
-                                "url": str(content.url),
-                                "gate_reason": gate_page_reason,
-                            },
-                        },
-                    )
 
             # Prepare for LLM processing
             try:
@@ -524,16 +416,15 @@ class ContentWorker:
                 "content_type": extracted_data.get("content_type", "html"),
                 "source": existing_metadata.get("source"),  # Never overwrite source from scraper
             }
+            gate_page_reason = extracted_data.get("gate_page_reason")
             if extracted_data.get("used_rss_fallback"):
                 metadata_update["used_rss_fallback"] = True
                 metadata_update["rss_fallback_length"] = extracted_data.get("rss_fallback_length")
-                if extracted_data.get("gate_page_reason"):
-                    metadata_update["gate_page_reason"] = extracted_data.get("gate_page_reason")
             if extracted_data.get("used_exa_fallback"):
                 metadata_update["used_exa_fallback"] = True
                 metadata_update["exa_fallback_length"] = extracted_data.get("exa_fallback_length")
-                if extracted_data.get("gate_page_reason"):
-                    metadata_update["gate_page_reason"] = extracted_data.get("gate_page_reason")
+            if gate_page_reason:
+                metadata_update["gate_page_reason"] = gate_page_reason
             if extracted_data.get("used_newspaper_fallback"):
                 metadata_update["used_newspaper_fallback"] = True
             if subscribe_to_feed:

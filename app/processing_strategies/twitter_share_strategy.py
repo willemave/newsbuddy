@@ -57,7 +57,13 @@ class TwitterShareProcessorStrategy(UrlProcessorStrategy):
     ) -> TweetContent:
         return resolve_tweet_content(url=url, metadata=metadata)
 
-    def extract_data(self, content: TweetContent, url: str) -> dict[str, Any]:
+    def extract_data(
+        self,
+        content: TweetContent,
+        url: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del context
         title = content.text.split("\n", 1)[0].strip() if content.text else "Tweet"
 
         return {

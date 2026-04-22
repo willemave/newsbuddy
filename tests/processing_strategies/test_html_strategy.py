@@ -332,6 +332,160 @@ def test_newspaper_fallback_fetch_for_allowlisted_domain(html_strategy: HtmlProc
     assert extracted_data["used_newspaper_fallback"] is True
 
 
+def test_extract_data_uses_newspaper_fallback_when_crawl_returns_empty_body(
+    html_strategy: HtmlProcessorStrategy,
+):
+    """Gift article pages with an empty crawl body should still trigger blocked-domain fallback."""
+    url = "https://giftarticle.ft.com/giftarticle/actions/redeem/example"
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.metadata = {
+        "title": (
+            "Q&A with a16z partner Martin Cascado, who leads an AI investment team "
+            "(George Hammond/Financial Times)"
+        )
+    }
+    mock_result.url = url
+    mock_result.cleaned_html = (
+        "<html><head><title>FT gift article</title></head><body></body></html>"
+    )
+
+    mock_markdown = MagicMock()
+    mock_markdown.raw_markdown = ""
+    mock_result.markdown = mock_markdown
+
+    mock_crawler = AsyncMock()
+    mock_crawler.arun = AsyncMock(return_value=mock_result)
+    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+
+    article = SimpleNamespace(
+        title="Recovered gift article title",
+        text="Recovered article body from newspaper fallback.",
+        authors=["Financial Times"],
+        publish_date=datetime(2026, 4, 16),
+        article_html="<html><head><title>Recovered gift article title</title></head></html>",
+    )
+
+    with (
+        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch.dict("sys.modules", {"newspaper": SimpleNamespace(article=lambda _url: article)}),
+    ):
+        extracted_data = html_strategy.extract_data("", url)
+
+    assert extracted_data["title"] == "Recovered gift article title"
+    assert extracted_data["text_content"] == "Recovered article body from newspaper fallback."
+    assert extracted_data["used_newspaper_fallback"] is True
+    assert extracted_data["extraction_error"] is None
+
+
+def test_extract_data_recovers_gate_page_with_exa_context(
+    html_strategy: HtmlProcessorStrategy,
+):
+    """Gate-page crawl results should recover via Exa inside the HTML strategy."""
+    url = "https://www.latent.space/p/ainews-anthropics-agent-autonomy"
+    gate_text = (
+        "This site requires JavaScript to run correctly. "
+        "Please turn on JavaScript or unblock scripts."
+    )
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.metadata = {"title": "Latent Space"}
+    mock_result.url = url
+    mock_result.cleaned_html = (
+        "<html><body><div class='challenge-error-text'>"
+        "This site requires JavaScript to run correctly."
+        "</div></body></html>"
+    )
+
+    mock_markdown = MagicMock()
+    mock_markdown.raw_markdown = gate_text
+    mock_result.markdown = mock_markdown
+
+    mock_crawler = AsyncMock()
+    mock_crawler.arun = AsyncMock(return_value=mock_result)
+    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch.object(html_strategy, "_fallback_fetch", return_value=None),
+        patch(
+            "app.processing_strategies.html_strategy.exa_get_contents",
+            return_value=[
+                ExaContentResult(
+                    title="Latent Space",
+                    url=url,
+                    text="Exa recovered the full article body about agent autonomy.",
+                )
+            ],
+        ),
+    ):
+        extracted_data = html_strategy.extract_data(
+            "",
+            url,
+            context={"content_id": 42, "existing_metadata": {}},
+        )
+
+    assert extracted_data["used_exa_fallback"] is True
+    assert extracted_data["gate_page_reason"] == "access gate detected: challenge/JS wall content"
+    assert extracted_data["extraction_error"] is None
+    assert "exa recovered the full article body" in extracted_data["text_content"].lower()
+
+
+def test_extract_data_recovers_gate_page_with_rss_context_when_exa_empty(
+    html_strategy: HtmlProcessorStrategy,
+):
+    """Gate-page crawl results should fall back to rss_content when Exa does not recover text."""
+    url = "https://www.latent.space/p/ainews-anthropics-agent-autonomy"
+    gate_text = (
+        "This site requires JavaScript to run correctly. "
+        "Please turn on JavaScript or unblock scripts."
+    )
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.metadata = {"title": "Latent Space"}
+    mock_result.url = url
+    mock_result.cleaned_html = (
+        "<html><body><div class='challenge-error-text'>"
+        "This site requires JavaScript to run correctly."
+        "</div></body></html>"
+    )
+
+    mock_markdown = MagicMock()
+    mock_markdown.raw_markdown = gate_text
+    mock_result.markdown = mock_markdown
+
+    mock_crawler = AsyncMock()
+    mock_crawler.arun = AsyncMock(return_value=mock_result)
+    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch.object(html_strategy, "_fallback_fetch", return_value=None),
+        patch("app.processing_strategies.html_strategy.exa_get_contents", return_value=[]),
+    ):
+        extracted_data = html_strategy.extract_data(
+            "",
+            url,
+            context={
+                "content_id": 42,
+                "existing_metadata": {
+                    "rss_content": "<p>Recovered RSS content about agent autonomy.</p>",
+                },
+            },
+        )
+
+    assert extracted_data["used_rss_fallback"] is True
+    assert extracted_data["gate_page_reason"] == "access gate detected: challenge/JS wall content"
+    assert extracted_data["extraction_error"] is None
+    assert "recovered rss content about agent autonomy." in extracted_data["text_content"].lower()
+
+
 @pytest.mark.parametrize(
     ("url", "expected_source"),
     [

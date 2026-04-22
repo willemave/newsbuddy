@@ -146,13 +146,19 @@ class PubMedProcessorStrategy(UrlProcessorStrategy):
             )
             return None
 
-    def extract_data(self, content: str, url: str) -> dict[str, Any]:
+    def extract_data(
+        self,
+        content: str,
+        url: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Extracts the full-text link from the PubMed page using crawl4ai.
         Returns a special dictionary indicating the next URL to process.
         'content' parameter is ignored as crawl4ai handles downloading.
         'url' here is the final URL of the PubMed page itself.
         """
+        del content, context
         logger.info("PubMedStrategy: Extracting full-text link from PubMed page: %s", url)
 
         try:

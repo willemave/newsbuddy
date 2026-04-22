@@ -535,6 +535,24 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         return None
 
     @staticmethod
+    def _detect_missing_body_issue(
+        *,
+        title: str | None,
+        text_content: str | None,
+    ) -> str | None:
+        """Detect successful crawls that returned a title but no article body."""
+
+        normalized_title = re.sub(r"\s+", " ", title or "").strip()
+        if not normalized_title:
+            return None
+
+        normalized_text = re.sub(r"\s+", " ", text_content or "").strip()
+        if normalized_text:
+            return None
+
+        return "malformed extraction: missing article body"
+
+    @staticmethod
     def _looks_like_discussion_url(url: str) -> bool:
         """Return True when the submitted URL explicitly targets a discussion page."""
 
@@ -596,6 +614,13 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         if placeholder_title_reason:
             return placeholder_title_reason
 
+        missing_body_reason = cls._detect_missing_body_issue(
+            title=title,
+            text_content=text_content,
+        )
+        if missing_body_reason:
+            return missing_body_reason
+
         return cls._detect_discussion_only_extraction(
             url=url,
             text_content=text_content,
@@ -616,6 +641,122 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                 break
 
         return trimmed_text
+
+    @staticmethod
+    def _normalize_rss_content_text(raw_rss_content: str) -> str:
+        """Convert RSS HTML-ish content into compact plain text."""
+
+        without_scripts = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", raw_rss_content)
+        without_tags = re.sub(r"(?is)<[^>]+>", " ", without_scripts)
+        return re.sub(r"\s+", " ", unescape(without_tags)).strip()
+
+    @classmethod
+    def _get_rss_fallback_text(cls, metadata: dict[str, Any]) -> str:
+        """Return fallback text from RSS payload when present."""
+
+        rss_content = metadata.get("rss_content")
+        if not isinstance(rss_content, str) or not rss_content.strip():
+            return ""
+
+        normalized = cls._normalize_rss_content_text(rss_content)
+        return normalized if normalized else rss_content.strip()
+
+    def _get_exa_fallback_text(self, url: str) -> str:
+        """Return fallback article text from Exa when available."""
+
+        results = exa_get_contents(
+            [url],
+            max_characters=None,
+            livecrawl="always",
+            raise_on_error=True,
+        )
+        if not results:
+            return ""
+
+        primary = results[0]
+        for candidate in (primary.text, primary.summary):
+            if not isinstance(candidate, str) or not candidate.strip():
+                continue
+            normalized = re.sub(r"\s+", " ", candidate).strip()
+            if normalized:
+                return normalized
+        return ""
+
+    def _recover_gate_page_content(
+        self,
+        extracted_data: dict[str, Any],
+        context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Use metadata-aware recovery for access-gated pages before failing the extraction."""
+
+        gate_reason = extracted_data.get("extraction_error")
+        if not isinstance(gate_reason, str) or not gate_reason.startswith("access gate detected"):
+            return extracted_data
+
+        context_data = context if isinstance(context, dict) else {}
+        existing_metadata = context_data.get("existing_metadata")
+        if not isinstance(existing_metadata, dict):
+            existing_metadata = {}
+
+        final_url = extracted_data.get("final_url_after_redirects") or context_data.get(
+            "original_url"
+        )
+        resolved_url = str(final_url) if final_url else ""
+        if not resolved_url:
+            return extracted_data
+
+        content_id = context_data.get("content_id")
+
+        try:
+            exa_fallback_text = self._get_exa_fallback_text(resolved_url)
+        except ExaClientError as exc:
+            logger.error(
+                "HtmlStrategy: Access gate Exa fallback failed for %s: %s",
+                resolved_url,
+                exc,
+                extra={
+                    "component": "html_strategy",
+                    "operation": "gate_page_recovery",
+                    "item_id": str(content_id) if content_id is not None else resolved_url,
+                    "context_data": {
+                        "url": resolved_url,
+                        "gate_reason": gate_reason,
+                        "error": str(exc),
+                    },
+                },
+            )
+            exa_fallback_text = ""
+
+        if exa_fallback_text:
+            logger.warning(
+                "HtmlStrategy: Access gate detected for %s; using Exa fallback",
+                resolved_url,
+            )
+            return {
+                **extracted_data,
+                "text_content": exa_fallback_text,
+                "used_exa_fallback": True,
+                "exa_fallback_length": len(exa_fallback_text),
+                "gate_page_reason": gate_reason,
+                "extraction_error": None,
+            }
+
+        rss_fallback_text = self._get_rss_fallback_text(existing_metadata)
+        if rss_fallback_text:
+            logger.warning(
+                "HtmlStrategy: Access gate detected for %s; using rss_content fallback",
+                resolved_url,
+            )
+            return {
+                **extracted_data,
+                "text_content": rss_fallback_text,
+                "used_rss_fallback": True,
+                "rss_fallback_length": len(rss_fallback_text),
+                "gate_page_reason": gate_reason,
+                "extraction_error": None,
+            }
+
+        return extracted_data
 
     def _exa_fallback_fetch(self, url: str, source: str) -> dict[str, Any] | None:
         """Use Exa contents as the first fallback after crawl4ai extraction fails."""
@@ -673,7 +814,6 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             "source": host,
             "final_url_after_redirects": final_url,
             "table_markdown": None,
-            "gate_page_detected": False,
             "extraction_error": None,
         }
 
@@ -725,9 +865,6 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             "source": host,
             "final_url_after_redirects": str(response.url),
             "table_markdown": None,
-            "gate_page_detected": bool(
-                extraction_issue and extraction_issue.startswith("access gate detected")
-            ),
             "extraction_error": extraction_issue,
         }
 
@@ -807,12 +944,16 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             "source": host,
             "final_url_after_redirects": url,
             "table_markdown": None,
-            "gate_page_detected": False,
             "extraction_error": None,
             "used_newspaper_fallback": True,
         }
 
-    def extract_data(self, content: str, url: str) -> dict[str, Any]:
+    def extract_data(
+        self,
+        content: str,
+        url: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Extracts data from HTML content using crawl4ai.
         'content' parameter is ignored as crawl4ai handles downloading.
@@ -999,13 +1140,20 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                 if self._should_use_httpx_fallback(RuntimeError(error_detail)):
                     fallback_data = self._fallback_fetch(url, source)
                     if fallback_data:
-                        return fallback_data
+                        return self._recover_gate_page_content(fallback_data, context)
 
                 raise Exception(error_msg)
 
             # Extract metadata from content if not provided
             extracted_text = result.markdown.raw_markdown if result.markdown else ""
             if not extracted_text:
+                fallback_data = self._fallback_fetch(url, source)
+                if fallback_data:
+                    logger.warning(
+                        "HtmlStrategy: Using fallback extraction for %s after empty crawl body",
+                        url,
+                    )
+                    return self._recover_gate_page_content(fallback_data, context)
                 raise Exception("No content extracted from the page")
             logger.debug(
                 "HtmlStrategy: Extracted markdown length=%s cleaned_html_length=%s",
@@ -1120,7 +1268,7 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                         "after malformed crawl4ai output",
                         final_url,
                     )
-                    return fallback_data
+                    return self._recover_gate_page_content(fallback_data, context)
 
             # Extract feed links from HTML for potential feed detection
             feed_links = None
@@ -1134,22 +1282,22 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                         len(feed_links),
                     )
 
-            return {
-                "title": title,
-                "author": author,
-                "publication_date": publication_date,
-                "text_content": extracted_text,
-                "content_type": "html",
-                # Source should be full domain name, leave platform to the scraper convention
-                "source": host,
-                "final_url_after_redirects": final_url,
-                "table_markdown": table_markdown or None,
-                "feed_links": feed_links,  # For feed detection in worker
-                "gate_page_detected": bool(
-                    extraction_issue and extraction_issue.startswith("access gate detected")
-                ),
-                "extraction_error": extraction_issue,
-            }
+            return self._recover_gate_page_content(
+                {
+                    "title": title,
+                    "author": author,
+                    "publication_date": publication_date,
+                    "text_content": extracted_text,
+                    "content_type": "html",
+                    # Source should be full domain name, leave platform to the scraper convention
+                    "source": host,
+                    "final_url_after_redirects": final_url,
+                    "table_markdown": table_markdown or None,
+                    "feed_links": feed_links,  # For feed detection in worker
+                    "extraction_error": extraction_issue,
+                },
+                context,
+            )
 
         except Exception as e:
             import traceback
@@ -1162,7 +1310,7 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                     logger.warning(
                         "HtmlStrategy: Using fallback extraction for %s after error: %s", url, e
                     )
-                    return fallback_data
+                    return self._recover_gate_page_content(fallback_data, context)
 
             error_msg = f"Content extraction failed for {url}: {str(e)}"
             traceback_str = traceback.format_exc()

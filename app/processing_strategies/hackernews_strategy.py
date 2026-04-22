@@ -212,8 +212,14 @@ class HackerNewsProcessorStrategy(UrlProcessorStrategy):
         logger.info(f"HackerNewsStrategy: download_content called for {url}")
         return url
 
-    def extract_data(self, content: str, url: str) -> dict[str, Any]:
+    def extract_data(
+        self,
+        content: str,
+        url: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Extract data from HackerNews item page."""
+        del context
         logger.info(f"HackerNewsStrategy: Extracting data from {url}")
 
         item_id = self._extract_item_id(url)

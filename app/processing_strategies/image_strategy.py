@@ -90,11 +90,17 @@ class ImageProcessorStrategy(UrlProcessorStrategy):
         logger.info(f"ImageStrategy: Skipping download for image URL: {url}")
         return url
 
-    def extract_data(self, content: str, url: str) -> dict[str, Any]:
+    def extract_data(
+        self,
+        content: str,
+        url: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         For image URLs, we return a special structure indicating this should be skipped.
         The content parameter here is actually the URL from download_content.
         """
+        del context
         logger.info(f"ImageStrategy: Marking image URL for skipping: {url}")
 
         # Extract a basic title from the URL

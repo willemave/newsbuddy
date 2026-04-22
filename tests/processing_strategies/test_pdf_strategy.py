@@ -97,19 +97,37 @@ def test_extract_data_successful(pdf_strategy: PdfProcessorStrategy, mocker):
 
 
 def test_extract_data_no_content(pdf_strategy: PdfProcessorStrategy, mocker):
-    """Test data extraction when no PDF content is provided."""
-    """Test data extraction when PDF extraction fails."""
-    # Mock the Google Gemini client to raise an exception
+    """Fall back to local PDF extraction when Gemini extraction fails."""
     mock_client = MagicMock()
     mock_client.models.generate_content.side_effect = Exception("Failed to extract")
     pdf_strategy.client = mock_client
+    mocker.patch(
+        "app.processing_strategies.pdf_strategy.extract_pdf_text",
+        return_value="Local PDF Title\nRecovered body",
+    )
 
     url = "http://example.com/empty.pdf"
     extracted_data = pdf_strategy.extract_data(SAMPLE_PDF_BYTES, url)
 
+    assert extracted_data["title"] == "Local PDF Title"
+    assert extracted_data["text_content"] == "Local PDF Title\nRecovered body"
+    assert extracted_data["content_type"] == "pdf"
+
+
+def test_extract_data_returns_failure_when_all_pdf_extraction_paths_fail(
+    pdf_strategy: PdfProcessorStrategy,
+    mocker,
+):
+    """Return a failed extraction payload when Gemini and local fallback both fail."""
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = Exception("Failed to extract")
+    pdf_strategy.client = mock_client
+    mocker.patch("app.processing_strategies.pdf_strategy.extract_pdf_text", return_value="")
+
+    extracted_data = pdf_strategy.extract_data(SAMPLE_PDF_BYTES, "http://example.com/empty.pdf")
+
     assert extracted_data["title"] == "PDF Extraction Failed"
     assert extracted_data["text_content"] == ""
-    assert extracted_data["content_type"] == "pdf"
 
 
 def test_prepare_for_llm(pdf_strategy: PdfProcessorStrategy):

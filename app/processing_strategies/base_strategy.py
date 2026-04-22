@@ -74,6 +74,7 @@ class UrlProcessorStrategy(ABC):
         self,
         content: Any,
         url: str,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | Awaitable[dict[str, Any]]:
         """
         Extracts relevant data from the downloaded content.
@@ -82,6 +83,7 @@ class UrlProcessorStrategy(ABC):
         Args:
             content: The downloaded content (e.g., HTML string, PDF bytes).
             url: The URL from which the content was downloaded (final URL after redirects).
+            context: Optional caller-provided context for the extraction attempt.
 
         Returns:
             A dictionary containing extracted data like title, author, text_content, etc.

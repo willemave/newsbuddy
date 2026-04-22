@@ -13,6 +13,7 @@ from app.services.langfuse_tracing import (
     extract_google_usage_details,
     langfuse_generation_context,
 )
+from app.services.pdf_text_extraction import extract_pdf_text
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -69,8 +70,14 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
                 raise NonRetryableError(f"HTTP {status_code}: {e}") from e
             raise
 
-    def extract_data(self, content: bytes, url: str) -> dict[str, Any]:
+    def extract_data(
+        self,
+        content: bytes,
+        url: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Extract text from PDF content using Google Gemini API."""
+        del context
         logger.info(f"PdfStrategy: Extracting text from PDF content for URL: {url}")
 
         try:
@@ -110,24 +117,20 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
             text_content = response.text if hasattr(response, "text") else ""
             if not text_content:
                 raise ValueError("No text extracted from PDF")
-
-            # Try to extract title from first lines
-            lines = text_content.strip().split("\n")
-            title = lines[0][:200] if lines else "PDF Document"
-
-            logger.info(
-                f"PdfStrategy: Successfully extracted text for {url}. Title: {title[:50]}..."
-            )
-            return {
-                "title": title,
-                "author": None,
-                "publication_date": None,
-                "text_content": text_content,
-                "content_type": "pdf",
-                "final_url_after_redirects": url,
-            }
+            return self._build_extracted_data(text_content, url=url, default_title="PDF Document")
         except Exception as e:
             logger.error(f"PdfStrategy: Failed to extract text from PDF {url}: {e}")
+            fallback_text = extract_pdf_text(content)
+            if fallback_text:
+                logger.info(
+                    "PdfStrategy: Local PDF extraction succeeded for %s after Gemini failure",
+                    url,
+                )
+                return self._build_extracted_data(
+                    fallback_text,
+                    url=url,
+                    default_title="PDF Document",
+                )
             return {
                 "title": "PDF Extraction Failed",
                 "text_content": "",
@@ -145,4 +148,28 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
             "content_to_filter": text_content,
             "content_to_summarize": text_content,
             "is_pdf": True,
+        }
+
+    @staticmethod
+    def _build_extracted_data(
+        text_content: str,
+        *,
+        url: str,
+        default_title: str,
+    ) -> dict[str, Any]:
+        lines = text_content.strip().split("\n")
+        title = lines[0][:200] if lines else default_title
+
+        logger.info(
+            "PdfStrategy: Successfully extracted text for %s. Title: %s...",
+            url,
+            title[:50],
+        )
+        return {
+            "title": title,
+            "author": None,
+            "publication_date": None,
+            "text_content": text_content,
+            "content_type": "pdf",
+            "final_url_after_redirects": url,
         }

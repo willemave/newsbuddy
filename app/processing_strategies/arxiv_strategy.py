@@ -15,6 +15,7 @@ from app.services.langfuse_tracing import (
     extract_google_usage_details,
     langfuse_generation_context,
 )
+from app.services.pdf_text_extraction import extract_pdf_text
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -108,11 +109,17 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
         )
         return response.content
 
-    def extract_data(self, content: bytes, url: str) -> dict[str, Any]:
+    def extract_data(
+        self,
+        content: bytes,
+        url: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Prepares PDF data for LLM processing.
-        No local text extraction - the LLM will handle everything from the PDF bytes.
+        Prefer Gemini extraction and fall back to local PDF text extraction.
         """
+        del context
         logger.info("ArxivStrategy: Preparing PDF data for LLM processing for URL: %s", url)
 
         if not content:
@@ -122,7 +129,6 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
                 "text_content": None,
                 "content_type": "pdf",
                 "final_url_after_redirects": url,
-                "pdf_bytes": None,
             }
 
         google_api_key = getattr(settings, "google_api_key", None)
@@ -157,21 +163,11 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
                         )
                 text_content = response.text if hasattr(response, "text") else ""
                 if text_content:
-                    lines = text_content.strip().split("\n")
-                    title = lines[0][:200] if lines else "ArXiv PDF Document"
-                    logger.info(
-                        "ArxivStrategy: Extracted text via Gemini for %s. Title: %s...",
-                        url,
-                        title[:50],
+                    return self._build_extracted_data(
+                        text_content,
+                        url=url,
+                        default_title="ArXiv PDF Document",
                     )
-                    return {
-                        "title": title,
-                        "author": None,
-                        "publication_date": None,
-                        "text_content": text_content,
-                        "content_type": "pdf",
-                        "final_url_after_redirects": url,
-                    }
             except Exception as exc:  # noqa: BLE001
                 error_message = str(exc).lower()
                 if (
@@ -181,7 +177,7 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
                     logger.warning(
                         (
                             "ArxivStrategy: Gemini extraction unavailable for %s; "
-                            "falling back to raw PDF bytes: %s"
+                            "falling back to local PDF parsing: %s"
                         ),
                         url,
                         exc,
@@ -194,7 +190,18 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
                 url,
             )
 
-        # Use filename from URL as a fallback title - LLM will extract the real title
+        fallback_text = extract_pdf_text(content)
+        if fallback_text:
+            logger.info(
+                "ArxivStrategy: Local PDF extraction succeeded for %s after Gemini fallback",
+                url,
+            )
+            return self._build_extracted_data(
+                fallback_text,
+                url=url,
+                default_title="ArXiv PDF Document",
+            )
+
         parsed_url = urlparse(url)
         filename = parsed_url.path.split("/")[-1] or "ArXiv PDF Document"
         if not filename.lower().endswith(".pdf"):
@@ -212,37 +219,18 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
             "text_content": "",
             "content_type": "pdf",
             "final_url_after_redirects": url,
-            "pdf_bytes": content,  # Store raw PDF bytes for LLM processing
         }
 
     def prepare_for_llm(self, extracted_data: dict[str, Any]) -> dict[str, Any]:
         """
-        Prepares PDF data for LLM processing.
-        Passes raw PDF bytes directly to the LLM for title extraction and summarization.
+        Prepare extracted PDF text for summarization.
         """
         final_url = extracted_data.get("final_url_after_redirects", "Unknown URL")
         logger.info("ArxivStrategy: Preparing PDF data for LLM for URL: %s", final_url)
         text_content = extracted_data.get("text_content") or ""
-        if isinstance(text_content, str) and text_content.strip():
-            return {
-                "content_to_filter": text_content,
-                "content_to_summarize": text_content,
-                "is_pdf": True,
-            }
-
-        pdf_bytes = extracted_data.get("pdf_bytes")
-
-        if pdf_bytes is None:
-            logger.error("ArxivStrategy: PDF bytes not found in extracted_data for %s", final_url)
-            return {
-                "content_to_filter": None,  # PDFs skip text-based filtering
-                "content_to_summarize": b"",  # Empty bytes as fallback
-                "is_pdf": True,
-            }
-
         return {
-            "content_to_filter": None,  # PDFs skip text-based filtering
-            "content_to_summarize": pdf_bytes,  # Pass raw PDF bytes to LLM
+            "content_to_filter": text_content,
+            "content_to_summarize": text_content,
             "is_pdf": True,
         }
 
@@ -261,3 +249,26 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
         """Return True if the provided netloc belongs to arxiv.org."""
         normalized = netloc.lower()
         return normalized == "arxiv.org" or normalized.endswith(".arxiv.org")
+
+    @staticmethod
+    def _build_extracted_data(
+        text_content: str,
+        *,
+        url: str,
+        default_title: str,
+    ) -> dict[str, Any]:
+        lines = text_content.strip().split("\n")
+        title = lines[0][:200] if lines else default_title
+        logger.info(
+            "ArxivStrategy: Extracted text for %s. Title: %s...",
+            url,
+            title[:50],
+        )
+        return {
+            "title": title,
+            "author": None,
+            "publication_date": None,
+            "text_content": text_content,
+            "content_type": "pdf",
+            "final_url_after_redirects": url,
+        }

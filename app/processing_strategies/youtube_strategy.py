@@ -110,8 +110,14 @@ class YouTubeProcessorStrategy(UrlProcessorStrategy):
         # The actual content comes from the transcript
         return b""
 
-    async def extract_data(self, content: bytes, url: str) -> dict[str, Any]:
+    async def extract_data(
+        self,
+        content: bytes,
+        url: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Extract metadata and transcript from YouTube video."""
+        del content, context
         logger.info(f"Extracting YouTube data from: {url}")
 
         with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:

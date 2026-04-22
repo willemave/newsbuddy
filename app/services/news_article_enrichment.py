@@ -14,7 +14,6 @@ from app.models.metadata import ContentType
 from app.models.schema import Content, NewsItem
 from app.processing_strategies.registry import StrategyRegistry, get_strategy_registry
 from app.services.content_bodies import get_content_body_resolver
-from app.services.exa_client import ExaClientError, exa_get_contents
 from app.services.gateways.object_storage_gateway import ObjectStorageGateway
 from app.services.news_article_bodies import (
     NEWS_ARTICLE_BODY_REF_KEY,
@@ -71,10 +70,10 @@ def _clean_title(value: Any) -> str | None:
     return clean_title(value)
 
 
-def _run_strategy_method(method: Any, *args: Any) -> Any:
+def _run_strategy_method(method: Any, *args: Any, **kwargs: Any) -> Any:
     if asyncio.iscoroutinefunction(method):
-        return asyncio.run(method(*args))
-    return method(*args)
+        return asyncio.run(method(*args, **kwargs))
+    return method(*args, **kwargs)
 
 
 def _extract_host(url: str | None) -> str | None:
@@ -98,24 +97,6 @@ def _existing_article_body_content(db: Session, article_url: str) -> Content | N
         .order_by(Content.id.asc())
         .first()
     )
-
-
-def _get_exa_fallback_text(url: str) -> str:
-    results = exa_get_contents(
-        [url],
-        max_characters=None,
-        livecrawl="always",
-        raise_on_error=True,
-    )
-    if not results:
-        return ""
-
-    primary = results[0]
-    for candidate in (primary.text, primary.summary):
-        text = _clean_string(candidate)
-        if text:
-            return text
-    return ""
 
 
 def _choose_article_url(news_item: NewsItem) -> tuple[str | None, str | None]:
@@ -291,12 +272,23 @@ def enrich_news_item_article(
 
     processed_url = strategy.preprocess_url(article_url)
     strategy_name = strategy.__class__.__name__
+    extraction_context = {
+        "content_id": news_item_id,
+        "existing_metadata": raw_metadata,
+        "original_url": article_url,
+    }
     try:
         extracted_data: dict[str, Any] | None = None
         while True:
             raw_content = _run_strategy_method(strategy.download_content, processed_url)
             extracted_data = (
-                _run_strategy_method(strategy.extract_data, raw_content, processed_url) or {}
+                _run_strategy_method(
+                    strategy.extract_data,
+                    raw_content,
+                    processed_url,
+                    context=extraction_context,
+                )
+                or {}
             )
             delegated_url = normalize_http_url(extracted_data.get("next_url_to_process"))
             if delegated_url is None:
@@ -305,29 +297,6 @@ def enrich_news_item_article(
 
         if extracted_data is None:
             raise ValueError("Article extraction produced no data")
-
-        gate_page_detected = bool(extracted_data.get("gate_page_detected"))
-        if gate_page_detected:
-            try:
-                exa_fallback_text = _get_exa_fallback_text(processed_url)
-            except ExaClientError as exc:
-                logger.warning(
-                    "News item article enrichment Exa fallback failed",
-                    extra={
-                        "component": "news_article_enrichment",
-                        "operation": "exa_fallback",
-                        "item_id": str(news_item_id),
-                        "context_data": {
-                            "article_url": processed_url,
-                            "error": str(exc),
-                        },
-                    },
-                )
-                exa_fallback_text = ""
-            if exa_fallback_text:
-                extracted_data["text_content"] = exa_fallback_text
-                extracted_data["extraction_error"] = None
-                extracted_data["used_exa_fallback"] = True
 
         llm_data = _run_strategy_method(strategy.prepare_for_llm, extracted_data) or {}
         source_text = _clean_string(llm_data.get("content_to_summarize"))
