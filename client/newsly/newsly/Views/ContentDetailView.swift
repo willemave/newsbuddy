@@ -1782,7 +1782,9 @@ struct ContentDetailView: View {
             } else {
                 ForEach(discussion.links) { link in
                     if let url = URL(string: link.url) {
-                        Link(destination: url) {
+                        let addState = viewModel.discussionLinkAddState(for: link.id)
+
+                        VStack(alignment: .leading, spacing: 10) {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(link.title ?? link.url)
                                     .font(.callout)
@@ -1797,7 +1799,6 @@ struct ContentDetailView: View {
                                     .lineLimit(1)
                                     .truncationMode(.middle)
 
-                                // Show originating comment snippet
                                 if let commentID = link.commentID,
                                    let comment = commentsByID[commentID] {
                                     Text(comment.compactText ?? String(comment.text.prefix(120)))
@@ -1815,11 +1816,37 @@ struct ContentDetailView: View {
                                 }
                                 .foregroundColor(.accentColor)
                             }
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.surfaceSecondary)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                            HStack(spacing: 10) {
+                                Link(destination: url) {
+                                    Label("Open", systemImage: "arrow.up.right.square")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button {
+                                    Task { await viewModel.addDiscussionLinkToLongForm(link) }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        if addState == .adding {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else {
+                                            Image(systemName: addState == .added ? "checkmark" : "plus")
+                                        }
+                                        Text(addState == .added ? "Added" : "Add to Long Form")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(Color.terracottaPrimary)
+                                .disabled(addState != .idle)
+                            }
                         }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.surfaceSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                 }
             }

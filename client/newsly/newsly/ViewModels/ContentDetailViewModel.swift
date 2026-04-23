@@ -18,6 +18,12 @@ enum ShareContentOption {
     case full
 }
 
+enum DiscussionLinkAddState: Equatable {
+    case idle
+    case adding
+    case added
+}
+
 @MainActor
 class ContentDetailViewModel: ObservableObject {
     @Published var content: ContentDetail?
@@ -31,16 +37,27 @@ class ContentDetailViewModel: ObservableObject {
     @Published var isSubscribingToFeed = false
     @Published var feedSubscriptionSuccess = false
     @Published var feedSubscriptionError: String?
+    @Published private var discussionLinkStates: [String: DiscussionLinkAddState] = [:]
 
     private let contentService = ContentService.shared
     private let unreadCountService = UnreadCountService.shared
     private let scraperConfigService = ScraperConfigService.shared
+    private let submitLinkToLongFormHandler: (URL, String?) async throws -> SubmitContentResponse
     private var contentId: Int = 0
     private var contentType: ContentType?
     
-    init(contentId: Int = 0, contentType: ContentType? = nil) {
+    init(
+        contentId: Int = 0,
+        contentType: ContentType? = nil,
+        submitLinkToLongFormHandler: @escaping (URL, String?) async throws -> SubmitContentResponse = {
+            url,
+            title in
+            try await ContentService.shared.submitContent(url: url, title: title)
+        }
+    ) {
         self.contentId = contentId
         self.contentType = contentType
+        self.submitLinkToLongFormHandler = submitLinkToLongFormHandler
     }
     
     func updateContentId(_ newId: Int, contentType newContentType: ContentType? = nil) {
@@ -51,6 +68,7 @@ class ContentDetailViewModel: ObservableObject {
         // Clear previous content to show loading state
         self.content = nil
         self.contentBody = nil
+        discussionLinkStates = [:]
     }
     
     func loadContent() async {
@@ -221,6 +239,37 @@ class ContentDetailViewModel: ObservableObject {
             }
         } catch {
             ToastService.shared.showError("Failed to save linked article: \(error.localizedDescription)")
+        }
+    }
+
+    func discussionLinkAddState(for linkID: String) -> DiscussionLinkAddState {
+        discussionLinkStates[linkID] ?? .idle
+    }
+
+    func addDiscussionLinkToLongForm(_ link: DiscussionLink) async {
+        guard let url = URL(string: link.url) else {
+            ToastService.shared.showError("Invalid link URL")
+            return
+        }
+
+        let linkID = link.id
+        guard discussionLinkAddState(for: linkID) == .idle else {
+            return
+        }
+
+        discussionLinkStates[linkID] = .adding
+
+        do {
+            let response = try await submitLinkToLongFormHandler(url, link.title)
+            discussionLinkStates[linkID] = .added
+            if response.alreadyExists {
+                ToastService.shared.show("Already in Long Form", type: .info)
+            } else {
+                ToastService.shared.showSuccess("Added to Long Form")
+            }
+        } catch {
+            discussionLinkStates.removeValue(forKey: linkID)
+            ToastService.shared.showError("Failed to add to Long Form: \(error.localizedDescription)")
         }
     }
 
