@@ -1004,11 +1004,22 @@ class OnboardingSelectedSource(BaseModel):
     config: dict[str, Any] | None = None
 
 
+class OnboardingSelectedAggregator(BaseModel):
+    """Fast-news aggregator the user picked during onboarding."""
+
+    key: str = Field(..., min_length=1, max_length=64)
+    title: str | None = None
+    # Optional per-aggregator topic picks (currently only Brutalist Report uses
+    # this — other aggregators ignore it).
+    topics: list[str] = Field(default_factory=list)
+
+
 class OnboardingCompleteRequest(BaseModel):
     """Request to finalize onboarding selections."""
 
     selected_sources: list[OnboardingSelectedSource] = Field(default_factory=list)
     selected_subreddits: list[str] = Field(default_factory=list)
+    selected_aggregators: list[OnboardingSelectedAggregator] = Field(default_factory=list)
     profile_summary: str | None = None
     inferred_topics: list[str] | None = None
     twitter_username: str | None = Field(default=None, max_length=50)
@@ -1264,6 +1275,7 @@ class AgentOnboardingCompleteRequest(BaseModel):
     accept_all: bool = False
     source_ids: list[int] = Field(default_factory=list)
     selected_subreddits: list[str] = Field(default_factory=list)
+    selected_aggregators: list[OnboardingSelectedAggregator] = Field(default_factory=list)
 
 
 class AgentDigestRequest(BaseModel):

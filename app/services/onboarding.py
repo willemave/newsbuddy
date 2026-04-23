@@ -28,6 +28,7 @@ from app.models.api.common import (
     OnboardingFastDiscoverResponse,
     OnboardingProfileRequest,
     OnboardingProfileResponse,
+    OnboardingSelectedAggregator,
     OnboardingSelectedSource,
     OnboardingSuggestion,
     OnboardingVoiceParseRequest,
@@ -58,7 +59,10 @@ from app.services.llm_agents import get_basic_agent
 from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
 from app.services.news_list_preferences import normalize_news_list_preference_prompt
 from app.services.queue import TaskType
-from app.services.scraper_configs import create_user_scraper_config
+from app.services.scraper_configs import (
+    ScraperConfigAlreadyExistsError,
+    create_user_scraper_config,
+)
 from app.services.x_integration import normalize_twitter_username
 from app.utils.paths import resolve_config_path
 
@@ -594,58 +598,28 @@ def complete_onboarding(
             display_name=selection.title,
             config=config_payload,
         )
-
-        try:
-            config = create_user_scraper_config(
-                db,
-                user_id=user_id,
-                data=create_data,
-            )
-            created_types.add(selection.suggestion_type)
-            configured_source_count += 1
-            if selection.suggestion_type in FEED_SUGGESTION_TYPES and config.id is not None:
-                feed_config_ids_for_backfill.append(config.id)
-        except ValueError as exc:
-            if "already exists" in str(exc):
-                created_types.add(selection.suggestion_type)
-                configured_source_count += 1
-                existing_config = (
-                    db.query(UserScraperConfig)
-                    .filter(UserScraperConfig.user_id == user_id)
-                    .filter(UserScraperConfig.scraper_type == create_data.scraper_type)
-                    .filter(UserScraperConfig.feed_url == create_data.config["feed_url"])
-                    .first()
-                )
-                if (
-                    selection.suggestion_type in FEED_SUGGESTION_TYPES
-                    and existing_config is not None
-                    and existing_config.id is not None
-                ):
-                    feed_config_ids_for_backfill.append(existing_config.id)
-                continue
-            logger.error(
-                "Failed to create onboarding scraper config",
-                extra={
-                    "component": "onboarding",
-                    "operation": "create_scraper_config",
-                    "item_id": str(user_id),
-                    "context_data": {"error": str(exc)},
-                },
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Unexpected error creating scraper config",
-                extra={
-                    "component": "onboarding",
-                    "operation": "create_scraper_config",
-                    "item_id": str(user_id),
-                    "context_data": {"error": str(exc)},
-                },
-            )
+        config = _persist_scraper_config_idempotent(
+            db,
+            user_id=user_id,
+            data=create_data,
+            operation="create_scraper_config",
+            log_context={"feed_url": create_data.config.get("feed_url")},
+        )
+        if config is None:
+            continue
+        created_types.add(selection.suggestion_type)
+        configured_source_count += 1
+        if selection.suggestion_type in FEED_SUGGESTION_TYPES and config.id is not None:
+            feed_config_ids_for_backfill.append(config.id)
 
     if request.selected_subreddits:
         created_types.add("reddit")
         configured_source_count += _create_reddit_configs(db, user_id, request.selected_subreddits)
+
+    if request.selected_aggregators:
+        configured_source_count += _create_aggregator_configs(
+            db, user_id, request.selected_aggregators
+        )
 
     queue_gateway = get_task_queue_gateway()
     unique_feed_config_ids = list(dict.fromkeys(feed_config_ids_for_backfill))
@@ -2043,14 +2017,62 @@ def _defaults_to_selected_sources(
     return selections
 
 
+def _persist_scraper_config_idempotent(
+    db: Session,
+    *,
+    user_id: int,
+    data: CreateUserScraperConfig,
+    operation: str,
+    log_context: dict[str, Any],
+) -> UserScraperConfig | None:
+    """Create a scraper config, treating duplicates as success.
+
+    Returns the persisted ``UserScraperConfig`` (newly created or pre-existing)
+    on success, or ``None`` if the create failed for any other reason. Errors
+    are logged with ``operation``/``log_context`` and swallowed so the caller
+    can keep going through the remaining selections.
+    """
+    try:
+        return create_user_scraper_config(db, user_id=user_id, data=data)
+    except ScraperConfigAlreadyExistsError:
+        return (
+            db.query(UserScraperConfig)
+            .filter(UserScraperConfig.user_id == user_id)
+            .filter(UserScraperConfig.scraper_type == data.scraper_type)
+            .filter(UserScraperConfig.feed_url == data.config.get("feed_url"))
+            .first()
+        )
+    except ValueError as exc:
+        logger.error(
+            "Failed to create onboarding scraper config",
+            extra={
+                "component": "onboarding",
+                "operation": operation,
+                "item_id": str(user_id),
+                "context_data": {"error": str(exc), **log_context},
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Unexpected error creating onboarding scraper config",
+            extra={
+                "component": "onboarding",
+                "operation": operation,
+                "item_id": str(user_id),
+                "context_data": {"error": str(exc), **log_context},
+            },
+        )
+    return None
+
+
 def _create_reddit_configs(db: Session, user_id: int, subreddits: list[str]) -> int:
     configured_count = 0
     for subreddit in subreddits:
         cleaned = _normalize_subreddit_name(subreddit)
         if not cleaned:
             continue
-        try:
-            create_user_scraper_config(
+        if (
+            _persist_scraper_config_idempotent(
                 db,
                 user_id=user_id,
                 data=CreateUserScraperConfig(
@@ -2058,31 +2080,49 @@ def _create_reddit_configs(db: Session, user_id: int, subreddits: list[str]) -> 
                     display_name=cleaned,
                     config={"subreddit": cleaned, "limit": DEFAULT_NEW_FEED_LIMIT},
                 ),
+                operation="create_subreddit",
+                log_context={"subreddit": cleaned},
             )
+            is not None
+        ):
             configured_count += 1
-        except ValueError as exc:
-            if "already exists" in str(exc):
-                configured_count += 1
-                continue
-            logger.error(
-                "Failed to create subreddit config",
-                extra={
-                    "component": "onboarding",
-                    "operation": "create_subreddit",
-                    "item_id": str(user_id),
-                    "context_data": {"error": str(exc), "subreddit": cleaned},
-                },
+    return configured_count
+
+
+def _create_aggregator_configs(
+    db: Session,
+    user_id: int,
+    aggregators: list[OnboardingSelectedAggregator],
+) -> int:
+    """Persist user fast-news aggregator subscriptions.
+
+    Each pick becomes a ``user_scraper_configs`` row with
+    ``scraper_type='aggregator'`` and ``feed_url='aggregator://<key>'``. Topics
+    (Brutalist Report) are stored on ``config.topics``.
+    """
+    configured_count = 0
+    for selection in aggregators:
+        key = selection.key.strip().lower()
+        if not key:
+            continue
+        config_payload: dict[str, Any] = {"key": key, "limit": DEFAULT_NEW_FEED_LIMIT}
+        if selection.topics:
+            config_payload["topics"] = selection.topics
+        if (
+            _persist_scraper_config_idempotent(
+                db,
+                user_id=user_id,
+                data=CreateUserScraperConfig(
+                    scraper_type="aggregator",
+                    display_name=selection.title or key,
+                    config=config_payload,
+                ),
+                operation="create_aggregator",
+                log_context={"aggregator": key},
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Unexpected error creating subreddit config",
-                extra={
-                    "component": "onboarding",
-                    "operation": "create_subreddit",
-                    "item_id": str(user_id),
-                    "context_data": {"error": str(exc), "subreddit": cleaned},
-                },
-            )
+            is not None
+        ):
+            configured_count += 1
     return configured_count
 
 

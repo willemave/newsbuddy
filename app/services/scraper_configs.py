@@ -35,6 +35,15 @@ logger = get_logger(__name__)
 settings = get_settings()
 
 
+class ScraperConfigAlreadyExistsError(ValueError):
+    """Raised when a user already has a scraper config for the given feed.
+
+    Subclasses ``ValueError`` so legacy ``except ValueError`` callers keep
+    working; new callers should match this type for an explicit idempotency
+    branch.
+    """
+
+
 def _normalize_feed_url(config: dict[str, Any]) -> str:
     feed_url = (config.get("feed_url") or "").strip()
     return feed_url
@@ -350,7 +359,7 @@ def create_user_scraper_config(
         .first()
     )
     if existing:
-        raise ValueError("Scraper config already exists for this feed")
+        raise ScraperConfigAlreadyExistsError("Scraper config already exists for this feed")
 
     record = UserScraperConfig(
         user_id=user_id,
@@ -365,7 +374,9 @@ def create_user_scraper_config(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise ValueError("Scraper config already exists for this feed") from exc
+        raise ScraperConfigAlreadyExistsError(
+            "Scraper config already exists for this feed"
+        ) from exc
 
     db.refresh(record)
     return record
@@ -402,7 +413,9 @@ def update_user_scraper_config(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise ValueError("Scraper config already exists for this feed") from exc
+        raise ScraperConfigAlreadyExistsError(
+            "Scraper config already exists for this feed"
+        ) from exc
 
     db.refresh(record)
     return record

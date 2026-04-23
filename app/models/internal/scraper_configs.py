@@ -6,10 +6,21 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.constants import DEFAULT_NEW_FEED_LIMIT
+from app.constants import (
+    AGGREGATOR_FEED_URL_PREFIX,
+    AGGREGATOR_SCRAPER_TYPE,
+    DEFAULT_NEW_FEED_LIMIT,
+)
 from app.services.feed_detection import FeedDetector
 
-ALLOWED_SCRAPER_TYPES = {"substack", "atom", "podcast_rss", "youtube", "reddit"}
+ALLOWED_SCRAPER_TYPES = {
+    "substack",
+    "atom",
+    "podcast_rss",
+    "youtube",
+    "reddit",
+    AGGREGATOR_SCRAPER_TYPE,
+}
 FEED_VALIDATOR = FeedDetector(use_llm=False, use_exa_search=False)
 
 
@@ -23,7 +34,7 @@ def _validate_limit(limit: object) -> None:
 class CreateUserScraperConfig(BaseModel):
     """Payload for creating a scraper config."""
 
-    scraper_type: Literal["substack", "atom", "podcast_rss", "youtube", "reddit"]
+    scraper_type: Literal["substack", "atom", "podcast_rss", "youtube", "reddit", "aggregator"]
     display_name: str | None = Field(None, max_length=255)
     config: dict[str, Any] = Field(default_factory=dict)
     is_active: bool = True
@@ -34,6 +45,8 @@ class CreateUserScraperConfig(BaseModel):
             self.config = normalize_youtube_config(self.config)
         elif self.scraper_type == "reddit":
             self.config = normalize_reddit_config(self.config)
+        elif self.scraper_type == AGGREGATOR_SCRAPER_TYPE:
+            self.config = normalize_aggregator_config(self.config)
         else:
             self.config = normalize_feed_config(self.config)
         if "limit" not in self.config:
@@ -114,6 +127,34 @@ def normalize_reddit_config(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def normalize_aggregator_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a fast-news aggregator subscription config.
+
+    The user picks an aggregator key (e.g. ``"hackernews"``, ``"brutalist"``).
+    Brutalist also persists the per-user topic selection so the visibility
+    filter can match ``raw_metadata.aggregator.topic``.
+    """
+
+    key = str(config.get("key") or "").strip().lower()
+    if not key:
+        raise ValueError("config.key is required for aggregator subscriptions")
+
+    config["key"] = key
+    config["feed_url"] = f"{AGGREGATOR_FEED_URL_PREFIX}{key}"
+
+    raw_topics = config.get("topics")
+    if raw_topics is not None:
+        if not isinstance(raw_topics, list) or not all(isinstance(t, str) for t in raw_topics):
+            raise ValueError("config.topics must be a list of strings")
+        cleaned_topics = sorted({topic.strip().lower() for topic in raw_topics if topic.strip()})
+        if cleaned_topics:
+            config["topics"] = cleaned_topics
+        else:
+            config.pop("topics", None)
+
+    return config
+
+
 def normalize_update_config(config: dict[str, Any]) -> dict[str, Any]:
     """Normalize an update payload based on the submitted config shape."""
 
@@ -121,7 +162,10 @@ def normalize_update_config(config: dict[str, Any]) -> dict[str, Any]:
     channel_id = config.get("channel_id")
     playlist_id = config.get("playlist_id")
     subreddit = config.get("subreddit") or config.get("name")
+    aggregator_key = config.get("key")
 
+    if aggregator_key and (not feed_url or str(feed_url).startswith(AGGREGATOR_FEED_URL_PREFIX)):
+        return normalize_aggregator_config(config)
     if not feed_url and (channel_id or playlist_id):
         return normalize_youtube_config(config)
     if subreddit and not feed_url:

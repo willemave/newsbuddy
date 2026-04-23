@@ -44,7 +44,10 @@ from app.services.content_submission import submit_user_content
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.podcast_search import search_podcast_episodes
 from app.services.queue import TaskType
-from app.services.scraper_configs import create_user_scraper_config
+from app.services.scraper_configs import (
+    ScraperConfigAlreadyExistsError,
+    create_user_scraper_config,
+)
 
 logger = get_logger(__name__)
 
@@ -419,12 +422,11 @@ async def subscribe_discovery_suggestions(
             )
             suggestion.status = "subscribed"
             subscribed.append(suggestion_id)
+        except ScraperConfigAlreadyExistsError:
+            suggestion.status = "subscribed"
+            subscribed.append(suggestion_id)
         except ValueError as exc:
-            if "already exists" in str(exc):
-                suggestion.status = "subscribed"
-                subscribed.append(suggestion_id)
-            else:
-                errors.append({"id": str(suggestion_id), "error": str(exc)})
+            errors.append({"id": str(suggestion_id), "error": str(exc)})
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "Failed to subscribe discovery suggestion",

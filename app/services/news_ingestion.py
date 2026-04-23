@@ -127,15 +127,22 @@ def _normalize_url(value: Any) -> str | None:
     return normalize_http_url(cleaned) or cleaned
 
 
+_SOURCE_LABELS_BY_PLATFORM: dict[str, str] = {
+    "hackernews": "Hacker News",
+    "techmeme": "Techmeme",
+    "mediagazer": "Mediagazer",
+    "memeorandum": "Memeorandum",
+    "sciurls": "SciURLs",
+    "finurls": "FinURLs",
+    "brutalist": "Brutalist Report",
+    "reddit": "Reddit",
+    "twitter": "X",
+}
+
+
 def _source_label_from_platform(platform: str | None) -> str | None:
-    if platform == "hackernews":
-        return "Hacker News"
-    if platform == "techmeme":
-        return "Techmeme"
-    if platform == "reddit":
-        return "Reddit"
-    if platform == "twitter":
-        return "X"
+    if platform in _SOURCE_LABELS_BY_PLATFORM:
+        return _SOURCE_LABELS_BY_PLATFORM[platform]
     return _clean_string(platform)
 
 

@@ -41,6 +41,16 @@ AGGREGATE_PLATFORMS = {"twitter", "techmeme"}
 DEFAULT_NEW_FEED_LIMIT = 1
 DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT = 2
 
+# Maximum number of representative news items kept visible in a user's fast-news
+# feed. The pipeline still ingests/indexes everything; this just trims what the
+# UI exposes to the most-recent N rows so the feed doesn't unbound over time.
+NEWS_FEED_VISIBLE_LIMIT = 100
+
+# Per-user aggregator subscriptions live in ``user_scraper_configs`` with this
+# scraper_type and a ``feed_url`` of ``AGGREGATOR_FEED_URL_PREFIX + <key>``.
+AGGREGATOR_SCRAPER_TYPE = "aggregator"
+AGGREGATOR_FEED_URL_PREFIX = "aggregator://"
+
 # Summary kind/version constants
 SUMMARY_KIND_LONG_INTERLEAVED = "long_interleaved"
 SUMMARY_KIND_LONG_STRUCTURED = "long_structured"

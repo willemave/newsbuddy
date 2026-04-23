@@ -63,5 +63,6 @@ def execute(
         OnboardingCompleteRequest(
             selected_sources=selected_sources,
             selected_subreddits=selected_subreddits,
+            selected_aggregators=list(payload.selected_aggregators),
         ),
     )
