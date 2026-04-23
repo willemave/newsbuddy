@@ -1,0 +1,63 @@
+# Aggregator news sources.
+#
+# Each entry is loaded by ``app.scraping.aggregators.load_aggregator_scrapers``
+# and turned into an ``AggregatorScraper`` subclass selected by ``key``.
+# ``kind`` controls which Pydantic settings model validates the entry.
+#
+# Per-user subscriptions live in ``user_scraper_configs`` with
+# ``scraper_type='aggregator'`` and ``feed_url`` set to ``aggregator://<key>``.
+# For Brutalist Report the per-user config also stores selected ``topics``.
+
+aggregators:
+  - key: hackernews
+    name: Hacker News
+    kind: hackernews
+    limit: 30
+
+  - key: techmeme
+    name: Techmeme
+    kind: rss_cluster
+    url: https://www.techmeme.com/feed.xml
+    limit: 25
+    include_related: true
+    max_related: 6
+
+  - key: mediagazer
+    name: Mediagazer
+    kind: rss_cluster
+    url: https://www.mediagazer.com/feed.xml
+    limit: 25
+    include_related: true
+    max_related: 6
+
+  - key: memeorandum
+    name: Memeorandum
+    kind: rss_cluster
+    url: https://www.memeorandum.com/feed.xml
+    limit: 25
+    include_related: true
+    max_related: 6
+
+  - key: sciurls
+    name: SciURLs
+    kind: html_grouped
+    url: https://sciurls.com
+    limit: 100
+
+  - key: finurls
+    name: FinURLs
+    kind: html_grouped
+    url: https://finurls.com
+    limit: 100
+
+  - key: brutalist
+    name: Brutalist Report
+    kind: html_topic
+    base_url: "https://brutalist.report/topic/{topic}?limit={limit}&hours={hours}"
+    topics:
+      - science
+      - business
+      - politics
+      - sports
+    limit: 25
+    hours: 24

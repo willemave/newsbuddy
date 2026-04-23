@@ -1,13 +1,12 @@
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.models.scraper_runs import ScraperStats
+from app.scraping.aggregators import load_aggregator_scrapers
 from app.scraping.atom_unified import AtomScraper
 from app.scraping.base import BaseScraper
-from app.scraping.hackernews_unified import HackerNewsUnifiedScraper
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 from app.scraping.reddit_unified import RedditUnifiedScraper
 from app.scraping.substack_unified import SubstackScraper
-from app.scraping.techmeme_unified import TechmemeScraper
 
 # from app.scraping.youtube_unified import YouTubeUnifiedScraper
 logger = get_logger(__name__)
@@ -17,11 +16,15 @@ class ScraperRunner:
     """Manages and runs all scrapers."""
 
     def __init__(self) -> None:
+        # News aggregators (HN, Techmeme, Mediagazer, Memeorandum, SciURLs,
+        # FinURLs, Brutalist Report) are loaded from ``config/aggregators.yml``
+        # so adding a new aggregator is a YAML edit + new subclass under
+        # ``app.scraping.aggregators``.
+        aggregator_scrapers = load_aggregator_scrapers()
         self.scrapers: list[BaseScraper] = [
-            HackerNewsUnifiedScraper(),
+            *aggregator_scrapers,
             RedditUnifiedScraper(),
             SubstackScraper(),
-            TechmemeScraper(),
             PodcastUnifiedScraper(),
             # YouTubeUnifiedScraper(),  # Disabled - not working
             AtomScraper(),
