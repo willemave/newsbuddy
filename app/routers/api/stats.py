@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.db import get_readonly_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.models.api.common import (
     LongFormStatsResponse,
     ProcessingCountResponse,
@@ -16,13 +16,6 @@ from app.models.user import User
 from app.queries import get_stats
 
 router = APIRouter(prefix="/stats")
-
-
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
 
 
 @router.get(
@@ -40,7 +33,7 @@ def get_unread_counts(
     Optimized to use NOT EXISTS instead of NOT IN for much better performance
     with large read lists (30x faster: ~20ms vs ~650ms).
     """
-    return get_stats.get_unread_counts(db, user_id=_require_user_id(current_user))
+    return get_stats.get_unread_counts(db, user_id=require_user_id(current_user))
 
 
 @router.get(
@@ -57,7 +50,7 @@ def get_processing_count(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ProcessingCountResponse:
     """Return processing counts for long-form, news, and total."""
-    return get_stats.get_processing_count(db, user_id=_require_user_id(current_user))
+    return get_stats.get_processing_count(db, user_id=require_user_id(current_user))
 
 
 @router.get(
@@ -71,4 +64,4 @@ def get_long_form_stats(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> LongFormStatsResponse:
     """Return unread long-form count for the authenticated user."""
-    return get_stats.get_long_form_stats(db, user_id=_require_user_id(current_user))
+    return get_stats.get_long_form_stats(db, user_id=require_user_id(current_user))

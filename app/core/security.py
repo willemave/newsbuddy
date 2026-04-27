@@ -98,34 +98,17 @@ def verify_apple_token(id_token: str) -> dict[str, Any]:
     Raises:
         ValueError: If token verification fails
 
-    SECURITY WARNING - MVP ONLY:
-        This implementation does NOT verify the token signature with Apple's public keys.
-        It only decodes and validates basic claims. This is INSECURE for production use.
-
-        BEFORE PRODUCTION DEPLOYMENT:
-        1. Fetch Apple's public keys from https://appleid.apple.com/auth/keys
-        2. Cache the keys with appropriate TTL
-        3. Verify the token signature using the correct public key (based on 'kid' header)
-        4. Validate all required claims (iss, aud, exp, iat, sub)
-        5. Implement proper error handling for key rotation
-
-        Current implementation is suitable ONLY for development/MVP testing.
     """
     try:
-        # For MVP: decode without signature verification (ONLY for development)
-        # Production TODO: Verify signature with Apple's public keys
+        settings = get_settings()
+        signing_key = _get_apple_signing_key(id_token)
         claims = jwt.decode(
             id_token,
-            options={"verify_signature": False},
-            algorithms=["RS256", "HS256"],  # Accept both for testing
+            signing_key,
+            algorithms=["RS256"],
+            audience=settings.apple_signin_audiences,
+            issuer="https://appleid.apple.com",
         )
-
-        # Validate required claims
-        if claims.get("iss") != "https://appleid.apple.com":
-            raise ValueError("Invalid issuer")
-
-        if not claims.get("aud"):
-            raise ValueError("Missing audience claim")
 
         if not claims.get("sub"):
             raise ValueError("Missing subject claim")
@@ -133,6 +116,12 @@ def verify_apple_token(id_token: str) -> dict[str, Any]:
         return claims
     except jwt.InvalidTokenError as e:
         raise ValueError(f"Invalid Apple token: {str(e)}") from e
+
+
+def _get_apple_signing_key(id_token: str) -> Any:
+    settings = get_settings()
+    jwks_client = jwt.PyJWKClient(settings.apple_jwks_url)
+    return jwks_client.get_signing_key_from_jwt(id_token).key
 
 
 def verify_admin_password(password: str) -> bool:
@@ -147,3 +136,26 @@ def verify_admin_password(password: str) -> bool:
     """
     settings = get_settings()
     return password == settings.ADMIN_PASSWORD
+
+
+def create_admin_session_token() -> str:
+    settings = get_settings()
+    now = datetime.now(UTC)
+    expire = now + timedelta(minutes=settings.admin_session_expire_minutes)
+    payload = {
+        "sub": "admin",
+        "type": "admin_session",
+        "exp": expire,
+        "iat": now,
+    }
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def verify_admin_session_token(token: str) -> dict[str, Any]:
+    try:
+        payload = verify_token(token)
+    except jwt.InvalidTokenError as exc:
+        raise ValueError("Invalid admin session") from exc
+    if payload.get("type") != "admin_session" or payload.get("sub") != "admin":
+        raise ValueError("Invalid admin session")
+    return payload

@@ -125,7 +125,7 @@ def build_content_body_storage_key(
     """Return the canonical object key for one content body."""
     settings = get_settings()
     extension = "md" if content_format == ContentBodyFormat.MARKDOWN else "txt"
-    prefix = settings.content_body_storage_prefix.strip("/")
+    prefix = settings.storage.content_body_storage_prefix.strip("/")
     return f"{prefix}/{content_id}/{variant.value}-{sha256}.{extension}"
 
 
@@ -294,7 +294,7 @@ def persist_content_body(
         db.add(body)
 
     settings = get_settings()
-    body.storage_provider = settings.content_body_storage_provider
+    body.storage_provider = settings.storage.content_body_storage_provider
     body.storage_bucket = settings.content_body_storage_bucket
     body.storage_key = storage_key
     body.content_format = content_format.value

@@ -11,41 +11,16 @@ from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
 from app.models.schema import ProcessingTask
+from app.pipeline.task_specs import TASK_SPECS, get_task_spec
 
 logger = get_logger(__name__)
 
 
 TASK_QUEUE_BY_TYPE: dict[TaskType, TaskQueue] = {
-    TaskType.SCRAPE: TaskQueue.CONTENT,
-    TaskType.BACKFILL_FEEDS: TaskQueue.ONBOARDING,
-    TaskType.ANALYZE_URL: TaskQueue.CONTENT,
-    TaskType.PROCESS_CONTENT: TaskQueue.CONTENT,
-    TaskType.ENRICH_NEWS_ITEM_ARTICLE: TaskQueue.CONTENT,
-    TaskType.PROCESS_NEWS_ITEM: TaskQueue.CONTENT,
-    TaskType.PROCESS_PODCAST_MEDIA: TaskQueue.MEDIA,
-    TaskType.DOWNLOAD_AUDIO: TaskQueue.MEDIA,
-    TaskType.TRANSCRIBE: TaskQueue.MEDIA,
-    TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO: TaskQueue.MEDIA,
-    TaskType.TRANSCRIBE_TWEET_VIDEO: TaskQueue.MEDIA,
-    TaskType.SUMMARIZE: TaskQueue.CONTENT,
-    TaskType.FETCH_DISCUSSION: TaskQueue.CONTENT,
-    TaskType.GENERATE_IMAGE: TaskQueue.IMAGE,
-    TaskType.DISCOVER_FEEDS: TaskQueue.CONTENT,
-    TaskType.GENERATE_AGENT_DIGEST: TaskQueue.CONTENT,
-    TaskType.ONBOARDING_DISCOVER: TaskQueue.ONBOARDING,
-    TaskType.DIG_DEEPER: TaskQueue.CHAT,
-    TaskType.SYNC_INTEGRATION: TaskQueue.TWITTER,
-    TaskType.GENERATE_INSIGHT_REPORT: TaskQueue.CONTENT,
+    task_type: spec.queue for task_type, spec in TASK_SPECS.items()
 }
-
 DEDUPABLE_CONTENT_TASK_TYPES: set[TaskType] = {
-    TaskType.PROCESS_CONTENT,
-    TaskType.PROCESS_PODCAST_MEDIA,
-    TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO,
-    TaskType.TRANSCRIBE_TWEET_VIDEO,
-    TaskType.SUMMARIZE,
-    TaskType.FETCH_DISCUSSION,
-    TaskType.GENERATE_IMAGE,
+    task_type for task_type, spec in TASK_SPECS.items() if spec.dedupe_by_content
 }
 ACTIVE_TASK_STATUSES: tuple[str, str] = (
     TaskStatus.PENDING.value,
@@ -62,7 +37,7 @@ def _utc_now() -> datetime:
 def _task_lease_seconds() -> int:
     """Return the default worker lease duration in seconds."""
     settings = get_settings()
-    return max(int(settings.worker_timeout_seconds), 1)
+    return max(int(settings.queue.worker_timeout_seconds), 1)
 
 
 def _normalize_payload_for_dedupe(payload: dict[str, Any] | None) -> str | None:
@@ -214,16 +189,15 @@ class QueueService:
         Returns:
             Task ID
         """
-        target_queue = self._resolve_task_queue(task_type, queue_name)
-        task_payload = payload or {}
+        task_spec = get_task_spec(task_type)
+        target_queue = self._normalize_queue_name(queue_name) or task_spec.queue.value
+        task_payload = task_spec.normalize_payload(payload)
         active_task_order = func.coalesce(
             ProcessingTask.available_at,
             ProcessingTask.created_at,
         )
         with get_db() as db:
-            should_dedupe = (
-                dedupe if dedupe is not None else task_type in DEDUPABLE_CONTENT_TASK_TYPES
-            )
+            should_dedupe = dedupe if dedupe is not None else task_spec.dedupe_by_content
             resolved_dedupe_key = dedupe_key
             if resolved_dedupe_key is None:
                 resolved_dedupe_key = _build_dedupe_key(
@@ -780,7 +754,7 @@ class QueueService:
 
     def get_backpressure_status(self) -> dict[str, Any]:
         """Return whether pending queue backlog is healthy enough for cron enqueue work."""
-        settings = get_settings()
+        queue_settings = get_settings().queue
         stats = self.get_queue_stats()
         pending_by_queue = stats.get("pending_by_queue", {})
         pending_by_queue_type = stats.get("pending_by_queue_type", {})
@@ -793,13 +767,16 @@ class QueueService:
             content_pending_by_type.get(TaskType.GENERATE_AGENT_DIGEST.value, 0)
         )
         reasons: list[str] = []
-        if content_pending >= settings.queue_backpressure_max_pending_content:
+        if content_pending >= queue_settings.queue_backpressure_max_pending_content:
             reasons.append("content_queue_backlog")
-        if pending_process_news_item >= settings.queue_backpressure_max_pending_process_news_item:
+        if (
+            pending_process_news_item
+            >= queue_settings.queue_backpressure_max_pending_process_news_item
+        ):
             reasons.append("process_news_item_backlog")
         if (
             pending_generate_agent_digest
-            >= settings.queue_backpressure_max_pending_generate_agent_digest
+            >= queue_settings.queue_backpressure_max_pending_generate_agent_digest
         ):
             reasons.append("generate_agent_digest_backlog")
         return {
@@ -811,12 +788,12 @@ class QueueService:
                 "pending_generate_agent_digest": pending_generate_agent_digest,
             },
             "thresholds": {
-                "pending_content": settings.queue_backpressure_max_pending_content,
+                "pending_content": queue_settings.queue_backpressure_max_pending_content,
                 "pending_process_news_item": (
-                    settings.queue_backpressure_max_pending_process_news_item
+                    queue_settings.queue_backpressure_max_pending_process_news_item
                 ),
                 "pending_generate_agent_digest": (
-                    settings.queue_backpressure_max_pending_generate_agent_digest
+                    queue_settings.queue_backpressure_max_pending_generate_agent_digest
                 ),
             },
         }

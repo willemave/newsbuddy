@@ -4,10 +4,13 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.core.security import (
     create_access_token,
+    create_admin_session_token,
     create_refresh_token,
+    verify_admin_session_token,
     verify_apple_token,
     verify_token,
 )
@@ -78,55 +81,96 @@ def test_verify_token_invalid():
         verify_token("invalid.token.here")
 
 
-def test_verify_apple_token_mvp_decode():
-    """
-    Test that verify_apple_token can decode Apple JWT tokens without verification (MVP).
+@pytest.fixture
+def apple_private_key():
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    This creates a mock Apple-like JWT token and verifies that the function can decode it.
-    In MVP mode, we skip signature verification as documented in the security warnings.
-    """
-    # Create a mock Apple JWT token (simulating what Apple would send)
-    # In reality, Apple signs with RS256, but for MVP we're skipping verification
+
+def test_verify_apple_token_valid_signature(monkeypatch, apple_private_key):
+    """Apple tokens must validate against the signing key, issuer, audience, and subject."""
     mock_apple_claims = {
         "iss": "https://appleid.apple.com",
-        "aud": "com.example.newsly",  # Your app's bundle ID
-        "sub": "001234.abcdef123456.7890",  # Apple user ID
+        "aud": "org.willemaw.newsly",
+        "sub": "001234.abcdef123456.7890",
         "email": "test@icloud.com",
         "email_verified": True,
         "exp": datetime.now(UTC) + timedelta(hours=1),
         "iat": datetime.now(UTC),
     }
-
-    # Create a JWT token (we'll use a dummy key since MVP doesn't verify)
-    # In production, Apple would sign this with their private key
     test_token = jwt.encode(
         mock_apple_claims,
-        TEST_JWT_KEY,
-        algorithm="HS256",
+        apple_private_key,
+        algorithm="RS256",
+        headers={"kid": "test-key"},
+    )
+    monkeypatch.setattr(
+        "app.core.security._get_apple_signing_key",
+        lambda _token: apple_private_key.public_key(),
     )
 
-    # This should decode successfully for MVP (without signature verification)
     claims = verify_apple_token(test_token)
 
-    # Verify the claims were extracted correctly
     assert claims["sub"] == "001234.abcdef123456.7890"
     assert claims["email"] == "test@icloud.com"
     assert claims["iss"] == "https://appleid.apple.com"
 
 
-def test_verify_apple_token_missing_required_claims():
+def test_verify_apple_token_missing_required_claims(monkeypatch, apple_private_key):
     """Test that verify_apple_token validates required claims."""
-    # Create token missing issuer claim
     invalid_claims = {
         "sub": "001234.test",
-        "aud": "com.example.newsly",
+        "aud": "org.willemaw.newsly",
         "exp": datetime.now(UTC) + timedelta(hours=1),
         "iat": datetime.now(UTC),
-        # Missing "iss" claim
     }
+    test_token = jwt.encode(
+        invalid_claims,
+        apple_private_key,
+        algorithm="RS256",
+        headers={"kid": "test-key"},
+    )
+    monkeypatch.setattr(
+        "app.core.security._get_apple_signing_key",
+        lambda _token: apple_private_key.public_key(),
+    )
 
-    test_token = jwt.encode(invalid_claims, TEST_JWT_KEY, algorithm="HS256")
-
-    # Should raise error for missing required claim
-    with pytest.raises(ValueError, match="Invalid issuer"):
+    with pytest.raises(ValueError, match="Invalid Apple token"):
         verify_apple_token(test_token)
+
+
+def test_verify_apple_token_rejects_wrong_signature(apple_private_key):
+    claims = {
+        "iss": "https://appleid.apple.com",
+        "aud": "org.willemaw.newsly",
+        "sub": "001234.test",
+        "exp": datetime.now(UTC) + timedelta(hours=1),
+        "iat": datetime.now(UTC),
+    }
+    test_token = jwt.encode(
+        claims,
+        apple_private_key,
+        algorithm="RS256",
+        headers={"kid": "test-key"},
+    )
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "app.core.security._get_apple_signing_key",
+            lambda _token: other_key.public_key(),
+        )
+        with pytest.raises(ValueError, match="Invalid Apple token"):
+            verify_apple_token(test_token)
+
+
+def test_verify_admin_session_token_valid():
+    token = create_admin_session_token()
+    payload = verify_admin_session_token(token)
+    assert payload["sub"] == "admin"
+    assert payload["type"] == "admin_session"
+
+
+def test_verify_admin_session_token_rejects_access_token():
+    token = create_access_token(123)
+    with pytest.raises(ValueError, match="Invalid admin session"):
+        verify_admin_session_token(token)

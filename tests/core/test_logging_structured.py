@@ -31,6 +31,27 @@ class TestStructuredLogging:
         assert payload["context_data"]["content_id"] == 42
         assert payload["user_id"] == 555
 
+    def test_structured_payload_promotes_provider_and_model(self):
+        """Provider/model should be first-class fields for vendor and LLM logs."""
+        record = logging.LogRecord(
+            name="test.logger",
+            level=logging.INFO,
+            pathname="test_file.py",
+            lineno=10,
+            msg="Vendor usage",
+            args=(),
+            exc_info=None,
+        )
+        record.provider = "openai"
+        record.model = "gpt-5.4-mini"
+        record.context_data = {"feature": "summarization"}
+
+        payload = _build_structured_json_payload(record)
+
+        assert payload["provider"] == "openai"
+        assert payload["model"] == "gpt-5.4-mini"
+        assert payload["context_data"] == {"feature": "summarization"}
+
     def test_structured_log_filter(self):
         """Test structured log filter only allows records with structured data."""
         filter_instance = _StructuredLogFilter()
@@ -103,6 +124,26 @@ class TestConsoleStructuredFormatter:
         assert "operation=audio_commit_received" in result
         assert "item_id=123" in result
         assert "audio.commit" in result
+
+    def test_structured_record_includes_provider_and_model(self):
+        """Console logs surface provider/model without burying them in context."""
+        formatter = _ConsoleStructuredFormatter("%(message)s")
+        record = logging.LogRecord(
+            name="test.logger",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="vendor trace",
+            args=(),
+            exc_info=None,
+        )
+        record.provider = "google"
+        record.model = "gemini-3.1-flash-lite-preview"
+
+        result = formatter.format(record)
+
+        assert "provider=google" in result
+        assert "model=gemini-3.1-flash-lite-preview" in result
 
     def test_structured_record_redacts_sensitive_context(self):
         """Sensitive fields are redacted in console structured suffix."""

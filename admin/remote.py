@@ -16,6 +16,8 @@ from admin.remote_ops import (
     db_schema,
     db_tables,
     events_list,
+    health_config,
+    health_queue,
     health_snapshot,
     logs_exceptions,
     logs_list,
@@ -144,6 +146,14 @@ def _dispatch(action: str, *, context: RemoteContext, payload: dict[str, Any]) -
         )
     if action == "health.snapshot":
         return health_snapshot(context)
+    if action == "health.queue":
+        return health_queue(
+            context,
+            window_hours=int(payload.get("window_hours", 24)),
+            top_errors_limit=int(payload.get("top_errors_limit", 10)),
+        )
+    if action == "health.config":
+        return health_config(context)
     if action == "fix.preview-reset-content":
         return preview_reset_content(
             context,

@@ -22,9 +22,11 @@ from admin.log_parsing import (
 )
 from admin.sql_guard import validate_readonly_sql
 from app.core.redaction import redact_value
+from app.core.settings import get_settings
 from app.models.content_mapper import content_to_domain
 from app.models.schema import Content, ContentStatusEntry, ProcessingTask, VendorUsageRecord
 from app.models.user import User
+from app.queries.queue_health import get_queue_health_snapshot
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.image_generation import ImageGenerationService, get_image_generation_service
 from app.services.long_form_images import (
@@ -295,6 +297,33 @@ def health_snapshot(context: RemoteContext) -> dict[str, Any]:
             }
     finally:
         engine.dispose()
+
+
+def health_queue(
+    context: RemoteContext,
+    *,
+    window_hours: int = 24,
+    top_errors_limit: int = 10,
+) -> dict[str, Any]:
+    """Return queue SLO/backlog health for operator workflows."""
+    engine = create_engine(context.database_url, pool_pre_ping=True)
+    session_factory = sessionmaker(bind=engine)
+    try:
+        with session_factory() as session:
+            snapshot = get_queue_health_snapshot(
+                session,
+                window_hours=window_hours,
+                top_errors_limit=top_errors_limit,
+            )
+            return snapshot.model_dump(mode="json")
+    finally:
+        engine.dispose()
+
+
+def health_config(context: RemoteContext) -> dict[str, Any]:
+    """Return redacted runtime configuration diagnostics."""
+    del context
+    return get_settings().redacted_diagnostics()
 
 
 def preview_reset_content(

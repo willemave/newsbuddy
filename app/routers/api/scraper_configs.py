@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import DEFAULT_NEW_FEED_LIMIT
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.models.api.scraper_configs import (
     ScraperConfigResponse,
     ScraperConfigStatsResponse,
@@ -30,13 +30,6 @@ from app.services.scraper_configs import (
 router = APIRouter(prefix="/scrapers", tags=["scrapers"])
 
 ScraperTypeLiteral = Literal["substack", "atom", "podcast_rss", "youtube", "reddit"]
-
-
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
 
 
 def _require_config_id(config_id: int | None) -> int:
@@ -79,7 +72,7 @@ def list_scraper_configs(
     types: str | None = Query(None, alias="types"),
 ) -> list[ScraperConfigResponse]:
     """List scraper configurations for the current user."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     requested_types: set[str] = set()
     if scraper_type:
         requested_types.add(scraper_type)
@@ -116,7 +109,7 @@ def create_scraper_config(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ScraperConfigResponse:
     """Create a scraper config for the current user."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     try:
         record = create_user_scraper_config(db, user_id, payload)
     except ValueError as exc:
@@ -137,7 +130,7 @@ def update_scraper_config(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ScraperConfigResponse:
     """Update a scraper config belonging to the current user."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     try:
         record = update_user_scraper_config(db, user_id, config_id, payload)
     except ValueError as exc:
@@ -158,7 +151,7 @@ def delete_scraper_config_endpoint(
 ) -> None:
     """Delete a scraper config for the current user."""
     try:
-        delete_user_scraper_config(db, _require_user_id(current_user), config_id)
+        delete_user_scraper_config(db, require_user_id(current_user), config_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -180,7 +173,7 @@ def subscribe_to_feed(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported feed type: {payload.feed_type}",
         )
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     scraper_type = cast(ScraperTypeLiteral, payload.feed_type)
 
     try:

@@ -14,7 +14,7 @@ from app.commands import (
     start_agent_onboarding,
 )
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.models.api.common import (
     AgentDigestRequest,
     AgentDigestResponse,
@@ -48,13 +48,6 @@ from app.services.cli_link import (
 from app.services.personal_markdown_library import collect_personal_markdown_documents_for_user
 
 router = APIRouter(tags=["agent"])
-
-
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
@@ -91,7 +84,7 @@ async def start_onboarding(
     """Start simplified async onboarding."""
     return await start_agent_onboarding.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         payload=payload,
     )
 
@@ -108,7 +101,7 @@ def get_onboarding(
     """Return onboarding run status."""
     return get_agent_onboarding_status.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         run_id=run_id,
     )
 
@@ -126,7 +119,7 @@ def complete_onboarding(
     """Complete onboarding from simplified selections."""
     response = complete_agent_onboarding.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         run_id=run_id,
         payload=payload,
     )
@@ -144,7 +137,7 @@ def generate_digest(
         raise HTTPException(status_code=404, detail="Not Found")
     return generate_agent_digest.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         payload=payload,
     )
 
@@ -228,7 +221,7 @@ def get_agent_library_manifest(
     """Return manifest metadata for exportable per-user markdown files."""
     documents = collect_personal_markdown_documents_for_user(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         include_source=include_source,
     )
     return AgentLibraryManifestResponse(
@@ -257,7 +250,7 @@ def get_agent_library_file(
     """Return one rendered markdown document by relative manifest path."""
     documents = collect_personal_markdown_documents_for_user(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         include_source=True,
     )
     document = next((item for item in documents if item.relative_path.as_posix() == path), None)

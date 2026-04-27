@@ -47,6 +47,7 @@ build/
 .deriveddata/
 .derived-data/
 *.png
+!docs/assets/newsbuddy-hero.png
 *.db-shm
 *.db-wal
 
@@ -77,3 +78,7 @@ certs/
 # Generated eval/report artifacts
 outputs/
 test-results/
+.local_dumps/
+
+# Local agent/editor state
+.claude/

@@ -893,6 +893,16 @@ func (s *AgentOnboardingCompleteRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.SelectedAggregators != nil {
+			e.FieldStart("selected_aggregators")
+			e.ArrStart()
+			for _, elem := range s.SelectedAggregators {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		if s.SelectedSubreddits != nil {
 			e.FieldStart("selected_subreddits")
 			e.ArrStart()
@@ -914,10 +924,11 @@ func (s *AgentOnboardingCompleteRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfAgentOnboardingCompleteRequest = [3]string{
+var jsonFieldsNameOfAgentOnboardingCompleteRequest = [4]string{
 	0: "accept_all",
-	1: "selected_subreddits",
-	2: "source_ids",
+	1: "selected_aggregators",
+	2: "selected_subreddits",
+	3: "source_ids",
 }
 
 // Decode decodes AgentOnboardingCompleteRequest from json.
@@ -938,6 +949,23 @@ func (s *AgentOnboardingCompleteRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"accept_all\"")
+			}
+		case "selected_aggregators":
+			if err := func() error {
+				s.SelectedAggregators = make([]OnboardingSelectedAggregator, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem OnboardingSelectedAggregator
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.SelectedAggregators = append(s.SelectedAggregators, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"selected_aggregators\"")
 			}
 		case "selected_subreddits":
 			if err := func() error {
@@ -4811,6 +4839,8 @@ func (s *ContentType) Decode(d *jx.Decoder) error {
 		*s = ContentTypePodcast
 	case ContentTypeNews:
 		*s = ContentTypeNews
+	case ContentTypeInsightReport:
+		*s = ContentTypeInsightReport
 	case ContentTypeUnknown:
 		*s = ContentTypeUnknown
 	default:
@@ -6192,6 +6222,149 @@ func (s *OnboardingFastDiscoverResponse) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OnboardingFastDiscoverResponse) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *OnboardingSelectedAggregator) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *OnboardingSelectedAggregator) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("key")
+		e.Str(s.Key)
+	}
+	{
+		if s.Title.Set {
+			e.FieldStart("title")
+			s.Title.Encode(e)
+		}
+	}
+	{
+		if s.Topics != nil {
+			e.FieldStart("topics")
+			e.ArrStart()
+			for _, elem := range s.Topics {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+}
+
+var jsonFieldsNameOfOnboardingSelectedAggregator = [3]string{
+	0: "key",
+	1: "title",
+	2: "topics",
+}
+
+// Decode decodes OnboardingSelectedAggregator from json.
+func (s *OnboardingSelectedAggregator) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode OnboardingSelectedAggregator to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "key":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := d.Str()
+				s.Key = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"key\"")
+			}
+		case "title":
+			if err := func() error {
+				s.Title.Reset()
+				if err := s.Title.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"title\"")
+			}
+		case "topics":
+			if err := func() error {
+				s.Topics = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Topics = append(s.Topics, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"topics\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode OnboardingSelectedAggregator")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000001,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfOnboardingSelectedAggregator) {
+					name = jsonFieldsNameOfOnboardingSelectedAggregator[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *OnboardingSelectedAggregator) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OnboardingSelectedAggregator) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

@@ -344,6 +344,107 @@
     </details>
   </div>
 
+  <!-- Queue Health -->
+  <div class="bg-white rounded-lg border border-gray-200 mb-4">
+    <details open>
+      <summary class="px-4 py-3 border-b border-gray-100 cursor-pointer select-none flex items-center justify-between hover:bg-gray-50 transition-colors">
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-gray-900">Queue Health</h2>
+          {% if queue_health.expired_lease_count > 0 or queue_health.recent_failed_count > 0 %}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">attention</span>
+          {% endif %}
+        </div>
+        <span class="text-xs text-gray-400">{{ queue_health.window_hours }}h window</span>
+      </summary>
+
+      <div class="p-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div class="border border-gray-200 rounded-lg p-3">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Processing</div>
+            <div class="text-lg font-bold text-gray-900 tabular-nums mt-0.5">{{ queue_health.processing_count }}</div>
+          </div>
+          <div class="border border-gray-200 rounded-lg p-3">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Expired Leases</div>
+            <div class="text-lg font-bold {% if queue_health.expired_lease_count > 0 %}text-red-600{% else %}text-gray-900{% endif %} tabular-nums mt-0.5">{{ queue_health.expired_lease_count }}</div>
+          </div>
+          <div class="border border-gray-200 rounded-lg p-3">
+            <div class="text-xs text-gray-500 uppercase tracking-wide">Recent Failures</div>
+            <div class="text-lg font-bold {% if queue_health.recent_failed_count > 0 %}text-red-600{% else %}text-gray-900{% endif %} tabular-nums mt-0.5">{{ queue_health.recent_failed_count }}</div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100">
+              <h3 class="text-sm font-semibold text-gray-900">Oldest Pending</h3>
+            </div>
+            {% if queue_health.pending %}
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-sm">
+                <thead>
+                  <tr class="border-b border-gray-100">
+                    <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Queue / Task</th>
+                    <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Pending</th>
+                    <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Oldest</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50">
+                  {% for row in queue_health.pending %}
+                  <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="px-4 py-2.5">
+                      <div class="font-medium text-gray-900">{{ row.queue_name }}</div>
+                      <div class="text-xs text-gray-400 font-mono">{{ row.task_type }}</div>
+                    </td>
+                    <td class="px-4 py-2.5 text-right tabular-nums text-gray-900">{{ row.pending_count }}</td>
+                    <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">{{ row.oldest_pending_age }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <div class="px-4 py-10 text-sm text-gray-400">No pending queue backlog.</div>
+            {% endif %}
+          </div>
+
+          <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100">
+              <h3 class="text-sm font-semibold text-gray-900">Failures and Retries</h3>
+            </div>
+            <div class="p-4">
+              {% if queue_health.retry_buckets %}
+              <div class="flex flex-wrap gap-2 mb-4">
+                {% for bucket in queue_health.retry_buckets %}
+                <span class="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-700">
+                  retry {{ bucket.retry_count }}
+                  <span class="font-semibold tabular-nums text-gray-900">{{ bucket.pending_count }}</span>
+                </span>
+                {% endfor %}
+              </div>
+              {% endif %}
+
+              {% if queue_health.top_failures %}
+              <div class="space-y-2">
+                {% for failure in queue_health.top_failures %}
+                <div class="border border-gray-100 rounded-md p-2">
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="font-mono text-xs text-gray-700">{{ failure.task_type }}</span>
+                    <span class="text-xs font-semibold tabular-nums text-red-600">{{ failure.count }}x</span>
+                  </div>
+                  <div class="text-xs text-gray-500 mt-1 break-words">{{ failure.error_message }}</div>
+                </div>
+                {% endfor %}
+              </div>
+              {% else %}
+              <p class="text-sm text-gray-400">No recent queue failures.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </details>
+  </div>
+
   <!-- Task Phases -->
   <div class="bg-white rounded-lg border border-gray-200 mb-4">
     <details open>

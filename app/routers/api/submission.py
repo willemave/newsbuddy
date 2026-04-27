@@ -4,26 +4,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import String, and_, cast, or_
 from sqlalchemy.orm import Session
 
 from app.commands import submit_content as submit_content_command
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import get_current_user
-from app.core.logging import get_logger
+from app.core.deps import get_current_user, require_user_id
 from app.models.api.common import (
     SubmissionStatusListResponse,
-    SubmissionStatusResponse,
 )
 from app.models.content_submission import ContentSubmissionResponse, SubmitContentRequest
-from app.models.metadata import ContentStatus, ContentType
-from app.models.pagination import PaginationMetadata
-from app.models.schema import Content
 from app.models.user import User
-from app.utils.pagination import PaginationCursor
+from app.queries import list_submission_statuses as list_submission_statuses_query
 
 router = APIRouter()
-logger = get_logger(__name__)
 
 
 @router.post(
@@ -79,112 +72,13 @@ async def list_submission_statuses(
     ),
 ) -> SubmissionStatusListResponse:
     """List status information for the current user's submissions."""
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    last_id = None
-    last_created_at = None
-    if cursor:
-        try:
-            cursor_data = PaginationCursor.decode_cursor(cursor)
-            last_id = cursor_data["last_id"]
-            last_created_at = cursor_data["last_created_at"]
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    status_filter = [
-        ContentStatus.NEW.value,
-        ContentStatus.PENDING.value,
-        ContentStatus.PROCESSING.value,
-        ContentStatus.FAILED.value,
-        ContentStatus.SKIPPED.value,
-    ]
-
-    submitter_filter = cast(Content.content_metadata["submitted_by_user_id"], String) == str(
-        user_id
-    )
-
-    query = (
-        db.query(Content)
-        .filter(submitter_filter)
-        .filter(Content.status.in_(status_filter))
-        .order_by(Content.created_at.desc(), Content.id.desc())
-    )
-
-    if last_id and last_created_at:
-        query = query.filter(
-            or_(
-                Content.created_at < last_created_at,
-                and_(Content.created_at == last_created_at, Content.id < last_id),
-            )
+    user_id = require_user_id(current_user)
+    try:
+        return list_submission_statuses_query.execute(
+            db,
+            user_id=user_id,
+            cursor=cursor,
+            limit=limit,
         )
-
-    contents = query.limit(limit + 1).all()
-
-    has_more = len(contents) > limit
-    if has_more:
-        contents = contents[:limit]
-
-    submissions: list[SubmissionStatusResponse] = []
-    for content in contents:
-        try:
-            metadata = content.content_metadata or {}
-            raw_content_type = content.content_type
-            raw_status = content.status
-            if raw_content_type is None or raw_status is None:
-                raise ValueError("Submission row is missing required fields")
-            submissions.append(
-                SubmissionStatusResponse(
-                    id=_require_content_id(content.id),
-                    content_type=ContentType(raw_content_type),
-                    url=str(content.url),
-                    source_url=content.source_url,
-                    title=content.title,
-                    status=ContentStatus(raw_status),
-                    error_message=content.error_message,
-                    created_at=content.created_at.isoformat() if content.created_at else "",
-                    processed_at=content.processed_at.isoformat() if content.processed_at else None,
-                    submitted_via=metadata.get("submitted_via"),
-                    is_self_submission=True,
-                )
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Skipping submission %s due to validation error: %s",
-                content.id,
-                exc,
-                extra={
-                    "component": "submission_status",
-                    "operation": "list_submissions",
-                    "item_id": content.id,
-                    "context_data": {"content_id": content.id},
-                },
-            )
-            continue
-
-    next_cursor = None
-    if has_more and contents:
-        last_item = contents[-1]
-        if last_item.created_at is None:
-            raise ValueError("Submission row is missing created_at")
-        next_cursor = PaginationCursor.encode_cursor(
-            last_id=_require_content_id(last_item.id),
-            last_created_at=last_item.created_at,
-            filters={},
-        )
-
-    return SubmissionStatusListResponse(
-        submissions=submissions,
-        meta=PaginationMetadata(
-            next_cursor=next_cursor,
-            has_more=has_more,
-            page_size=len(submissions),
-            total=len(submissions),
-        ),
-    )
-
-
-def _require_content_id(content_id: int | None) -> int:
-    if content_id is None:
-        raise ValueError("Content is missing an id")
-    return content_id
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

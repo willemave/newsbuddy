@@ -28,6 +28,7 @@ from app.models.schema import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.content_bodies import get_content_body_resolver, sync_content_body_storage
+from app.services.content_lifecycle import build_content_lifecycle_log_extra
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.content_status_state_machine import ContentStatusStateMachine
 from app.services.dig_deeper import enqueue_dig_deeper_task
@@ -177,6 +178,29 @@ class SummarizeHandler:
 
                 body_resolver = get_content_body_resolver()
 
+                def _log_lifecycle_event(
+                    event_name: str,
+                    *,
+                    status: str | ContentStatus | None = None,
+                    event_task_id: int | None = None,
+                    event_task_type: TaskType | str | None = None,
+                    context_data: dict[str, Any] | None = None,
+                ) -> None:
+                    logger.info(
+                        "Content lifecycle event: %s",
+                        event_name,
+                        extra=build_content_lifecycle_log_extra(
+                            event_name=event_name,
+                            operation="summarize_task",
+                            content_id=content.id,
+                            content_type=content.content_type,
+                            status=status or content.status,
+                            task_id=event_task_id,
+                            task_type=event_task_type,
+                            context_data=context_data,
+                        ),
+                    )
+
                 def _persist_failure(
                     reason: str,
                     *,
@@ -208,6 +232,12 @@ class SummarizeHandler:
                     content.error_message = reason[:500]
                     content.processed_at = datetime.now(UTC)
                     db.commit()
+                    if status == ContentStatus.FAILED:
+                        _log_lifecycle_event(
+                            "content.failed",
+                            status=status,
+                            context_data={"reason": reason[:500]},
+                        )
 
                 def _persist_retryable_failure(reason: str) -> None:
                     base_metadata = _load_latest_metadata()
@@ -329,6 +359,9 @@ class SummarizeHandler:
                         "Skipping summarize task for content %s; summarization input unchanged",
                         content_id,
                     )
+                    _log_lifecycle_event("content.summary_completed")
+                    if content.status == ContentStatus.COMPLETED.value:
+                        _log_lifecycle_event("content.completed")
                     return TaskResult.ok()
 
                 summarization_type, max_bullet_points, max_quotes = (
@@ -480,6 +513,15 @@ class SummarizeHandler:
                     ).value
                     content.processed_at = datetime.now(UTC)
                     db.commit()
+                    _log_lifecycle_event(
+                        "content.summary_completed",
+                        context_data={
+                            "summary_kind": summary_kind,
+                            "summary_version": summary_version,
+                        },
+                    )
+                    if content.status == ContentStatus.COMPLETED.value:
+                        _log_lifecycle_event("content.completed")
 
                     if share_and_chat_user_ids:
                         for user_id in share_and_chat_user_ids:
@@ -495,21 +537,25 @@ class SummarizeHandler:
                             "Skipping post-summary image generation for news content %s",
                             content_id,
                         )
-                    elif (
-                        enqueue_visible_long_form_image_if_needed(
+                    else:
+                        image_task_id = enqueue_visible_long_form_image_if_needed(
                             db,
                             content,
                             queue_service=cast(Any, context.queue),
                         )
-                        is not None
-                    ):
-                        logger.info("Enqueued image generation for content %s", content_id)
-                    else:
-                        logger.info(
-                            "Skipping post-summary image generation for content %s; "
-                            "not visible or already covered",
-                            content_id,
-                        )
+                        if image_task_id is not None:
+                            logger.info("Enqueued image generation for content %s", content_id)
+                            _log_lifecycle_event(
+                                "content.image_queued",
+                                event_task_id=image_task_id,
+                                event_task_type=TaskType.GENERATE_IMAGE,
+                            )
+                        else:
+                            logger.info(
+                                "Skipping post-summary image generation for content %s; "
+                                "not visible or already covered",
+                                content_id,
+                            )
 
                     return TaskResult.ok()
 

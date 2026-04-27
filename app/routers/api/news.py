@@ -13,7 +13,7 @@ from app.commands.convert_news_to_article import (
     ensure_article_saved_to_knowledge,
 )
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.models.api.common import (
     BulkMarkReadRequest,
     ContentDetailResponse,
@@ -35,13 +35,6 @@ from app.utils.url_utils import is_http_url, normalize_http_url
 router = APIRouter(tags=["news"], responses={404: {"description": "Not found"}})
 
 
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
-
-
 @router.get("/items", response_model=ContentListResponse, summary="List visible news items")
 def list_news_items(
     db: Annotated[Session, Depends(get_readonly_db_session)],
@@ -54,7 +47,7 @@ def list_news_items(
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> ContentListResponse:
     """Return the visible representative news feed for the current user."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     return list_visible_news_items(
         db,
         user_id=user_id,
@@ -71,7 +64,7 @@ def mark_news_items_read(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, Any]:
     """Mark the given visible representative news items as read."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     return bulk_mark_news_items_read(
         db,
         user_id=user_id,
@@ -92,7 +85,7 @@ def get_news_item(
     """Return one visible representative news item."""
     item = get_visible_news_item_detail(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         news_item_id=news_item_id,
     )
     if item is None:
@@ -113,7 +106,7 @@ def get_news_item_discussion(
     """Return discussion payload for one visible representative news item."""
     return get_news_item_discussion_query.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         news_item_id=news_item_id,
     )
 
@@ -131,7 +124,7 @@ def refresh_news_item_discussion(
     """Refresh discussion payload for one visible representative news item."""
     return refresh_content_discussion_command.refresh_news_item_discussion(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         news_item_id=news_item_id,
     )
 
@@ -147,7 +140,7 @@ def convert_news_item_to_article(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ConvertNewsItemResponse:
     """Convert one representative news item into saved article content."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     item = get_visible_news_item(db, user_id=user_id, news_item_id=news_item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="News item not found")

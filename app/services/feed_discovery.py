@@ -549,7 +549,7 @@ def _select_directions_llm(
     user_id: int,
     model_spec: str,
 ) -> DiscoveryDirectionPlan:
-    settings = get_settings()
+    queue_settings = get_settings().queue
     agent = _get_direction_agent(model_spec)
     prompt = (
         "Use search_favorites to inspect the user's favorites. "
@@ -570,7 +570,7 @@ def _select_directions_llm(
     result = agent.run_sync(
         prompt,
         deps=DiscoveryToolDeps(user_id=user_id),
-        model_settings={"timeout": settings.worker_timeout_seconds},
+        model_settings={"timeout": queue_settings.worker_timeout_seconds},
     )
     record_model_usage(
         "direction_select",
@@ -624,7 +624,7 @@ def _plan_lanes_llm(
     direction_plan: DiscoveryDirectionPlan,
     model_spec: str,
 ) -> DiscoveryLanePlan:
-    settings = get_settings()
+    queue_settings = get_settings().queue
     agent = get_basic_agent(
         model_spec=model_spec,
         output_type=DiscoveryLanePlan,
@@ -662,7 +662,10 @@ def _plan_lanes_llm(
             "context_data": {"direction_count": len(direction_plan.directions)},
         },
     )
-    result = agent.run_sync(prompt, model_settings={"timeout": settings.worker_timeout_seconds})
+    result = agent.run_sync(
+        prompt,
+        model_settings={"timeout": queue_settings.worker_timeout_seconds},
+    )
     record_model_usage(
         "lane_plan",
         result,
@@ -696,7 +699,7 @@ def _extract_candidates_llm(
     results: list[ExaSearchResult],
     model_spec: str,
 ) -> DiscoveryCandidateBatch:
-    settings = get_settings()
+    queue_settings = get_settings().queue
     agent = get_basic_agent(
         model_spec=model_spec,
         output_type=DiscoveryCandidateBatch,
@@ -725,7 +728,10 @@ def _extract_candidates_llm(
             "context_data": {"lane": lane.name, "result_count": len(results)},
         },
     )
-    result = agent.run_sync(prompt, model_settings={"timeout": settings.worker_timeout_seconds})
+    result = agent.run_sync(
+        prompt,
+        model_settings={"timeout": queue_settings.worker_timeout_seconds},
+    )
     record_model_usage(
         f"candidate_extract:{lane.name}",
         result,

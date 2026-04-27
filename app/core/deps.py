@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.api_keys import is_api_key_token
 from app.core.db import get_db_session as get_db
 from app.core.logging import bind_log_context
-from app.core.security import verify_token
+from app.core.security import verify_admin_session_token, verify_token
 from app.models.schema import UserApiKey
 from app.models.user import User
 from app.repositories.api_key_repository import (
@@ -96,6 +96,14 @@ def get_current_user(
     return user
 
 
+def require_user_id(user: User) -> int:
+    """Return a persisted authenticated user id."""
+    user_id = user.id
+    if user_id is None:
+        raise ValueError("Authenticated user is missing an id")
+    return int(user_id)
+
+
 def get_optional_user(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
@@ -170,13 +178,15 @@ def require_admin(request: Request, db: Annotated[Session, Depends(get_db)]) -> 
     Raises:
         AdminAuthRequired: If not authenticated, redirects to login page
     """
-    from app.routers.auth import admin_sessions
-
     admin_session = request.cookies.get(ADMIN_SESSION_COOKIE)
 
-    if not admin_session or admin_session not in admin_sessions:
+    try:
+        if not admin_session:
+            raise ValueError("Missing admin session")
+        verify_admin_session_token(admin_session)
+    except ValueError as exc:
         # Build redirect URL with next parameter
         next_url = quote(str(request.url.path), safe="")
-        raise AdminAuthRequired(redirect_url=f"/auth/admin/login?next={next_url}")
+        raise AdminAuthRequired(redirect_url=f"/auth/admin/login?next={next_url}") from exc
 
     return get_or_create_admin_user(db)

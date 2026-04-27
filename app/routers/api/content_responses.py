@@ -6,6 +6,7 @@ from app.models.api.common import ContentDetailResponse, ContentSummaryResponse,
 from app.models.content_display import resolve_image_urls
 from app.models.contracts import ContentClassification, ContentStatus
 from app.models.metadata import ContentData, ContentType
+from app.models.metadata_access import metadata_view
 from app.models.schema import Content
 from app.services.content_bodies import sanitize_metadata_for_api
 from app.utils.image_urls import build_content_image_url, build_thumbnail_url
@@ -18,40 +19,17 @@ def _require_content_id(content_id: int | None) -> int:
 
 
 def _extract_news_summary(domain_content: ContentData) -> dict[str, Any]:
-    metadata = domain_content.metadata or {}
-    article_meta = metadata.get("article", {})
-    aggregator_meta = metadata.get("aggregator", {})
-    aggregator_metadata = (
-        aggregator_meta.get("metadata", {}) if isinstance(aggregator_meta, dict) else {}
-    )
-    summary_meta = metadata.get("summary", {})
-    discussion_url = metadata.get("discussion_url") or aggregator_meta.get("url")
-    news_article_url = str(domain_content.url) if domain_content.url else article_meta.get("url")
-
-    key_points = summary_meta.get("key_points")
-    if not isinstance(key_points, list) or not key_points:
-        key_points = metadata.get("summary_key_points")
-    news_key_points = key_points if isinstance(key_points, list) and key_points else None
-
-    comment_count: int | None = None
-    for raw in (
-        metadata.get("comment_count"),
-        aggregator_metadata.get("comments_count"),
-    ):
-        if raw is not None:
-            try:
-                comment_count = max(int(raw), 0)
-            except (TypeError, ValueError):
-                continue
-            break
+    view = metadata_view(domain_content.metadata)
+    fields = view.news_fields()
+    news_article_url = str(domain_content.url) if domain_content.url else fields.article.get("url")
 
     return {
         "news_article_url": news_article_url,
-        "news_discussion_url": discussion_url,
-        "news_key_points": news_key_points,
+        "news_discussion_url": fields.discussion_url,
+        "news_key_points": fields.summary_key_points,
         "news_summary_text": domain_content.summary,
-        "classification": summary_meta.get("classification"),
-        "comment_count": comment_count,
+        "classification": fields.summary.get("classification"),
+        "comment_count": fields.comment_count,
     }
 
 
@@ -76,7 +54,8 @@ def build_content_summary_response(
     news_discussion_url = None
     news_key_points = None
     news_summary_text = domain_content.short_summary
-    discussion_url = (domain_content.metadata or {}).get("discussion_url")
+    metadata = metadata_view(domain_content.metadata)
+    discussion_url = metadata.get("discussion_url")
     comment_count: int | None = None
 
     if domain_content.content_type == ContentType.NEWS:
@@ -100,7 +79,7 @@ def build_content_summary_response(
         if platform:
             primary_topic = platform
 
-    raw_top_comment = (domain_content.metadata or {}).get("top_comment")
+    raw_top_comment = metadata.get("top_comment")
     top_comment: dict[str, str] | None = None
     if isinstance(raw_top_comment, dict):
         author = str(raw_top_comment.get("author") or "unknown").strip() or "unknown"
@@ -151,7 +130,9 @@ def build_fallback_content_summary_response(
     is_saved_to_knowledge: bool,
 ) -> ContentSummaryResponse | None:
     """Build a minimal summary response when full metadata normalization fails."""
-    metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
+    metadata = metadata_view(
+        content.content_metadata if isinstance(content.content_metadata, dict) else {}
+    )
     short_summary = content.short_summary
     if not short_summary:
         return None
@@ -173,11 +154,11 @@ def build_fallback_content_summary_response(
     if content.content_type in {
         ContentType.ARTICLE.value,
         ContentType.PODCAST.value,
-    } and metadata.get("image_generated_at"):
+    } and metadata.image_state().get("image_generated_at"):
         image_url = build_content_image_url(content_id)
         thumbnail_url = build_thumbnail_url(content_id)
     elif content.content_type == ContentType.PODCAST.value:
-        raw_thumbnail = metadata.get("thumbnail_url")
+        raw_thumbnail = metadata.image_state().get("thumbnail_url")
         if isinstance(raw_thumbnail, str) and raw_thumbnail.startswith("http"):
             image_url = raw_thumbnail
 
@@ -238,13 +219,14 @@ def build_content_detail_response(
     quotes = domain_content.quotes
     topics = domain_content.topics
     full_markdown = None
-    summary_kind = (domain_content.metadata or {}).get("summary_kind")
-    summary_version = (domain_content.metadata or {}).get("summary_version")
+    metadata = metadata_view(domain_content.metadata)
+    summary_kind = metadata.summary_kind()
+    summary_version = metadata.summary_version()
     news_article_url = None
     news_discussion_url = None
     news_key_points = None
     news_summary_text = domain_content.summary
-    discussion_url = (domain_content.metadata or {}).get("discussion_url")
+    discussion_url = metadata.get("discussion_url")
 
     if domain_content.content_type == ContentType.NEWS:
         news_fields = _extract_news_summary(domain_content)

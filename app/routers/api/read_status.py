@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.commands import mark_read as mark_read_command
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.core.logging import get_logger
 from app.models.api.common import BulkMarkReadRequest, ContentListResponse
 from app.models.user import User
@@ -16,13 +16,6 @@ from app.queries import get_recently_read as get_recently_read_query
 logger = get_logger(__name__)
 
 router = APIRouter()
-
-
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
 
 
 @router.post(
@@ -41,7 +34,7 @@ async def mark_content_read(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     """Mark content as read."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     logger.info(
         "[API] POST /{content_id}/mark-read called | user_id=%s content_id=%s",
         user_id,
@@ -66,7 +59,7 @@ async def mark_content_unread(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     """Mark content as unread by removing its read status."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     logger.info(
         "[API] DELETE /{content_id}/mark-unread called | user_id=%s content_id=%s",
         user_id,
@@ -91,7 +84,7 @@ async def bulk_mark_read(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> dict:
     """Mark multiple content items as read."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     logger.info(
         "[API] POST /bulk-mark-read called | user_id=%s content_ids=%s count=%s",
         user_id,
@@ -129,7 +122,7 @@ async def get_recently_read(
     ),
 ) -> ContentListResponse:
     """Get all recently read content with cursor-based pagination, sorted by read time."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     logger.info(
         "[API] GET /recently-read/list called | user_id=%s cursor=%s limit=%s",
         user_id,

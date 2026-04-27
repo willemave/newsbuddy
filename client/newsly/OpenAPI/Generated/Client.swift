@@ -65,6 +65,20 @@ internal struct Client: APIProtocol {
                     name: "limit",
                     value: input.query.limit
                 )
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: true,
+                    name: "stats_range",
+                    value: input.query.statsRange
+                )
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: true,
+                    name: "cost_bucket",
+                    value: input.query.costBucket
+                )
                 converter.setAcceptHeader(
                     in: &request.headerFields,
                     contentTypes: input.headers.accept
@@ -660,6 +674,161 @@ internal struct Client: APIProtocol {
                 case 422:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Operations.AdminEvalSummariesRun.Output.UnprocessableContent.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.HTTPValidationError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unprocessableContent(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// Admin Insight Reports Page
+    ///
+    /// Admin panel: per-user insight report eligibility + manual trigger.
+    ///
+    /// - Remark: HTTP `GET /admin/insight-reports`.
+    /// - Remark: Generated from `#/paths//admin/insight-reports/get(adminInsightReportsPage)`.
+    internal func adminInsightReportsPage(_ input: Operations.AdminInsightReportsPage.Input) async throws -> Operations.AdminInsightReportsPage.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.AdminInsightReportsPage.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/admin/insight-reports",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.AdminInsightReportsPage.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "text/html"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "text/html":
+                        body = try converter.getResponseBodyAsBinary(
+                            OpenAPIRuntime.HTTPBody.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .html(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// Admin Insight Reports Trigger
+    ///
+    /// Manually enqueue a ``generate_insight_report`` task for a single user.
+    ///
+    /// - Remark: HTTP `POST /admin/insight-reports/trigger`.
+    /// - Remark: Generated from `#/paths//admin/insight-reports/trigger/post(adminInsightReportsTrigger)`.
+    internal func adminInsightReportsTrigger(_ input: Operations.AdminInsightReportsTrigger.Input) async throws -> Operations.AdminInsightReportsTrigger.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.AdminInsightReportsTrigger.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/admin/insight-reports/trigger",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .post
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                let body: OpenAPIRuntime.HTTPBody?
+                switch input.body {
+                case let .urlEncodedForm(value):
+                    body = try converter.setRequiredRequestBodyAsURLEncodedForm(
+                        value,
+                        headerFields: &request.headerFields,
+                        contentType: "application/x-www-form-urlencoded"
+                    )
+                }
+                return (request, body)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.AdminInsightReportsTrigger.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            OpenAPIRuntime.OpenAPIValueContainer.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 422:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.AdminInsightReportsTrigger.Output.UnprocessableContent.Body
                     let chosenContentType = try converter.bestContentType(
                         received: contentType,
                         options: [

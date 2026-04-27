@@ -150,6 +150,19 @@ def test_build_parser_defaults_to_text_output():
     assert args.output == "text"
 
 
+def test_build_parser_supports_health_queue():
+    args = build_parser().parse_args(["health", "queue", "--window-hours", "6"])
+
+    assert args.health_command == "queue"
+    assert args.window_hours == 6
+
+
+def test_build_parser_supports_health_config():
+    args = build_parser().parse_args(["health", "config"])
+
+    assert args.health_command == "config"
+
+
 def test_build_parser_supports_logs_exceptions():
     args = build_parser().parse_args(["logs", "exceptions", "--limit", "7"])
 
@@ -250,6 +263,43 @@ def test_emit_text_usage_summary_includes_vendor_units():
     assert "Totals: 2 calls, 100 tokens, 2 requests, 9 resources, $0.4200" in rendered
     assert "- exa: 1 calls, 1 requests, 8 resources, $0.2800" in rendered
     assert "- openai: 1 calls, 100 tokens, $0.1400" in rendered
+
+
+def test_emit_text_health_config_summarizes_redacted_groups():
+    stream = StringIO()
+    emit(
+        Envelope(
+            ok=True,
+            command="health.config",
+            data={
+                "environment": "production",
+                "redacted": True,
+                "groups": {
+                    "auth": {
+                        "jwt_secret_configured": True,
+                        "admin_password_configured": True,
+                    },
+                    "queue": {
+                        "max_workers": 1,
+                        "worker_timeout_seconds": 300,
+                    },
+                    "providers": {
+                        "openai_api_key_configured": True,
+                        "exa_api_key_configured": False,
+                    },
+                },
+            },
+        ),
+        "text",
+        stream,
+    )
+
+    rendered = stream.getvalue()
+    assert "Config diagnostics:" in rendered
+    assert "- environment: production" in rendered
+    assert "- auth: 2/2 configured" in rendered
+    assert "- providers: 1/2 configured" in rendered
+    assert "- queue: 2 settings" in rendered
 
 
 def test_logs_group_error_includes_next_steps(capsys):

@@ -8,19 +8,12 @@ from sqlalchemy.orm import Session
 from app.commands import remove_from_knowledge as remove_from_knowledge_command
 from app.commands import save_to_knowledge as save_to_knowledge_command
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.models.api.common import ContentListResponse
 from app.models.user import User
 from app.queries import get_knowledge_library as get_knowledge_library_query
 
 router = APIRouter()
-
-
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
 
 
 @router.post(
@@ -41,7 +34,7 @@ async def save_to_knowledge(
     """Save content to the authenticated user's knowledge library."""
     return save_to_knowledge_command.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         content_id=content_id,
     )
 
@@ -64,7 +57,7 @@ async def remove_from_knowledge(
     """Remove content from the authenticated user's knowledge library."""
     return remove_from_knowledge_command.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         content_id=content_id,
     )
 
@@ -90,7 +83,7 @@ async def get_knowledge_library(
     """Get all knowledge-saved content with cursor-based pagination."""
     return get_knowledge_library_query.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         cursor=cursor,
         limit=limit,
     )

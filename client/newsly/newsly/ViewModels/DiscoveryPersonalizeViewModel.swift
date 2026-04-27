@@ -258,6 +258,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
             let request = OnboardingCompleteRequest(
                 selectedSources: selectedSources,
                 selectedSubreddits: selectedSubreddits,
+                selectedAggregators: [],
                 profileSummary: topicSummary,
                 inferredTopics: inferredTopics.isEmpty ? nil : inferredTopics,
                 twitterUsername: nil,

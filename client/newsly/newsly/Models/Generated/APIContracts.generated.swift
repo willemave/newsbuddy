@@ -7,6 +7,7 @@ enum APIContentType: String, Codable, CaseIterable {
     case article = "article"
     case podcast = "podcast"
     case news = "news"
+    case insight_report = "insight_report"
     case unknown = "unknown"
 }
 
@@ -35,6 +36,8 @@ enum APITaskType: String, Codable, CaseIterable {
     case process_podcast_media = "process_podcast_media"
     case download_audio = "download_audio"
     case transcribe = "transcribe"
+    case download_tweet_video_audio = "download_tweet_video_audio"
+    case transcribe_tweet_video = "transcribe_tweet_video"
     case summarize = "summarize"
     case fetch_discussion = "fetch_discussion"
     case generate_image = "generate_image"
@@ -43,6 +46,7 @@ enum APITaskType: String, Codable, CaseIterable {
     case onboarding_discover = "onboarding_discover"
     case dig_deeper = "dig_deeper"
     case sync_integration = "sync_integration"
+    case generate_insight_report = "generate_insight_report"
 }
 
 enum APITaskStatus: String, Codable, CaseIterable {

@@ -17,7 +17,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.models.api.chat import (
@@ -85,13 +85,6 @@ _SEARCH_TOOL_NAMES = {
     "exa_web_search",
     "search_personal_library",
 }
-
-
-def _require_user_id(user: User) -> int:
-    user_id = user.id
-    if user_id is None:
-        raise HTTPException(status_code=500, detail="User record missing id")
-    return user_id
 
 
 def _require_session_id(session: ChatSession) -> int:
@@ -487,7 +480,7 @@ async def list_sessions(
     Returns sessions ordered by last_message_at (most recent first),
     falling back to created_at for sessions without messages.
     """
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     query = db.query(ChatSession).filter(
         ChatSession.user_id == user_id,
         ChatSession.is_archived == False,  # noqa: E712
@@ -664,7 +657,7 @@ async def create_session(
     If content_id is provided, the session will be associated with that article
     and the article's context will be available to the chat agent.
     """
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     # Resolve model
     provider, model_spec = resolve_model(request.llm_provider, request.llm_model_hint)
 
@@ -802,7 +795,7 @@ async def update_session(
 
     Allows switching LLM provider mid-conversation while preserving chat history.
     """
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
 
     if not session:
@@ -868,7 +861,7 @@ async def get_session(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ChatSessionDetailDto:
     """Get chat session details with message history."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
 
     if not session:
@@ -925,7 +918,7 @@ async def delete_session(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
     """Archive a chat session for the current user."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
 
     if not session:
@@ -987,7 +980,7 @@ async def send_message(
     Returns immediately with the user message and a message_id.
     Poll GET /messages/{message_id}/status for completion.
     """
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
 
     if not session:
@@ -1097,7 +1090,7 @@ async def create_assistant_turn(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AssistantTurnResponse:
     """Create or continue an assistant-driven chat turn with screen context."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     screen_context: AssistantScreenContext = request.screen_context
     session: ChatSession
 
@@ -1206,7 +1199,7 @@ async def get_message_status(
     Returns the current status and assistant message if completed.
     Poll every 500ms-1s until status is 'completed' or 'failed'.
     """
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     from pydantic_ai.messages import (
         ModelMessagesTypeAdapter,
         ModelResponse,
@@ -1311,10 +1304,11 @@ async def start_council_mode(
 ) -> ChatSessionDetailDto:
     """Fork the current chat into four persona branches and persist the council row."""
 
+    user_id = require_user_id(current_user)
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.user_id != current_user.id:
+    if session.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this session")
 
     try:
@@ -1343,10 +1337,11 @@ async def select_council_mode_branch(
 ) -> ChatSessionDetailDto:
     """Switch the active council branch and return the merged parent transcript."""
 
+    user_id = require_user_id(current_user)
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.user_id != current_user.id:
+    if session.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this session")
     if not session.council_mode:
         raise HTTPException(status_code=400, detail="Council mode is not active for this chat")
@@ -1376,10 +1371,11 @@ async def retry_council_mode_branch(
 ) -> ChatSessionDetailDto:
     """Regenerate one council branch and return the merged parent transcript."""
 
+    user_id = require_user_id(current_user)
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.user_id != current_user.id:
+    if session.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this session")
     if not session.council_mode:
         raise HTTPException(status_code=400, detail="Council mode is not active for this chat")
@@ -1411,12 +1407,13 @@ async def get_initial_suggestions(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ChatMessageDto:
     """Get initial follow-up question suggestions for an article-based session."""
+    user_id = require_user_id(current_user)
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user_id != current_user.id:
+    if session.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this session")
 
     if not session.content_id:
@@ -1432,7 +1429,7 @@ async def get_initial_suggestions(
             operation="initial_suggestions",
             event_name="chat.initial_suggestions",
             status="started",
-            user_id=current_user.id,
+            user_id=user_id,
             session_id=session_id,
             context_data={"model": session.llm_model},
         ),
@@ -1457,7 +1454,7 @@ async def get_initial_suggestions(
             operation="initial_suggestions",
             event_name="chat.initial_suggestions",
             status="completed",
-            user_id=current_user.id,
+            user_id=user_id,
             session_id=session_id,
             context_data={"model": session.llm_model},
         ),

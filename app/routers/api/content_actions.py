@@ -13,7 +13,7 @@ from app.commands import (
     generate_tweet_suggestions as generate_tweet_suggestions_command,
 )
 from app.core.db import get_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.models.api.common import (
     ConvertNewsResponse,
     DownloadMoreRequest,
@@ -24,13 +24,6 @@ from app.models.api.common import (
 from app.models.user import User
 
 router = APIRouter()
-
-
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
 
 
 @router.post(
@@ -57,7 +50,7 @@ async def convert_news_to_article(
     return convert_news_to_article_command.execute(
         db,
         content_id=content_id,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
     )
 
 
@@ -86,7 +79,7 @@ async def download_more_from_series(
     """Download older items from the same feed series as this content."""
     return await download_more_from_series_command.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         content_id=content_id,
         count=request.count,
     )
@@ -116,7 +109,7 @@ async def get_tweet_suggestions(
     """Generate tweet suggestions for one content item."""
     return await generate_tweet_suggestions_command.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         content_id=content_id,
         message=request.message,
         creativity=request.creativity,

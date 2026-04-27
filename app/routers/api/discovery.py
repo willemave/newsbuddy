@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import DEFAULT_NEW_FEED_LIMIT
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.api.common import (
@@ -55,13 +55,6 @@ router = APIRouter()
 
 ScraperTypeLiteral = Literal["substack", "atom", "podcast_rss", "youtube", "reddit"]
 _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
-
-
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
 
 
 def _require_run_id(run_id: int | None) -> int:
@@ -142,7 +135,7 @@ async def get_discovery_suggestions(
     db: Session = Depends(get_readonly_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoverySuggestionsResponse:
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     run = (
         db.query(FeedDiscoveryRun)
         .filter(FeedDiscoveryRun.user_id == user_id)
@@ -200,7 +193,7 @@ async def get_discovery_history(
     db: Session = Depends(get_readonly_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryHistoryResponse:
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     runs = (
         db.query(FeedDiscoveryRun)
         .filter(FeedDiscoveryRun.user_id == user_id)
@@ -287,7 +280,7 @@ async def search_discovery_podcast_episodes(
     db: Session = Depends(get_readonly_db_session),
     current_user: User = Depends(get_current_user),
 ) -> PodcastEpisodeSearchResponse:
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     existing_feed_rows = (
         db.query(UserScraperConfig.feed_url)
         .filter(
@@ -342,7 +335,7 @@ async def refresh_discovery(
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryRefreshResponse:
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     settings = get_settings()
     knowledge_save_count = (
         db.query(func.count(ContentKnowledgeSave.id))
@@ -373,7 +366,7 @@ async def subscribe_discovery_suggestions(
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoverySubscribeResponse:
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     suggestions = (
         db.query(FeedDiscoverySuggestion)
         .filter(
@@ -453,7 +446,7 @@ async def add_discovery_items(
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryAddItemResponse:
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     suggestions = (
         db.query(FeedDiscoverySuggestion)
         .filter(
@@ -523,7 +516,7 @@ async def dismiss_discovery_suggestions(
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryDismissResponse:
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     suggestions = (
         db.query(FeedDiscoverySuggestion)
         .filter(
@@ -552,7 +545,7 @@ async def clear_discovery_suggestions(
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryDismissResponse:
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     suggestions = (
         db.query(FeedDiscoverySuggestion).filter(FeedDiscoverySuggestion.user_id == user_id).all()
     )

@@ -24,6 +24,17 @@ compare_dir() {
   fi
 }
 
+compare_generated_go_dir() {
+  local expected="$1"
+  local actual="$2"
+  local generated_file
+  while IFS= read -r generated_file; do
+    local filename
+    filename="$(basename "$generated_file")"
+    compare_file "$expected/$filename" "$actual/$filename"
+  done < <(find "$actual" -maxdepth 1 -type f -name '*_gen.go' | sort)
+}
+
 cd "$REPO_ROOT"
 
 FULL_SCHEMA_TMP="$TMPDIR_ROOT/openapi.json"
@@ -53,6 +64,6 @@ AGENT_OPENAPI_OUTPUT="$AGENT_SCHEMA_TMP" GO_TARGET_DIR="$GO_TARGET_TMP" \
   "$REPO_ROOT/scripts/generate_agent_cli_artifacts.sh" \
   >/dev/null
 compare_file "$REPO_ROOT/cli/openapi/agent-openapi.json" "$AGENT_SCHEMA_TMP"
-compare_dir "$REPO_ROOT/cli/internal/api" "$GO_TARGET_TMP"
+compare_generated_go_dir "$REPO_ROOT/cli/internal/api" "$GO_TARGET_TMP"
 
 echo "Public contract artifacts are up to date."

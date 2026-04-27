@@ -17,12 +17,19 @@ from app.models.metadata_state import (
 from app.models.schema import Content
 from app.pipeline.checkout import get_checkout_manager
 from app.pipeline.podcast_workers import PodcastMediaWorker
-from app.pipeline.workflows.content_processing_workflow import ContentProcessingWorkflow
 from app.processing_strategies.registry import get_strategy_registry
 from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
 from app.services.content_bodies import sync_content_body_storage
+from app.services.content_lifecycle import (
+    TERMINAL_STATUSES,
+    build_content_lifecycle_log_extra,
+    complete_with_reused_summary,
+    decide_process_content_lifecycle,
+    process_content_lifecycle_event_names,
+    should_enqueue_summarize_after_processing,
+    should_reuse_existing_summary,
+)
 from app.services.content_metadata_merge import refresh_merge_content_metadata
-from app.services.content_status_state_machine import ContentStatusStateMachine
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.http import NonRetryableError, get_http_service
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
@@ -32,10 +39,6 @@ from app.services.youtube_equivalent_resolver import (
     resolve_youtube_equivalent,
 )
 from app.utils.dates import parse_date_with_tz
-from app.utils.summarization_inputs import (
-    build_summarization_payload,
-    compute_summarization_input_fingerprint,
-)
 from app.utils.title_utils import clean_title
 from app.utils.url_utils import is_http_url, normalize_http_url
 
@@ -59,7 +62,6 @@ class ContentWorker:
         self.queue_gateway = get_task_queue_gateway()
         self.strategy_registry = get_strategy_registry()
         self.podcast_media_worker = PodcastMediaWorker()
-        self.processing_workflow = ContentProcessingWorkflow()
 
     def _mark_article_extraction_failure(
         self,
@@ -118,27 +120,7 @@ class ContentWorker:
         starting_metadata: dict[str, Any],
     ) -> bool:
         """Return True when processed content already has a matching summary."""
-        if not isinstance(starting_metadata.get("summary"), dict):
-            return False
-
-        current_payload = build_summarization_payload(content.content_type, content.metadata or {})
-        previous_payload = build_summarization_payload(content.content_type, starting_metadata)
-        if not current_payload or not previous_payload:
-            return False
-
-        current_fingerprint = compute_summarization_input_fingerprint(
-            content.content_type,
-            current_payload,
-        )
-        previous_fingerprint = starting_metadata.get("summarization_input_fingerprint")
-        if isinstance(previous_fingerprint, str) and previous_fingerprint == current_fingerprint:
-            return True
-
-        previous_payload_fingerprint = compute_summarization_input_fingerprint(
-            content.content_type,
-            previous_payload,
-        )
-        return previous_payload_fingerprint == current_fingerprint
+        return should_reuse_existing_summary(content, starting_metadata)
 
     def process_content(self, content_id: int, worker_id: str) -> bool:
         """
@@ -152,6 +134,9 @@ class ContentWorker:
         try:
             enqueue_summarize_task = False
             next_task_type: TaskType | None = None
+            queued_task_id: int | None = None
+            queued_task_type: TaskType | None = None
+            image_task_id: int | None = None
             state_persisted = False
             starting_metadata: dict[str, Any] = {}
 
@@ -179,7 +164,16 @@ class ContentWorker:
                 )
                 success = False
 
-            transition = self.processing_workflow.infer_transition(content=content, success=success)
+            next_task_type = None
+            if success and should_enqueue_summarize_after_processing(content):
+                next_task_type = self._tweet_video_audio_task(content)
+            lifecycle_decision = decide_process_content_lifecycle(
+                content=content,
+                success=success,
+                starting_metadata=starting_metadata,
+                next_task_type=next_task_type,
+            )
+            transition = lifecycle_decision.transition
             content.metadata = update_processing_state(
                 normalize_metadata_shape(content.metadata),
                 workflow_from=transition.from_status.value,
@@ -187,45 +181,21 @@ class ContentWorker:
                 workflow_transition=transition.reason,
             )
 
-            if not success and content.status not in self.processing_workflow.TERMINAL_STATUSES:
-                content.status = ContentStatus.FAILED
+            if lifecycle_decision.terminal_failure_status is not None:
+                content.status = lifecycle_decision.terminal_failure_status
 
-            if success:
-                enqueue_summarize_task = self.processing_workflow.should_enqueue_summarize(content)
-                if enqueue_summarize_task:
-                    next_task_type = self._tweet_video_audio_task(content)
-                if (
-                    enqueue_summarize_task
-                    and next_task_type is None
-                    and self._should_reuse_existing_summary(
-                        content,
-                        starting_metadata,
-                    )
-                ):
-                    current_payload = build_summarization_payload(
-                        content.content_type,
-                        content.metadata or {},
-                    )
-                    if current_payload:
-                        content.metadata["summarization_input_fingerprint"] = (
-                            compute_summarization_input_fingerprint(
-                                content.content_type,
-                                current_payload,
-                            )
-                        )
-                    content.status = ContentStatusStateMachine.status_after_summary(
-                        content_type=content.content_type,
-                        artwork_ready=bool(content.metadata.get("image_generated_at")),
-                    )
-                    content.processed_at = datetime.now(UTC)
-                    enqueue_summarize_task = False
-                    logger.info(
-                        "Skipping summarize enqueue for content %s; summarization input unchanged",
-                        content.id,
-                    )
+            enqueue_summarize_task = lifecycle_decision.enqueue_summarize_task
+            next_task_type = lifecycle_decision.next_task_type
+            if lifecycle_decision.reuse_existing_summary:
+                complete_with_reused_summary(content)
+                enqueue_summarize_task = False
+                logger.info(
+                    "Skipping summarize enqueue for content %s; summarization input unchanged",
+                    content.id,
+                )
 
             # Update database when processing succeeded or content was marked failed/skipped.
-            if success or content.status in self.processing_workflow.TERMINAL_STATUSES:
+            if success or content.status in TERMINAL_STATUSES:
                 with get_db() as db:
                     db_content = db.query(Content).filter(Content.id == content_id).first()
                     if db_content:
@@ -250,7 +220,8 @@ class ContentWorker:
 
             if enqueue_summarize_task and state_persisted and content.id is not None:
                 task_type = next_task_type or TaskType.SUMMARIZE
-                self.queue_gateway.enqueue(task_type, content_id=content.id)
+                queued_task_id = self.queue_gateway.enqueue(task_type, content_id=content.id)
+                queued_task_type = task_type
                 logger.info(
                     "Enqueued %s task for content %s (%s)",
                     task_type.value,
@@ -265,7 +236,49 @@ class ContentWorker:
                 with get_db() as db:
                     db_content = db.query(Content).filter(Content.id == content.id).first()
                     if db_content is not None:
-                        enqueue_visible_long_form_image_if_needed(db, db_content)
+                        image_task_id = enqueue_visible_long_form_image_if_needed(db, db_content)
+
+            if state_persisted and content.id is not None:
+                for event_name in process_content_lifecycle_event_names(
+                    decision=lifecycle_decision,
+                    success=success,
+                    final_status=content.status,
+                    queued_task_type=queued_task_type,
+                ):
+                    event_task_id = queued_task_id if event_name.endswith("_queued") else None
+                    event_task_type = queued_task_type if event_name.endswith("_queued") else None
+                    logger.info(
+                        "Content lifecycle event: %s",
+                        event_name,
+                        extra=build_content_lifecycle_log_extra(
+                            event_name=event_name,
+                            operation="process_content",
+                            content_id=content.id,
+                            content_type=content.content_type,
+                            status=content.status,
+                            worker_id=worker_id,
+                            task_id=event_task_id,
+                            task_type=event_task_type,
+                            transition=transition,
+                            context_data={"state_persisted": state_persisted},
+                        ),
+                    )
+
+                if image_task_id is not None:
+                    logger.info(
+                        "Content lifecycle event: content.image_queued",
+                        extra=build_content_lifecycle_log_extra(
+                            event_name="content.image_queued",
+                            operation="process_content",
+                            content_id=content.id,
+                            content_type=content.content_type,
+                            status=content.status,
+                            worker_id=worker_id,
+                            task_id=image_task_id,
+                            task_type=TaskType.GENERATE_IMAGE,
+                            context_data={"state_persisted": state_persisted},
+                        ),
+                    )
 
             return success
 

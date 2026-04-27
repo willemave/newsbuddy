@@ -46,7 +46,7 @@ logger = setup_logging()
 
 def _ensure_static_mount_directories() -> tuple[Path, Path]:
     """Create local static mount directories before Starlette validates them."""
-    images_dir = settings.images_base_dir.resolve()
+    images_dir = settings.storage.images_base_dir.resolve()
     images_dir.mkdir(parents=True, exist_ok=True)
 
     static_dir = Path("static").resolve()
@@ -309,7 +309,7 @@ async def log_requests(request: Request, call_next):
 # Add middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_allow_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

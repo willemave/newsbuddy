@@ -5,9 +5,23 @@ from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.core.security import create_access_token, create_refresh_token
 from app.models.user import User
+
+
+def test_require_user_id_returns_persisted_user_id(db: Session):
+    user = User(apple_id="test.apple.require-user-id", email="id@example.com", is_active=True)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    assert require_user_id(user) == user.id
+
+
+def test_require_user_id_rejects_transient_user() -> None:
+    with pytest.raises(ValueError, match="Authenticated user is missing an id"):
+        require_user_id(User(apple_id="transient", email="transient@example.com"))
 
 
 def test_get_current_user_valid_token(db: Session):

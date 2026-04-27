@@ -10,6 +10,7 @@ from app.constants import SELF_SUBMISSION_SOURCE
 from app.core.logging import get_logger
 from app.models.content_submission import ContentSubmissionResponse, SubmitContentRequest
 from app.models.metadata import ContentClassification, ContentStatus, ContentType
+from app.models.metadata_access import metadata_view
 from app.models.metadata_state import normalize_metadata_shape, update_processing_state
 from app.models.schema import Content, ProcessingTask
 from app.models.user import User
@@ -271,10 +272,23 @@ def submit_user_content(
                 existing_metadata,
                 subscribe_to_feed=True,
             )
-            existing_metadata.setdefault("submitted_by_user_id", current_user_id)
-            existing_metadata.setdefault("submitted_via", submission_channel)
-            if platform_hint:
-                existing_metadata.setdefault("platform_hint", platform_hint)
+            if metadata_view(existing_metadata).submission_user_id() is None:
+                existing_metadata = update_processing_state(
+                    existing_metadata,
+                    submitted_by_user_id=current_user_id,
+                )
+            if not metadata_view(existing_metadata).processing_flag("submitted_via"):
+                existing_metadata = update_processing_state(
+                    existing_metadata,
+                    submitted_via=submission_channel,
+                )
+            if platform_hint and not metadata_view(existing_metadata).processing_flag(
+                "platform_hint"
+            ):
+                existing_metadata = update_processing_state(
+                    existing_metadata,
+                    platform_hint=platform_hint,
+                )
             existing.content_metadata = existing_metadata
             db.commit()
         else:

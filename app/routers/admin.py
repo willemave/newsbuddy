@@ -27,6 +27,7 @@ from app.models.internal.admin_eval import (
 from app.models.schema import Content, OnboardingDiscoveryRun, ProcessingTask, VendorUsageRecord
 from app.models.user import User
 from app.queries import list_api_keys
+from app.queries.queue_health import get_queue_health_snapshot
 from app.services.admin_eval import get_default_pricing, run_admin_eval
 from app.services.insight_report import (
     DEFAULT_MIN_SAVES_FOR_TRIGGER,
@@ -234,6 +235,44 @@ def _build_queue_status_rows(db: Session) -> list[dict[str, Any]]:
         row["total"] = total
         rows.append(row)
     return rows
+
+
+def _build_queue_health_dashboard(db: Session) -> dict[str, Any]:
+    """Build queue SLO data for dashboard display."""
+    snapshot = get_queue_health_snapshot(db, window_hours=24, top_errors_limit=5)
+    return {
+        "generated_at": snapshot.generated_at,
+        "window_hours": snapshot.window_hours,
+        "processing_count": snapshot.processing_count,
+        "expired_lease_count": snapshot.expired_lease_count,
+        "recent_failed_count": snapshot.recent_failed_count,
+        "pending": [
+            {
+                "queue_name": row.queue_name,
+                "task_type": row.task_type,
+                "pending_count": row.pending_count,
+                "oldest_pending_age": _format_duration_seconds(row.oldest_pending_age_seconds),
+            }
+            for row in snapshot.pending[:10]
+        ],
+        "retry_buckets": snapshot.retry_buckets,
+        "top_failures": snapshot.top_failures,
+    }
+
+
+def _format_duration_seconds(seconds: float | None) -> str:
+    """Format a queue-age duration for compact admin display."""
+    if seconds is None:
+        return "unknown"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.0f}m"
+    hours = minutes / 60
+    if hours < 48:
+        return f"{hours:.1f}h"
+    return f"{hours / 24:.1f}d"
 
 
 def _build_phase_status_rows(db: Session) -> list[dict[str, Any]]:
@@ -792,6 +831,7 @@ def admin_dashboard(
 
     # Dashboard readouts
     queue_status_rows = _build_queue_status_rows(db)
+    queue_health = _build_queue_health_dashboard(db)
     phase_status_rows = _build_phase_status_rows(db)
     recent_failure_rows, recent_failure_total = _build_recent_failure_rows(db, recent_cutoff)
     scraper_health = _build_scraper_health(db, recent_cutoff)
@@ -842,6 +882,7 @@ def admin_dashboard(
             "cost_analysis": cost_analysis,
             "external_api_analysis": external_api_analysis,
             "queue_status_rows": queue_status_rows,
+            "queue_health": queue_health,
             "phase_status_rows": phase_status_rows,
             "recent_failure_rows": recent_failure_rows,
             "recent_failure_total": recent_failure_total,

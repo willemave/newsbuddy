@@ -259,7 +259,8 @@ _object_storage_gateway: ObjectStorageGateway | None = None
 def build_object_storage_gateway() -> ObjectStorageGateway:
     """Create an object storage gateway from settings."""
     settings = get_settings()
-    if settings.content_body_storage_provider == "local":
+    storage_settings = settings.storage
+    if storage_settings.content_body_storage_provider == "local":
         return LocalObjectStorageGateway(root_dir=settings.content_body_root_dir)
 
     bucket = settings.content_body_storage_bucket
@@ -271,7 +272,7 @@ def build_object_storage_gateway() -> ObjectStorageGateway:
         region_name=settings.content_body_storage_region,
         access_key=settings.content_body_storage_access_key,
         secret_key=settings.content_body_storage_secret_key,
-        timeout_seconds=settings.content_body_storage_timeout_seconds,
+        timeout_seconds=storage_settings.content_body_storage_timeout_seconds,
     )
 
 

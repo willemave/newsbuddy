@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.core.settings import get_settings
 from app.models.api.openai import AudioTranscriptionHealthResponse, AudioTranscriptionResponse
 from app.models.user import User
@@ -37,13 +37,12 @@ def transcribe_audio(
     file: UploadFile = File(...),
 ) -> AudioTranscriptionResponse:
     """Transcribe uploaded audio without exposing provider API keys to the client."""
-    _ = current_user
     filename = file.filename or "audio.m4a"
     try:
         transcript, language = get_openai_transcription_service().transcribe_audio_from_buffer(
             file.file,
             filename,
-            user_id=current_user.id,
+            user_id=require_user_id(current_user),
         )
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

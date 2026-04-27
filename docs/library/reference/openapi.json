@@ -307,6 +307,13 @@
             "title": "Accept All",
             "type": "boolean"
           },
+          "selected_aggregators": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingSelectedAggregator"
+            },
+            "title": "Selected Aggregators",
+            "type": "array"
+          },
           "selected_subreddits": {
             "items": {
               "type": "string"
@@ -852,6 +859,29 @@
           "user_id"
         ],
         "title": "Body_adminApiKeysCreate",
+        "type": "object"
+      },
+      "Body_adminInsightReportsTrigger": {
+        "properties": {
+          "effort": {
+            "default": "high",
+            "title": "Effort",
+            "type": "string"
+          },
+          "synthesis_model": {
+            "default": "anthropic:claude-sonnet-4-6",
+            "title": "Synthesis Model",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "Body_adminInsightReportsTrigger",
         "type": "object"
       },
       "Body_transcribeOpenaiTranscriptionsAudio": {
@@ -2624,6 +2654,7 @@
           "article",
           "podcast",
           "news",
+          "insight_report",
           "unknown"
         ],
         "title": "ContentType",
@@ -2959,7 +2990,8 @@
               "atom",
               "podcast_rss",
               "youtube",
-              "reddit"
+              "reddit",
+              "aggregator"
             ],
             "title": "Scraper Type",
             "type": "string"
@@ -4303,6 +4335,13 @@
             ],
             "title": "Profile Summary"
           },
+          "selected_aggregators": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingSelectedAggregator"
+            },
+            "title": "Selected Aggregators",
+            "type": "array"
+          },
           "selected_sources": {
             "items": {
               "$ref": "#/components/schemas/OnboardingSelectedSource"
@@ -4578,6 +4617,40 @@
           "profile_summary"
         ],
         "title": "OnboardingProfileResponse",
+        "type": "object"
+      },
+      "OnboardingSelectedAggregator": {
+        "description": "Fast-news aggregator the user picked during onboarding.",
+        "properties": {
+          "key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Topics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "OnboardingSelectedAggregator",
         "type": "object"
       },
       "OnboardingSelectedSource": {
@@ -6430,6 +6503,26 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "stats_range",
+            "required": false,
+            "schema": {
+              "default": "24h",
+              "title": "Stats Range",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cost_bucket",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "title": "Cost Bucket",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6710,6 +6803,68 @@
           }
         },
         "summary": "Admin Eval Summaries Run",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/insight-reports": {
+      "get": {
+        "description": "Admin panel: per-user insight report eligibility + manual trigger.",
+        "operationId": "adminInsightReportsPage",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin Insight Reports Page",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/insight-reports/trigger": {
+      "post": {
+        "description": "Manually enqueue a ``generate_insight_report`` task for a single user.",
+        "operationId": "adminInsightReportsTrigger",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_adminInsightReportsTrigger"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Insight Reports Trigger",
         "tags": [
           "admin"
         ]

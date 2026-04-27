@@ -73,6 +73,20 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /admin/evals/summaries/run`.
     /// - Remark: Generated from `#/paths//admin/evals/summaries/run/post(adminEvalSummariesRun)`.
     func adminEvalSummariesRun(_ input: Operations.AdminEvalSummariesRun.Input) async throws -> Operations.AdminEvalSummariesRun.Output
+    /// Admin Insight Reports Page
+    ///
+    /// Admin panel: per-user insight report eligibility + manual trigger.
+    ///
+    /// - Remark: HTTP `GET /admin/insight-reports`.
+    /// - Remark: Generated from `#/paths//admin/insight-reports/get(adminInsightReportsPage)`.
+    func adminInsightReportsPage(_ input: Operations.AdminInsightReportsPage.Input) async throws -> Operations.AdminInsightReportsPage.Output
+    /// Admin Insight Reports Trigger
+    ///
+    /// Manually enqueue a ``generate_insight_report`` task for a single user.
+    ///
+    /// - Remark: HTTP `POST /admin/insight-reports/trigger`.
+    /// - Remark: Generated from `#/paths//admin/insight-reports/trigger/post(adminInsightReportsTrigger)`.
+    func adminInsightReportsTrigger(_ input: Operations.AdminInsightReportsTrigger.Input) async throws -> Operations.AdminInsightReportsTrigger.Output
     /// Legacy Llm Usage Redirect
     ///
     /// Backwards-compatible redirect to the broader vendor usage dashboard.
@@ -970,6 +984,30 @@ extension APIProtocol {
         body: Operations.AdminEvalSummariesRun.Input.Body
     ) async throws -> Operations.AdminEvalSummariesRun.Output {
         try await adminEvalSummariesRun(Operations.AdminEvalSummariesRun.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// Admin Insight Reports Page
+    ///
+    /// Admin panel: per-user insight report eligibility + manual trigger.
+    ///
+    /// - Remark: HTTP `GET /admin/insight-reports`.
+    /// - Remark: Generated from `#/paths//admin/insight-reports/get(adminInsightReportsPage)`.
+    internal func adminInsightReportsPage(headers: Operations.AdminInsightReportsPage.Input.Headers = .init()) async throws -> Operations.AdminInsightReportsPage.Output {
+        try await adminInsightReportsPage(Operations.AdminInsightReportsPage.Input(headers: headers))
+    }
+    /// Admin Insight Reports Trigger
+    ///
+    /// Manually enqueue a ``generate_insight_report`` task for a single user.
+    ///
+    /// - Remark: HTTP `POST /admin/insight-reports/trigger`.
+    /// - Remark: Generated from `#/paths//admin/insight-reports/trigger/post(adminInsightReportsTrigger)`.
+    internal func adminInsightReportsTrigger(
+        headers: Operations.AdminInsightReportsTrigger.Input.Headers = .init(),
+        body: Operations.AdminInsightReportsTrigger.Input.Body
+    ) async throws -> Operations.AdminInsightReportsTrigger.Output {
+        try await adminInsightReportsTrigger(Operations.AdminInsightReportsTrigger.Input(
             headers: headers,
             body: body
         ))
@@ -2845,6 +2883,8 @@ internal enum Components {
         internal struct AgentOnboardingCompleteRequest: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/AgentOnboardingCompleteRequest/accept_all`.
             internal var acceptAll: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/AgentOnboardingCompleteRequest/selected_aggregators`.
+            internal var selectedAggregators: [Components.Schemas.OnboardingSelectedAggregator]?
             /// - Remark: Generated from `#/components/schemas/AgentOnboardingCompleteRequest/selected_subreddits`.
             internal var selectedSubreddits: [Swift.String]?
             /// - Remark: Generated from `#/components/schemas/AgentOnboardingCompleteRequest/source_ids`.
@@ -2853,19 +2893,23 @@ internal enum Components {
             ///
             /// - Parameters:
             ///   - acceptAll:
+            ///   - selectedAggregators:
             ///   - selectedSubreddits:
             ///   - sourceIds:
             internal init(
                 acceptAll: Swift.Bool? = nil,
+                selectedAggregators: [Components.Schemas.OnboardingSelectedAggregator]? = nil,
                 selectedSubreddits: [Swift.String]? = nil,
                 sourceIds: [Swift.Int]? = nil
             ) {
                 self.acceptAll = acceptAll
+                self.selectedAggregators = selectedAggregators
                 self.selectedSubreddits = selectedSubreddits
                 self.sourceIds = sourceIds
             }
             internal enum CodingKeys: String, CodingKey {
                 case acceptAll = "accept_all"
+                case selectedAggregators = "selected_aggregators"
                 case selectedSubreddits = "selected_subreddits"
                 case sourceIds = "source_ids"
             }
@@ -3226,6 +3270,35 @@ internal enum Components {
                 self.userId = userId
             }
             internal enum CodingKeys: String, CodingKey {
+                case userId = "user_id"
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/Body_adminInsightReportsTrigger`.
+        internal struct BodyAdminInsightReportsTrigger: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/Body_adminInsightReportsTrigger/effort`.
+            internal var effort: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/Body_adminInsightReportsTrigger/synthesis_model`.
+            internal var synthesisModel: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/Body_adminInsightReportsTrigger/user_id`.
+            internal var userId: Swift.Int
+            /// Creates a new `BodyAdminInsightReportsTrigger`.
+            ///
+            /// - Parameters:
+            ///   - effort:
+            ///   - synthesisModel:
+            ///   - userId:
+            internal init(
+                effort: Swift.String? = nil,
+                synthesisModel: Swift.String? = nil,
+                userId: Swift.Int
+            ) {
+                self.effort = effort
+                self.synthesisModel = synthesisModel
+                self.userId = userId
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case effort
+                case synthesisModel = "synthesis_model"
                 case userId = "user_id"
             }
         }
@@ -4180,6 +4253,7 @@ internal enum Components {
             case article = "article"
             case podcast = "podcast"
             case news = "news"
+            case insightReport = "insight_report"
             case unknown = "unknown"
         }
         /// Response for converting a news item into long-form article content.
@@ -4502,6 +4576,7 @@ internal enum Components {
                 case podcastRss = "podcast_rss"
                 case youtube = "youtube"
                 case reddit = "reddit"
+                case aggregator = "aggregator"
             }
             /// - Remark: Generated from `#/components/schemas/CreateUserScraperConfig/scraper_type`.
             internal var scraperType: Components.Schemas.CreateUserScraperConfig.ScraperTypePayload
@@ -5555,6 +5630,8 @@ internal enum Components {
         ///
         /// - Remark: Generated from `#/components/schemas/OnboardingCompleteRequest`.
         internal struct OnboardingCompleteRequest: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OnboardingCompleteRequest/selected_aggregators`.
+            internal var selectedAggregators: [Components.Schemas.OnboardingSelectedAggregator]?
             /// - Remark: Generated from `#/components/schemas/OnboardingCompleteRequest/selected_sources`.
             internal var selectedSources: [Components.Schemas.OnboardingSelectedSource]?
             /// - Remark: Generated from `#/components/schemas/OnboardingCompleteRequest/selected_subreddits`.
@@ -5562,16 +5639,20 @@ internal enum Components {
             /// Creates a new `OnboardingCompleteRequest`.
             ///
             /// - Parameters:
+            ///   - selectedAggregators:
             ///   - selectedSources:
             ///   - selectedSubreddits:
             internal init(
+                selectedAggregators: [Components.Schemas.OnboardingSelectedAggregator]? = nil,
                 selectedSources: [Components.Schemas.OnboardingSelectedSource]? = nil,
                 selectedSubreddits: [Swift.String]? = nil
             ) {
+                self.selectedAggregators = selectedAggregators
                 self.selectedSources = selectedSources
                 self.selectedSubreddits = selectedSubreddits
             }
             internal enum CodingKeys: String, CodingKey {
+                case selectedAggregators = "selected_aggregators"
                 case selectedSources = "selected_sources"
                 case selectedSubreddits = "selected_subreddits"
             }
@@ -5809,6 +5890,31 @@ internal enum Components {
                 case candidateSources = "candidate_sources"
                 case inferredTopics = "inferred_topics"
                 case profileSummary = "profile_summary"
+            }
+        }
+        /// Fast-news aggregator the user picked during onboarding.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OnboardingSelectedAggregator`.
+        internal struct OnboardingSelectedAggregator: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OnboardingSelectedAggregator/key`.
+            internal var key: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OnboardingSelectedAggregator/topics`.
+            internal var topics: [Swift.String]?
+            /// Creates a new `OnboardingSelectedAggregator`.
+            ///
+            /// - Parameters:
+            ///   - key:
+            ///   - topics:
+            internal init(
+                key: Swift.String,
+                topics: [Swift.String]? = nil
+            ) {
+                self.key = key
+                self.topics = topics
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case key
+                case topics
             }
         }
         /// Selected source for onboarding completion.
@@ -7122,12 +7228,24 @@ internal enum Operations {
             internal struct Query: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/admin/GET/query/limit`.
                 internal var limit: Swift.Int?
+                /// - Remark: Generated from `#/paths/admin/GET/query/stats_range`.
+                internal var statsRange: Swift.String?
+                /// - Remark: Generated from `#/paths/admin/GET/query/cost_bucket`.
+                internal var costBucket: Swift.String?
                 /// Creates a new `Query`.
                 ///
                 /// - Parameters:
                 ///   - limit:
-                internal init(limit: Swift.Int? = nil) {
+                ///   - statsRange:
+                ///   - costBucket:
+                internal init(
+                    limit: Swift.Int? = nil,
+                    statsRange: Swift.String? = nil,
+                    costBucket: Swift.String? = nil
+                ) {
                     self.limit = limit
+                    self.statsRange = statsRange
+                    self.costBucket = costBucket
                 }
             }
             internal var query: Operations.AdminDashboard.Input.Query
@@ -8342,6 +8460,292 @@ internal enum Operations {
             /// - Throws: An error if `self` is not `.unprocessableContent`.
             /// - SeeAlso: `.unprocessableContent`.
             internal var unprocessableContent: Operations.AdminEvalSummariesRun.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Admin Insight Reports Page
+    ///
+    /// Admin panel: per-user insight report eligibility + manual trigger.
+    ///
+    /// - Remark: HTTP `GET /admin/insight-reports`.
+    /// - Remark: Generated from `#/paths//admin/insight-reports/get(adminInsightReportsPage)`.
+    internal enum AdminInsightReportsPage {
+        internal static let id: Swift.String = "adminInsightReportsPage"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/admin/insight-reports/GET/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AdminInsightReportsPage.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AdminInsightReportsPage.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.AdminInsightReportsPage.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            internal init(headers: Operations.AdminInsightReportsPage.Input.Headers = .init()) {
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/admin/insight-reports/GET/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/admin/insight-reports/GET/responses/200/content/text\/html`.
+                    case html(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.html`.
+                    ///
+                    /// - Throws: An error if `self` is not `.html`.
+                    /// - SeeAlso: `.html`.
+                    internal var html: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .html(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.AdminInsightReportsPage.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.AdminInsightReportsPage.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//admin/insight-reports/get(adminInsightReportsPage)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.AdminInsightReportsPage.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.AdminInsightReportsPage.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case html
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "text/html":
+                    self = .html
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .html:
+                    return "text/html"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .html
+                ]
+            }
+        }
+    }
+    /// Admin Insight Reports Trigger
+    ///
+    /// Manually enqueue a ``generate_insight_report`` task for a single user.
+    ///
+    /// - Remark: HTTP `POST /admin/insight-reports/trigger`.
+    /// - Remark: Generated from `#/paths//admin/insight-reports/trigger/post(adminInsightReportsTrigger)`.
+    internal enum AdminInsightReportsTrigger {
+        internal static let id: Swift.String = "adminInsightReportsTrigger"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/admin/insight-reports/trigger/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AdminInsightReportsTrigger.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AdminInsightReportsTrigger.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.AdminInsightReportsTrigger.Input.Headers
+            /// - Remark: Generated from `#/paths/admin/insight-reports/trigger/POST/requestBody`.
+            internal enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/admin/insight-reports/trigger/POST/requestBody/content/application\/x-www-form-urlencoded`.
+                case urlEncodedForm(Components.Schemas.BodyAdminInsightReportsTrigger)
+            }
+            internal var body: Operations.AdminInsightReportsTrigger.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            internal init(
+                headers: Operations.AdminInsightReportsTrigger.Input.Headers = .init(),
+                body: Operations.AdminInsightReportsTrigger.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/admin/insight-reports/trigger/POST/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/admin/insight-reports/trigger/POST/responses/200/content/application\/json`.
+                    case json(OpenAPIRuntime.OpenAPIValueContainer)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: OpenAPIRuntime.OpenAPIValueContainer {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.AdminInsightReportsTrigger.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.AdminInsightReportsTrigger.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//admin/insight-reports/trigger/post(adminInsightReportsTrigger)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.AdminInsightReportsTrigger.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.AdminInsightReportsTrigger.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/admin/insight-reports/trigger/POST/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/admin/insight-reports/trigger/POST/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.AdminInsightReportsTrigger.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.AdminInsightReportsTrigger.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//admin/insight-reports/trigger/post(adminInsightReportsTrigger)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.AdminInsightReportsTrigger.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.AdminInsightReportsTrigger.Output.UnprocessableContent {
                 get throws {
                     switch self {
                     case let .unprocessableContent(response):

@@ -327,7 +327,13 @@ The SQLAlchemy schema lives primarily in `app/models/schema.py` and `app/models/
 | `chat_sessions` | Stored chat sessions | Session type, model/provider, optional content link, snapshot |
 | `chat_messages` | Stored message history | Serialized pydantic-ai messages plus async message status |
 
-### 7.2 Content model
+### 7.2 Fast-news read model
+
+`news_items` is the canonical read model for short-form/fast-news product surfaces. New fast-news ingestion, list rendering, read-state, relation clustering, and article-conversion work should start from `news_items`.
+
+`contents` rows with `content_type='news'` are legacy compatibility records. They may still exist as bridges for older content-card/detail surfaces, historical discussion payloads, or conversion flows, but they should not be treated as the source of truth for new fast-news behavior. When a bridge exists, `news_items.legacy_content_id` is the explicit link back to the legacy `contents` row.
+
+### 7.3 Content model
 
 `contents` is the central table. Key fields:
 
@@ -359,7 +365,7 @@ The `content_metadata` JSON holds most type-specific payloads:
 - processing workflow state
 - share-and-chat flags and other submission metadata
 
-### 7.3 User visibility model
+### 7.4 User visibility model
 
 Long-form content visibility is user-scoped. News items are globally visible once completed; articles and podcasts usually require a `content_status` inbox row for that user.
 
@@ -371,7 +377,7 @@ The shared visibility query in `app/repositories/content_feed_query.py` enforces
 - inbox membership for articles and podcasts
 - favorites/recently-read derived from overlay tables
 
-### 7.4 Chat persistence model
+### 7.5 Chat persistence model
 
 Chat is server-stored, not client-authoritative.
 
@@ -382,7 +388,7 @@ Chat is server-stored, not client-authoritative.
 - async message state
   - `processing`, `completed`, `failed`
 
-### 7.5 Schema evolution
+### 7.6 Schema evolution
 
 Alembic migration history in `migrations/alembic/versions/` shows the app’s major feature evolution:
 

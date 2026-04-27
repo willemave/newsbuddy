@@ -8,6 +8,7 @@ from pydantic import HttpUrl, TypeAdapter
 
 from app.core.logging import get_logger
 from app.models.metadata import ContentData, ContentStatus, ContentType
+from app.models.metadata_access import metadata_view
 from app.models.metadata_state import merge_runtime_metadata, normalize_metadata_shape
 from app.models.schema import Content as DBContent
 from app.utils.summary_metadata import infer_summary_kind_version
@@ -24,8 +25,9 @@ def _is_user_scoped_x_digest_url(raw_url: str, metadata: dict[str, Any], content
     if "#newsly-digest-user-" not in raw_url:
         return False
 
-    source_type = str(metadata.get("source_type") or "").strip().lower()
-    return source_type in {"x_timeline", "x_list"} or bool(metadata.get("tweet_id"))
+    view = metadata_view(metadata)
+    source_type = str(view.get("source_type") or "").strip().lower()
+    return source_type in {"x_timeline", "x_list"} or bool(view.get("tweet_id"))
 
 
 def _select_http_url(raw_url: str, metadata: dict[str, Any], content_type: str) -> str:
@@ -35,15 +37,16 @@ def _select_http_url(raw_url: str, metadata: dict[str, Any], content_type: str) 
     candidates: list[str | None] = [raw_url]
 
     if content_type == ContentType.NEWS.value:
-        article = metadata.get("article")
+        article = metadata_view(metadata).news_fields().article
         if isinstance(article, dict):
             candidates.insert(0, article.get("url"))
 
+    view = metadata_view(metadata)
     candidates.extend(
         [
-            metadata.get("final_url_after_redirects"),
-            metadata.get("final_url"),
-            metadata.get("url"),
+            view.get("final_url_after_redirects"),
+            view.get("final_url"),
+            view.get("url"),
         ]
     )
 
@@ -59,11 +62,12 @@ def _select_news_article_url(
     source_url: str | None,
     metadata: dict[str, Any],
 ) -> str | None:
+    view = metadata_view(metadata)
     candidates: list[str | None] = [
         source_url,
-        metadata.get("final_url_after_redirects"),
-        metadata.get("final_url"),
-        metadata.get("url"),
+        view.get("final_url_after_redirects"),
+        view.get("final_url"),
+        view.get("url"),
         raw_url,
     ]
     for candidate in candidates:
@@ -76,7 +80,8 @@ def _backfill_news_article_metadata(db_content: DBContent, metadata: dict[str, A
     if db_content.content_type != ContentType.NEWS.value:
         return
 
-    article = metadata.get("article")
+    view = metadata_view(metadata)
+    article = view.news_fields().article
     if isinstance(article, dict) and isinstance(article.get("url"), str):
         return
 
@@ -85,7 +90,8 @@ def _backfill_news_article_metadata(db_content: DBContent, metadata: dict[str, A
         return
 
     parsed = urlparse(article_url)
-    source_domain = metadata.get("source") if isinstance(metadata.get("source"), str) else None
+    source = view.get("source")
+    source_domain = source if isinstance(source, str) else None
     if not source_domain:
         source_domain = parsed.netloc or None
 
@@ -159,12 +165,13 @@ def content_to_domain(db_content: DBContent) -> ContentData:
 
 
 def _normalize_summary_metadata(metadata: dict[str, Any], content_type: str) -> None:
-    summary = metadata.get("summary")
+    view = metadata_view(metadata)
+    summary = view.summary()
     if not isinstance(summary, dict):
         return
 
-    summary_kind = metadata.get("summary_kind")
-    summary_version = metadata.get("summary_version")
+    summary_kind = view.summary_kind()
+    summary_version = view.summary_version()
     if summary_kind and summary_version:
         return
 

@@ -1,10 +1,12 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/hero.svg">
-    <img alt="Newsly" src="docs/assets/hero.svg" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/newsbuddy-hero.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/newsbuddy-hero.png">
+    <img alt="Newsbuddy product hero" src="docs/assets/newsbuddy-hero.png" width="100%">
   </picture>
 </p>
+
+<h1 align="center">Newsbuddy</h1>
 
 <p align="center">
   <strong>Stop drowning in tabs. Start understanding what matters.</strong>
@@ -21,7 +23,7 @@
 
 ---
 
-Newsly is an AI-powered knowledge companion that keeps you informed without the noise. It pulls in content from RSS feeds, podcasts, Hacker News, Reddit, Techmeme, X bookmarks, and any URL you throw at it — then summarizes everything with LLMs so you get focused, non-sensationalized reading on the things you actually care about.
+Newsbuddy is an AI-powered knowledge companion that keeps you informed without the noise. It pulls in content from RSS feeds, podcasts, Hacker News, Reddit, Techmeme, X bookmarks, and any URL you throw at it — then summarizes everything with LLMs so you get focused, non-sensationalized reading on the things you actually care about.
 
 <br>
 
@@ -30,7 +32,7 @@ Newsly is an AI-powered knowledge companion that keeps you informed without the 
 </p>
 
 <p align="center">
-  <sub>Newsly is a native iOS app built with SwiftUI. Coming soon to the App Store — or <a href="#getting-started">self-host it yourself</a> with your own API keys.</sub>
+  <sub>Newsbuddy is a native iOS app built with SwiftUI. Coming soon to the App Store — or <a href="#getting-started">self-host it yourself</a> with your own API keys.</sub>
 </p>
 
 <br>
@@ -47,7 +49,7 @@ Newsly is an AI-powered knowledge companion that keeps you informed without the 
 Focused Reading, Zero Noise
 </h3>
 
-<p>Stay informed on the go with content that respects your attention. Newsly delivers non-sensationalized, AI-summarized reading across the topics you care about — so you read what matters, when you want to.</p>
+<p>Stay informed on the go with content that respects your attention. Newsbuddy delivers non-sensationalized, AI-summarized reading across the topics you care about — so you read what matters, when you want to.</p>
 
 </td>
 <td width="50%" valign="top">
@@ -70,7 +72,7 @@ Your Council of Experts
 RSS Feeds &amp; Long-Form Content
 </h3>
 
-<p>First-class support for RSS and Atom feeds, podcasts, and long-form articles. Subscribe to your favorite blogs, newsletters, and shows — Newsly monitors them continuously and processes new content as it arrives.</p>
+<p>First-class support for RSS and Atom feeds, podcasts, and long-form articles. Subscribe to your favorite blogs, newsletters, and shows — Newsbuddy monitors them continuously and processes new content as it arrives.</p>
 
 </td>
 <td width="50%" valign="top">
@@ -93,7 +95,7 @@ Fast Tech News
 Discover New Knowledge
 </h3>
 
-<p>Newsly surfaces related content and new sources based on what you've read and what's trending across the open web — expanding your knowledge graph without you having to hunt for it.</p>
+<p>Newsbuddy surfaces related content and new sources based on what you've read and what's trending across the open web — expanding your knowledge graph without you having to hunt for it.</p>
 
 </td>
 <td width="50%" valign="top">
@@ -103,7 +105,7 @@ Discover New Knowledge
 Sources You Already Use
 </h3>
 
-<p>Built-in integrations for <strong>X bookmarks &amp; follows</strong>, <strong>Hacker News</strong>, <strong>Techmeme</strong>, <strong>Reddit</strong>, <strong>Substack</strong>, and any RSS/Atom feed. Connect the sources you already follow and let Newsly do the rest.</p>
+<p>Built-in integrations for <strong>X bookmarks &amp; follows</strong>, <strong>Hacker News</strong>, <strong>Techmeme</strong>, <strong>Reddit</strong>, <strong>Substack</strong>, and any RSS/Atom feed. Connect the sources you already follow and let Newsbuddy do the rest.</p>
 
 </td>
 </tr>
@@ -116,7 +118,7 @@ Sources You Already Use
 CLI-Powered Content Management
 </h3>
 
-<p>A dedicated CLI lets your AI <em>claws</em> manage and curate your library from the terminal. Add feeds, submit articles, manage sources — the system classifies, processes, and enriches everything automatically.</p>
+<p>A dedicated CLI lets your AI agents manage and curate your library from the terminal. Add feeds, submit articles, manage sources — the system classifies, processes, and enriches everything automatically.</p>
 
 </td>
 <td width="50%" valign="top">
@@ -137,7 +139,7 @@ Local Markdown Sync
 
 ## CLI
 
-The `newsly-agent` CLI (Go, Cobra-based) gives you full control over your knowledge base from the terminal — perfect for scripting, automation, or letting your AI *claws* manage content on your behalf.
+The Newsbuddy CLI uses the `newsly-agent` binary (Go, Cobra-based) to give you full control over your knowledge base from the terminal — perfect for scripting, automation, or letting your AI agents manage content on your behalf.
 
 ```bash
 # Authenticate

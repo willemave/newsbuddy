@@ -11,11 +11,12 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session
-from app.core.deps import ADMIN_SESSION_COOKIE, get_current_user
+from app.core.deps import ADMIN_SESSION_COOKIE, get_current_user, require_user_id
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.core.security import (
     create_access_token,
+    create_admin_session_token,
     create_refresh_token,
     verify_admin_password,
     verify_apple_token,
@@ -48,40 +49,9 @@ settings = get_settings()
 
 router = APIRouter()
 
-# PRODUCTION WARNING - IN-MEMORY SESSION STORAGE:
-# This in-memory set stores admin session tokens. This has critical limitations:
-#
-# PROBLEMS WITH CURRENT IMPLEMENTATION:
-# 1. Sessions lost on application restart - all admins logged out
-# 2. Does not work with multiple server instances - sessions only valid on one server
-# 3. No session expiry mechanism - sessions live forever until server restart
-# 4. No ability to revoke sessions or view active sessions
-# 5. Memory leak potential if sessions accumulate
-#
-# BEFORE PRODUCTION DEPLOYMENT - MUST FIX:
-# Option 1: Redis (recommended for distributed systems)
-#   - Use Redis with TTL for automatic expiry
-#   - Works across multiple server instances
-#   - Fast session validation
-#
-# Option 2: Database sessions
-#   - Store sessions in database with expiry timestamp
-#   - Works across server instances
-#   - Can track login history and revoke sessions
-#
-# This implementation is suitable ONLY for single-instance development/MVP.
-admin_sessions = set()
-
-
-def _require_user_id(user: User) -> int:
-    user_id = user.id
-    if user_id is None:
-        raise ValueError("User is missing an id")
-    return user_id
-
 
 def _build_user_response(db: Session, user: User) -> UserResponse:
-    has_sync = has_active_x_connection(db, _require_user_id(user))
+    has_sync = has_active_x_connection(db, require_user_id(user))
     response = UserResponse.model_validate(user)
     return response.model_copy(
         update={
@@ -200,7 +170,7 @@ def apple_signin(
         is_new_user = True
 
     # Generate tokens
-    user_id = _require_user_id(user)
+    user_id = require_user_id(user)
     access_token = create_access_token(user_id)
     refresh_token = create_refresh_token(user_id)
     logger.info(
@@ -267,7 +237,7 @@ def debug_create_user(
     db.commit()
     db.refresh(user)
 
-    user_id = _require_user_id(user)
+    user_id = require_user_id(user)
     access_token = create_access_token(user_id)
     refresh_token = create_refresh_token(user_id)
 
@@ -328,7 +298,7 @@ def refresh_token(
         raise credentials_exception
 
     # Generate new access token AND new refresh token (token rotation)
-    current_user_id = _require_user_id(user)
+    current_user_id = require_user_id(user)
     access_token = create_access_token(current_user_id)
     new_refresh_token = create_refresh_token(current_user_id)
 
@@ -418,7 +388,7 @@ def _repair_invalid_email(
     current_user: User,
     errors: Sequence[Mapping[str, object]],
 ) -> User:
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     local_part = f"user{user_id}"
     email = (current_user.email or "").strip()
     original_email = email
@@ -436,7 +406,7 @@ def _repair_invalid_email(
         extra={
             "component": "auth",
             "operation": "repair_email",
-            "item_id": str(current_user.id),
+            "item_id": str(user_id),
             "context_data": {
                 "errors": errors,
                 "email": current_user.email,
@@ -481,17 +451,17 @@ def admin_login(request: AdminLoginRequest, response: Response) -> AdminLoginRes
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin password"
         )
 
-    # Generate session token
-    session_token = secrets.token_urlsafe(32)
-    admin_sessions.add(session_token)
+    session_token = create_admin_session_token()
+    is_production = settings.environment.lower() == "production"
 
     # Set httpOnly cookie
     response.set_cookie(
         key=ADMIN_SESSION_COOKIE,
         value=session_token,
         httponly=True,
-        max_age=7 * 24 * 60 * 60,  # 7 days
+        max_age=settings.admin_session_expire_minutes * 60,
         samesite="lax",
+        secure=is_production,
     )
 
     return AdminLoginResponse(message="Logged in as admin")

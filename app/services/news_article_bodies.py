@@ -44,7 +44,7 @@ def _clean_text(value: Any) -> str | None:
 
 
 def _build_news_item_storage_key(*, news_item_id: int, sha256: str) -> str:
-    prefix = get_settings().content_body_storage_prefix.strip("/")
+    prefix = get_settings().storage.content_body_storage_prefix.strip("/")
     return f"{prefix}/news-items/{news_item_id}/source-{sha256}.txt"
 
 

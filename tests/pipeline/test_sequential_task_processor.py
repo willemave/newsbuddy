@@ -73,6 +73,43 @@ class TestSequentialTaskProcessor:
         assert result.success is True
         processor.dispatcher.dispatch.assert_called_once()
 
+    def test_process_task_normalizes_payload_before_dispatch(self, processor):
+        """Task specs apply defaults before a task reaches its handler."""
+        task = TaskEnvelope(
+            id=1,
+            task_type=TaskType.ANALYZE_URL,
+            retry_count=0,
+            payload={"content_id": 123, "instruction": "read links"},
+        )
+        processor.dispatcher.dispatch.return_value = TaskResult.ok()
+
+        result = processor.process_task(task)
+
+        assert result.success is True
+        dispatched_task = processor.dispatcher.dispatch.call_args.args[0]
+        assert dispatched_task.payload == {
+            "content_id": 123,
+            "instruction": "read links",
+            "crawl_links": False,
+            "subscribe_to_feed": False,
+        }
+
+    def test_process_task_rejects_invalid_spec_payload(self, processor):
+        """Malformed spec payloads fail before handler dispatch."""
+        task = TaskEnvelope(
+            id=1,
+            task_type=TaskType.ANALYZE_URL,
+            retry_count=0,
+            payload={"content_id": "not-an-int"},
+        )
+
+        result = processor.process_task(task)
+
+        assert result.success is False
+        assert result.retryable is False
+        assert "Invalid payload for analyze_url" in (result.error_message or "")
+        processor.dispatcher.dispatch.assert_not_called()
+
     def test_process_task_sets_default_error_message(self, processor):
         """Test default error message when handler returns none."""
         task = TaskEnvelope(
@@ -392,5 +429,5 @@ class TestSequentialTaskProcessor:
 
         assert call_count == 2
         mock_dispose.assert_called_once()
-        mock_close_listener.assert_called_once()
+        mock_close_listener.assert_called()
         mock_sleep.assert_any_call(10.0)

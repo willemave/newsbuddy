@@ -39,6 +39,7 @@ from app.pipeline.handlers.transcribe_tweet_video import TranscribeTweetVideoHan
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_handler import TaskHandler
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.pipeline.task_specs import get_task_spec
 from app.pipeline.worker import get_llm_service
 from app.services.gateways.task_queue_gateway import TaskQueueGateway
 from app.services.langfuse_tracing import langfuse_trace_context
@@ -262,7 +263,7 @@ class SequentialTaskProcessor:
             yield
             return
 
-        raw_lease_seconds = getattr(self.settings, "worker_timeout_seconds", 300)
+        raw_lease_seconds = self.settings.queue.worker_timeout_seconds
         try:
             lease_seconds = max(int(raw_lease_seconds), 1)
         except (TypeError, ValueError):
@@ -313,6 +314,28 @@ class SequentialTaskProcessor:
     def process_task(self, task: TaskEnvelope) -> TaskResult:
         """Process a single task."""
         start_time = time.perf_counter()
+        try:
+            normalized_payload = get_task_spec(task.task_type).normalize_payload(task.payload)
+        except ValueError as exc:
+            logger.error(
+                "Task payload failed spec validation",
+                extra=_task_extra(
+                    task,
+                    processor=self,
+                    operation="validate_task_payload",
+                    event_name="task.invalid_payload",
+                    status="failed",
+                    context_data={
+                        "failure_class": type(exc).__name__,
+                        "payload_keys": sorted(task.payload.keys()),
+                    },
+                ),
+            )
+            return TaskResult.fail(str(exc), retryable=False)
+
+        if normalized_payload != task.payload:
+            task = task.model_copy(update={"payload": normalized_payload})
+
         raw_user_id = task.payload.get("user_id")
         user_id: str | int | None = raw_user_id if isinstance(raw_user_id, (int, str)) else None
         metadata = {
@@ -412,7 +435,7 @@ class SequentialTaskProcessor:
     ) -> dict[str, object] | None:
         """Persist task completion/retry state without crashing the worker loop."""
         retry_count = task.retry_count
-        max_retries = getattr(self.settings, "max_retries", 3)
+        max_retries = self.settings.queue.max_retries
         should_retry = not result.success and result.retryable and retry_count < max_retries
         retry_delay_seconds = None
         if should_retry:
@@ -589,7 +612,7 @@ class SequentialTaskProcessor:
                         processed_count,
                     )
                 else:
-                    max_retries = getattr(self.settings, "max_retries", 3)
+                    max_retries = self.settings.queue.max_retries
                     if finalization and finalization.get("status") == "pending":
                         logger.info(
                             "Task retry requested by processor",

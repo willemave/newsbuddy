@@ -1,3 +1,5 @@
+import re
+
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.models.scraper_runs import ScraperStats
@@ -10,6 +12,21 @@ from app.scraping.substack_unified import SubstackScraper
 
 # from app.scraping.youtube_unified import YouTubeUnifiedScraper
 logger = get_logger(__name__)
+
+
+def _normalize_scraper_name(name: str) -> str:
+    """Return a stable key for CLI/display-name scraper matching."""
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
+def _scraper_lookup_keys(scraper: BaseScraper) -> set[str]:
+    """Return accepted normalized names for a scraper instance."""
+    keys = {scraper.name}
+    for attr_name in ("KEY", "DISPLAY_NAME"):
+        value = getattr(scraper, attr_name, None)
+        if isinstance(value, str) and value:
+            keys.add(value)
+    return {_normalize_scraper_name(key) for key in keys}
 
 
 class ScraperRunner:
@@ -109,8 +126,9 @@ class ScraperRunner:
 
     def run_scraper_with_stats(self, name: str) -> ScraperStats | None:
         """Run a specific scraper by name and return detailed statistics."""
+        requested_name = _normalize_scraper_name(name)
         for scraper in self.scrapers:
-            if scraper.name.lower() == name.lower():
+            if requested_name in _scraper_lookup_keys(scraper):
                 try:
                     stats = scraper.run_with_stats()
 

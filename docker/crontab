@@ -1,4 +1,4 @@
-*/15 * * * * cd /app && flock -n /tmp/news_app_scrapers.lock python scripts/run_scrapers.py --show-stats --scrapers HackerNews Reddit Substack Techmeme Podcast Atom
+*/15 * * * * cd /app && flock -n /tmp/news_app_scrapers.lock python scripts/run_scrapers.py --show-stats --scrapers hackernews Reddit Substack Techmeme Podcast Atom
 */15 * * * * cd /app && flock -n /tmp/news_app_twitter.lock python scripts/run_twitter.py
 0 3 * * 1 cd /app && flock -n /tmp/news_app_feed_discovery.lock python scripts/run_feed_discovery.py
 30 4 * * * cd /app && flock -n /tmp/news_app_insight_reports.lock python scripts/enqueue_insight_reports.py

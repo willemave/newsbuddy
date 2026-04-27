@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from functools import lru_cache
@@ -5,7 +6,15 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import AliasChoices, Field, PostgresDsn, ValidationInfo, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    Field,
+    PostgresDsn,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
@@ -65,6 +74,143 @@ def _default_images_base_dir() -> Path:
     return _normalize_storage_path(DATA_ROOT / "images", "images_base_dir")
 
 
+class QueueSettingsView(BaseModel):
+    """Grouped worker and queue settings for internal consumers and diagnostics."""
+
+    max_workers: int
+    worker_timeout_seconds: int
+    checkout_timeout_minutes: int
+    queue_backpressure_max_pending_content: int
+    queue_backpressure_max_pending_process_news_item: int
+    queue_backpressure_max_pending_generate_agent_digest: int
+    max_retry_attempts: int
+    max_retries: int
+
+
+class AuthSettingsView(BaseModel):
+    """Grouped auth settings without exposing secrets."""
+
+    jwt_algorithm: str
+    access_token_expire_minutes: int
+    refresh_token_expire_days: int
+    admin_session_expire_minutes: int
+    apple_jwks_url: str
+    apple_signin_audiences: list[str]
+    jwt_secret_configured: bool
+    admin_password_configured: bool
+
+
+class StorageSettingsView(BaseModel):
+    """Grouped storage settings without exposing storage credentials."""
+
+    media_base_dir: Path
+    logs_base_dir: Path
+    images_base_dir: Path
+    content_body_storage_provider: str
+    content_body_local_root: Path
+    content_body_storage_prefix: str
+    content_body_storage_bucket_configured: bool
+    content_body_storage_endpoint_configured: bool
+    content_body_storage_region: str | None
+    content_body_storage_access_key_configured: bool
+    content_body_storage_secret_key_configured: bool
+    content_body_storage_timeout_seconds: int
+    podcast_scratch_dir: Path
+    personal_markdown_enabled: bool
+    personal_markdown_root: Path
+
+
+class ProviderSettingsView(BaseModel):
+    """Grouped provider settings with secret fields reduced to configured flags."""
+
+    openai_api_key_configured: bool
+    anthropic_api_key_configured: bool
+    google_api_key_configured: bool
+    google_cloud_project_configured: bool
+    google_cloud_location: str
+    image_generation_model: str
+    image_generation_fallback_model: str | None
+    infographic_generation_provider: str
+    infographic_generation_model: str | None
+    infographic_generation_fallback_model: str | None
+    runware_api_key_configured: bool
+    cerebras_api_key_configured: bool
+    exa_api_key_configured: bool
+    elevenlabs_api_key_configured: bool
+    elevenlabs_tts_voice_id_configured: bool
+    listen_notes_api_key_configured: bool
+    spotify_client_id_configured: bool
+    spotify_client_secret_configured: bool
+    podcast_index_api_key_configured: bool
+    podcast_index_api_secret_configured: bool
+    firecrawl_api_key_configured: bool
+    chat_sandbox_provider: str
+    chat_sandbox_e2b_api_key_configured: bool
+
+
+class DiscoverySettingsView(BaseModel):
+    """Grouped discovery and news-list model settings."""
+
+    discovery_model: str
+    discovery_candidate_model: str
+    discovery_itunes_country: str | None
+    discovery_min_favorites: int
+    discovery_max_favorites: int
+    discovery_exa_results: int
+    news_embedding_model: str
+    news_embedding_device: str
+    news_list_reranker_enabled: bool
+    news_list_reranker_model: str
+    news_list_reranker_device: str
+    news_list_reranker_max_candidates: int
+    news_list_reranker_batch_size: int
+    news_list_reranker_similarity_threshold: float
+    news_group_model: str
+    news_header_model: str
+
+
+class XIntegrationSettingsView(BaseModel):
+    """Grouped X/Twitter integration settings without exposing secrets."""
+
+    twitter_auth_token_configured: bool
+    twitter_ct0_configured: bool
+    twitter_user_agent_configured: bool
+    twitter_query_id_cache: Path | None
+    x_app_bearer_token_configured: bool
+    x_client_id_configured: bool
+    x_client_secret_configured: bool
+    x_oauth_redirect_uri: str | None
+    x_oauth_authorize_url: str
+    x_oauth_token_url: str
+    x_token_encryption_key_configured: bool
+    x_bookmark_sync_enabled: bool
+    x_sync_min_interval_minutes: int
+    x_bookmark_sync_min_interval_minutes: int
+
+
+class IntegrationSettingsView(BaseModel):
+    """Grouped integration settings."""
+
+    x: XIntegrationSettingsView
+
+
+class ObservabilitySettingsView(BaseModel):
+    """Grouped logging and tracing settings without exposing secrets."""
+
+    environment: str
+    debug: bool
+    log_level: str
+    langfuse_enabled: bool
+    langfuse_public_key_configured: bool
+    langfuse_secret_key_configured: bool
+    langfuse_host: str
+    langfuse_sample_rate: float | None
+    langfuse_include_content: bool
+    langfuse_include_binary_content: bool
+    langfuse_instrumentation_version: int
+    langfuse_event_mode: str
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         case_sensitive=False,
@@ -81,6 +227,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = False
     log_level: str = "INFO"
+    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
 
     # Authentication settings
     JWT_SECRET_KEY: str = Field(..., description="Secret key for JWT token signing")
@@ -90,6 +237,9 @@ class Settings(BaseSettings):
     )
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=90, description="Refresh token expiry in days")
     ADMIN_PASSWORD: str = Field(..., description="Admin password for web access")
+    admin_session_expire_minutes: int = Field(default=10_080, ge=1)
+    apple_jwks_url: str = "https://appleid.apple.com/auth/keys"
+    apple_signin_audiences: list[str] = Field(default_factory=lambda: ["org.willemaw.newsly"])
 
     # Worker configuration
     max_workers: int = 1
@@ -305,6 +455,31 @@ class Settings(BaseSettings):
             raise ValueError("DATABASE_URL must use a PostgreSQL SQLAlchemy dialect")
         return raw_value
 
+    @field_validator("cors_allow_origins", "apple_signin_audiences", mode="before")
+    @classmethod
+    def parse_string_list(cls, v: str | list[str] | tuple[str, ...] | None) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                parsed = json.loads(stripped)
+                if not isinstance(parsed, list):
+                    raise ValueError("Expected a JSON list")
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return [item.strip() for item in v if item.strip()]
+
+    @model_validator(mode="after")
+    def validate_production_security_settings(self) -> "Settings":
+        if self.environment.lower() == "production" and "*" in self.cors_allow_origins:
+            raise ValueError("CORS_ALLOW_ORIGINS must be explicit in production")
+        if not self.apple_signin_audiences:
+            raise ValueError("APPLE_SIGNIN_AUDIENCES must include at least one audience")
+        return self
+
     @field_validator("pdf_gemini_model")
     @classmethod
     def validate_pdf_gemini_model(cls, v: str) -> str:
@@ -329,6 +504,161 @@ class Settings(BaseSettings):
         return _normalize_storage_path(v, info.field_name or "")
 
     @property
+    def queue(self) -> QueueSettingsView:
+        return QueueSettingsView(
+            max_workers=self.max_workers,
+            worker_timeout_seconds=self.worker_timeout_seconds,
+            checkout_timeout_minutes=self.checkout_timeout_minutes,
+            queue_backpressure_max_pending_content=self.queue_backpressure_max_pending_content,
+            queue_backpressure_max_pending_process_news_item=(
+                self.queue_backpressure_max_pending_process_news_item
+            ),
+            queue_backpressure_max_pending_generate_agent_digest=(
+                self.queue_backpressure_max_pending_generate_agent_digest
+            ),
+            max_retry_attempts=self.max_retry_attempts,
+            max_retries=self.max_retries,
+        )
+
+    @property
+    def auth(self) -> AuthSettingsView:
+        return AuthSettingsView(
+            jwt_algorithm=self.JWT_ALGORITHM,
+            access_token_expire_minutes=self.ACCESS_TOKEN_EXPIRE_MINUTES,
+            refresh_token_expire_days=self.REFRESH_TOKEN_EXPIRE_DAYS,
+            admin_session_expire_minutes=self.admin_session_expire_minutes,
+            apple_jwks_url=self.apple_jwks_url,
+            apple_signin_audiences=self.apple_signin_audiences,
+            jwt_secret_configured=bool(self.JWT_SECRET_KEY),
+            admin_password_configured=bool(self.ADMIN_PASSWORD),
+        )
+
+    @property
+    def storage(self) -> StorageSettingsView:
+        return StorageSettingsView(
+            media_base_dir=self.media_base_dir,
+            logs_base_dir=self.logs_base_dir,
+            images_base_dir=self.images_base_dir,
+            content_body_storage_provider=self.content_body_storage_provider,
+            content_body_local_root=self.content_body_local_root,
+            content_body_storage_prefix=self.content_body_storage_prefix,
+            content_body_storage_bucket_configured=bool(self.content_body_storage_bucket),
+            content_body_storage_endpoint_configured=bool(self.content_body_storage_endpoint),
+            content_body_storage_region=self.content_body_storage_region,
+            content_body_storage_access_key_configured=bool(self.content_body_storage_access_key),
+            content_body_storage_secret_key_configured=bool(self.content_body_storage_secret_key),
+            content_body_storage_timeout_seconds=self.content_body_storage_timeout_seconds,
+            podcast_scratch_dir=self.podcast_scratch_dir,
+            personal_markdown_enabled=self.personal_markdown_enabled,
+            personal_markdown_root=self.personal_markdown_root,
+        )
+
+    @property
+    def providers(self) -> ProviderSettingsView:
+        return ProviderSettingsView(
+            openai_api_key_configured=bool(self.openai_api_key),
+            anthropic_api_key_configured=bool(self.anthropic_api_key),
+            google_api_key_configured=bool(self.google_api_key),
+            google_cloud_project_configured=bool(self.google_cloud_project),
+            google_cloud_location=self.google_cloud_location,
+            image_generation_model=self.image_generation_model,
+            image_generation_fallback_model=self.image_generation_fallback_model,
+            infographic_generation_provider=self.infographic_generation_provider,
+            infographic_generation_model=self.infographic_generation_model,
+            infographic_generation_fallback_model=self.infographic_generation_fallback_model,
+            runware_api_key_configured=bool(self.runware_api_key),
+            cerebras_api_key_configured=bool(self.cerebras_api_key),
+            exa_api_key_configured=bool(self.exa_api_key),
+            elevenlabs_api_key_configured=bool(self.elevenlabs_api_key),
+            elevenlabs_tts_voice_id_configured=bool(self.elevenlabs_tts_voice_id),
+            listen_notes_api_key_configured=bool(self.listen_notes_api_key),
+            spotify_client_id_configured=bool(self.spotify_client_id),
+            spotify_client_secret_configured=bool(self.spotify_client_secret),
+            podcast_index_api_key_configured=bool(self.podcast_index_api_key),
+            podcast_index_api_secret_configured=bool(self.podcast_index_api_secret),
+            firecrawl_api_key_configured=bool(self.firecrawl_api_key),
+            chat_sandbox_provider=self.chat_sandbox_provider,
+            chat_sandbox_e2b_api_key_configured=bool(self.chat_sandbox_e2b_api_key),
+        )
+
+    @property
+    def discovery(self) -> DiscoverySettingsView:
+        return DiscoverySettingsView(
+            discovery_model=self.discovery_model,
+            discovery_candidate_model=self.discovery_candidate_model,
+            discovery_itunes_country=self.discovery_itunes_country,
+            discovery_min_favorites=self.discovery_min_favorites,
+            discovery_max_favorites=self.discovery_max_favorites,
+            discovery_exa_results=self.discovery_exa_results,
+            news_embedding_model=self.news_embedding_model,
+            news_embedding_device=self.news_embedding_device,
+            news_list_reranker_enabled=self.news_list_reranker_enabled,
+            news_list_reranker_model=self.news_list_reranker_model,
+            news_list_reranker_device=self.news_list_reranker_device,
+            news_list_reranker_max_candidates=self.news_list_reranker_max_candidates,
+            news_list_reranker_batch_size=self.news_list_reranker_batch_size,
+            news_list_reranker_similarity_threshold=self.news_list_reranker_similarity_threshold,
+            news_group_model=self.news_group_model,
+            news_header_model=self.news_header_model,
+        )
+
+    @property
+    def integrations(self) -> IntegrationSettingsView:
+        return IntegrationSettingsView(
+            x=XIntegrationSettingsView(
+                twitter_auth_token_configured=bool(self.twitter_auth_token),
+                twitter_ct0_configured=bool(self.twitter_ct0),
+                twitter_user_agent_configured=bool(self.twitter_user_agent),
+                twitter_query_id_cache=self.twitter_query_id_cache,
+                x_app_bearer_token_configured=bool(self.x_app_bearer_token),
+                x_client_id_configured=bool(self.x_client_id),
+                x_client_secret_configured=bool(self.x_client_secret),
+                x_oauth_redirect_uri=self.x_oauth_redirect_uri,
+                x_oauth_authorize_url=self.x_oauth_authorize_url,
+                x_oauth_token_url=self.x_oauth_token_url,
+                x_token_encryption_key_configured=bool(self.x_token_encryption_key),
+                x_bookmark_sync_enabled=self.x_bookmark_sync_enabled,
+                x_sync_min_interval_minutes=self.x_sync_min_interval_minutes,
+                x_bookmark_sync_min_interval_minutes=self.x_bookmark_sync_min_interval_minutes,
+            )
+        )
+
+    @property
+    def observability(self) -> ObservabilitySettingsView:
+        return ObservabilitySettingsView(
+            environment=self.environment,
+            debug=self.debug,
+            log_level=self.log_level,
+            langfuse_enabled=self.langfuse_enabled,
+            langfuse_public_key_configured=bool(self.langfuse_public_key),
+            langfuse_secret_key_configured=bool(self.langfuse_secret_key),
+            langfuse_host=self.langfuse_host,
+            langfuse_sample_rate=self.langfuse_sample_rate,
+            langfuse_include_content=self.langfuse_include_content,
+            langfuse_include_binary_content=self.langfuse_include_binary_content,
+            langfuse_instrumentation_version=self.langfuse_instrumentation_version,
+            langfuse_event_mode=self.langfuse_event_mode,
+        )
+
+    def redacted_diagnostics(self) -> dict[str, object]:
+        """Return operator-safe grouped config diagnostics."""
+
+        groups = {
+            "queue": self.queue,
+            "auth": self.auth,
+            "storage": self.storage,
+            "providers": self.providers,
+            "discovery": self.discovery,
+            "integrations": self.integrations,
+            "observability": self.observability,
+        }
+        return {
+            "environment": self.environment,
+            "redacted": True,
+            "groups": {name: view.model_dump(mode="json") for name, view in groups.items()},
+        }
+
+    @property
     def podcast_media_dir(self) -> Path:
         """Return the directory for storing podcast media files.
 
@@ -336,13 +666,13 @@ class Settings(BaseSettings):
             Path: Absolute directory path for podcast media output.
         """
 
-        return (self.media_base_dir / "podcasts").resolve()
+        return (self.storage.media_base_dir / "podcasts").resolve()
 
     @property
     def tweet_video_media_dir(self) -> Path:
         """Return the directory for temporary tweet video audio downloads."""
 
-        return (self.media_base_dir / "tweet_videos").resolve()
+        return (self.storage.media_base_dir / "tweet_videos").resolve()
 
     @property
     def substack_media_dir(self) -> Path:
@@ -352,7 +682,7 @@ class Settings(BaseSettings):
             Path: Absolute directory path for Substack media output.
         """
 
-        return (self.media_base_dir / "substack").resolve()
+        return (self.storage.media_base_dir / "substack").resolve()
 
     @property
     def logs_dir(self) -> Path:
@@ -362,22 +692,22 @@ class Settings(BaseSettings):
             Path: Absolute directory path for log storage.
         """
 
-        return self.logs_base_dir.resolve()
+        return self.storage.logs_base_dir.resolve()
 
     @property
     def content_body_root_dir(self) -> Path:
         """Return the local filesystem root for canonical content body storage."""
-        return self.content_body_local_root.resolve()
+        return self.storage.content_body_local_root.resolve()
 
     @property
     def podcast_scratch_root(self) -> Path:
         """Return the scratch directory used by podcast media workers."""
-        return self.podcast_scratch_dir.resolve()
+        return self.storage.podcast_scratch_dir.resolve()
 
     @property
     def personal_markdown_root_dir(self) -> Path:
         """Return the local filesystem root for the per-user markdown library."""
-        return self.personal_markdown_root.resolve()
+        return self.storage.personal_markdown_root.resolve()
 
 
 @lru_cache

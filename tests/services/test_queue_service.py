@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from app.models.schema import ProcessingTask
 from app.services.queue import QueueService, TaskQueue, TaskStatus, TaskType
 
@@ -154,6 +156,13 @@ def test_enqueue_dedupes_content_tasks_by_default(db_session, monkeypatch):
         .all()
     )
     assert len(queued_tasks) == 1
+
+
+def test_enqueue_validates_payload_against_task_spec(db_session, monkeypatch):
+    queue = _patch_db(monkeypatch, db_session)
+
+    with pytest.raises(ValueError, match="Invalid payload for analyze_url"):
+        queue.enqueue(TaskType.ANALYZE_URL, payload={"content_id": "not-an-int"})
 
 
 def test_enqueue_does_not_dedupe_onboarding_tasks(db_session, monkeypatch):
@@ -403,9 +412,11 @@ def test_get_backpressure_status_uses_content_thresholds(db_session, monkeypatch
     monkeypatch.setattr(
         "app.services.queue.get_settings",
         lambda: SimpleNamespace(
-            queue_backpressure_max_pending_content=2,
-            queue_backpressure_max_pending_process_news_item=1,
-            queue_backpressure_max_pending_generate_agent_digest=1,
+            queue=SimpleNamespace(
+                queue_backpressure_max_pending_content=2,
+                queue_backpressure_max_pending_process_news_item=1,
+                queue_backpressure_max_pending_generate_agent_digest=1,
+            ),
         ),
     )
 

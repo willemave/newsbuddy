@@ -92,13 +92,16 @@ def score_x_digest_candidate(
         source_label=source_label,
     )
     try:
-        settings = get_settings()
+        queue_settings = get_settings().queue
         agent = get_basic_agent(
             X_DIGEST_FILTER_MODEL,
             _XDigestFilterOutput,
             X_DIGEST_FILTER_SYSTEM_PROMPT,
         )
-        result = agent.run_sync(prompt, model_settings={"timeout": settings.worker_timeout_seconds})
+        result = agent.run_sync(
+            prompt,
+            model_settings={"timeout": queue_settings.worker_timeout_seconds},
+        )
         output = _extract_agent_output(result)
         reason = " ".join(output.reason.split()).strip()[:X_DIGEST_FILTER_REASON_MAX_CHARS]
         return XDigestFilterDecision(
@@ -159,9 +162,8 @@ def _build_filter_prompt(
     source_type: str,
     source_label: str,
 ) -> str:
-    author = (
-        tweet.author_name
-        or (f"@{tweet.author_username}" if tweet.author_username else "Unknown")
+    author = tweet.author_name or (
+        f"@{tweet.author_username}" if tweet.author_username else "Unknown"
     )
     lines = [
         "User digest preference instructions:",

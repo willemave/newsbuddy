@@ -166,7 +166,7 @@ def dispatch(args: argparse.Namespace, *, config: AdminConfig) -> CommandResult:
     if args.group == "events":
         return _handle_events(args, config=config)
     if args.group == "health":
-        return _handle_health(config=config)
+        return _handle_health(args, config=config)
     if args.group == "debug":
         return _handle_debug(args, config=config)
     raise AdminCLIError(f"Unsupported command group: {args.group}")
@@ -341,11 +341,27 @@ def _handle_events(args: argparse.Namespace, *, config: AdminConfig) -> CommandR
     )
 
 
-def _handle_health(*, config: AdminConfig) -> CommandResult:
-    return CommandResult(
-        data=_invoke_remote("health.snapshot", config=config, payload={}),
-        warnings=[],
-    )
+def _handle_health(args: argparse.Namespace, *, config: AdminConfig) -> CommandResult:
+    if args.health_command == "snapshot":
+        return CommandResult(
+            data=_invoke_remote("health.snapshot", config=config, payload={}),
+            warnings=[],
+        )
+    if args.health_command == "queue":
+        payload = {
+            "window_hours": args.window_hours,
+            "top_errors_limit": args.top_errors_limit,
+        }
+        return CommandResult(
+            data=_invoke_remote("health.queue", config=config, payload=payload),
+            warnings=[],
+        )
+    if args.health_command == "config":
+        return CommandResult(
+            data=_invoke_remote("health.config", config=config, payload={}),
+            warnings=[],
+        )
+    raise AdminCLIError(f"Unsupported health command: {args.health_command}")
 
 
 def _handle_debug(args: argparse.Namespace, *, config: AdminConfig) -> CommandResult:
@@ -746,6 +762,10 @@ def _build_health_parser(subparsers: argparse._SubParsersAction[AdminArgumentPar
     )
     health_subparsers = health_parser.add_subparsers(dest="health_command", required=True)
     health_subparsers.add_parser("snapshot", help="Snapshot current operational counts")
+    health_subparsers.add_parser("config", help="Redacted runtime config diagnostics")
+    queue_parser = health_subparsers.add_parser("queue", help="Queue backlog and lease health")
+    queue_parser.add_argument("--window-hours", type=int, default=24)
+    queue_parser.add_argument("--top-errors-limit", type=int, default=10)
 
 
 def _build_debug_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:

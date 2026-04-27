@@ -387,14 +387,20 @@ func (*AgentLibraryManifestResponse) getAgentLibraryManifestRes() {}
 // Complete simplified agent onboarding.
 // Ref: #/components/schemas/AgentOnboardingCompleteRequest
 type AgentOnboardingCompleteRequest struct {
-	AcceptAll          OptBool  `json:"accept_all"`
-	SelectedSubreddits []string `json:"selected_subreddits"`
-	SourceIds          []int    `json:"source_ids"`
+	AcceptAll           OptBool                        `json:"accept_all"`
+	SelectedAggregators []OnboardingSelectedAggregator `json:"selected_aggregators"`
+	SelectedSubreddits  []string                       `json:"selected_subreddits"`
+	SourceIds           []int                          `json:"source_ids"`
 }
 
 // GetAcceptAll returns the value of AcceptAll.
 func (s *AgentOnboardingCompleteRequest) GetAcceptAll() OptBool {
 	return s.AcceptAll
+}
+
+// GetSelectedAggregators returns the value of SelectedAggregators.
+func (s *AgentOnboardingCompleteRequest) GetSelectedAggregators() []OnboardingSelectedAggregator {
+	return s.SelectedAggregators
 }
 
 // GetSelectedSubreddits returns the value of SelectedSubreddits.
@@ -410,6 +416,11 @@ func (s *AgentOnboardingCompleteRequest) GetSourceIds() []int {
 // SetAcceptAll sets the value of AcceptAll.
 func (s *AgentOnboardingCompleteRequest) SetAcceptAll(val OptBool) {
 	s.AcceptAll = val
+}
+
+// SetSelectedAggregators sets the value of SelectedAggregators.
+func (s *AgentOnboardingCompleteRequest) SetSelectedAggregators(val []OnboardingSelectedAggregator) {
+	s.SelectedAggregators = val
 }
 
 // SetSelectedSubreddits sets the value of SelectedSubreddits.
@@ -2183,10 +2194,11 @@ func (s *ContentSummaryResponseTopComment) init() ContentSummaryResponseTopComme
 type ContentType string
 
 const (
-	ContentTypeArticle ContentType = "article"
-	ContentTypePodcast ContentType = "podcast"
-	ContentTypeNews    ContentType = "news"
-	ContentTypeUnknown ContentType = "unknown"
+	ContentTypeArticle       ContentType = "article"
+	ContentTypePodcast       ContentType = "podcast"
+	ContentTypeNews          ContentType = "news"
+	ContentTypeInsightReport ContentType = "insight_report"
+	ContentTypeUnknown       ContentType = "unknown"
 )
 
 // AllValues returns all ContentType values.
@@ -2195,6 +2207,7 @@ func (ContentType) AllValues() []ContentType {
 		ContentTypeArticle,
 		ContentTypePodcast,
 		ContentTypeNews,
+		ContentTypeInsightReport,
 		ContentTypeUnknown,
 	}
 }
@@ -2207,6 +2220,8 @@ func (s ContentType) MarshalText() ([]byte, error) {
 	case ContentTypePodcast:
 		return []byte(s), nil
 	case ContentTypeNews:
+		return []byte(s), nil
+	case ContentTypeInsightReport:
 		return []byte(s), nil
 	case ContentTypeUnknown:
 		return []byte(s), nil
@@ -2226,6 +2241,9 @@ func (s *ContentType) UnmarshalText(data []byte) error {
 		return nil
 	case ContentTypeNews:
 		*s = ContentTypeNews
+		return nil
+	case ContentTypeInsightReport:
+		*s = ContentTypeInsightReport
 		return nil
 	case ContentTypeUnknown:
 		*s = ContentTypeUnknown
@@ -2771,6 +2789,44 @@ func (s *OnboardingFastDiscoverResponse) SetRecommendedSubreddits(val []Onboardi
 // SetRecommendedSubstacks sets the value of RecommendedSubstacks.
 func (s *OnboardingFastDiscoverResponse) SetRecommendedSubstacks(val []OnboardingSuggestion) {
 	s.RecommendedSubstacks = val
+}
+
+// Fast-news aggregator the user picked during onboarding.
+// Ref: #/components/schemas/OnboardingSelectedAggregator
+type OnboardingSelectedAggregator struct {
+	Key    string       `json:"key"`
+	Title  OptNilString `json:"title"`
+	Topics []string     `json:"topics"`
+}
+
+// GetKey returns the value of Key.
+func (s *OnboardingSelectedAggregator) GetKey() string {
+	return s.Key
+}
+
+// GetTitle returns the value of Title.
+func (s *OnboardingSelectedAggregator) GetTitle() OptNilString {
+	return s.Title
+}
+
+// GetTopics returns the value of Topics.
+func (s *OnboardingSelectedAggregator) GetTopics() []string {
+	return s.Topics
+}
+
+// SetKey sets the value of Key.
+func (s *OnboardingSelectedAggregator) SetKey(val string) {
+	s.Key = val
+}
+
+// SetTitle sets the value of Title.
+func (s *OnboardingSelectedAggregator) SetTitle(val OptNilString) {
+	s.Title = val
+}
+
+// SetTopics sets the value of Topics.
+func (s *OnboardingSelectedAggregator) SetTopics(val []string) {
+	s.Topics = val
 }
 
 // Single onboarding recommendation item.

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.commands import delete_user_llm_integration, upsert_user_llm_integration
 from app.core.db import get_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.models.api.common import (
     IntegrationDisconnectResponse,
     UpsertUserLlmIntegrationRequest,
@@ -32,13 +32,6 @@ from app.services.x_integration import (
 
 router = APIRouter(prefix="/integrations/x", tags=["integrations"])
 llm_router = APIRouter(prefix="/integrations/llm", tags=["integrations"])
-
-
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
 
 
 def _to_connection_response(view: XConnectionView) -> XConnectionResponse:
@@ -125,7 +118,7 @@ def get_llm_integrations(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[UserLlmIntegrationResponse]:
     """List user-managed LLM provider keys."""
-    return list_user_llm_integrations.execute(db, user_id=_require_user_id(current_user))
+    return list_user_llm_integrations.execute(db, user_id=require_user_id(current_user))
 
 
 @llm_router.put("/{provider}", response_model=UserLlmIntegrationResponse)
@@ -138,7 +131,7 @@ def put_llm_integration(
     """Store or update a user-managed LLM provider key."""
     return upsert_user_llm_integration.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         provider=provider,
         api_key=payload.api_key,
     )
@@ -153,7 +146,7 @@ def delete_llm_integration(
     """Delete a user-managed LLM provider key."""
     return delete_user_llm_integration.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         provider=provider,
     )
 
@@ -165,7 +158,7 @@ def test_llm_integration(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserLlmIntegrationTestResponse:
     """Validate presence of a user-managed LLM provider key."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     integrations = {
         integration.provider: integration
         for integration in list_user_llm_integrations.execute(db, user_id=user_id)

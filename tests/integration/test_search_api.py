@@ -158,7 +158,7 @@ class TestSearchAPI:
     ) -> None:
         del search_seeded_content
         monkeypatch.setattr(
-            "app.routers.api.content_list.find_feed_options",
+            "app.queries.search_mixed.find_feed_options",
             lambda query, limit: AssistantFeedOptionsResult(
                 query=query,
                 options=[
@@ -177,7 +177,7 @@ class TestSearchAPI:
             ),
         )
         monkeypatch.setattr(
-            "app.routers.api.content_list.search_podcast_episodes",
+            "app.queries.search_mixed.search_podcast_episodes",
             lambda query, limit: [
                 type(
                     "PodcastHit",

@@ -1,24 +1,20 @@
 """Tests for admin authentication dependency."""
 
+from datetime import timedelta
 from unittest.mock import MagicMock, Mock
 
 import pytest
 from fastapi import Request
 
 from app.core.deps import AdminAuthRequired, require_admin
+from app.core.security import create_admin_session_token
 
 
-def test_require_admin_valid_session(monkeypatch):
+def test_require_admin_valid_session():
     """Test require_admin with valid admin session."""
-    # Mock admin sessions
-    test_session_token = "valid_session_token_123"
-    mock_admin_sessions = {test_session_token}
-
-    monkeypatch.setattr("app.routers.auth.admin_sessions", mock_admin_sessions)
-
     # Create mock request with valid session cookie
     mock_request = Mock(spec=Request)
-    mock_request.cookies = {"admin_session": test_session_token}
+    mock_request.cookies = {"admin_session": create_admin_session_token()}
 
     # Create mock db session
     mock_db = MagicMock()
@@ -44,11 +40,8 @@ def test_require_admin_no_cookie():
     assert "/auth/admin/login" in exc_info.value.redirect_url
 
 
-def test_require_admin_invalid_session(monkeypatch):
+def test_require_admin_invalid_session():
     """Test require_admin with invalid session token."""
-    mock_admin_sessions = {"valid_token"}
-    monkeypatch.setattr("app.routers.auth.admin_sessions", mock_admin_sessions)
-
     mock_request = Mock(spec=Request)
     mock_request.cookies = {"admin_session": "invalid_token"}
     mock_request.url.path = "/admin/dashboard"
@@ -61,14 +54,14 @@ def test_require_admin_invalid_session(monkeypatch):
     assert "/auth/admin/login" in exc_info.value.redirect_url
 
 
-def test_require_admin_expired_session(monkeypatch):
-    """Test require_admin after session has been removed."""
-    # Session was valid but has been logged out
-    mock_admin_sessions = set()
-    monkeypatch.setattr("app.routers.auth.admin_sessions", mock_admin_sessions)
+def test_require_admin_expired_session():
+    """Test require_admin rejects expired session tokens."""
+    from app.core.security import create_token
 
     mock_request = Mock(spec=Request)
-    mock_request.cookies = {"admin_session": "expired_token"}
+    mock_request.cookies = {
+        "admin_session": create_token(0, "admin_session", timedelta(seconds=-1)),
+    }
     mock_request.url.path = "/admin/dashboard"
 
     mock_db = MagicMock()

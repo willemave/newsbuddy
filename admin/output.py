@@ -106,6 +106,10 @@ def _format_success_text(command: str, data: Any) -> str:
         return _format_sync_result(data)
     if command == "health.snapshot":
         return _format_health_snapshot(data)
+    if command == "health.config":
+        return _format_config_health(data)
+    if command == "health.queue":
+        return _format_queue_health(data)
     if command == "usage.summary":
         return _format_usage_summary(data)
     if command in {"usage.user", "usage.content"}:
@@ -235,6 +239,67 @@ def _format_health_snapshot(data: dict[str, Any]) -> str:
             f"- latest usage record: {_coerce_text(usage.get('latest_record_at') or 'none')}",
         ]
     )
+
+
+def _format_queue_health(data: dict[str, Any]) -> str:
+    pending = data.get("pending") or []
+    retry_buckets = data.get("retry_buckets") or []
+    top_failures = data.get("top_failures") or []
+    lines = [
+        "Queue health:",
+        f"- processing: {data.get('processing_count', 0)}",
+        f"- expired leases: {data.get('expired_lease_count', 0)}",
+        (
+            f"- recent failures ({data.get('window_hours', 24)}h): "
+            f"{data.get('recent_failed_count', 0)}"
+        ),
+    ]
+    if pending:
+        lines.append("Pending:")
+        for row in pending[:10]:
+            age = row.get("oldest_pending_age_seconds")
+            age_text = "unknown" if age is None else f"{float(age):.0f}s"
+            lines.append(
+                f"- {row.get('queue_name')}/{row.get('task_type')}: "
+                f"{row.get('pending_count', 0)} pending, oldest {age_text}"
+            )
+    if retry_buckets:
+        bucket_text = ", ".join(
+            f"{bucket.get('retry_count', 0)}={bucket.get('pending_count', 0)}"
+            for bucket in retry_buckets
+        )
+        lines.append(f"Retry buckets: {bucket_text}")
+    if top_failures:
+        lines.append("Top failures:")
+        for failure in top_failures[:5]:
+            lines.append(
+                f"- {failure.get('task_type')}: {failure.get('count', 0)}x "
+                f"{_coerce_text(failure.get('error_message') or 'unknown')}"
+            )
+    return "\n".join(lines)
+
+
+def _format_config_health(data: dict[str, Any]) -> str:
+    groups = data.get("groups") or {}
+    lines = [
+        "Config diagnostics:",
+        f"- environment: {_coerce_text(data.get('environment') or 'unknown')}",
+        f"- redacted: {bool(data.get('redacted'))}",
+    ]
+    for group_name, values in sorted(groups.items()):
+        if not isinstance(values, dict):
+            continue
+        configured_flags = [
+            bool(value)
+            for key, value in values.items()
+            if str(key).endswith("_configured") and isinstance(value, bool)
+        ]
+        if configured_flags:
+            configured_count = sum(1 for value in configured_flags if value)
+            lines.append(f"- {group_name}: {configured_count}/{len(configured_flags)} configured")
+        else:
+            lines.append(f"- {group_name}: {len(values)} settings")
+    return "\n".join(lines)
 
 
 def _format_usage_summary(data: dict[str, Any]) -> str:

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.commands import refresh_content_discussion as refresh_content_discussion_command
 from app.core.db import get_db_session, get_readonly_db_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_user_id
 from app.core.timing import timed
 from app.models.api.common import (
     ChatGPTUrlResponse,
@@ -22,13 +22,6 @@ from app.queries import get_content_detail as get_content_detail_query
 from app.queries import get_content_discussion as get_content_discussion_query
 
 router = APIRouter()
-
-
-def _require_user_id(current_user: User) -> int:
-    user_id = current_user.id
-    if user_id is None:
-        raise ValueError("Authenticated user is missing an id")
-    return user_id
 
 
 @router.get(
@@ -49,7 +42,7 @@ def get_content_detail(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ContentDetailResponse:
     """Get detailed view of a specific content item."""
-    user_id = _require_user_id(current_user)
+    user_id = require_user_id(current_user)
     with timed("query content_detail"):
         return get_content_detail_query.execute(
             db,
@@ -76,7 +69,7 @@ def get_content_body(
     """Return canonical body text for a content item."""
     return get_content_body_query.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         content_id=content_id,
         variant=variant,
     )
@@ -105,7 +98,7 @@ def get_content_discussion(
     """Return stored discussion payload for a content item."""
     return get_content_discussion_query.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         content_id=content_id,
     )
 
@@ -133,7 +126,7 @@ def refresh_content_discussion(
     """Refresh and return discussion payload for a content item."""
     return refresh_content_discussion_command.refresh_content_discussion(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         content_id=content_id,
     )
 
@@ -163,7 +156,7 @@ def get_chatgpt_url(
     """
     return get_content_chat_url_query.execute(
         db,
-        user_id=_require_user_id(current_user),
+        user_id=require_user_id(current_user),
         content_id=content_id,
         user_prompt=user_prompt,
     )
