@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -225,6 +226,117 @@ def test_list_chat_sessions(client: TestClient, db_session: Session, test_user) 
 
     sessions = response.json()
     assert len(sessions) == 3
+
+
+def test_list_chat_sessions_page_uses_cursor_ordering(
+    client: TestClient, db_session: Session, test_user
+) -> None:
+    base_time = datetime(2026, 1, 1, tzinfo=UTC)
+    for index in range(5):
+        activity_at = base_time + timedelta(minutes=index)
+        session = ChatSession(
+            user_id=test_user.id,
+            title=f"Session {index}",
+            session_type="knowledge_chat",
+            llm_model="openai:gpt-5.4",
+            llm_provider="openai",
+            created_at=activity_at,
+            last_message_at=activity_at,
+        )
+        db_session.add(session)
+    db_session.commit()
+
+    response = client.get("/api/content/chat/sessions/list?limit=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [session["title"] for session in payload["sessions"]] == ["Session 4", "Session 3"]
+    assert payload["meta"]["has_more"] is True
+    assert payload["meta"]["page_size"] == 2
+    assert payload["meta"]["next_cursor"]
+
+    next_response = client.get(
+        "/api/content/chat/sessions/list",
+        params={"limit": 2, "cursor": payload["meta"]["next_cursor"]},
+    )
+
+    assert next_response.status_code == 200
+    next_payload = next_response.json()
+    assert [session["title"] for session in next_payload["sessions"]] == [
+        "Session 2",
+        "Session 1",
+    ]
+    assert {session["id"] for session in payload["sessions"]}.isdisjoint(
+        {session["id"] for session in next_payload["sessions"]}
+    )
+
+
+def test_list_chat_sessions_page_filters_hidden_archived_and_content(
+    client: TestClient, db_session: Session, test_user
+) -> None:
+    content = Content(
+        url="https://example.com/list-page-filter",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Filtered Article",
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+
+    visible = ChatSession(
+        user_id=test_user.id,
+        content_id=content.id,
+        title="Visible Session",
+        session_type="knowledge_chat",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    archived = ChatSession(
+        user_id=test_user.id,
+        content_id=content.id,
+        title="Archived Session",
+        session_type="knowledge_chat",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+        is_archived=True,
+    )
+    hidden = ChatSession(
+        user_id=test_user.id,
+        content_id=content.id,
+        title="Hidden Session",
+        session_type="knowledge_chat",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+        is_hidden_from_history=True,
+    )
+    unrelated = ChatSession(
+        user_id=test_user.id,
+        title="Unrelated Session",
+        session_type="knowledge_chat",
+        llm_model="openai:gpt-5.4",
+        llm_provider="openai",
+    )
+    db_session.add_all([visible, archived, hidden, unrelated])
+    db_session.commit()
+
+    response = client.get(
+        "/api/content/chat/sessions/list",
+        params={"content_id": content.id, "limit": 20},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [session["title"] for session in payload["sessions"]] == ["Visible Session"]
+    assert payload["sessions"][0]["content_id"] == content.id
+    assert payload["meta"]["has_more"] is False
+
+
+def test_list_chat_sessions_page_rejects_bad_cursor(client: TestClient) -> None:
+    response = client.get("/api/content/chat/sessions/list?cursor=not-a-cursor")
+
+    assert response.status_code == 400
+    assert "Invalid pagination cursor" in response.json()["detail"]
 
 
 def _seed_turn(

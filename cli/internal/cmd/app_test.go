@@ -98,15 +98,12 @@ func TestContentSubmitWaitAddsJobPayload(t *testing.T) {
 			}
 			writeJSON(t, w, map[string]any{
 				"body_available":      true,
-				"body_format":         nil,
-				"body_kind":           nil,
 				"bullet_points":       []any{},
 				"can_subscribe":       false,
 				"checked_out_at":      nil,
 				"checked_out_by":      nil,
 				"content_type":        "article",
 				"created_at":          "2026-04-09T12:00:00Z",
-				"detected_feed":       nil,
 				"discussion_url":      nil,
 				"display_title":       "Example Story",
 				"error_message":       nil,
@@ -130,8 +127,6 @@ func TestContentSubmitWaitAddsJobPayload(t *testing.T) {
 				"status":              "completed",
 				"structured_summary":  nil,
 				"summary":             nil,
-				"summary_kind":        nil,
-				"summary_version":     nil,
 				"thumbnail_url":       nil,
 				"title":               "Example Story",
 				"topics":              []string{},
@@ -261,8 +256,8 @@ func TestContentSummarizeSetsFavoriteAndMarkRead(t *testing.T) {
 		if !strings.Contains(payload, `"url":"https://example.com/story"`) {
 			t.Fatalf("expected submitted URL in payload: %s", payload)
 		}
-		if !strings.Contains(payload, `"favorite_and_mark_read":true`) {
-			t.Fatalf("expected favorite_and_mark_read in payload: %s", payload)
+		if !strings.Contains(payload, `"save_to_knowledge_and_mark_read":true`) {
+			t.Fatalf("expected save_to_knowledge_and_mark_read in payload: %s", payload)
 		}
 		writeJSON(t, w, map[string]any{
 			"content_id":     9,

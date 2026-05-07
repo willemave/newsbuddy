@@ -491,6 +491,7 @@ Prefix: `/api/content`
 #### Chat
 
 - `GET /api/content/chat/sessions`
+- `GET /api/content/chat/sessions/list`
 - `POST /api/content/chat/sessions`
 - `PATCH /api/content/chat/sessions/{session_id}`
 - `GET /api/content/chat/sessions/{session_id}`

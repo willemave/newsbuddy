@@ -13,7 +13,7 @@ from fastapi import (
     Response,
     status,
 )
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session, get_readonly_db_session
@@ -27,6 +27,7 @@ from app.models.api.chat import (
     ChatMessageDto,
     ChatMessageRole,
     ChatSessionDetailDto,
+    ChatSessionListResponse,
     ChatSessionSummaryDto,
     CouncilRetryRequest,
     CouncilSelectRequest,
@@ -43,6 +44,7 @@ from app.models.api.chat import (
 )
 from app.models.chat_message_metadata import ChatMessageRenderMetadata
 from app.models.internal.assistant import AssistantScreenContext
+from app.models.pagination import PaginationMetadata
 from app.models.schema import (
     ChatMessage,
     ChatSession,
@@ -75,6 +77,7 @@ from app.services.llm_models import (
     resolve_model,
 )
 from app.services.personal_markdown_library import sync_personal_markdown_for_content
+from app.utils.pagination import PaginationCursor
 from app.utils.title_utils import resolve_content_display_title
 
 logger = get_logger(__name__)
@@ -358,6 +361,198 @@ def _extract_last_message_preview(
     return None, None
 
 
+def _chat_session_activity_expr():
+    return func.coalesce(ChatSession.last_message_at, ChatSession.created_at)
+
+
+def _list_visible_chat_sessions(
+    db: Session,
+    *,
+    user_id: int,
+    content_id: int | None,
+    limit: int,
+    cursor: str | None = None,
+    overfetch: bool = False,
+) -> list[ChatSession]:
+    activity_expr = _chat_session_activity_expr()
+    query = db.query(ChatSession).filter(
+        ChatSession.user_id == user_id,
+        ChatSession.is_archived == False,  # noqa: E712
+        ChatSession.is_hidden_from_history == False,  # noqa: E712
+    )
+    if content_id is not None:
+        query = query.filter(ChatSession.content_id == content_id)
+
+    if cursor:
+        try:
+            cursor_data = PaginationCursor.decode_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if not PaginationCursor.validate_cursor(cursor_data, {"content_id": content_id}):
+            raise HTTPException(status_code=400, detail="Invalid pagination cursor for filters")
+
+        last_id = cursor_data["last_id"]
+        last_activity_at = cursor_data["last_created_at"]
+        query = query.filter(
+            or_(
+                activity_expr < last_activity_at,
+                and_(activity_expr == last_activity_at, ChatSession.id < last_id),
+            )
+        )
+
+    fetch_limit = limit + 1 if overfetch else limit
+    return (
+        query.order_by(
+            activity_expr.desc(),
+            ChatSession.id.desc(),
+        )
+        .limit(fetch_limit)
+        .all()
+    )
+
+
+def _build_session_summaries(
+    db: Session,
+    *,
+    user_id: int,
+    sessions: list[ChatSession],
+) -> list[ChatSessionSummaryDto]:
+    active_child_ids = {
+        session.active_child_session_id
+        for session in sessions
+        if session.active_child_session_id is not None
+    }
+    active_child_sessions: dict[int, ChatSession] = {}
+    if active_child_ids:
+        active_child_rows = (
+            db.query(ChatSession)
+            .filter(ChatSession.id.in_(active_child_ids))
+            .filter(ChatSession.is_hidden_from_history == True)  # noqa: E712
+            .all()
+        )
+        active_child_sessions = {
+            child.id: child for child in active_child_rows if child.id is not None
+        }
+
+    content_ids = {session.content_id for session in sessions if session.content_id is not None}
+    contents_by_id: dict[int, Content] = {}
+    if content_ids:
+        content_rows = db.query(Content).filter(Content.id.in_(content_ids)).all()
+        contents_by_id = {content.id: content for content in content_rows if content.id is not None}
+
+    session_ids = {s.id for s in sessions if s.id is not None}
+    preview_session_ids = session_ids | active_child_ids
+    pending_session_ids: set[int] = set()
+    sessions_with_messages: set[int] = set()
+
+    if preview_session_ids:
+        pending_messages = (
+            db.query(ChatMessage.session_id)
+            .filter(
+                ChatMessage.session_id.in_(preview_session_ids),
+                ChatMessage.status == MessageProcessingStatus.PROCESSING.value,
+            )
+            .distinct()
+            .all()
+        )
+        pending_session_ids = {m.session_id for m in pending_messages if m.session_id is not None}
+
+        sessions_with_any_messages = (
+            db.query(ChatMessage.session_id)
+            .filter(ChatMessage.session_id.in_(preview_session_ids))
+            .distinct()
+            .all()
+        )
+        sessions_with_messages = {
+            m.session_id for m in sessions_with_any_messages if m.session_id is not None
+        }
+
+    last_message_map: dict[int, ChatMessage] = {}
+    if preview_session_ids:
+        latest_msg_subq = (
+            db.query(
+                ChatMessage.session_id,
+                func.max(ChatMessage.id).label("max_id"),
+            )
+            .filter(ChatMessage.session_id.in_(preview_session_ids))
+            .group_by(ChatMessage.session_id)
+            .subquery()
+        )
+        latest_messages = (
+            db.query(ChatMessage)
+            .join(latest_msg_subq, ChatMessage.id == latest_msg_subq.c.max_id)
+            .all()
+        )
+        last_message_map = {m.session_id: m for m in latest_messages if m.session_id is not None}
+
+    knowledge_saved_content_ids: set[int] = set()
+    if content_ids:
+        knowledge_saves = (
+            db.query(ContentKnowledgeSave.content_id)
+            .filter(
+                ContentKnowledgeSave.user_id == user_id,
+                ContentKnowledgeSave.content_id.in_(content_ids),
+            )
+            .all()
+        )
+        knowledge_saved_content_ids = {
+            row.content_id for row in knowledge_saves if row.content_id is not None
+        }
+
+    result: list[ChatSessionSummaryDto] = []
+    for session in sessions:
+        article_title = None
+        article_url = None
+        article_summary = None
+        article_source = None
+
+        if session.content_id:
+            content = contents_by_id.get(session.content_id)
+            if content:
+                article_title = _resolve_article_title(content)
+                article_url = content.url
+                article_summary = _extract_short_summary(content)
+                article_source = content.source
+
+        preview_session = session
+        if session.council_mode and session.active_child_session_id is not None:
+            candidate_child = active_child_sessions.get(session.active_child_session_id)
+            if candidate_child and candidate_child.parent_session_id == session.id:
+                preview_session = candidate_child
+
+        preview_session_id = _require_session_id(preview_session)
+        session_row_id = _require_session_id(session)
+        has_pending = preview_session_id in pending_session_ids
+        is_saved_to_knowledge = (
+            session.content_id in knowledge_saved_content_ids if session.content_id else False
+        )
+        has_messages = session_row_id in sessions_with_messages
+
+        last_preview: str | None = None
+        last_role: str | None = None
+        last_msg = last_message_map.get(preview_session_id)
+        if last_msg:
+            last_preview, last_role = _extract_last_message_preview(last_msg)
+
+        result.append(
+            _session_to_summary(
+                session,
+                article_title=article_title,
+                article_url=article_url,
+                article_summary=article_summary,
+                article_source=article_source,
+                has_pending_message=has_pending,
+                is_saved_to_knowledge=is_saved_to_knowledge,
+                has_messages=has_messages,
+                last_message_preview=last_preview,
+                last_message_role=last_role,
+            )
+        )
+
+    return result
+
+
 def _extract_messages_for_display(
     db: Session,
     session_id: int,
@@ -514,164 +709,60 @@ async def list_sessions(
     falling back to created_at for sessions without messages.
     """
     user_id = require_user_id(current_user)
-    query = db.query(ChatSession).filter(
-        ChatSession.user_id == user_id,
-        ChatSession.is_archived == False,  # noqa: E712
-        ChatSession.is_hidden_from_history == False,  # noqa: E712
+    sessions = _list_visible_chat_sessions(
+        db,
+        user_id=user_id,
+        content_id=content_id,
+        limit=limit,
     )
+    return _build_session_summaries(db, user_id=user_id, sessions=sessions)
 
-    if content_id is not None:
-        query = query.filter(ChatSession.content_id == content_id)
 
-    # Order by most recent activity (coalesce with created_at for new sessions)
-    sessions = (
-        query.order_by(
-            func.coalesce(ChatSession.last_message_at, ChatSession.created_at).desc(),
-        )
-        .limit(limit)
-        .all()
+@router.get(
+    "/sessions/list",
+    response_model=ChatSessionListResponse,
+    summary="List chat sessions page",
+    description="List a page of chat sessions for the current user.",
+)
+async def list_sessions_page(
+    db: Annotated[Session, Depends(get_readonly_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    content_id: Annotated[int | None, Query(description="Filter by content ID")] = None,
+    cursor: Annotated[str | None, Query(description="Pagination cursor for next page")] = None,
+    limit: Annotated[int, Query(ge=1, le=100, description="Maximum sessions to return")] = 25,
+) -> ChatSessionListResponse:
+    """List one cursor-paginated page of chat sessions."""
+    user_id = require_user_id(current_user)
+    rows = _list_visible_chat_sessions(
+        db,
+        user_id=user_id,
+        content_id=content_id,
+        limit=limit,
+        cursor=cursor,
+        overfetch=True,
     )
-
-    active_child_ids = [
-        session.active_child_session_id
-        for session in sessions
-        if session.active_child_session_id is not None
-    ]
-    active_child_sessions: dict[int, ChatSession] = {}
-    if active_child_ids:
-        active_child_rows = (
-            db.query(ChatSession)
-            .filter(ChatSession.id.in_(active_child_ids))
-            .filter(ChatSession.is_hidden_from_history == True)  # noqa: E712
-            .all()
+    has_more = len(rows) > limit
+    sessions = rows[:limit] if has_more else rows
+    next_cursor = None
+    if has_more and sessions:
+        last_session = sessions[-1]
+        next_cursor = PaginationCursor.encode_cursor(
+            last_id=_require_session_id(last_session),
+            last_created_at=_require_timestamp(
+                last_session.last_message_at or last_session.created_at,
+                detail="Chat session missing activity timestamp",
+            ),
+            filters={"content_id": content_id},
         )
-        active_child_sessions = {
-            child.id: child for child in active_child_rows if child.id is not None
-        }
-
-    content_ids = [session.content_id for session in sessions if session.content_id is not None]
-    contents_by_id: dict[int, Content] = {}
-    if content_ids:
-        content_rows = db.query(Content).filter(Content.id.in_(content_ids)).all()
-        contents_by_id = {content.id: content for content in content_rows if content.id is not None}
-
-    # Get session IDs that have pending messages (for efficiency)
-    session_ids = [s.id for s in sessions if s.id is not None]
-    preview_session_ids = session_ids + active_child_ids
-    pending_session_ids: set[int] = set()
-    sessions_with_messages: set[int] = set()
-
-    if preview_session_ids:
-        # Check for pending messages
-        pending_messages = (
-            db.query(ChatMessage.session_id)
-            .filter(
-                ChatMessage.session_id.in_(preview_session_ids),
-                ChatMessage.status == MessageProcessingStatus.PROCESSING.value,
-            )
-            .distinct()
-            .all()
-        )
-        pending_session_ids = {m.session_id for m in pending_messages if m.session_id is not None}
-
-        # Check which sessions have any messages at all
-        sessions_with_any_messages = (
-            db.query(ChatMessage.session_id)
-            .filter(ChatMessage.session_id.in_(preview_session_ids))
-            .distinct()
-            .all()
-        )
-        sessions_with_messages = {
-            m.session_id for m in sessions_with_any_messages if m.session_id is not None
-        }
-
-    # Batch-query the most recent message per session for previews
-    last_message_map: dict[int, ChatMessage] = {}
-    if preview_session_ids:
-        # Subquery to get the max message ID per session
-        latest_msg_subq = (
-            db.query(
-                ChatMessage.session_id,
-                func.max(ChatMessage.id).label("max_id"),
-            )
-            .filter(ChatMessage.session_id.in_(preview_session_ids))
-            .group_by(ChatMessage.session_id)
-            .subquery()
-        )
-        latest_messages = (
-            db.query(ChatMessage)
-            .join(latest_msg_subq, ChatMessage.id == latest_msg_subq.c.max_id)
-            .all()
-        )
-        last_message_map = {m.session_id: m for m in latest_messages if m.session_id is not None}
-
-    # Get knowledge-saved content IDs for this user
-    knowledge_saved_content_ids: set[int] = set()
-    if content_ids:
-        knowledge_saves = (
-            db.query(ContentKnowledgeSave.content_id)
-            .filter(
-                ContentKnowledgeSave.user_id == user_id,
-                ContentKnowledgeSave.content_id.in_(content_ids),
-            )
-            .all()
-        )
-        knowledge_saved_content_ids = {
-            row.content_id for row in knowledge_saves if row.content_id is not None
-        }
-
-    # Build response with article titles, URLs, summaries, and sources
-    result = []
-    for session in sessions:
-        article_title = None
-        article_url = None
-        article_summary = None
-        article_source = None
-
-        if session.content_id:
-            content = contents_by_id.get(session.content_id)
-            if content:
-                article_title = _resolve_article_title(content)
-                article_url = content.url
-                article_summary = _extract_short_summary(content)
-                article_source = content.source
-
-        preview_session = session
-        if session.council_mode and session.active_child_session_id is not None:
-            candidate_child = active_child_sessions.get(session.active_child_session_id)
-            if candidate_child and candidate_child.parent_session_id == session.id:
-                preview_session = candidate_child
-        preview_session_id = _require_session_id(preview_session)
-        session_row_id = _require_session_id(session)
-        has_pending = preview_session_id in pending_session_ids
-        is_saved_to_knowledge = (
-            session.content_id in knowledge_saved_content_ids if session.content_id else False
-        )
-        has_messages = session_row_id in sessions_with_messages
-
-        # Extract last message preview
-        last_preview: str | None = None
-        last_role: str | None = None
-        last_msg = last_message_map.get(preview_session_id)
-        if last_msg:
-            last_preview, last_role = _extract_last_message_preview(last_msg)
-
-        result.append(
-            _session_to_summary(
-                session,
-                article_title=article_title,
-                article_url=article_url,
-                article_summary=article_summary,
-                article_source=article_source,
-                has_pending_message=has_pending,
-                is_saved_to_knowledge=is_saved_to_knowledge,
-                has_messages=has_messages,
-                last_message_preview=last_preview,
-                last_message_role=last_role,
-            )
-        )
-
-    return result
+    return ChatSessionListResponse(
+        sessions=_build_session_summaries(db, user_id=user_id, sessions=sessions),
+        meta=PaginationMetadata(
+            next_cursor=next_cursor,
+            has_more=has_more,
+            page_size=len(sessions),
+            total=len(sessions),
+        ),
+    )
 
 
 @router.post(

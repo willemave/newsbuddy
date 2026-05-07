@@ -108,10 +108,6 @@ struct ContentView: View {
                     },
                     onShowKnowledgeLibrary: {
                         knowledgePath.append(KnowledgeLibraryRoute())
-                    },
-                    onShowSessionHistory: {
-                        knowledgePath = NavigationPath()
-                        knowledgePath.append(SessionHistoryRoute())
                     }
                 )
                 .withContentRoutes(

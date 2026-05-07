@@ -10,7 +10,6 @@ import SwiftUI
 struct KnowledgeView: View {
     let onSelectSession: ((ChatSessionRoute) -> Void)?
     let onShowKnowledgeLibrary: (() -> Void)?
-    let onShowSessionHistory: (() -> Void)?
 
     @StateObject private var viewModel = KnowledgeHubViewModel()
     @ObservedObject private var settings = AppSettings.shared
@@ -53,12 +52,10 @@ struct KnowledgeView: View {
 
     init(
         onSelectSession: ((ChatSessionRoute) -> Void)? = nil,
-        onShowKnowledgeLibrary: (() -> Void)? = nil,
-        onShowSessionHistory: (() -> Void)? = nil
+        onShowKnowledgeLibrary: (() -> Void)? = nil
     ) {
         self.onSelectSession = onSelectSession
         self.onShowKnowledgeLibrary = onShowKnowledgeLibrary
-        self.onShowSessionHistory = onShowSessionHistory
     }
 
     var body: some View {
@@ -71,7 +68,7 @@ struct KnowledgeView: View {
                     quickActionsSection
                     librarySection
                     discoverySection
-                    recentChatsSection
+                    chatHistorySection
                 }
                 .padding(.bottom, 148)
             }
@@ -272,46 +269,80 @@ struct KnowledgeView: View {
         }
     }
 
-    // MARK: - Recent Chats
+    // MARK: - Chat History
 
-    private var recentChatsSection: some View {
-        Group {
-            if !viewModel.recentSessions.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Recent Chats")
-                        .font(.terracottaHeadlineSmall)
-                        .foregroundStyle(Color.onSurface)
+    private var chatHistorySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Chat History")
+                .font(.terracottaHeadlineSmall)
+                .foregroundStyle(Color.onSurface)
+                .padding(.horizontal, Spacing.screenHorizontal)
+
+            if viewModel.isLoading && viewModel.sessions.isEmpty {
+                chatHistoryLoadingRow
+            } else if viewModel.sessions.isEmpty {
+                chatHistoryEmptyRow
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(viewModel.sessions) { session in
+                        Button {
+                            onSelectSession?(ChatSessionRoute(session: session))
+                        } label: {
+                            ChatSessionCard(session: session)
+                        }
+                        .buttonStyle(.plain)
                         .padding(.horizontal, Spacing.screenHorizontal)
-
-                    VStack(spacing: 10) {
-                        ForEach(viewModel.recentSessions) { session in
-                            Button {
-                                onSelectSession?(ChatSessionRoute(session: session))
-                            } label: {
-                                ChatSessionCard(session: session)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, Spacing.screenHorizontal)
+                        .task {
+                            await viewModel.loadMoreSessionsIfNeeded(currentSession: session)
                         }
                     }
+                }
 
-                    Button {
-                        onShowSessionHistory?()
-                    } label: {
-                        HStack {
-                            Text("See all chats")
-                                .font(.terracottaBodyMedium)
-                                .fontWeight(.medium)
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(.terracottaPrimary)
+                chatHistoryFooter
+            }
+        }
+        .padding(.bottom, 32)
+    }
+
+    private var chatHistoryLoadingRow: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text("Loading chats")
+                .font(.terracottaBodyMedium)
+                .foregroundStyle(Color.onSurfaceSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .padding(.horizontal, Spacing.screenHorizontal)
+    }
+
+    private var chatHistoryEmptyRow: some View {
+        Text("No chats yet")
+            .font(.terracottaBodyMedium)
+            .foregroundStyle(Color.onSurfaceSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Spacing.screenHorizontal)
+            .padding(.vertical, 8)
+    }
+
+    private var chatHistoryFooter: some View {
+        Group {
+            if viewModel.isLoadingMore {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            } else if viewModel.hasLoadMoreError {
+                Button {
+                    Task { await viewModel.loadMoreSessions() }
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                        .font(.terracottaBodyMedium)
+                        .foregroundStyle(Color.terracottaPrimary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                    }
-                    .padding(.horizontal, Spacing.screenHorizontal)
                 }
-                .padding(.bottom, 32)
+                .buttonStyle(.plain)
+                .padding(.horizontal, Spacing.screenHorizontal)
             }
         }
     }

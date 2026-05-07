@@ -22,6 +22,7 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         XCTAssertEqual(chatService.receivedScreenTitles, ["Knowledge"])
         XCTAssertEqual(chatService.receivedQueries, [nil])
         XCTAssertEqual(chatService.receivedNotes, [nil])
+        XCTAssertEqual(viewModel.sessions.map(\.id), [91])
     }
 
     func testSeededActionsUseExpectedPrompts() async {
@@ -69,27 +70,64 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         )
     }
 
-    func testLoadHubLimitsToFiveMostRecentSessions() async {
+    func testLoadHubStoresFirstHistoryPageAndPagination() async {
         let sessions = [
             makeSession(id: 1),
             makeSession(id: 2),
             makeSession(id: 3),
-            makeSession(id: 4),
-            makeSession(id: 5),
-            makeSession(id: 6),
-            makeSession(id: 7),
         ]
         let chatService = MockKnowledgeHubChatService(
-            sessionsResult: .success(sessions),
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: sessions,
+                        nextCursor: "next-page",
+                        hasMore: true
+                    )
+                )
+            ],
             turnResponses: []
         )
         let viewModel = KnowledgeHubViewModel(chatService: chatService)
 
         await viewModel.loadHub()
 
-        XCTAssertEqual(chatService.requestedListLimit, 10)
-        XCTAssertEqual(viewModel.recentSessions.map(\.id), [1, 2, 3, 4, 5])
+        XCTAssertEqual(chatService.requestedPageLimits, [20])
+        XCTAssertEqual(chatService.requestedPageCursors, [nil])
+        XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2, 3])
+        XCTAssertTrue(viewModel.hasMoreSessions)
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testLoadMoreAppendsUniqueSessions() async {
+        let chatService = MockKnowledgeHubChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 1), makeSession(id: 2)],
+                        nextCursor: "next-page",
+                        hasMore: true
+                    )
+                ),
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 2), makeSession(id: 3)],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+            ],
+            turnResponses: []
+        )
+        let viewModel = KnowledgeHubViewModel(chatService: chatService)
+
+        await viewModel.loadHub()
+        await viewModel.loadMoreSessionsIfNeeded(currentSession: viewModel.sessions.last)
+
+        XCTAssertEqual(chatService.requestedPageCursors, [nil, "next-page"])
+        XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2, 3])
+        XCTAssertFalse(viewModel.hasMoreSessions)
+        XCTAssertFalse(viewModel.hasLoadMoreError)
     }
 
     func testStartSearchChatStoresErrorWhenAssistantTurnFails() async {
@@ -116,6 +154,22 @@ final class KnowledgeHubViewModelTests: XCTestCase {
             ),
             messageId: 200 + sessionId,
             status: .processing
+        )
+    }
+
+    private func makeSessionListResponse(
+        sessions: [ChatSessionSummary],
+        nextCursor: String?,
+        hasMore: Bool
+    ) -> ChatSessionListResponse {
+        ChatSessionListResponse(
+            sessions: sessions,
+            meta: PaginationMetadata(
+                nextCursor: nextCursor,
+                hasMore: hasMore,
+                pageSize: sessions.count,
+                total: sessions.count
+            )
         )
     }
 
@@ -154,7 +208,8 @@ private final class MockKnowledgeHubChatService: KnowledgeHubChatServicing {
         }
     }
 
-    var requestedListLimit: Int?
+    var requestedPageLimits: [Int] = []
+    var requestedPageCursors: [String?] = []
     var receivedMessages: [String] = []
     var receivedSessionIds: [Int?] = []
     var receivedScreenTypes: [String] = []
@@ -162,21 +217,32 @@ private final class MockKnowledgeHubChatService: KnowledgeHubChatServicing {
     var receivedQueries: [String?] = []
     var receivedNotes: [String?] = []
 
-    private let sessionsResult: Result<[ChatSessionSummary], Error>
+    private var pageResponses: [Result<ChatSessionListResponse, Error>]
     private var turnResponses: [Result<AssistantTurnResponse, Error>]
 
     init(
-        sessionsResult: Result<[ChatSessionSummary], Error> = .success([]),
+        pageResponses: [Result<ChatSessionListResponse, Error>] = [],
         turnResponses: [Result<AssistantTurnResponse, Error>]
     ) {
-        self.sessionsResult = sessionsResult
+        self.pageResponses = pageResponses
         self.turnResponses = turnResponses
     }
 
-    func listSessions(contentId: Int?, limit: Int) async throws -> [ChatSessionSummary] {
+    func listSessionsPage(
+        contentId: Int?,
+        limit: Int,
+        cursor: String?
+    ) async throws -> ChatSessionListResponse {
         XCTAssertNil(contentId)
-        requestedListLimit = limit
-        return try sessionsResult.get()
+        requestedPageLimits.append(limit)
+        requestedPageCursors.append(cursor)
+
+        guard !pageResponses.isEmpty else {
+            XCTFail("Missing chat session page response")
+            throw MockError.boom
+        }
+
+        return try pageResponses.removeFirst().get()
     }
 
     func createAssistantTurn(

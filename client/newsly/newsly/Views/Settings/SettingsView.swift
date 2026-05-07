@@ -520,8 +520,6 @@ struct SettingsView: View {
 
     private var longArticleDisplayModeRow: some View {
         VStack(alignment: .leading, spacing: 10) {
-            let selectedMode = LongArticleDisplayMode(rawValue: settings.longArticleDisplayMode) ?? .both
-
             HStack(spacing: 12) {
                 SettingsIcon(systemName: "doc.text.magnifyingglass", color: .indigo)
 

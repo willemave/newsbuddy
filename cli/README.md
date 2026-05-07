@@ -89,6 +89,7 @@ Notes:
 - `content submit --wait` and `content summarize --wait` now block until the submitted item is fetchable via `content get`, not just until the first async job reaches a terminal state.
 - `content summarize` submits the URL in "favorite and mark read" mode so the finished item is saved and marked read once processing completes.
 - `sources add --feed-type` accepts `atom`, `substack`, or `podcast_rss`.
+- `library sync` treats the remote markdown manifest as the desired local state and prunes tracked files that disappear remotely. If the remote manifest is empty while local files are tracked, the CLI refuses to delete everything unless you pass `--allow-prune-all`.
 
 ## Regeneration
 

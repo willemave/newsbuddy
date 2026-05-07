@@ -86,6 +86,30 @@ class ChatService {
         )
     }
 
+    /// List one page of chat sessions for the current user
+    func listSessionsPage(
+        contentId: Int? = nil,
+        limit: Int = 25,
+        cursor: String? = nil
+    ) async throws -> ChatSessionListResponse {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+
+        if let contentId = contentId {
+            queryItems.append(URLQueryItem(name: "content_id", value: String(contentId)))
+        }
+
+        if let cursor {
+            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+        }
+
+        return try await client.request(
+            APIEndpoints.chatSessionsList,
+            queryItems: queryItems
+        )
+    }
+
     /// Create a new chat session
     func createSession(
         contentId: Int? = nil,

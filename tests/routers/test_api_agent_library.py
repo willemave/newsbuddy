@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.core.settings import get_settings
 from app.models.schema import Content
 from app.repositories import knowledge_repository
 
@@ -62,6 +63,19 @@ def test_agent_library_manifest_defaults_to_source_and_summary(
     assert len(payload["documents"]) == 2
     variants = {document["variant"] for document in payload["documents"]}
     assert variants == {"source", "summary"}
+
+
+def test_agent_library_manifest_returns_unavailable_when_disabled(
+    client,
+    monkeypatch,
+) -> None:
+    """Disabled markdown sync should not look like an empty successful library."""
+    monkeypatch.setattr(get_settings(), "personal_markdown_enabled", False)
+
+    response = client.get("/api/agent/library/manifest")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Personal markdown library is disabled"
 
 
 def test_agent_library_manifest_can_exclude_source_when_requested(

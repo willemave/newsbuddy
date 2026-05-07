@@ -128,17 +128,6 @@ struct ChatSessionView: View {
         }
         .padding(.top, 10)
         .padding(.bottom, 8)
-        .background(
-            LinearGradient(
-                stops: [
-                    .init(color: Color.surfacePrimary.opacity(0), location: 0),
-                    .init(color: Color.surfacePrimary.opacity(0.96), location: 0.18),
-                    .init(color: Color.surfacePrimary, location: 1.0),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
     }
 
     private var composerDock: some View {

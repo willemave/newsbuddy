@@ -115,6 +115,7 @@ enum APIEndpoints {
 
     // MARK: - Chat Endpoints
     static let chatSessions = "/api/content/chat/sessions"
+    static let chatSessionsList = "/api/content/chat/sessions/list"
     static func chatSession(id: Int) -> String {
         return "/api/content/chat/sessions/\(id)"
     }

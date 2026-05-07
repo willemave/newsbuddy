@@ -231,6 +231,7 @@ def _build_submit_content_request(
         crawl_links=False,
         subscribe_to_feed=subscribe_to_feed,
         share_and_chat=False,
+        chat_initial_message=None,
         save_to_knowledge_and_mark_read=False,
     )
 

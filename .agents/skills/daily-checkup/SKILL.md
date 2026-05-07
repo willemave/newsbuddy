@@ -1,6 +1,6 @@
 ---
 name: daily-checkup
-description: "Run a daily production checkup for Newsly using the admin CLI: inspect recent logs, recent exceptions, and recent LLM usage, then produce a concise set of suggested fixes."
+description: "Run a daily production checkup for Newsly using the admin CLI: inspect recent logs, recent exceptions, LLM usage, and cost stats, then produce a concise set of suggested fixes."
 ---
 
 # Daily Checkup
@@ -9,6 +9,7 @@ Use this skill when the user asks for a daily checkup, production sweep, morning
 
 ## Goal
 - Inspect recent remote production signals with the `admin` CLI.
+- Include a short LLM usage and cost readout for the same window.
 - Summarize what looks healthy, noisy, or broken.
 - End with concrete suggested fixes, ordered by severity.
 
@@ -74,14 +75,28 @@ Focus on:
 - errors tied to one feature or external dependency
 - whether one recurring error pattern is hiding older but higher-severity incidents earlier in the window
 
-### 3) Recent LLM usage
-Inspect usage totals for the same window:
+### 3) Recent LLM usage and cost stats
+Inspect usage totals for the same window and include the stats in the final answer:
 
 ```bash
 uv run admin usage summary --since "$SINCE" --group-by feature
 uv run admin usage summary --since "$SINCE" --group-by model
 uv run admin usage summary --since "$SINCE" --group-by provider
 ```
+
+If a feature, provider, or model dominates cost or tokens, add an operation or source breakdown:
+
+```bash
+uv run admin usage summary --since "$SINCE" --group-by operation
+uv run admin usage summary --since "$SINCE" --group-by source
+```
+
+Use these stats to report:
+- total calls, tokens, requests/resources, and estimated cost
+- top cost driver by feature, model, and provider
+- whether one feature/provider/model is dominating spend or token volume
+- whether usage dropped unexpectedly to zero for active features
+- whether retries or provider errors appear to be amplifying usage
 
 Use this to spot:
 - unusual cost spikes
@@ -90,11 +105,17 @@ Use this to spot:
 - usage dropping unexpectedly to zero
 
 ## Output Shape
-Respond in 3 short sections:
+Respond in 4 short sections:
 
 ### Health
 - what looks normal
 - anything worth watching
+
+### LLM Usage
+- report the window totals: calls, tokens, requests/resources, and estimated cost
+- name the top feature, model, and provider by cost or tokens
+- call out cost spikes, zero-usage surprises, model/provider drift, or retry amplification
+- if usage checks fail, say which command failed and keep the rest of the checkup moving
 
 ### Findings
 - highest-severity issue first
@@ -129,7 +150,7 @@ Suggested fixes:
 
 ### LLM usage spikes sharply
 Suggested fixes:
-- compare `feature`, `model`, and `provider` summaries
+- compare `feature`, `model`, `provider`, `operation`, and `source` summaries
 - identify the feature driving cost
 - inspect recent exceptions to see whether retries amplified usage
 

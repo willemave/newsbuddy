@@ -343,3 +343,8 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         return Self.utcMicrosecondsFormatter.date(from: dateString)
     }
 }
+
+struct ChatSessionListResponse: Codable {
+    let sessions: [ChatSessionSummary]
+    let meta: PaginationMetadata
+}

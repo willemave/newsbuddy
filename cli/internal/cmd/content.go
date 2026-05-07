@@ -120,7 +120,7 @@ func (a *App) newSubmitCommand(use string, commandName string) *cobra.Command {
 				request.SubscribeToFeed.SetTo(true)
 			}
 			if use == "summarize" {
-				request.FavoriteAndMarkRead.SetTo(true)
+				request.SaveToKnowledgeAndMarkRead.SetTo(true)
 			}
 			if args.Title != "" {
 				request.Title.SetTo(args.Title)

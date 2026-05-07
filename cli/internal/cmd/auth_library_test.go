@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -94,7 +96,7 @@ func TestLibrarySyncDownloadsAndPrunesFiles(t *testing.T) {
 						"variant":         "source",
 						"updated_at":      "2026-04-04T17:59:00Z",
 						"size_bytes":      16,
-						"checksum_sha256": "source-sha",
+						"checksum_sha256": testSHA256("Raw article body\n"),
 					},
 					{
 						"relative_path":   "article/example/new-doc__2026-04-03__summary__c1.md",
@@ -102,7 +104,7 @@ func TestLibrarySyncDownloadsAndPrunesFiles(t *testing.T) {
 						"variant":         "summary",
 						"updated_at":      "2026-04-04T17:59:00Z",
 						"size_bytes":      12,
-						"checksum_sha256": "new-sha",
+						"checksum_sha256": testSHA256("# Hello\n"),
 					},
 				},
 			})
@@ -114,7 +116,7 @@ func TestLibrarySyncDownloadsAndPrunesFiles(t *testing.T) {
 					"content_id":      1,
 					"variant":         "source",
 					"updated_at":      "2026-04-04T17:59:00Z",
-					"checksum_sha256": "source-sha",
+					"checksum_sha256": testSHA256("Raw article body\n"),
 					"text":            "Raw article body\n",
 				})
 			case "article/example/new-doc__2026-04-03__summary__c1.md":
@@ -123,7 +125,7 @@ func TestLibrarySyncDownloadsAndPrunesFiles(t *testing.T) {
 					"content_id":      1,
 					"variant":         "summary",
 					"updated_at":      "2026-04-04T17:59:00Z",
-					"checksum_sha256": "new-sha",
+					"checksum_sha256": testSHA256("# Hello\n"),
 					"text":            "# Hello\n",
 				})
 			default:
@@ -193,6 +195,235 @@ func TestLibrarySyncDownloadsAndPrunesFiles(t *testing.T) {
 	}
 }
 
+func TestLibrarySyncRefusesToPruneAllTrackedFilesByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer newsly_ak_test" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agent/library/manifest":
+			writeJSON(t, w, map[string]any{
+				"generated_at":   "2026-04-04T18:00:00Z",
+				"include_source": true,
+				"documents":      []map[string]any{},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	libraryRoot := filepath.Join(t.TempDir(), "library")
+	trackedPath := filepath.Join(libraryRoot, "article", "example", "old-doc.md")
+	if err := os.MkdirAll(filepath.Dir(trackedPath), 0o755); err != nil {
+		t.Fatalf("mkdir tracked dir: %v", err)
+	}
+	if err := os.WriteFile(trackedPath, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	manifestPath := filepath.Join(libraryRoot, ".newsly-agent-manifest.json")
+	if err := os.WriteFile(manifestPath, []byte(`{"files":{"article/example/old-doc.md":"old-sha"}}`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL:   server.URL,
+		APIKey:      "newsly_ak_test",
+		LibraryRoot: libraryRoot,
+	})
+
+	exitCode := cli.run("library", "sync")
+	if exitCode == 0 {
+		t.Fatalf("expected nonzero exit, stdout=%s stderr=%s", cli.stdout.String(), cli.stderr.String())
+	}
+	requireErrorMessage(
+		t,
+		cli.envelope(t),
+		"remote library manifest is empty; refusing to delete all tracked files without --allow-prune-all",
+	)
+	if _, err := os.Stat(trackedPath); err != nil {
+		t.Fatalf("expected tracked file to remain, stat err=%v", err)
+	}
+}
+
+func TestLibrarySyncAllowsExplicitPruneAll(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agent/library/manifest":
+			writeJSON(t, w, map[string]any{
+				"generated_at":   "2026-04-04T18:00:00Z",
+				"include_source": true,
+				"documents":      []map[string]any{},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	libraryRoot := filepath.Join(t.TempDir(), "library")
+	trackedPath := filepath.Join(libraryRoot, "article", "example", "old-doc.md")
+	if err := os.MkdirAll(filepath.Dir(trackedPath), 0o755); err != nil {
+		t.Fatalf("mkdir tracked dir: %v", err)
+	}
+	if err := os.WriteFile(trackedPath, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	manifestPath := filepath.Join(libraryRoot, ".newsly-agent-manifest.json")
+	if err := os.WriteFile(manifestPath, []byte(`{"files":{"article/example/old-doc.md":"old-sha"}}`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL:   server.URL,
+		APIKey:      "newsly_ak_test",
+		LibraryRoot: libraryRoot,
+	})
+
+	exitCode := cli.run("library", "sync", "--allow-prune-all")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+	if _, err := os.Stat(trackedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected tracked file to be pruned, stat err=%v", err)
+	}
+}
+
+func TestLibrarySyncRedownloadsCorruptLocalFile(t *testing.T) {
+	remoteText := "# Correct\n"
+	remoteChecksum := testSHA256(remoteText)
+	fileRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agent/library/manifest":
+			writeJSON(t, w, map[string]any{
+				"generated_at":   "2026-04-04T18:00:00Z",
+				"include_source": true,
+				"documents": []map[string]any{
+					{
+						"relative_path":   "article/example/doc__2026-04-03__summary__c1.md",
+						"content_id":      1,
+						"variant":         "summary",
+						"updated_at":      "2026-04-04T17:59:00Z",
+						"size_bytes":      len(remoteText),
+						"checksum_sha256": remoteChecksum,
+					},
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agent/library/file":
+			fileRequests++
+			writeJSON(t, w, map[string]any{
+				"relative_path":   "article/example/doc__2026-04-03__summary__c1.md",
+				"content_id":      1,
+				"variant":         "summary",
+				"updated_at":      "2026-04-04T17:59:00Z",
+				"checksum_sha256": remoteChecksum,
+				"text":            remoteText,
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	libraryRoot := filepath.Join(t.TempDir(), "library")
+	relativePath := "article/example/doc__2026-04-03__summary__c1.md"
+	targetPath := filepath.Join(libraryRoot, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+	if err := os.WriteFile(targetPath, []byte("corrupt\n"), 0o644); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+	manifestPath := filepath.Join(libraryRoot, ".newsly-agent-manifest.json")
+	manifestPayload := fmt.Sprintf(`{"files":{%q:%q}}`, relativePath, remoteChecksum)
+	if err := os.WriteFile(manifestPath, []byte(manifestPayload), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL:   server.URL,
+		APIKey:      "newsly_ak_test",
+		LibraryRoot: libraryRoot,
+	})
+
+	exitCode := cli.run("library", "sync")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+	if fileRequests != 1 {
+		t.Fatalf("expected corrupt file to be redownloaded once, got %d requests", fileRequests)
+	}
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target file: %v", err)
+	}
+	if string(data) != remoteText {
+		t.Fatalf("expected repaired file, got %q", string(data))
+	}
+	envelope := cli.envelope(t)
+	dataPayload := envelope["data"].(map[string]any)
+	if int(dataPayload["repaired"].(float64)) != 1 {
+		t.Fatalf("expected repaired=1, got %#v", dataPayload)
+	}
+}
+
+func TestLibrarySyncRejectsDownloadedChecksumMismatch(t *testing.T) {
+	expectedChecksum := testSHA256("# Expected\n")
+	manifestPath := "article/example/doc__2026-04-03__summary__c1.md"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agent/library/manifest":
+			writeJSON(t, w, map[string]any{
+				"generated_at":   "2026-04-04T18:00:00Z",
+				"include_source": true,
+				"documents": []map[string]any{
+					{
+						"relative_path":   manifestPath,
+						"content_id":      1,
+						"variant":         "summary",
+						"updated_at":      "2026-04-04T17:59:00Z",
+						"size_bytes":      11,
+						"checksum_sha256": expectedChecksum,
+					},
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agent/library/file":
+			writeJSON(t, w, map[string]any{
+				"relative_path":   manifestPath,
+				"content_id":      1,
+				"variant":         "summary",
+				"updated_at":      "2026-04-04T17:59:00Z",
+				"checksum_sha256": expectedChecksum,
+				"text":            "# Different\n",
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	libraryRoot := filepath.Join(t.TempDir(), "library")
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL:   server.URL,
+		APIKey:      "newsly_ak_test",
+		LibraryRoot: libraryRoot,
+	})
+
+	exitCode := cli.run("library", "sync")
+	if exitCode == 0 {
+		t.Fatalf("expected nonzero exit, stdout=%s stderr=%s", cli.stdout.String(), cli.stderr.String())
+	}
+	requireErrorMessage(
+		t,
+		cli.envelope(t),
+		"downloaded checksum mismatch for article/example/doc__2026-04-03__summary__c1.md",
+	)
+	if _, err := os.Stat(filepath.Join(libraryRoot, filepath.FromSlash(manifestPath))); !os.IsNotExist(err) {
+		t.Fatalf("expected mismatched file not to be written, stat err=%v", err)
+	}
+}
+
 func TestLibrarySyncIsIdempotentAndPrunesEmptyDirectories(t *testing.T) {
 	type syncPhase struct {
 		documents []map[string]any
@@ -208,7 +439,7 @@ func TestLibrarySyncIsIdempotentAndPrunesEmptyDirectories(t *testing.T) {
 					"variant":         "summary",
 					"updated_at":      "2026-04-04T17:59:00Z",
 					"size_bytes":      8,
-					"checksum_sha256": "sha-1",
+					"checksum_sha256": testSHA256("# Hello\n"),
 				},
 			},
 			files: map[string]string{
@@ -223,7 +454,7 @@ func TestLibrarySyncIsIdempotentAndPrunesEmptyDirectories(t *testing.T) {
 					"variant":         "summary",
 					"updated_at":      "2026-04-04T17:59:00Z",
 					"size_bytes":      8,
-					"checksum_sha256": "sha-1",
+					"checksum_sha256": testSHA256("# Hello\n"),
 				},
 			},
 			files: map[string]string{
@@ -261,7 +492,7 @@ func TestLibrarySyncIsIdempotentAndPrunesEmptyDirectories(t *testing.T) {
 				"content_id":      1,
 				"variant":         "summary",
 				"updated_at":      "2026-04-04T17:59:00Z",
-				"checksum_sha256": "sha-1",
+				"checksum_sha256": testSHA256(text),
 				"text":            text,
 			})
 		default:
@@ -301,7 +532,13 @@ func TestLibrarySyncIsIdempotentAndPrunesEmptyDirectories(t *testing.T) {
 	}
 
 	phaseIndex = 2
-	third := runAndDecode()
+	cli.stdout.Reset()
+	cli.stderr.Reset()
+	exitCode := cli.run("library", "sync", "--allow-prune-all")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+	third := cli.envelope(t)
 	thirdData := third["data"].(map[string]any)
 	if int(thirdData["deleted"].(float64)) != 1 || int(thirdData["document_count"].(float64)) != 0 {
 		t.Fatalf("unexpected third sync data: %#v", thirdData)
@@ -318,6 +555,11 @@ func TestLibrarySyncIsIdempotentAndPrunesEmptyDirectories(t *testing.T) {
 	if string(manifestBytes) != "{\n  \"files\": {}\n}\n" {
 		t.Fatalf("unexpected manifest contents: %s", string(manifestBytes))
 	}
+}
+
+func testSHA256(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return fmt.Sprintf("%x", sum[:])
 }
 
 func TestLibrarySyncCanExcludeSourceDocuments(t *testing.T) {
@@ -340,7 +582,7 @@ func TestLibrarySyncCanExcludeSourceDocuments(t *testing.T) {
 						"variant":         "summary",
 						"updated_at":      "2026-04-04T17:59:00Z",
 						"size_bytes":      12,
-						"checksum_sha256": "summary-sha",
+						"checksum_sha256": testSHA256("# Summary\n"),
 					},
 				},
 			})
@@ -353,7 +595,7 @@ func TestLibrarySyncCanExcludeSourceDocuments(t *testing.T) {
 				"content_id":      1,
 				"variant":         "summary",
 				"updated_at":      "2026-04-04T17:59:00Z",
-				"checksum_sha256": "summary-sha",
+				"checksum_sha256": testSHA256("# Summary\n"),
 				"text":            "# Summary\n",
 			})
 		default:

@@ -15,6 +15,7 @@ from app.commands import (
 )
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
+from app.core.settings import get_settings
 from app.models.api.common import (
     AgentDigestRequest,
     AgentDigestResponse,
@@ -219,6 +220,8 @@ def get_agent_library_manifest(
     include_source: Annotated[bool, Query()] = True,
 ) -> AgentLibraryManifestResponse:
     """Return manifest metadata for exportable per-user markdown files."""
+    if not get_settings().personal_markdown_enabled:
+        raise HTTPException(status_code=503, detail="Personal markdown library is disabled")
     documents = collect_personal_markdown_documents_for_user(
         db,
         user_id=require_user_id(current_user),
@@ -248,6 +251,8 @@ def get_agent_library_file(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AgentLibraryFileResponse:
     """Return one rendered markdown document by relative manifest path."""
+    if not get_settings().personal_markdown_enabled:
+        raise HTTPException(status_code=503, detail="Personal markdown library is disabled")
     documents = collect_personal_markdown_documents_for_user(
         db,
         user_id=require_user_id(current_user),

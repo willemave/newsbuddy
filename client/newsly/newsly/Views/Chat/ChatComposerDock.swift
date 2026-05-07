@@ -37,7 +37,7 @@ struct ChatComposerDock: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(Color.surfacePrimary.opacity(0.96))
+                .fill(Color.surfacePrimary)
                 .overlay(
                     RoundedRectangle(cornerRadius: 26, style: .continuous)
                         .stroke(Color.outlineVariant.opacity(0.22), lineWidth: 1)
@@ -97,7 +97,7 @@ struct ChatComposerDock: View {
                 .accessibilityIdentifier("knowledge.chat_input")
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(Color.surfaceContainerHighest.opacity(0.92))
+                .background(Color.surfaceContainerHighest)
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)

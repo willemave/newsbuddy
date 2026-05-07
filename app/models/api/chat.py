@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.chat_message_metadata import AssistantFeedOption, CouncilCandidate
 from app.models.internal.assistant import AssistantScreenContext
+from app.models.pagination import PaginationMetadata
 from app.services.llm_models import LLMProvider as ChatModelProvider
 
 
@@ -237,6 +238,11 @@ class ChatSessionDetailDto(BaseModel):
 
     session: ChatSessionSummaryDto
     messages: list[ChatMessageDto]
+
+
+class ChatSessionListResponse(BaseModel):
+    sessions: list[ChatSessionSummaryDto]
+    meta: PaginationMetadata
 
 
 class SendMessageResponse(BaseModel):

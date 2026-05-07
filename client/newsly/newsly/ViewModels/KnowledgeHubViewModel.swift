@@ -8,7 +8,11 @@ import SwiftUI
 
 @MainActor
 protocol KnowledgeHubChatServicing: AnyObject {
-    func listSessions(contentId: Int?, limit: Int) async throws -> [ChatSessionSummary]
+    func listSessionsPage(
+        contentId: Int?,
+        limit: Int,
+        cursor: String?
+    ) async throws -> ChatSessionListResponse
 
     func createAssistantTurn(
         message: String,
@@ -29,29 +33,72 @@ extension ChatService: KnowledgeHubChatServicing {}
 
 @MainActor
 class KnowledgeHubViewModel: ObservableObject {
-    @Published var recentSessions: [ChatSessionSummary] = []
+    @Published var sessions: [ChatSessionSummary] = []
     @Published var isLoading = false
+    @Published var isLoadingMore = false
+    @Published var hasMoreSessions = false
     @Published var isCreatingSession = false
     @Published var errorMessage: String?
+    @Published var hasLoadMoreError = false
 
     private let chatService: any KnowledgeHubChatServicing
+    private var nextCursor: String?
+    private let historyPageLimit = 20
 
     init(chatService: any KnowledgeHubChatServicing = ChatService.shared) {
         self.chatService = chatService
     }
 
     func loadHub() async {
+        guard !isLoading else { return }
         isLoading = true
+        defer { isLoading = false }
+
         errorMessage = nil
+        hasLoadMoreError = false
+        nextCursor = nil
+        hasMoreSessions = false
 
         do {
-            let sessions = try await chatService.listSessions(contentId: nil, limit: 10)
-            recentSessions = Array(sessions.prefix(5))
+            let response = try await chatService.listSessionsPage(
+                contentId: nil,
+                limit: historyPageLimit,
+                cursor: nil
+            )
+            sessions = response.sessions
+            nextCursor = response.meta.nextCursor
+            hasMoreSessions = response.meta.hasMore
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
 
-        isLoading = false
+    func loadMoreSessionsIfNeeded(currentSession: ChatSessionSummary?) async {
+        guard shouldLoadMore(currentSession: currentSession) else { return }
+        await loadMoreSessions()
+    }
+
+    func loadMoreSessions() async {
+        guard !isLoading, !isLoadingMore, hasMoreSessions, let cursor = nextCursor else {
+            return
+        }
+
+        isLoadingMore = true
+        hasLoadMoreError = false
+        defer { isLoadingMore = false }
+
+        do {
+            let response = try await chatService.listSessionsPage(
+                contentId: nil,
+                limit: historyPageLimit,
+                cursor: cursor
+            )
+            appendUniqueSessions(response.sessions)
+            nextCursor = response.meta.nextCursor
+            hasMoreSessions = response.meta.hasMore
+        } catch {
+            hasLoadMoreError = true
+        }
     }
 
     func startNewChat() async -> ChatSessionRoute? {
@@ -65,6 +112,7 @@ class KnowledgeHubViewModel: ObservableObject {
                 contentId: nil, topic: nil, provider: nil,
                 modelHint: nil, initialMessage: nil
             )
+            prependSession(session)
             return ChatSessionRoute(sessionId: session.id)
         } catch {
             errorMessage = error.localizedDescription
@@ -130,6 +178,7 @@ class KnowledgeHubViewModel: ObservableObject {
                 sessionId: nil,
                 screenContext: screenContext ?? makeHubContext()
             )
+            prependSession(response.session)
             return ChatSessionRoute(
                 sessionId: response.session.id,
                 initialUserMessageText: response.userMessage.content,
@@ -152,5 +201,31 @@ class KnowledgeHubViewModel: ObservableObject {
             query: query,
             note: note
         )
+    }
+
+    private func shouldLoadMore(currentSession: ChatSessionSummary?) -> Bool {
+        guard !isLoading, !isLoadingMore, hasMoreSessions, nextCursor != nil else {
+            return false
+        }
+        guard let currentSession else {
+            return true
+        }
+        guard let index = sessions.firstIndex(where: { $0.id == currentSession.id }) else {
+            return false
+        }
+        let thresholdIndex = max(sessions.count - 5, 0)
+        return index >= thresholdIndex
+    }
+
+    private func appendUniqueSessions(_ newSessions: [ChatSessionSummary]) {
+        var seenIds = Set(sessions.map(\.id))
+        for session in newSessions where seenIds.insert(session.id).inserted {
+            sessions.append(session)
+        }
+    }
+
+    private func prependSession(_ session: ChatSessionSummary) {
+        sessions.removeAll { $0.id == session.id }
+        sessions.insert(session, at: 0)
     }
 }

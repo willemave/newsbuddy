@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +28,7 @@ func (a *App) newLibraryCommand() *cobra.Command {
 	args := struct {
 		Dir           string
 		IncludeSource bool
+		AllowPruneAll bool
 	}{
 		IncludeSource: true,
 	}
@@ -55,7 +58,7 @@ func (a *App) newLibraryCommand() *cobra.Command {
 				return a.renderError("library.sync", errors.New("missing library root"))
 			}
 			libraryRoot = filepath.Clean(libraryRoot)
-			if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+			if err := os.MkdirAll(libraryRoot, 0o700); err != nil {
 				return a.renderError("library.sync", err)
 			}
 
@@ -69,9 +72,16 @@ func (a *App) newLibraryCommand() *cobra.Command {
 			if err != nil {
 				return a.renderError("library.sync", err)
 			}
+			if len(remoteManifest.Documents) == 0 && len(localManifest.Files) > 0 && !args.AllowPruneAll {
+				return a.renderError(
+					"library.sync",
+					errors.New("remote library manifest is empty; refusing to delete all tracked files without --allow-prune-all"),
+				)
+			}
 
 			downloaded := 0
 			unchanged := 0
+			repaired := 0
 			remoteFiles := make(map[string]string, len(remoteManifest.Documents))
 			for _, document := range remoteManifest.Documents {
 				remoteFiles[document.RelativePath] = document.ChecksumSHA256
@@ -80,20 +90,30 @@ func (a *App) newLibraryCommand() *cobra.Command {
 					return a.renderError("library.sync", err)
 				}
 				if localManifest.Files[document.RelativePath] == document.ChecksumSHA256 {
-					if _, err := os.Stat(targetPath); err == nil {
+					if actualChecksum, err := checksumFile(targetPath); err == nil && actualChecksum == document.ChecksumSHA256 {
 						unchanged++
 						continue
 					}
+					repaired++
 				}
 
 				filePayload, err := client.GetLibraryFile(cmd.Context(), document.RelativePath)
 				if err != nil {
 					return a.renderErrorWithPath("library.sync", runtimeCfg.Path, err)
 				}
-				if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+				if actualChecksum := checksumText(filePayload.Text); actualChecksum != document.ChecksumSHA256 {
+					return a.renderError(
+						"library.sync",
+						fmt.Errorf("downloaded checksum mismatch for %s", document.RelativePath),
+					)
+				}
+				if err := rejectLibrarySymlinks(libraryRoot, targetPath); err != nil {
 					return a.renderError("library.sync", err)
 				}
-				if err := os.WriteFile(targetPath, []byte(filePayload.Text), 0o644); err != nil {
+				if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
+					return a.renderError("library.sync", err)
+				}
+				if err := writeFileAtomic(targetPath, []byte(filePayload.Text), 0o600); err != nil {
 					return a.renderError("library.sync", err)
 				}
 				downloaded++
@@ -127,6 +147,7 @@ func (a *App) newLibraryCommand() *cobra.Command {
 					"downloaded":     downloaded,
 					"deleted":        deleted,
 					"unchanged":      unchanged,
+					"repaired":       repaired,
 					"document_count": len(remoteManifest.Documents),
 				},
 			})
@@ -135,6 +156,7 @@ func (a *App) newLibraryCommand() *cobra.Command {
 
 	syncCmd.Flags().StringVar(&args.Dir, "dir", "", "Override the local sync directory")
 	syncCmd.Flags().BoolVar(&args.IncludeSource, "include-source", true, "Sync source/full-text markdown alongside summaries")
+	syncCmd.Flags().BoolVar(&args.AllowPruneAll, "allow-prune-all", false, "Allow an empty remote manifest to delete all tracked local files")
 
 	libraryCmd.AddCommand(syncCmd)
 	return libraryCmd
@@ -165,7 +187,7 @@ func saveLocalLibraryManifest(path string, files map[string]string) error {
 		return err
 	}
 	payload = append(payload, '\n')
-	return os.WriteFile(path, payload, 0o644)
+	return writeFileAtomic(path, payload, 0o600)
 }
 
 func safeLibraryPath(root string, relativePath string) (string, error) {
@@ -196,6 +218,66 @@ func pruneEmptyLibraryDirs(start string, stop string) error {
 			return err
 		}
 		current = filepath.Dir(current)
+	}
+	return nil
+}
+
+func checksumFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return checksumBytes(data), nil
+}
+
+func checksumText(text string) string {
+	return checksumBytes([]byte(text))
+}
+
+func checksumBytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, perm); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+func rejectLibrarySymlinks(root string, targetPath string) error {
+	root = filepath.Clean(root)
+	targetPath = filepath.Clean(targetPath)
+	rel, err := filepath.Rel(root, targetPath)
+	if err != nil {
+		return err
+	}
+	current := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "." || part == "" {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write through symlink in library path: %s", current)
+		}
 	}
 	return nil
 }
