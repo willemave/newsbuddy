@@ -6,7 +6,7 @@ import sys
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -22,6 +22,27 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.settings import get_settings  # noqa: E402
 from app.models.metadata import ContentType  # noqa: E402
 from app.models.schema import Content, ContentStatus, ProcessingTask  # noqa: E402
+
+PODCAST_RESET_METADATA_KEYS = frozenset(
+    {
+        "audio_url",
+        "author",
+        "description",
+        "duration_seconds",
+        "episode_number",
+        "episode_title",
+        "feed_config_id",
+        "feed_description",
+        "feed_name",
+        "feed_title",
+        "feed_url",
+        "media_format",
+        "platform",
+        "publication_date",
+        "source",
+        "source_domain",
+    }
+)
 
 
 class ResetOptions(BaseModel):
@@ -107,6 +128,20 @@ def _delete_processing_tasks(session: Session, content_ids: Iterable[int] | None
     return int(deleted_count or 0)
 
 
+def _reset_content_metadata(content: Content) -> dict[str, Any]:
+    """Return metadata that should survive a content processing reset."""
+
+    metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
+    if content.content_type != ContentType.PODCAST.value:
+        return {}
+
+    return {
+        key: metadata[key]
+        for key in PODCAST_RESET_METADATA_KEYS
+        if key in metadata and metadata[key] not in (None, "", [], {})
+    }
+
+
 def perform_reset(options: ResetOptions) -> ResetResult:
     """Reset content processing state or cancel tasks based on provided options."""
 
@@ -148,44 +183,30 @@ def perform_reset(options: ResetOptions) -> ResetResult:
                     created_tasks=created_tasks,
                 )
 
-            reset_payload: dict[object, object] = {
-                Content.status: ContentStatus.NEW.value,
-                Content.error_message: None,
-                Content.retry_count: 0,
-                Content.checked_out_by: None,
-                Content.checked_out_at: None,
-                Content.processed_at: None,
-                Content.content_metadata: {},
-            }
-
-            content_update_query = session.query(Content)
-            if content_ids is not None:
-                content_update_query = content_update_query.filter(Content.id.in_(content_ids))
-
-            reset_count = content_update_query.update(
-                cast(Any, reset_payload),
-                synchronize_session=False,
-            )
-
-            if not content_rows:
-                content_rows = list(
-                    session.query(Content).filter(Content.id.in_(content_ids or [])).all()
+            tasks_to_create = []
+            for content in content_rows:
+                tasks_to_create.append(
+                    ProcessingTask(
+                        task_type="process_content",
+                        content_id=content.id,
+                        status="pending",
+                        payload={
+                            "content_type": content.content_type,
+                            "url": content.url,
+                            "source": content.source,
+                        },
+                    )
                 )
 
-            tasks_to_create = [
-                ProcessingTask(
-                    task_type="process_content",
-                    content_id=content.id,
-                    status="pending",
-                    payload={
-                        "content_type": content.content_type,
-                        "url": content.url,
-                        "source": content.source,
-                    },
-                )
-                for content in content_rows
-            ]
+                content.status = ContentStatus.NEW.value
+                content.error_message = None
+                content.retry_count = 0
+                content.checked_out_by = None
+                content.checked_out_at = None
+                content.processed_at = None
+                content.content_metadata = _reset_content_metadata(content)
 
+            reset_count = len(content_rows)
             session.add_all(tasks_to_create)
             created_tasks = len(tasks_to_create)
 
@@ -244,7 +265,7 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"Deleted {result.deleted_tasks} processing tasks")
     if not options.cancel_tasks_only:
-        print(f"Reset {result.reset_contents} content items to 'new' status and cleared metadata")
+        print(f"Reset {result.reset_contents} content items to 'new' status")
         print(f"Created {result.created_tasks} new processing tasks")
 
     if options.cancel_tasks_only:

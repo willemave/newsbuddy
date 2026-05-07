@@ -14,6 +14,7 @@ from app.core.logging import get_logger
 from app.core.observability import build_log_extra, sanitize_url_for_logs
 from app.core.settings import get_settings
 from app.models.content_mapper import content_to_domain, domain_to_content
+from app.models.metadata import ContentData
 from app.models.schema import Content, ContentStatus
 from app.scraping.youtube_unified import YouTubeClientConfig
 from app.services.apple_podcasts import resolve_apple_podcast_episode
@@ -30,6 +31,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 logger = get_logger(__name__)
 settings = get_settings()
+
+DIRECT_AUDIO_FILE_EXTENSIONS = (
+    ".aac",
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".mpga",
+    ".oga",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".webm",
+)
 
 
 def sanitize_filename(title: str) -> str:
@@ -49,6 +63,26 @@ def get_file_extension_from_url(url: str) -> str:
     if "." in path:
         return os.path.splitext(path)[1]
     return ".mp3"  # Default to mp3
+
+
+def _is_direct_audio_file_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    path = unquote(parsed.path).lower()
+    return path.endswith(DIRECT_AUDIO_FILE_EXTENSIONS)
+
+
+def _direct_audio_url_from_content(content: ContentData) -> str | None:
+    candidates = [str(content.url)]
+    source_url = str(content.source_url) if content.source_url else None
+    if source_url and source_url not in candidates:
+        candidates.append(source_url)
+
+    for candidate in candidates:
+        if _is_direct_audio_file_url(candidate):
+            return candidate
+    return None
 
 
 class PodcastDownloadWorker:
@@ -346,6 +380,20 @@ class PodcastDownloadWorker:
                             audio_url = resolution.audio_url
 
                     if not audio_url:
+                        audio_url = _direct_audio_url_from_content(content)
+                        if audio_url:
+                            content.metadata["audio_url"] = audio_url
+                            logger.info(
+                                "Resolved podcast audio URL from content URL",
+                                extra=self._log_extra(
+                                    operation="resolve_audio_url",
+                                    content_id=content_id,
+                                    status="completed",
+                                    context_data={"audio_url": sanitize_url_for_logs(audio_url)},
+                                ),
+                            )
+
+                    if not audio_url:
                         platform = db_content.platform or content.metadata.get("platform")
                         logger.error(
                             "No podcast audio URL found",
@@ -641,6 +689,21 @@ class PodcastMediaWorker:
             if resolution.audio_url:
                 content.metadata["audio_url"] = resolution.audio_url
                 return resolution.audio_url
+
+        audio_url = _direct_audio_url_from_content(content)
+        if audio_url:
+            content.metadata["audio_url"] = audio_url
+            logger.info(
+                "Resolved podcast audio URL from content URL",
+                extra=self._log_extra(
+                    operation="resolve_audio_url",
+                    content_id=content.id,
+                    status="completed",
+                    context_data={"audio_url": sanitize_url_for_logs(audio_url)},
+                ),
+            )
+            return audio_url
+
         return None
 
     def _download_to_scratch(
