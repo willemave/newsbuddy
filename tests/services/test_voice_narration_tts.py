@@ -8,8 +8,8 @@ from app.models.schema import VendorUsageRecord
 from app.services.voice import narration_tts
 
 
-def test_digest_narration_tts_sets_speed_voice_setting(monkeypatch) -> None:
-    """Digest TTS should forward the configured speed to ElevenLabs voice settings."""
+def test_content_narration_tts_sets_speed_voice_setting(monkeypatch) -> None:
+    """Content narration TTS should forward the configured speed to ElevenLabs voice settings."""
 
     captured_kwargs: dict[str, object] = {}
 
@@ -36,14 +36,14 @@ def test_digest_narration_tts_sets_speed_voice_setting(monkeypatch) -> None:
         lambda: SimpleNamespace(
             elevenlabs_api_key="test-key",
             elevenlabs_tts_voice_id="voice-id",
-            elevenlabs_digest_tts_model="eleven_turbo_v2_5",
-            elevenlabs_digest_tts_output_format="mp3_44100_128",
-            elevenlabs_digest_tts_speed=1.0,
+            elevenlabs_narration_tts_model="eleven_turbo_v2_5",
+            elevenlabs_narration_tts_output_format="mp3_44100_128",
+            elevenlabs_narration_tts_speed=1.0,
         ),
     )
-    narration_tts._digest_narration_tts_service = None
+    narration_tts._content_narration_tts_service = None
 
-    audio = narration_tts.get_digest_narration_tts_service().synthesize_mp3(text="Hello world")
+    audio = narration_tts.get_content_narration_tts_service().synthesize_mp3(text="Hello world")
 
     assert audio == b"chunk"
     voice_settings = captured_kwargs["voice_settings"]
@@ -51,12 +51,12 @@ def test_digest_narration_tts_sets_speed_voice_setting(monkeypatch) -> None:
     assert voice_settings.speed == 1.0
 
 
-def test_digest_narration_tts_records_vendor_usage(
+def test_content_narration_tts_records_vendor_usage(
     monkeypatch,
     db_session,
     vendor_usage_db,
 ) -> None:
-    """Digest TTS should persist one ElevenLabs usage row."""
+    """Content narration TTS should persist one ElevenLabs usage row."""
     del vendor_usage_db
 
     class FakeTextToSpeech:
@@ -82,14 +82,14 @@ def test_digest_narration_tts_records_vendor_usage(
         lambda: SimpleNamespace(
             elevenlabs_api_key="test-key",
             elevenlabs_tts_voice_id="voice-id",
-            elevenlabs_digest_tts_model="eleven_turbo_v2_5",
-            elevenlabs_digest_tts_output_format="mp3_44100_128",
-            elevenlabs_digest_tts_speed=1.0,
+            elevenlabs_narration_tts_model="eleven_turbo_v2_5",
+            elevenlabs_narration_tts_output_format="mp3_44100_128",
+            elevenlabs_narration_tts_speed=1.0,
         ),
     )
-    narration_tts._digest_narration_tts_service = None
+    narration_tts._content_narration_tts_service = None
 
-    audio = narration_tts.get_digest_narration_tts_service().synthesize_mp3(
+    audio = narration_tts.get_content_narration_tts_service().synthesize_mp3(
         text="Hello world",
         item_id=42,
         user_id=7,

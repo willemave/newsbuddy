@@ -132,7 +132,7 @@ def test_content_narration_returns_audio_bytes(
             return b"fake-content-mp3"
 
     monkeypatch.setattr(
-        "app.routers.api.narration.get_digest_narration_tts_service",
+        "app.routers.api.narration.get_content_narration_tts_service",
         lambda: _FakeTtsService(),
     )
 

@@ -1,4 +1,4 @@
-"""One-shot narration helpers for digest audio playback."""
+"""One-shot TTS helpers for content summary narration."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ except Exception:  # pragma: no cover - gracefully handled at runtime
 logger = get_logger(__name__)
 
 
-class DigestNarrationTtsService:
-    """Generate one-shot narration audio for daily digests."""
+class ContentNarrationTtsService:
+    """Generate one-shot narration audio for content summaries."""
 
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -31,11 +31,11 @@ class DigestNarrationTtsService:
         item_id: int | None = None,
         user_id: int | None = None,
     ) -> bytes:
-        """Generate MP3 narration audio for one digest.
+        """Generate MP3 narration audio for one content summary.
 
         Args:
             text: Plain-text narration script.
-            item_id: Optional digest id for structured logging.
+            item_id: Optional content id for structured logging.
 
         Returns:
             MP3 bytes for playback.
@@ -60,9 +60,9 @@ class DigestNarrationTtsService:
             audio_iterator = client.text_to_speech.convert(
                 voice_id=self._settings.elevenlabs_tts_voice_id,
                 text=normalized,
-                model_id=self._settings.elevenlabs_digest_tts_model,
-                output_format=self._settings.elevenlabs_digest_tts_output_format,
-                voice_settings=VoiceSettings(speed=self._settings.elevenlabs_digest_tts_speed),
+                model_id=self._settings.elevenlabs_narration_tts_model,
+                output_format=self._settings.elevenlabs_narration_tts_output_format,
+                voice_settings=VoiceSettings(speed=self._settings.elevenlabs_narration_tts_speed),
             )
             audio_bytes = bytearray()
             for chunk in audio_iterator:
@@ -70,35 +70,35 @@ class DigestNarrationTtsService:
                     audio_bytes.extend(chunk)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
-                "Digest narration generation failed",
+                "Content narration generation failed",
                 extra={
-                    "component": "digest_narration_tts",
+                    "component": "content_narration_tts",
                     "operation": "synthesize_mp3",
                     "item_id": item_id,
                     "context_data": {
-                        "model_id": self._settings.elevenlabs_digest_tts_model,
-                        "output_format": self._settings.elevenlabs_digest_tts_output_format,
-                        "speed": self._settings.elevenlabs_digest_tts_speed,
+                        "model_id": self._settings.elevenlabs_narration_tts_model,
+                        "output_format": self._settings.elevenlabs_narration_tts_output_format,
+                        "speed": self._settings.elevenlabs_narration_tts_speed,
                     },
                 },
             )
-            raise RuntimeError("Failed to generate digest narration audio") from exc
+            raise RuntimeError("Failed to generate content narration audio") from exc
 
         if not audio_bytes:
-            raise RuntimeError("Digest narration audio was empty")
+            raise RuntimeError("Content narration audio was empty")
 
         record_vendor_usage_out_of_band(
             provider="elevenlabs",
-            model=self._settings.elevenlabs_digest_tts_model,
+            model=self._settings.elevenlabs_narration_tts_model,
             feature="narration_tts",
-            operation="digest_narration_tts.synthesize_mp3",
+            operation="content_narration_tts.synthesize_mp3",
             source="api",
             usage={"request_count": 1},
             user_id=user_id,
             metadata={
                 "target_id": item_id,
                 "voice_id": self._settings.elevenlabs_tts_voice_id,
-                "output_format": self._settings.elevenlabs_digest_tts_output_format,
+                "output_format": self._settings.elevenlabs_narration_tts_output_format,
                 "text_chars": len(normalized),
                 "audio_bytes": len(audio_bytes),
             },
@@ -107,13 +107,13 @@ class DigestNarrationTtsService:
         return bytes(audio_bytes)
 
 
-_digest_narration_tts_service: DigestNarrationTtsService | None = None
+_content_narration_tts_service: ContentNarrationTtsService | None = None
 
 
-def get_digest_narration_tts_service() -> DigestNarrationTtsService:
-    """Return the cached digest narration TTS service."""
+def get_content_narration_tts_service() -> ContentNarrationTtsService:
+    """Return the cached content narration TTS service."""
 
-    global _digest_narration_tts_service
-    if _digest_narration_tts_service is None:
-        _digest_narration_tts_service = DigestNarrationTtsService()
-    return _digest_narration_tts_service
+    global _content_narration_tts_service
+    if _content_narration_tts_service is None:
+        _content_narration_tts_service = ContentNarrationTtsService()
+    return _content_narration_tts_service

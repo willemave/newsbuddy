@@ -12,7 +12,7 @@ from app.core.deps import get_current_user, require_user_id
 from app.models.api.common import NarrationResponse
 from app.models.user import User
 from app.queries import get_narration as get_narration_query
-from app.services.voice.narration_tts import get_digest_narration_tts_service
+from app.services.voice.narration_tts import get_content_narration_tts_service
 
 router = APIRouter()
 
@@ -57,7 +57,7 @@ def get_narration(
 
     if _prefers_audio(request):
         try:
-            audio_bytes = get_digest_narration_tts_service().synthesize_mp3(
+            audio_bytes = get_content_narration_tts_service().synthesize_mp3(
                 text=payload.narration_text,
                 item_id=payload.target_id,
                 user_id=user_id,

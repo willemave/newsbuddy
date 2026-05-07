@@ -1,5 +1,5 @@
 //
-//  DigestNarrationService.swift
+//  NarrationPlaybackService.swift
 //  newsly
 //
 

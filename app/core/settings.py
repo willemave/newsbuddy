@@ -300,9 +300,9 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ELEVENLABS_API_KEY", "ELEVENLABS"),
     )
     elevenlabs_tts_voice_id: str | None = "JBFqnCBsd6RMkjVDRZzb"
-    elevenlabs_digest_tts_model: str = "eleven_turbo_v2_5"
-    elevenlabs_digest_tts_output_format: str = "mp3_44100_128"
-    elevenlabs_digest_tts_speed: float = Field(default=1.0, ge=0.7, le=1.2)
+    elevenlabs_narration_tts_model: str = "eleven_turbo_v2_5"
+    elevenlabs_narration_tts_output_format: str = "mp3_44100_128"
+    elevenlabs_narration_tts_speed: float = Field(default=1.0, ge=0.7, le=1.2)
     elevenlabs_agent_id: str = "agent_4701khf4v6jef3vskb8sd2a30m36"
     elevenlabs_agent_text_only: bool = True
     elevenlabs_agent_turn_timeout_seconds: int = 25

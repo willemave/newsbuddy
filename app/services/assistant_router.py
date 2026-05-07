@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
+from app.core.model_defaults import DEEP_RESEARCH_MODEL_SPEC
 from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.chat_message_metadata import (
@@ -51,7 +52,6 @@ from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_models import (
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
-    PROVIDER_DEFAULTS,
     build_pydantic_model,
     resolve_effective_api_key,
 )
@@ -890,7 +890,7 @@ def _get_or_create_agent(
                 session_type="deep_research",
                 topic=question[:500],
                 llm_provider="deep_research",
-                llm_model=PROVIDER_DEFAULTS["deep_research"],
+                llm_model=DEEP_RESEARCH_MODEL_SPEC,
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
             )
