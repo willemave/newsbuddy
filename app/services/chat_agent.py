@@ -1533,7 +1533,9 @@ async def generate_initial_suggestions(
         _log_chat_usage(result, session, session_row_id, None, "initial_suggestions")
         from pydantic_ai.messages import ModelResponse, TextPart
 
-        new_messages = [ModelResponse(parts=[TextPart(content=result.output_text)])]
+        new_messages: list[ModelMessage] = [
+            ModelResponse(parts=[TextPart(content=result.output_text)])
+        ]
         save_start = perf_counter()
         save_messages(db, session_row_id, new_messages)
         save_ms = (perf_counter() - save_start) * 1000

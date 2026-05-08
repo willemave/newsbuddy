@@ -482,6 +482,7 @@ async def add_discovery_items(
                     crawl_links=False,
                     subscribe_to_feed=False,
                     share_and_chat=False,
+                    chat_initial_message=None,
                     save_to_knowledge_and_mark_read=False,
                 ),
                 current_user,

@@ -63,14 +63,9 @@ def test_atom_scraper_in_runner(monkeypatch):
         def __init__(self, name: str):
             self.name = name
 
-    monkeypatch.setattr(
-        scraping_runner,
-        "HackerNewsUnifiedScraper",
-        lambda: _StubScraper("HackerNews"),
-    )
+    monkeypatch.setattr(scraping_runner, "load_aggregator_scrapers", lambda: [])
     monkeypatch.setattr(scraping_runner, "RedditUnifiedScraper", lambda: _StubScraper("Reddit"))
     monkeypatch.setattr(scraping_runner, "SubstackScraper", lambda: _StubScraper("Substack"))
-    monkeypatch.setattr(scraping_runner, "TechmemeScraper", lambda: _StubScraper("Techmeme"))
     monkeypatch.setattr(scraping_runner, "PodcastUnifiedScraper", lambda: _StubScraper("Podcast"))
     monkeypatch.setattr(scraping_runner, "AtomScraper", lambda: _StubScraper("Atom"))
 

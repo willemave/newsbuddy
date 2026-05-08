@@ -22,7 +22,7 @@ def test_run_single_task_skips_retry_for_non_retryable_failure() -> None:
     processor = SequentialTaskProcessor()
     queue_service = Mock()
     processor.queue_service = queue_service
-    processor.settings = Mock(max_retries=3)
+    processor.settings = Mock(queue=Mock(max_retries=3))
     processor.__dict__["process_task"] = Mock(
         return_value=TaskResult.fail("terminal failure", retryable=False)
     )
@@ -38,7 +38,7 @@ def test_run_single_task_retries_retryable_failure() -> None:
     processor = SequentialTaskProcessor()
     queue_service = Mock()
     processor.queue_service = queue_service
-    processor.settings = Mock(max_retries=3)
+    processor.settings = Mock(queue=Mock(max_retries=3))
     processor.__dict__["process_task"] = Mock(
         return_value=TaskResult.fail("transient failure", retryable=True)
     )

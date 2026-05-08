@@ -73,6 +73,13 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /admin/evals/summaries/run`.
     /// - Remark: Generated from `#/paths//admin/evals/summaries/run/post(adminEvalSummariesRun)`.
     func adminEvalSummariesRun(_ input: Operations.AdminEvalSummariesRun.Input) async throws -> Operations.AdminEvalSummariesRun.Output
+    /// Admin Feedback Page
+    ///
+    /// Render recent user feedback.
+    ///
+    /// - Remark: HTTP `GET /admin/feedback`.
+    /// - Remark: Generated from `#/paths//admin/feedback/get(adminFeedbackPage)`.
+    func adminFeedbackPage(_ input: Operations.AdminFeedbackPage.Input) async throws -> Operations.AdminFeedbackPage.Output
     /// Admin Insight Reports Page
     ///
     /// Admin panel: per-user insight report eligibility + manual trigger.
@@ -255,6 +262,13 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /api/content/chat/sessions`.
     /// - Remark: Generated from `#/paths//api/content/chat/sessions/post(createContentChatSession)`.
     func createContentChatSession(_ input: Operations.CreateContentChatSession.Input) async throws -> Operations.CreateContentChatSession.Output
+    /// List chat sessions page
+    ///
+    /// List a page of chat sessions for the current user.
+    ///
+    /// - Remark: HTTP `GET /api/content/chat/sessions/list`.
+    /// - Remark: Generated from `#/paths//api/content/chat/sessions/list/get(listContentChatSessionsPage)`.
+    func listContentChatSessionsPage(_ input: Operations.ListContentChatSessionsPage.Input) async throws -> Operations.ListContentChatSessionsPage.Output
     /// Get chat session details
     ///
     /// Get a chat session with its message history.
@@ -549,6 +563,13 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /api/discovery/suggestions`.
     /// - Remark: Generated from `#/paths//api/discovery/suggestions/get(getDiscoverySuggestions)`.
     func getDiscoverySuggestions(_ input: Operations.GetDiscoverySuggestions.Input) async throws -> Operations.GetDiscoverySuggestions.Output
+    /// Create Feedback
+    ///
+    /// Store feedback from the authenticated user.
+    ///
+    /// - Remark: HTTP `POST /api/feedback`.
+    /// - Remark: Generated from `#/paths//api/feedback/post(createFeedback)`.
+    func createFeedback(_ input: Operations.CreateFeedback.Input) async throws -> Operations.CreateFeedback.Output
     /// Get Llm Integrations
     ///
     /// List user-managed LLM provider keys.
@@ -988,6 +1009,15 @@ extension APIProtocol {
             body: body
         ))
     }
+    /// Admin Feedback Page
+    ///
+    /// Render recent user feedback.
+    ///
+    /// - Remark: HTTP `GET /admin/feedback`.
+    /// - Remark: Generated from `#/paths//admin/feedback/get(adminFeedbackPage)`.
+    internal func adminFeedbackPage(headers: Operations.AdminFeedbackPage.Input.Headers = .init()) async throws -> Operations.AdminFeedbackPage.Output {
+        try await adminFeedbackPage(Operations.AdminFeedbackPage.Input(headers: headers))
+    }
     /// Admin Insight Reports Page
     ///
     /// Admin panel: per-user insight report eligibility + manual trigger.
@@ -1340,6 +1370,21 @@ extension APIProtocol {
         try await createContentChatSession(Operations.CreateContentChatSession.Input(
             headers: headers,
             body: body
+        ))
+    }
+    /// List chat sessions page
+    ///
+    /// List a page of chat sessions for the current user.
+    ///
+    /// - Remark: HTTP `GET /api/content/chat/sessions/list`.
+    /// - Remark: Generated from `#/paths//api/content/chat/sessions/list/get(listContentChatSessionsPage)`.
+    internal func listContentChatSessionsPage(
+        query: Operations.ListContentChatSessionsPage.Input.Query = .init(),
+        headers: Operations.ListContentChatSessionsPage.Input.Headers = .init()
+    ) async throws -> Operations.ListContentChatSessionsPage.Output {
+        try await listContentChatSessionsPage(Operations.ListContentChatSessionsPage.Input(
+            query: query,
+            headers: headers
         ))
     }
     /// Get chat session details
@@ -1963,6 +2008,21 @@ extension APIProtocol {
     /// - Remark: Generated from `#/paths//api/discovery/suggestions/get(getDiscoverySuggestions)`.
     internal func getDiscoverySuggestions(headers: Operations.GetDiscoverySuggestions.Input.Headers = .init()) async throws -> Operations.GetDiscoverySuggestions.Output {
         try await getDiscoverySuggestions(Operations.GetDiscoverySuggestions.Input(headers: headers))
+    }
+    /// Create Feedback
+    ///
+    /// Store feedback from the authenticated user.
+    ///
+    /// - Remark: HTTP `POST /api/feedback`.
+    /// - Remark: Generated from `#/paths//api/feedback/post(createFeedback)`.
+    internal func createFeedback(
+        headers: Operations.CreateFeedback.Input.Headers = .init(),
+        body: Operations.CreateFeedback.Input.Body
+    ) async throws -> Operations.CreateFeedback.Output {
+        try await createFeedback(Operations.CreateFeedback.Input(
+            headers: headers,
+            body: body
+        ))
     }
     /// Get Llm Integrations
     ///
@@ -3498,6 +3558,29 @@ internal enum Components {
             internal enum CodingKeys: String, CodingKey {
                 case messages
                 case session
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/ChatSessionListResponse`.
+        internal struct ChatSessionListResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ChatSessionListResponse/meta`.
+            internal var meta: Components.Schemas.PaginationMetadata
+            /// - Remark: Generated from `#/components/schemas/ChatSessionListResponse/sessions`.
+            internal var sessions: [Components.Schemas.ChatSessionSummaryDto]
+            /// Creates a new `ChatSessionListResponse`.
+            ///
+            /// - Parameters:
+            ///   - meta:
+            ///   - sessions:
+            internal init(
+                meta: Components.Schemas.PaginationMetadata,
+                sessions: [Components.Schemas.ChatSessionSummaryDto]
+            ) {
+                self.meta = meta
+                self.sessions = sessions
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case meta
+                case sessions
             }
         }
         /// Summary of a chat session.
@@ -6589,6 +6672,75 @@ internal enum Components {
                 case url
             }
         }
+        /// Feedback submitted from an authenticated client.
+        ///
+        /// - Remark: Generated from `#/components/schemas/SubmitFeedbackRequest`.
+        internal struct SubmitFeedbackRequest: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/SubmitFeedbackRequest/message`.
+            internal var message: Swift.String
+            /// - Remark: Generated from `#/components/schemas/SubmitFeedbackRequest/source`.
+            internal var source: Swift.String?
+            /// Creates a new `SubmitFeedbackRequest`.
+            ///
+            /// - Parameters:
+            ///   - message:
+            ///   - source:
+            internal init(
+                message: Swift.String,
+                source: Swift.String? = nil
+            ) {
+                self.message = message
+                self.source = source
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case message
+                case source
+            }
+            internal init(from decoder: any Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.message = try container.decode(
+                    Swift.String.self,
+                    forKey: .message
+                )
+                self.source = try container.decodeIfPresent(
+                    Swift.String.self,
+                    forKey: .source
+                )
+                try decoder.ensureNoAdditionalProperties(knownKeys: [
+                    "message",
+                    "source"
+                ])
+            }
+        }
+        /// Response after feedback is stored.
+        ///
+        /// - Remark: Generated from `#/components/schemas/SubmitFeedbackResponse`.
+        internal struct SubmitFeedbackResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/SubmitFeedbackResponse/feedback_id`.
+            internal var feedbackId: Swift.Int
+            /// - Remark: Generated from `#/components/schemas/SubmitFeedbackResponse/status`.
+            internal enum StatusPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case success = "success"
+            }
+            /// - Remark: Generated from `#/components/schemas/SubmitFeedbackResponse/status`.
+            internal var status: Components.Schemas.SubmitFeedbackResponse.StatusPayload
+            /// Creates a new `SubmitFeedbackResponse`.
+            ///
+            /// - Parameters:
+            ///   - feedbackId:
+            ///   - status:
+            internal init(
+                feedbackId: Swift.Int,
+                status: Components.Schemas.SubmitFeedbackResponse.StatusPayload
+            ) {
+                self.feedbackId = feedbackId
+                self.status = status
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case feedbackId = "feedback_id"
+                case status
+            }
+        }
         /// Request to subscribe to a detected feed.
         ///
         /// - Remark: Generated from `#/components/schemas/SubscribeToFeedRequest`.
@@ -8502,6 +8654,118 @@ internal enum Operations {
             internal static var allCases: [Self] {
                 [
                     .json
+                ]
+            }
+        }
+    }
+    /// Admin Feedback Page
+    ///
+    /// Render recent user feedback.
+    ///
+    /// - Remark: HTTP `GET /admin/feedback`.
+    /// - Remark: Generated from `#/paths//admin/feedback/get(adminFeedbackPage)`.
+    internal enum AdminFeedbackPage {
+        internal static let id: Swift.String = "adminFeedbackPage"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/admin/feedback/GET/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AdminFeedbackPage.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AdminFeedbackPage.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.AdminFeedbackPage.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            internal init(headers: Operations.AdminFeedbackPage.Input.Headers = .init()) {
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/admin/feedback/GET/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/admin/feedback/GET/responses/200/content/text\/html`.
+                    case html(OpenAPIRuntime.HTTPBody)
+                    /// The associated value of the enum case if `self` is `.html`.
+                    ///
+                    /// - Throws: An error if `self` is not `.html`.
+                    /// - SeeAlso: `.html`.
+                    internal var html: OpenAPIRuntime.HTTPBody {
+                        get throws {
+                            switch self {
+                            case let .html(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.AdminFeedbackPage.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.AdminFeedbackPage.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//admin/feedback/get(adminFeedbackPage)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.AdminFeedbackPage.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.AdminFeedbackPage.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case html
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "text/html":
+                    self = .html
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .html:
+                    return "text/html"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .html
                 ]
             }
         }
@@ -13180,6 +13444,224 @@ internal enum Operations {
             /// - Throws: An error if `self` is not `.unprocessableContent`.
             /// - SeeAlso: `.unprocessableContent`.
             internal var unprocessableContent: Operations.CreateContentChatSession.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// List chat sessions page
+    ///
+    /// List a page of chat sessions for the current user.
+    ///
+    /// - Remark: HTTP `GET /api/content/chat/sessions/list`.
+    /// - Remark: Generated from `#/paths//api/content/chat/sessions/list/get(listContentChatSessionsPage)`.
+    internal enum ListContentChatSessionsPage {
+        internal static let id: Swift.String = "listContentChatSessionsPage"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/content/chat/sessions/list/GET/query`.
+            internal struct Query: Sendable, Hashable {
+                /// Maximum sessions to return
+                ///
+                /// - Remark: Generated from `#/paths/api/content/chat/sessions/list/GET/query/limit`.
+                internal var limit: Swift.Int?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - limit: Maximum sessions to return
+                internal init(limit: Swift.Int? = nil) {
+                    self.limit = limit
+                }
+            }
+            internal var query: Operations.ListContentChatSessionsPage.Input.Query
+            /// - Remark: Generated from `#/paths/api/content/chat/sessions/list/GET/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListContentChatSessionsPage.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListContentChatSessionsPage.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.ListContentChatSessionsPage.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - query:
+            ///   - headers:
+            internal init(
+                query: Operations.ListContentChatSessionsPage.Input.Query = .init(),
+                headers: Operations.ListContentChatSessionsPage.Input.Headers = .init()
+            ) {
+                self.query = query
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/chat/sessions/list/GET/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/chat/sessions/list/GET/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ChatSessionListResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.ChatSessionListResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.ListContentChatSessionsPage.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.ListContentChatSessionsPage.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/content/chat/sessions/list/get(listContentChatSessionsPage)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.ListContentChatSessionsPage.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.ListContentChatSessionsPage.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                internal init() {}
+            }
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/chat/sessions/list/get(listContentChatSessionsPage)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.ListContentChatSessionsPage.Output.NotFound)
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/chat/sessions/list/get(listContentChatSessionsPage)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            internal static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            internal var notFound: Operations.ListContentChatSessionsPage.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/chat/sessions/list/GET/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/chat/sessions/list/GET/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.ListContentChatSessionsPage.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.ListContentChatSessionsPage.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/content/chat/sessions/list/get(listContentChatSessionsPage)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.ListContentChatSessionsPage.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.ListContentChatSessionsPage.Output.UnprocessableContent {
                 get throws {
                     switch self {
                     case let .unprocessableContent(response):
@@ -22687,6 +23169,180 @@ internal enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Create Feedback
+    ///
+    /// Store feedback from the authenticated user.
+    ///
+    /// - Remark: HTTP `POST /api/feedback`.
+    /// - Remark: Generated from `#/paths//api/feedback/post(createFeedback)`.
+    internal enum CreateFeedback {
+        internal static let id: Swift.String = "createFeedback"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/feedback/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateFeedback.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateFeedback.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.CreateFeedback.Input.Headers
+            /// - Remark: Generated from `#/paths/api/feedback/POST/requestBody`.
+            internal enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/feedback/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.SubmitFeedbackRequest)
+            }
+            internal var body: Operations.CreateFeedback.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            internal init(
+                headers: Operations.CreateFeedback.Input.Headers = .init(),
+                body: Operations.CreateFeedback.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Created: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/feedback/POST/responses/201/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/feedback/POST/responses/201/content/application\/json`.
+                    case json(Components.Schemas.SubmitFeedbackResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.SubmitFeedbackResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateFeedback.Output.Created.Body
+                /// Creates a new `Created`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateFeedback.Output.Created.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/feedback/post(createFeedback)/responses/201`.
+            ///
+            /// HTTP response code: `201 created`.
+            case created(Operations.CreateFeedback.Output.Created)
+            /// The associated value of the enum case if `self` is `.created`.
+            ///
+            /// - Throws: An error if `self` is not `.created`.
+            /// - SeeAlso: `.created`.
+            internal var created: Operations.CreateFeedback.Output.Created {
+                get throws {
+                    switch self {
+                    case let .created(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "created",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/feedback/POST/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/feedback/POST/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateFeedback.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateFeedback.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/feedback/post(createFeedback)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.CreateFeedback.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.CreateFeedback.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
                             response: self
                         )
                     }

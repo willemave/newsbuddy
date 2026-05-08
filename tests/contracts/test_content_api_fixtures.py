@@ -14,6 +14,14 @@ from app.models.contracts import (
 )
 
 
+def _summary_response(**kwargs: object) -> ContentSummaryResponse:
+    return ContentSummaryResponse.model_validate(kwargs)
+
+
+def _detail_response(**kwargs: object) -> ContentDetailResponse:
+    return ContentDetailResponse.model_validate(kwargs)
+
+
 def _dump(response: ContentSummaryResponse | ContentDetailResponse) -> dict[str, object]:
     return response.model_dump(mode="json")
 
@@ -22,7 +30,7 @@ def _dump(response: ContentSummaryResponse | ContentDetailResponse) -> dict[str,
     ("response", "expected"),
     [
         (
-            ContentSummaryResponse(
+            _summary_response(
                 id=101,
                 content_type=ContentType.ARTICLE,
                 url="https://example.com/article",
@@ -72,10 +80,14 @@ def _dump(response: ContentSummaryResponse | ContentDetailResponse) -> dict[str,
                 "primary_topic": "AI",
                 "top_comment": {"author": "alice", "text": "Useful context."},
                 "comment_count": 12,
+                "feed_preview": None,
+                "artifact_type": None,
+                "preview_bullets": None,
+                "reason_to_read": None,
             },
         ),
         (
-            ContentSummaryResponse(
+            _summary_response(
                 id=202,
                 content_type=ContentType.PODCAST,
                 url="https://podcasts.example.com/episodes/202",
@@ -117,10 +129,14 @@ def _dump(response: ContentSummaryResponse | ContentDetailResponse) -> dict[str,
                 "primary_topic": "Startups",
                 "top_comment": None,
                 "comment_count": None,
+                "feed_preview": None,
+                "artifact_type": None,
+                "preview_bullets": None,
+                "reason_to_read": None,
             },
         ),
         (
-            ContentSummaryResponse(
+            _summary_response(
                 id=303,
                 content_type=ContentType.NEWS,
                 url="https://news.example.com/items/303",
@@ -163,6 +179,10 @@ def _dump(response: ContentSummaryResponse | ContentDetailResponse) -> dict[str,
                 "primary_topic": None,
                 "top_comment": None,
                 "comment_count": None,
+                "feed_preview": None,
+                "artifact_type": None,
+                "preview_bullets": None,
+                "reason_to_read": None,
             },
         ),
     ],
@@ -178,7 +198,7 @@ def test_content_summary_response_contract(
     ("response", "expected"),
     [
         (
-            ContentDetailResponse(
+            _detail_response(
                 id=401,
                 content_type=ContentType.ARTICLE,
                 url="https://example.com/long-read",
@@ -247,6 +267,11 @@ def test_content_summary_response_contract(
                     "quotes": [{"text": "Important quote", "context": "Interview"}],
                     "topics": ["AI", "Media"],
                 },
+                "longform_artifact": None,
+                "feed_preview": None,
+                "artifact_type": None,
+                "preview_bullets": None,
+                "reason_to_read": None,
                 "bullet_points": [{"text": "First point", "category": "finding"}],
                 "quotes": [{"text": "Important quote", "context": "Interview"}],
                 "topics": ["AI", "Media"],
@@ -265,7 +290,7 @@ def test_content_summary_response_contract(
             },
         ),
         (
-            ContentDetailResponse(
+            _detail_response(
                 id=402,
                 content_type=ContentType.ARTICLE,
                 url="https://newsletter.example.com/p/feed",
@@ -315,6 +340,11 @@ def test_content_summary_response_contract(
                 "summary_kind": None,
                 "summary_version": None,
                 "structured_summary": None,
+                "longform_artifact": None,
+                "feed_preview": None,
+                "artifact_type": None,
+                "preview_bullets": None,
+                "reason_to_read": None,
                 "bullet_points": [],
                 "quotes": [],
                 "topics": [],
@@ -338,7 +368,7 @@ def test_content_summary_response_contract(
             },
         ),
         (
-            ContentDetailResponse(
+            _detail_response(
                 id=403,
                 content_type=ContentType.NEWS,
                 url="https://news.example.com/items/403",
@@ -385,6 +415,11 @@ def test_content_summary_response_contract(
                 "summary_kind": None,
                 "summary_version": None,
                 "structured_summary": None,
+                "longform_artifact": None,
+                "feed_preview": None,
+                "artifact_type": None,
+                "preview_bullets": None,
+                "reason_to_read": None,
                 "bullet_points": [],
                 "quotes": [],
                 "topics": [],

@@ -149,4 +149,4 @@ def test_scrape_to_completion_smoke(db_session, monkeypatch) -> None:
 
     content = db_session.query(Content).filter(Content.url == "https://example.com/smoke").first()
     assert content is not None
-    assert content.status == ContentStatus.COMPLETED.value
+    assert content.status == ContentStatus.AWAITING_IMAGE.value

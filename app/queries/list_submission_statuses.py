@@ -64,8 +64,11 @@ def execute(
     if has_more:
         contents = contents[:limit]
 
-    submissions = [_build_submission_response(content) for content in contents]
-    submissions = [submission for submission in submissions if submission is not None]
+    submissions: list[SubmissionStatusResponse] = []
+    for content in contents:
+        submission = _build_submission_response(content)
+        if submission is not None:
+            submissions.append(submission)
 
     next_cursor = None
     if has_more and contents:

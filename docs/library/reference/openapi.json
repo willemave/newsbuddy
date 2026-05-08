@@ -869,7 +869,7 @@
             "type": "string"
           },
           "synthesis_model": {
-            "default": "anthropic:claude-sonnet-4-6",
+            "default": "anthropic:claude-opus-4-6",
             "title": "Synthesis Model",
             "type": "string"
           },
@@ -1107,6 +1107,26 @@
           "messages"
         ],
         "title": "ChatSessionDetailDto",
+        "type": "object"
+      },
+      "ChatSessionListResponse": {
+        "properties": {
+          "meta": {
+            "$ref": "#/components/schemas/PaginationMetadata"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/ChatSessionSummaryDto"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions",
+          "meta"
+        ],
+        "title": "ChatSessionListResponse",
         "type": "object"
       },
       "ChatSessionSummaryDto": {
@@ -4429,18 +4449,6 @@
             ],
             "title": "Inferred Topics"
           },
-          "news_list_preference_prompt": {
-            "anyOf": [
-              {
-                "maxLength": 4000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News List Preference Prompt"
-          },
           "profile_summary": {
             "anyOf": [
               {
@@ -5788,6 +5796,110 @@
         "title": "SubmitContentRequest",
         "type": "object"
       },
+      "SubmitFeedbackRequest": {
+        "additionalProperties": false,
+        "description": "Feedback submitted from an authenticated client.",
+        "properties": {
+          "app_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
+          "build_number": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Number"
+          },
+          "device_model": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Model"
+          },
+          "message": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "os_version": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Os Version"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "source": {
+            "default": "ios_settings",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "SubmitFeedbackRequest",
+        "type": "object"
+      },
+      "SubmitFeedbackResponse": {
+        "description": "Response after feedback is stored.",
+        "properties": {
+          "feedback_id": {
+            "title": "Feedback Id",
+            "type": "integer"
+          },
+          "status": {
+            "const": "success",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "feedback_id"
+        ],
+        "title": "SubmitFeedbackResponse",
+        "type": "object"
+      },
       "SubscribeToFeedRequest": {
         "description": "Request to subscribe to a detected feed.",
         "example": {
@@ -5986,7 +6098,7 @@
         "example": {
           "content_id": 123,
           "creativity": 7,
-          "model": "google-gla:gemini-3-pro-preview",
+          "model": "google:gemini-3.1-flash-lite-preview",
           "suggestions": [
             {
               "id": 1,
@@ -6021,7 +6133,7 @@
             "description": "Length preference used for generation"
           },
           "model": {
-            "default": "google-gla:gemini-3-pro-preview",
+            "default": "google:gemini-3.1-flash-lite-preview",
             "description": "LLM model used for generation",
             "title": "Model",
             "type": "string"
@@ -6138,18 +6250,6 @@
               }
             ],
             "title": "Full Name"
-          },
-          "news_list_preference_prompt": {
-            "anyOf": [
-              {
-                "maxLength": 4000,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News List Preference Prompt"
           },
           "twitter_username": {
             "anyOf": [
@@ -6343,17 +6443,6 @@
           "is_admin": {
             "title": "Is Admin",
             "type": "boolean"
-          },
-          "news_list_preference_prompt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "News List Preference Prompt"
           },
           "twitter_username": {
             "anyOf": [
@@ -6936,6 +7025,28 @@
           }
         },
         "summary": "Admin Eval Summaries Run",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/feedback": {
+      "get": {
+        "description": "Render recent user feedback.",
+        "operationId": "adminFeedbackPage",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Admin Feedback Page",
         "tags": [
           "admin"
         ]
@@ -8195,6 +8306,99 @@
           }
         ],
         "summary": "Create chat session",
+        "tags": [
+          "content",
+          "chat"
+        ]
+      }
+    },
+    "/api/content/chat/sessions/list": {
+      "get": {
+        "description": "List a page of chat sessions for the current user.",
+        "operationId": "listContentChatSessionsPage",
+        "parameters": [
+          {
+            "description": "Filter by content ID",
+            "in": "query",
+            "name": "content_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by content ID",
+              "title": "Content Id"
+            }
+          },
+          {
+            "description": "Pagination cursor for next page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pagination cursor for next page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum sessions to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "description": "Maximum sessions to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List chat sessions page",
         "tags": [
           "content",
           "chat"
@@ -10719,6 +10923,53 @@
           }
         ],
         "summary": "Get discovery suggestions"
+      }
+    },
+    "/api/feedback": {
+      "post": {
+        "description": "Store feedback from the authenticated user.",
+        "operationId": "createFeedback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitFeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitFeedbackResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Feedback",
+        "tags": [
+          "feedback"
+        ]
       }
     },
     "/api/integrations/llm": {

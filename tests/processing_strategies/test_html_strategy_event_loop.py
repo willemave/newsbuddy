@@ -51,7 +51,8 @@ class TestHtmlStrategyEventLoop:
 
         with (
             patch("app.processing_strategies.html_strategy.AsyncWebCrawler") as mock_crawler_class,
-            patch.object(strategy, "_should_use_httpx_fallback", return_value=False),
+            patch.object(strategy, "_firecrawl_fallback_fetch", return_value=None),
+            patch.object(strategy, "_should_use_extraction_fallback", return_value=False),
         ):
             crawler = AsyncMock()
             crawler.arun = AsyncMock(side_effect=Exception("Crawl4ai extraction failed"))

@@ -354,9 +354,9 @@ def _extract_last_message_preview(
         elif isinstance(model_msg, ModelRequest):
             for request_part in reversed(model_msg.parts):
                 if isinstance(request_part, UserPromptPart) and request_part.content:
-                    text = _extract_visible_user_prompt(request_part.content)
-                    if text:
-                        return text[:max_length], "user"
+                    visible_text = _extract_visible_user_prompt(request_part.content)
+                    if visible_text:
+                        return visible_text[:max_length], "user"
 
     return None, None
 

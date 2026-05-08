@@ -731,7 +731,7 @@
             "type": "string"
           },
           "synthesis_model": {
-            "default": "anthropic:claude-sonnet-4-6",
+            "default": "anthropic:claude-opus-4-6",
             "title": "Synthesis Model",
             "type": "string"
           },
@@ -945,6 +945,26 @@
           "messages"
         ],
         "title": "ChatSessionDetailDto",
+        "type": "object"
+      },
+      "ChatSessionListResponse": {
+        "properties": {
+          "meta": {
+            "$ref": "#/components/schemas/PaginationMetadata"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/ChatSessionSummaryDto"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions",
+          "meta"
+        ],
+        "title": "ChatSessionListResponse",
         "type": "object"
       },
       "ChatSessionSummaryDto": {
@@ -3505,12 +3525,6 @@
             "title": "Inferred Topics",
             "type": "array"
           },
-          "news_list_preference_prompt": {
-            "maxLength": 4000,
-            "nullable": true,
-            "title": "News List Preference Prompt",
-            "type": "string"
-          },
           "profile_summary": {
             "nullable": true,
             "title": "Profile Summary",
@@ -4571,6 +4585,80 @@
         "title": "SubmitContentRequest",
         "type": "object"
       },
+      "SubmitFeedbackRequest": {
+        "additionalProperties": false,
+        "description": "Feedback submitted from an authenticated client.",
+        "properties": {
+          "app_version": {
+            "maxLength": 64,
+            "nullable": true,
+            "title": "App Version",
+            "type": "string"
+          },
+          "build_number": {
+            "maxLength": 64,
+            "nullable": true,
+            "title": "Build Number",
+            "type": "string"
+          },
+          "device_model": {
+            "maxLength": 128,
+            "nullable": true,
+            "title": "Device Model",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "os_version": {
+            "maxLength": 128,
+            "nullable": true,
+            "title": "Os Version",
+            "type": "string"
+          },
+          "platform": {
+            "maxLength": 64,
+            "nullable": true,
+            "title": "Platform",
+            "type": "string"
+          },
+          "source": {
+            "default": "ios_settings",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "SubmitFeedbackRequest",
+        "type": "object"
+      },
+      "SubmitFeedbackResponse": {
+        "description": "Response after feedback is stored.",
+        "properties": {
+          "feedback_id": {
+            "title": "Feedback Id",
+            "type": "integer"
+          },
+          "status": {
+            "const": "success",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "feedback_id"
+        ],
+        "title": "SubmitFeedbackResponse",
+        "type": "object"
+      },
       "SubscribeToFeedRequest": {
         "description": "Request to subscribe to a detected feed.",
         "example": {
@@ -4745,7 +4833,7 @@
         "example": {
           "content_id": 123,
           "creativity": 7,
-          "model": "google-gla:gemini-3-pro-preview",
+          "model": "google:gemini-3.1-flash-lite-preview",
           "suggestions": [
             {
               "id": 1,
@@ -4780,7 +4868,7 @@
             "description": "Length preference used for generation"
           },
           "model": {
-            "default": "google-gla:gemini-3-pro-preview",
+            "default": "google:gemini-3.1-flash-lite-preview",
             "description": "LLM model used for generation",
             "title": "Model",
             "type": "string"
@@ -4872,12 +4960,6 @@
             "maxLength": 255,
             "nullable": true,
             "title": "Full Name",
-            "type": "string"
-          },
-          "news_list_preference_prompt": {
-            "maxLength": 4000,
-            "nullable": true,
-            "title": "News List Preference Prompt",
             "type": "string"
           },
           "twitter_username": {
@@ -5036,11 +5118,6 @@
           "is_admin": {
             "title": "Is Admin",
             "type": "boolean"
-          },
-          "news_list_preference_prompt": {
-            "nullable": true,
-            "title": "News List Preference Prompt",
-            "type": "string"
           },
           "twitter_username": {
             "nullable": true,
