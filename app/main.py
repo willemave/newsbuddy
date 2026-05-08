@@ -26,6 +26,7 @@ from app.routers import admin, api_content, auth, logs
 from app.routers.api import (
     agent,
     discovery,
+    feedback,
     integrations,
     interactions,
     news,
@@ -326,6 +327,7 @@ app.include_router(logs.router)
 app.include_router(api_content.router, prefix="/api/content")
 app.include_router(news.router, prefix="/api/news")
 app.include_router(interactions.router, prefix="/api")
+app.include_router(feedback.router, prefix="/api")
 app.include_router(scraper_configs.router, prefix="/api")
 app.include_router(discovery.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")

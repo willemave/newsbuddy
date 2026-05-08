@@ -11,24 +11,21 @@ struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     private let scrollToCouncilOnAppear: Bool
     private let cliLinkService = CLILinkService()
+    private let feedbackService = FeedbackService.shared
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var showMarkAllDialog = false
     @State private var isProcessingMarkAll = false
+    @State private var showingFeedbackSheet = false
     @State private var showingDebugMenu = false
     @State private var showingCLILinkScanner = false
     @State private var isApprovingCLILink = false
-    @State private var newsListPreferencePromptDraft = ""
-    @State private var serverNewsListPreferencePrompt = ""
-    @State private var hasUnsavedNewsListPreferencePromptEdits = false
-    @State private var isSavingNewsListPreferencePrompt = false
     @State private var councilPersonasDraft: [CouncilPersona] = []
     @State private var serverCouncilPersonas: [CouncilPersona] = []
     @State private var newExpertName = ""
     @State private var hasUnsavedCouncilPersonaEdits = false
     @State private var isSavingCouncilPersonas = false
     @State private var xConnection: XConnectionResponse?
-    @FocusState private var isNewsListPreferencePromptFocused: Bool
 
     init(scrollToCouncilOnAppear: Bool = false) {
         self.scrollToCouncilOnAppear = scrollToCouncilOnAppear
@@ -40,10 +37,10 @@ struct SettingsView: View {
                 VStack(spacing: 24) {
                     brandHeader
                     accountSection
+                    feedbackSection
                     twitterConfigurationSection
                     displayPreferencesSection
                     councilSection
-                    newsListPreferencesSection
                     sourcesSection
                     readStatusSection
 
@@ -95,13 +92,16 @@ struct SettingsView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingFeedbackSheet) {
+            FeedbackSheet { message in
+                try await submitFeedback(message: message)
+            }
+        }
         .onChange(of: authViewModel.authState) { _, _ in
-            syncNewsListPreferencePromptWithAuthenticatedUser(force: true)
             syncCouncilPersonasWithAuthenticatedUser(force: true)
             Task { await loadXConnectionState(force: true) }
         }
         .task {
-            syncNewsListPreferencePromptWithAuthenticatedUser(force: true)
             syncCouncilPersonasWithAuthenticatedUser(force: true)
             await loadXConnectionState(force: true)
         }
@@ -188,6 +188,25 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var feedbackSection: some View {
+        if authenticatedUser != nil {
+            Button {
+                showingFeedbackSheet = true
+            } label: {
+                SettingsRow(
+                    icon: "bubble.left.and.bubble.right",
+                    iconColor: .blue,
+                    title: "Give Feedback"
+                ) {
+                    NavigationChevron()
+                }
+            }
+            .buttonStyle(.plain)
+            .settingsCard()
+        }
+    }
+
     // MARK: - X / Twitter Section
 
     private var twitterConfigurationSection: some View {
@@ -226,19 +245,6 @@ struct SettingsView: View {
                 longArticleDisplayModeRow
             }
             .settingsCard()
-        }
-    }
-
-    private var newsListPreferencesSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "News List")
-
-            if authenticatedUser != nil {
-                VStack(spacing: 0) {
-                    newsListPreferencePromptRow
-                }
-                .settingsCard()
-            }
         }
     }
 
@@ -376,80 +382,6 @@ struct SettingsView: View {
             CouncilPersona(id: persona.id, displayName: persona.displayName, sortOrder: i)
         }
         hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
-    }
-
-    private var newsListPreferencePromptRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                SettingsIcon(systemName: "text.badge.star", color: .orange)
-
-                Text("News List Preferences")
-                    .font(.listTitle)
-                    .foregroundStyle(Color.onSurface)
-
-                Spacer(minLength: 8)
-            }
-
-            TextEditor(text: $newsListPreferencePromptDraft)
-                .focused($isNewsListPreferencePromptFocused)
-                .scrollContentBackground(.hidden)
-                .font(.body)
-                .foregroundStyle(Color.onSurface)
-                .frame(minHeight: 140)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(Color.surfaceTertiary, in: RoundedRectangle(cornerRadius: 12))
-                .onChange(of: newsListPreferencePromptDraft) { _, newValue in
-                    hasUnsavedNewsListPreferencePromptEdits =
-                        normalizedNewsListPreferencePromptForComparison(newValue)
-                        != normalizedNewsListPreferencePromptForComparison(serverNewsListPreferencePrompt)
-                }
-
-            HStack(spacing: 12) {
-                Spacer()
-
-                Button {
-                    newsListPreferencePromptDraft = ""
-                    hasUnsavedNewsListPreferencePromptEdits =
-                        normalizedNewsListPreferencePromptForComparison("")
-                        != normalizedNewsListPreferencePromptForComparison(serverNewsListPreferencePrompt)
-                } label: {
-                    Text("Reset")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Color.surfaceTertiary, in: RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    Task { await saveNewsListPreferencePrompt() }
-                } label: {
-                    Group {
-                        if isSavingNewsListPreferencePrompt {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.white)
-                        } else {
-                            Text("Save")
-                                .font(.callout.weight(.semibold))
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.terracottaPrimary, in: RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-                .disabled(
-                    isSavingNewsListPreferencePrompt || !hasUnsavedNewsListPreferencePromptEdits
-                )
-                .opacity((isSavingNewsListPreferencePrompt || !hasUnsavedNewsListPreferencePromptEdits) ? 0.4 : 1.0)
-            }
-        }
-        .padding(.horizontal, Spacing.rowHorizontal)
-        .padding(.vertical, Spacing.rowVertical)
     }
 
     private var textSizeRow: some View {
@@ -656,37 +588,6 @@ struct SettingsView: View {
     }
 
     @MainActor
-    private func syncNewsListPreferencePromptWithAuthenticatedUser(force: Bool) {
-        guard !isSavingNewsListPreferencePrompt else { return }
-        guard let user = authenticatedUser else {
-            serverNewsListPreferencePrompt = ""
-            if force || !isNewsListPreferencePromptFocused {
-                newsListPreferencePromptDraft = ""
-            }
-            hasUnsavedNewsListPreferencePromptEdits = false
-            return
-        }
-
-        serverNewsListPreferencePrompt = user.newsListPreferencePrompt
-        if force || (!isNewsListPreferencePromptFocused && !hasUnsavedNewsListPreferencePromptEdits)
-        {
-            newsListPreferencePromptDraft = user.newsListPreferencePrompt
-        }
-        hasUnsavedNewsListPreferencePromptEdits =
-            normalizedNewsListPreferencePromptForComparison(newsListPreferencePromptDraft)
-            != normalizedNewsListPreferencePromptForComparison(serverNewsListPreferencePrompt)
-    }
-
-    private func normalizedNewsListPreferencePromptDraft() -> String? {
-        let trimmed = newsListPreferencePromptDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func normalizedNewsListPreferencePromptForComparison(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    @MainActor
     private func syncCouncilPersonasWithAuthenticatedUser(force: Bool) {
         guard !isSavingCouncilPersonas else { return }
         let resolved = authenticatedUser?.councilPersonas ?? []
@@ -704,28 +605,6 @@ struct SettingsView: View {
                 displayName: persona.displayName.trimmingCharacters(in: .whitespacesAndNewlines),
                 sortOrder: index
             )
-        }
-    }
-
-    @MainActor
-    private func saveNewsListPreferencePrompt() async {
-        guard !isSavingNewsListPreferencePrompt, authenticatedUser != nil else { return }
-        isSavingNewsListPreferencePrompt = true
-        defer { isSavingNewsListPreferencePrompt = false }
-
-        do {
-            let user = try await AuthenticationService.shared.updateCurrentUserProfile(
-                newsListPreferencePrompt: normalizedNewsListPreferencePromptDraft()
-            )
-            authViewModel.updateUser(user)
-            serverNewsListPreferencePrompt = user.newsListPreferencePrompt
-            newsListPreferencePromptDraft = user.newsListPreferencePrompt
-            hasUnsavedNewsListPreferencePromptEdits = false
-            alertMessage = "News list preferences saved."
-            showingAlert = true
-        } catch {
-            alertMessage = "Failed to save news list preferences: \(error.localizedDescription)"
-            showingAlert = true
         }
     }
 
@@ -759,6 +638,13 @@ struct SettingsView: View {
             alertMessage = "Failed to save experts: \(error.localizedDescription)"
             showingAlert = true
         }
+    }
+
+    @MainActor
+    private func submitFeedback(message: String) async throws {
+        try await feedbackService.submit(message: message)
+        alertMessage = "Thanks for the feedback."
+        showingAlert = true
     }
 
     @MainActor
@@ -802,6 +688,93 @@ struct SettingsView: View {
         } catch {
             xConnection = nil
         }
+    }
+}
+
+private struct FeedbackSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var message = ""
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
+
+    let onSubmit: (String) async throws -> Void
+
+    private var trimmedMessage: String {
+        message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $message)
+                        .scrollContentBackground(.hidden)
+                        .font(.body)
+                        .foregroundStyle(Color.onSurface)
+                        .frame(minHeight: 180)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color.surfaceTertiary, in: RoundedRectangle(cornerRadius: 12))
+
+                    if message.isEmpty {
+                        Text("What should we improve?")
+                            .font(.body)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .padding(.horizontal, 17)
+                            .padding(.vertical, 18)
+                            .allowsHitTesting(false)
+                    }
+                }
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(Color.statusDestructive)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Spacing.screenHorizontal)
+            .padding(.top, 20)
+            .background(Color.surfacePrimary.ignoresSafeArea())
+            .navigationTitle("Give Feedback")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .disabled(isSubmitting)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        if isSubmitting {
+                            ProgressView()
+                        } else {
+                            Text("Submit")
+                        }
+                    }
+                    .disabled(isSubmitting || trimmedMessage.isEmpty)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func submit() async {
+        let feedbackMessage = trimmedMessage
+        guard !isSubmitting, !feedbackMessage.isEmpty else { return }
+        isSubmitting = true
+        errorMessage = nil
+        do {
+            try await onSubmit(feedbackMessage)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isSubmitting = false
     }
 }
 

@@ -85,6 +85,7 @@ enum APIEndpoints {
     static func cliLinkApprove(sessionID: String) -> String {
         return "/api/agent/cli/link/\(sessionID)/approve"
     }
+    static let feedback = "/api/feedback"
 
     // MARK: - Discovery Endpoints
     static let discoverySuggestions = "/api/discovery/suggestions"

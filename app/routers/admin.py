@@ -24,7 +24,13 @@ from app.models.internal.admin_eval import (
     LONGFORM_TEMPLATE_LABELS,
     AdminEvalRunRequest,
 )
-from app.models.schema import Content, OnboardingDiscoveryRun, ProcessingTask, VendorUsageRecord
+from app.models.schema import (
+    Content,
+    OnboardingDiscoveryRun,
+    ProcessingTask,
+    UserFeedback,
+    VendorUsageRecord,
+)
 from app.models.user import User
 from app.queries import list_api_keys
 from app.queries.queue_health import get_queue_health_snapshot
@@ -75,6 +81,7 @@ COST_EXTERNAL_FEATURES = (
     "transcription",
     "narration_tts",
     "podcast_search",
+    "html_extraction",
     "object_storage",
     "chat_sandbox",
 )
@@ -103,6 +110,7 @@ EXTERNAL_PROVIDER_LABELS = {
     "listen_notes": "Listen Notes",
     "spotify": "Spotify",
     "podcast_index": "Podcast Index",
+    "firecrawl": "Firecrawl",
     "s3_compatible": "Object Storage",
     "e2b": "E2B Sandbox",
 }
@@ -1028,6 +1036,53 @@ def admin_api_keys_revoke(
     """Revoke an API key and return to the admin list."""
     revoke_api_key.execute(db, api_key_id=api_key_id)
     return RedirectResponse(url="/admin/api-keys", status_code=303)
+
+
+def _build_feedback_rows(db: Session) -> list[dict[str, Any]]:
+    """Return recent user feedback rows for admin review."""
+    rows = (
+        db.query(
+            UserFeedback,
+            User.email.label("email"),
+            User.full_name.label("full_name"),
+        )
+        .outerjoin(User, User.id == UserFeedback.user_id)
+        .order_by(UserFeedback.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    return [
+        {
+            "user_id": feedback.user_id,
+            "user_label": _format_cost_user_label(feedback.user_id, email, full_name),
+            "message": feedback.message,
+            "source": feedback.source,
+            "app_version": feedback.app_version,
+            "build_number": feedback.build_number,
+            "platform": feedback.platform,
+            "os_version": feedback.os_version,
+            "device_model": feedback.device_model,
+            "created_at": feedback.created_at,
+        }
+        for feedback, email, full_name in rows
+    ]
+
+
+@router.get("/feedback", response_class=HTMLResponse)
+def admin_feedback_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_readonly_db_session)],
+    _: None = Depends(require_admin),
+) -> HTMLResponse:
+    """Render recent user feedback."""
+    return templates.TemplateResponse(
+        request,
+        "admin_feedback.html",
+        {
+            "request": request,
+            "feedback_rows": _build_feedback_rows(db),
+        },
+    )
 
 
 def _build_insight_report_rows(db: Session) -> list[dict[str, Any]]:

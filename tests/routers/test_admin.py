@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.deps import require_admin
 from app.main import app
-from app.models.schema import Content, ProcessingTask, UserApiKey
+from app.models.schema import Content, ProcessingTask, UserApiKey, UserFeedback
 
 
 def _override_admin_dependency(test_user):
@@ -182,6 +182,34 @@ def test_admin_api_keys_page_renders(client, db_session, test_user):
         assert response.status_code == 200
         assert "API Keys" in response.text
         assert str(test_user.email) in response.text
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+
+
+def test_admin_feedback_page_renders_submissions(client, db_session, test_user):
+    app.dependency_overrides[require_admin] = _override_admin_dependency(test_user)
+    try:
+        db_session.add(
+            UserFeedback(
+                user_id=test_user.id,
+                message="The new feedback flow works.",
+                source="ios_settings",
+                app_version="1.2.3",
+                build_number="456",
+                platform="ios",
+                os_version="26.0",
+                device_model="iPhone",
+            )
+        )
+        db_session.commit()
+
+        response = client.get("/admin/feedback")
+        assert response.status_code == 200
+        assert "Feedback" in response.text
+        assert "The new feedback flow works." in response.text
+        assert str(test_user.email) in response.text
+        assert "1.2.3" in response.text
+        assert "26.0" in response.text
     finally:
         app.dependency_overrides.pop(require_admin, None)
 
