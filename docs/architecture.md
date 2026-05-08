@@ -406,8 +406,8 @@ Alembic migration history in `migrations/alembic/versions/` shows the app’s ma
 - chat context snapshots
 - user API keys
 - digest checkpoint settings
-- X digest filter prompt
 - daily digest bullet details
+- user feedback submissions
 
 ## 8. API Surface
 

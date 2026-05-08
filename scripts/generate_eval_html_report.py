@@ -145,12 +145,6 @@ def parse_args() -> argparse.Namespace:
         help="Base backoff for retries (multiplied by attempt number).",
     )
     parser.add_argument(
-        "--parallel-model-calls",
-        type=int,
-        default=1,
-        help="Deprecated. Parallel model calls are disabled; runs always execute sequentially.",
-    )
-    parser.add_argument(
         "--max-input-chars",
         type=int,
         default=MAX_EVAL_INPUT_CHARS,
@@ -1758,13 +1752,6 @@ def main() -> int:
         if args.custom_news_user_template_file
         else None
     )
-    effective_parallel_model_calls = 1
-    if args.parallel_model_calls != 1:
-        logger.warning(
-            "Ignoring --parallel-model-calls=%s. Parallel execution is disabled to avoid event-loop/client errors.",
-            args.parallel_model_calls,
-        )
-
     output_dir = resolve_output_directory(args.output_dir)
     run_started_at = datetime.now(UTC)
 
@@ -1790,12 +1777,11 @@ def main() -> int:
         logger.warning("Missing content IDs: %s", ",".join(str(item) for item in missing_ids))
 
     logger.info(
-        "Generating report for items=%s models=%s timeout=%ss retries=%s parallel=%s",
+        "Generating report for items=%s models=%s timeout=%ss retries=%s",
         len(selected_sources),
         len(available_models),
         args.timeout_seconds,
         args.max_retries,
-        effective_parallel_model_calls,
     )
 
     item_results: list[dict[str, Any]] = []
@@ -1849,8 +1835,6 @@ def main() -> int:
             "content_ids": content_ids,
             "timeout_seconds": args.timeout_seconds,
             "max_retries": args.max_retries,
-            "parallel_model_calls_requested": args.parallel_model_calls,
-            "parallel_model_calls_effective": effective_parallel_model_calls,
             "max_input_chars": args.max_input_chars,
             "custom_longform_prompt_enabled": bool(custom_longform_system_prompt),
             "custom_news_prompt_enabled": bool(custom_news_system_prompt),
