@@ -55,6 +55,10 @@ def test_scrape_url_with_firecrawl_returns_markdown(monkeypatch) -> None:
     assert result.source_url == "https://example.com/story"
     assert result.published_time == "2026-04-23T10:00:00Z"
     record_usage.assert_called_once()
+    assert record_usage.call_args.kwargs["provider"] == "firecrawl"
+    assert record_usage.call_args.kwargs["model"] == "scrape-v2"
+    assert record_usage.call_args.kwargs["feature"] == "html_extraction"
+    assert record_usage.call_args.kwargs["usage"] == {"request_count": 1, "resource_count": 1}
 
 
 def test_scrape_url_with_firecrawl_requires_api_key(monkeypatch) -> None:

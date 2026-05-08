@@ -155,10 +155,11 @@ def test_run_admin_eval_uses_news_title_focus_and_cost(db_session, monkeypatch):
             anthropic_api_key="test-anthropic",
             google_api_key="test-google",
             cerebras_api_key="test-cerebras",
+            openrouter_api_key="test-openrouter",
         )
 
     def fake_get_basic_agent(model_spec: str, output_type, _system_prompt: str):  # noqa: ANN001
-        if output_type.__name__ == "NewsSummary":
+        if output_type.__name__ == "GeneratedNewsSummary":
             return _FakeAgent({"title": f"News from {model_spec}", "summary": "digest"})
         return _FakeAgent(
             {
@@ -216,20 +217,21 @@ def test_run_admin_eval_skips_unavailable_models(db_session, monkeypatch):
             anthropic_api_key=None,
             google_api_key=None,
             cerebras_api_key=None,
+            openrouter_api_key=None,
         )
 
     monkeypatch.setattr("app.services.admin_eval.get_settings", fake_get_settings)
 
     request = AdminEvalRunRequest(
         content_types=["article"],
-        models=["smart_openai", "cheap", "smart_claude", "fast"],
+        models=["smart_openai", "cheap", "smart_claude", "fast", "openrouter_deepseek_flash"],
         sample_size=1,
         recent_pool_size=10,
     )
 
     result = run_admin_eval(db_session, request)
     assert result["available_models"] == []
-    assert len(result["skipped_models"]) == 4
+    assert len(result["skipped_models"]) == 5
 
 
 def test_run_admin_eval_disables_model_after_first_hard_error(db_session, monkeypatch):
@@ -270,6 +272,7 @@ def test_run_admin_eval_disables_model_after_first_hard_error(db_session, monkey
             anthropic_api_key="test-anthropic",
             google_api_key="test-google",
             cerebras_api_key="test-cerebras",
+            openrouter_api_key="test-openrouter",
         )
 
     def fake_get_basic_agent(model_spec: str, _output_type, _system_prompt: str):  # noqa: ANN001

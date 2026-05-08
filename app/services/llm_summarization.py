@@ -19,6 +19,8 @@ from app.models.metadata import (
     BulletedSummary,
     ContentType,
     EditorialNarrativeSummary,
+    GeneratedEditorialNarrativeSummary,
+    GeneratedNewsSummary,
     InterleavedSummaryV2,
     NewsSummary,
     StructuredSummary,
@@ -56,7 +58,9 @@ SummarizationOutputType = (
     | type[InterleavedSummaryV2]
     | type[BulletedSummary]
     | type[EditorialNarrativeSummary]
+    | type[GeneratedEditorialNarrativeSummary]
     | type[LongformArtifactEnvelope]
+    | type[GeneratedNewsSummary]
     | type[NewsSummary]
 )
 
@@ -121,9 +125,9 @@ def resolve_summarization_output_type(
     if prompt_type == "longform_artifact":
         return LongformArtifactEnvelope
     if prompt_type == "news":
-        return NewsSummary
+        return GeneratedNewsSummary
     if is_editorial_prompt_type(prompt_type):
-        return EditorialNarrativeSummary
+        return GeneratedEditorialNarrativeSummary
     if prompt_type == "long_bullets":
         return BulletedSummary
     if prompt_type == "interleaved":

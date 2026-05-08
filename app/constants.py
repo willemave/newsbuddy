@@ -1,6 +1,7 @@
 """Application-wide constants and defaults."""
 
 from app.core.model_defaults import (
+    CHEAP_GOOGLE_MODEL_SPEC,
     CHEAP_MODEL_SPEC,
     SMART_ANTHROPIC_MODEL_SPEC,
     SMART_MODEL_SPEC,
@@ -11,7 +12,7 @@ TWEET_SUGGESTION_MODEL = CHEAP_MODEL_SPEC
 
 # LLM provider models for tweet suggestions
 TWEET_MODELS = {
-    "google": CHEAP_MODEL_SPEC,
+    "google": CHEAP_GOOGLE_MODEL_SPEC,
     "openai": SMART_MODEL_SPEC,
     "anthropic": SMART_ANTHROPIC_MODEL_SPEC,
 }

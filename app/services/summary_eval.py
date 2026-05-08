@@ -35,6 +35,7 @@ PromptType = Literal[
 ]
 
 DEFAULT_SUMMARY_EVAL_DATASET = Path("tests") / "evals" / "summary_generation.yaml"
+SUMMARY_EVAL_CALL_TIMEOUT_SECONDS = 120.0
 
 
 class SummaryEvalDefaults(BaseModel):
@@ -229,7 +230,10 @@ def _run_summary_generation(
         system_prompt,
     )
     user_message = _build_user_message(user_template, case.input_text, case.source_title)
-    result = agent.run_sync(user_message)
+    result = agent.run_sync(
+        user_message,
+        model_settings={"timeout": SUMMARY_EVAL_CALL_TIMEOUT_SECONDS},
+    )
     return prompt_type, _extract_result_payload(result)
 
 
@@ -293,7 +297,8 @@ def judge_generated_title(
             prompt_type=prompt_type,
             generated_title=generated_title,
             raw_output=raw_output,
-        )
+        ),
+        model_settings={"timeout": SUMMARY_EVAL_CALL_TIMEOUT_SECONDS},
     )
     return result.output
 

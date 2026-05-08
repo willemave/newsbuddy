@@ -17,7 +17,7 @@ from app.services.llm_models import resolve_model_provider
 
 logger = get_logger("vendor.cost")
 
-PRICING_VERSION = "2026-04-20"
+PRICING_VERSION = "2026-05-08"
 USD = "USD"
 
 
@@ -89,6 +89,11 @@ MODEL_PRICING: dict[str, ModelPricing] = {
     "gemini-3.1-flash-image-preview": ModelPricing(
         input_per_million_usd=0.50,
         output_per_million_usd=60.00,
+    ),
+    # OpenRouter
+    "deepseek/deepseek-v4-flash": ModelPricing(
+        input_per_million_usd=0.14,
+        output_per_million_usd=0.28,
     ),
 }
 
@@ -485,6 +490,7 @@ def _resolve_unit_pricing(*, provider: str, model: str) -> UnitPricing | None:
         "x:posts.read": UnitPricing(resource_usd=settings.x_posts_read_cost_usd),
         "x:users.read": UnitPricing(resource_usd=settings.x_users_read_cost_usd),
         "runware:runware:101@1": UnitPricing(request_usd=0.0038),
+        "firecrawl:scrape-v2": UnitPricing(resource_usd=settings.firecrawl_credit_cost_usd),
     }
     for candidate in _pricing_candidates(provider=provider, model=model):
         if candidate in unit_pricing:

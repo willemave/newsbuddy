@@ -1,8 +1,12 @@
+import pytest
+from pydantic import ValidationError
+
 from app.models.metadata import (
     ContentData,
     ContentStatus,
     ContentType,
     EditorialNarrativeSummary,
+    GeneratedEditorialNarrativeSummary,
 )
 
 
@@ -138,3 +142,62 @@ def test_editorial_narrative_summary_accepts_research_source_details() -> None:
 
     assert summary.source_details is not None
     assert summary.source_details.template == "research"
+
+
+def test_generated_editorial_narrative_summary_enforces_generation_limits() -> None:
+    valid_payload = {
+        "title": "Editorial Title",
+        "editorial_narrative": (
+            "Paragraph one with concrete detail and context, including named entities, "
+            "timeline anchors, and measurable outcomes that show what changed. "
+            "Paragraph two covers implications and evidence, describing constraints, "
+            "countervailing signals, and what the source says teams should do next."
+        ),
+        "quotes": [
+            {"text": "A direct quote that should be surfaced.", "attribution": "Source Person"},
+            {
+                "text": "A second quote with enough detail to pass schema validation.",
+                "attribution": "Industry Analyst",
+            },
+        ],
+        "key_points": [
+            {"point": "Point one with concrete detail."},
+            {"point": "Point two with concrete detail."},
+            {"point": "Point three with concrete detail."},
+            {"point": "Point four with concrete detail."},
+        ],
+    }
+
+    summary = GeneratedEditorialNarrativeSummary.model_validate(valid_payload)
+
+    assert len(summary.quotes) == 2
+    assert len(summary.key_points) == 4
+
+
+def test_generated_editorial_narrative_summary_rejects_long_outputs() -> None:
+    valid_payload = {
+        "title": "Editorial Title",
+        "editorial_narrative": (
+            "Paragraph one with concrete detail and context, including named entities, "
+            "timeline anchors, and measurable outcomes that show what changed. "
+            "Paragraph two covers implications and evidence, describing constraints, "
+            "countervailing signals, and what the source says teams should do next."
+        ),
+        "quotes": [
+            {"text": "A direct quote that should be surfaced.", "attribution": "Source Person"},
+            {
+                "text": "A second quote with enough detail to pass schema validation.",
+                "attribution": "Industry Analyst",
+            },
+            {"text": "A third quote should exceed generation limits.", "attribution": "Extra"},
+        ],
+        "key_points": [
+            {"point": "Point one with concrete detail."},
+            {"point": "Point two with concrete detail."},
+            {"point": "Point three with concrete detail."},
+            {"point": "Point four with concrete detail."},
+        ],
+    }
+
+    with pytest.raises(ValidationError):
+        GeneratedEditorialNarrativeSummary.model_validate(valid_payload)

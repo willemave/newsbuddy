@@ -40,7 +40,7 @@ def test_summarize_raises_on_precondition_error(monkeypatch) -> None:
             content_id=123,
         )
 
-    assert calls == ["google-gla:gemini-3-pro-preview"]
+    assert calls == ["google:gemini-3-pro-preview"]
 
 
 def test_summarize_raises_on_context_length_error(monkeypatch) -> None:

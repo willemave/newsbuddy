@@ -291,6 +291,17 @@ class EditorialKeyPoint(BaseModel):
     point: str = Field(..., min_length=10, max_length=500)
 
 
+class GeneratedEditorialKeyPoint(EditorialKeyPoint):
+    """Stricter key point entry used for new editorial summary generations."""
+
+    point: str = Field(
+        ...,
+        min_length=10,
+        max_length=180,
+        description="Concrete key point, roughly 22 words or less.",
+    )
+
+
 class PodcastSourceDetails(BaseModel):
     """Structured details for podcast summaries."""
 
@@ -472,6 +483,26 @@ class EditorialNarrativeSummary(BaseModel):
     summarization_date: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class GeneratedEditorialNarrativeSummary(EditorialNarrativeSummary):
+    """Strict narrative summary payload used for new LLM generations."""
+
+    title: str = Field(
+        ..., min_length=5, max_length=110, description="Descriptive title for the content"
+    )
+    editorial_narrative: str = Field(
+        ...,
+        min_length=180,
+        max_length=1200,
+        description="Compact thesis-led narrative summary, roughly 90-150 words.",
+    )
+    quotes: list[EditorialQuote] = Field(
+        ..., min_length=1, max_length=2, description="1-2 notable direct quotes"
+    )
+    key_points: list[GeneratedEditorialKeyPoint] = Field(  # type: ignore[assignment]
+        ..., min_length=4, max_length=6, description="4-6 concrete key points"
+    )
+
+
 class StructuredSummary(BaseModel):
     """Structured summary with bullet points and quotes."""
 
@@ -536,6 +567,11 @@ class StructuredSummary(BaseModel):
 
 # News digest summary used for fast-scanning feeds
 
+GeneratedNewsKeyPoint = Annotated[
+    str,
+    Field(min_length=1, max_length=120, description="Concrete news bullet, <=120 characters."),
+]
+
 
 class NewsSummary(BaseModel):
     """Compact summary payload for quick-glance news content."""
@@ -598,6 +634,29 @@ class NewsSummary(BaseModel):
             return None
         adapter = TypeAdapter(HttpUrl)
         return str(adapter.validate_python(value))
+
+
+class GeneratedNewsSummary(NewsSummary):
+    """Strict news summary payload used for new LLM generations."""
+
+    title: str = Field(
+        ...,
+        min_length=5,
+        max_length=95,
+        description="Generated factual headline for the digest, <=95 characters.",
+    )
+    key_points: list[GeneratedNewsKeyPoint] = Field(
+        ...,
+        min_length=2,
+        max_length=3,
+        description="2-3 headline-ready bullet points summarizing the article",
+    )
+    summary: str | None = Field(
+        None,
+        min_length=0,
+        max_length=180,
+        description="Optional one-sentence overview, <=180 characters.",
+    )
 
 
 class DailyNewsRollupSummary(BaseModel):
@@ -718,8 +777,10 @@ SummaryPayload = (
     | InterleavedSummaryV2
     | BulletedSummary
     | EditorialNarrativeSummary
+    | GeneratedEditorialNarrativeSummary
     | LongformArtifactEnvelope
     | NewsSummary
+    | GeneratedNewsSummary
 )
 
 
@@ -788,6 +849,7 @@ class BaseContentMetadata(BaseModel):
                 InterleavedSummaryV2,
                 BulletedSummary,
                 EditorialNarrativeSummary,
+                GeneratedEditorialNarrativeSummary,
                 LongformArtifactEnvelope,
                 NewsSummary,
             ),

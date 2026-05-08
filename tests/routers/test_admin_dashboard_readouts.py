@@ -187,6 +187,18 @@ def test_admin_dashboard_shows_cost_analysis(client, db_session, test_user) -> N
                     metadata_json={},
                     created_at=now,
                 ),
+                VendorUsageRecord(
+                    provider="firecrawl",
+                    model="scrape-v2",
+                    feature="html_extraction",
+                    operation="firecrawl_scrape",
+                    cost_usd=cast(Any, Decimal("0.00083")),
+                    request_count=1,
+                    resource_count=1,
+                    currency="USD",
+                    metadata_json={},
+                    created_at=now,
+                ),
             ]
         )
         db_session.commit()
@@ -206,9 +218,11 @@ def test_admin_dashboard_shows_cost_analysis(client, db_session, test_user) -> N
         assert "Summarization" in body
         assert "Image Generation" in body
         assert "X API" in body
+        assert "Firecrawl" in body
         assert "cost-other@example.com" in body
         assert "$2.500000" in body
         assert "$1.500000" in body
         assert "$1.000000" in body
+        assert "$0.000830" in body
     finally:
         app.dependency_overrides.pop(require_admin, None)

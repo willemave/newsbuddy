@@ -4,9 +4,11 @@ import pytest
 
 from app.models.metadata import (
     ContentType,
-    EditorialKeyPoint,
     EditorialNarrativeSummary,
     EditorialQuote,
+    GeneratedEditorialKeyPoint,
+    GeneratedEditorialNarrativeSummary,
+    GeneratedNewsSummary,
     NewsSummary,
 )
 from app.models.schema import VendorUsageRecord
@@ -37,8 +39,8 @@ class FakeAgent:
 def _editorial_summary(
     *,
     quotes: list[EditorialQuote] | None = None,
-) -> EditorialNarrativeSummary:
-    return EditorialNarrativeSummary(
+) -> GeneratedEditorialNarrativeSummary:
+    return GeneratedEditorialNarrativeSummary(
         title="Test Title",
         editorial_narrative=(
             "This is a dense editorial summary with enough concrete detail to satisfy "
@@ -60,26 +62,26 @@ def _editorial_summary(
             ),
         ],
         key_points=[
-            EditorialKeyPoint(point="First key point with enough detail to be valid."),
-            EditorialKeyPoint(point="Second key point with enough detail to be valid."),
-            EditorialKeyPoint(point="Third key point with enough detail to be valid."),
-            EditorialKeyPoint(point="Fourth key point with enough detail to be valid."),
+            GeneratedEditorialKeyPoint(point="First key point with enough detail."),
+            GeneratedEditorialKeyPoint(point="Second key point with enough detail."),
+            GeneratedEditorialKeyPoint(point="Third key point with enough detail."),
+            GeneratedEditorialKeyPoint(point="Fourth key point with enough detail."),
         ],
         source_details=None,
     )
 
 
-def _news_summary() -> NewsSummary:
-    return NewsSummary(
+def _news_summary() -> GeneratedNewsSummary:
+    return GeneratedNewsSummary(
         title="News Title",
         article_url="https://example.com",
-        key_points=["One"],
+        key_points=["One concrete source point.", "Second concrete source point."],
         summary="Short news summary.",
     )
 
 
 def _agent_output_for_type(output_type):
-    if output_type is NewsSummary:
+    if output_type in {GeneratedNewsSummary, NewsSummary}:
         return _news_summary()
     return _editorial_summary()
 
@@ -115,9 +117,15 @@ def test_summarize_news_uses_news_summary_output_type(monkeypatch: pytest.Monkey
 
     assert isinstance(result, NewsSummary)
     assert result.title == "News Title"
-    assert captured_output_types == [NewsSummary]
-    assert "rewritten headline" in captured_system_prompts[0].lower()
-    assert "placeholder" in captured_system_prompts[0].lower()
+    assert captured_output_types == [GeneratedNewsSummary]
+    assert "provided structured output schema" in captured_system_prompts[0].lower()
+    assert "direct factual headline" in captured_system_prompts[0].lower()
+
+
+def test_editorial_generation_uses_strict_generated_output_type() -> None:
+    output_type = llm_summarization.resolve_summarization_output_type("editorial_narrative")
+
+    assert output_type is GeneratedEditorialNarrativeSummary
 
 
 def test_content_summarizer_resolves_default_models(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,8 +146,8 @@ def test_content_summarizer_resolves_default_models(monkeypatch: pytest.MonkeyPa
     summarizer = llm_summarization.ContentSummarizer(_model_resolver=fake_resolve)
     summarizer.summarize("body", content_type=ContentType.NEWS)
 
-    assert captured_resolves == [("google", "gemini-3.1-flash-lite-preview")]
-    assert captured_model_specs == ["google:gemini-3.1-flash-lite-preview"]
+    assert captured_resolves == [("openrouter", "deepseek/deepseek-v4-flash")]
+    assert captured_model_specs == ["openrouter:deepseek/deepseek-v4-flash"]
 
 
 def test_content_summarizer_uses_gpt_5_4_mini_for_articles(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from app.services import summary_eval
 
@@ -172,6 +173,91 @@ def test_run_summary_eval_suite_supports_case_selection(monkeypatch) -> None:
     assert [result.case_id for result in report.results] == ["case-2"]
 
 
+def test_run_summary_generation_passes_timeout(monkeypatch) -> None:
+    """Live generation calls should be bounded so full evals cannot hang indefinitely."""
+    captured: dict[str, Any] = {}
+
+    class FakeResult:
+        output = {"title": "Synthetic title"}
+
+    class FakeAgent:
+        def run_sync(self, prompt: str, **kwargs: Any) -> FakeResult:
+            captured["prompt"] = prompt
+            captured["kwargs"] = kwargs
+            return FakeResult()
+
+    monkeypatch.setattr(summary_eval, "get_basic_agent", lambda *_args: FakeAgent())
+
+    prompt_type, payload = summary_eval._run_summary_generation(
+        case=summary_eval.SummaryEvalCase(
+            id="timeout-case",
+            content_type="news",
+            input_text="Concrete source evidence",
+            bad_titles=["bad"],
+            reference_titles=["good"],
+        ),
+        model_spec="openrouter:deepseek/deepseek-v4-flash",
+        longform_template="editorial_narrative_v1",
+    )
+
+    assert prompt_type == "news"
+    assert payload == {"title": "Synthetic title"}
+    assert captured["kwargs"] == {
+        "model_settings": {"timeout": summary_eval.SUMMARY_EVAL_CALL_TIMEOUT_SECONDS}
+    }
+
+
+def test_judge_generated_title_passes_timeout(monkeypatch) -> None:
+    """Judge calls should use the same bounded timeout as generation calls."""
+    captured: dict[str, Any] = {}
+
+    class FakeJudgeAgent:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            captured["init_kwargs"] = kwargs
+
+        def run_sync(self, prompt: str, **kwargs: Any) -> Any:
+            captured["prompt"] = prompt
+            captured["run_kwargs"] = kwargs
+            return type(
+                "FakeJudgeResult",
+                (),
+                {
+                    "output": summary_eval.TitleJudgeVerdict(
+                        passed=True,
+                        score=0.9,
+                        reasoning="Specific and grounded.",
+                    )
+                },
+            )()
+
+    monkeypatch.setattr(
+        summary_eval,
+        "build_pydantic_model",
+        lambda _model_spec: ("fake-model", {"temperature": 0.0}),
+    )
+    monkeypatch.setattr(summary_eval, "Agent", FakeJudgeAgent)
+
+    verdict = summary_eval.judge_generated_title(
+        case=summary_eval.SummaryEvalCase(
+            id="judge-timeout-case",
+            content_type="news",
+            input_text="Concrete source evidence",
+            bad_titles=["bad"],
+            reference_titles=["good"],
+        ),
+        prompt_type="news",
+        generated_title="Synthetic title",
+        raw_output={"title": "Synthetic title"},
+        judge_model_spec="anthropic:claude-opus-4-6",
+    )
+
+    assert verdict.passed is True
+    assert captured["init_kwargs"]["model_settings"] == {"temperature": 0.0}
+    assert captured["run_kwargs"] == {
+        "model_settings": {"timeout": summary_eval.SUMMARY_EVAL_CALL_TIMEOUT_SECONDS}
+    }
+
+
 def test_resolve_generation_model_spec_uses_real_app_defaults() -> None:
     """Default eval generation model should follow production summarization routing."""
 
@@ -198,5 +284,5 @@ def test_resolve_generation_model_spec_uses_real_app_defaults() -> None:
     )
     assert (
         summary_eval._resolve_generation_model_spec(case=news_case, defaults=defaults)
-        == "google:gemini-3.1-flash-lite-preview"
+        == "openrouter:deepseek/deepseek-v4-flash"
     )

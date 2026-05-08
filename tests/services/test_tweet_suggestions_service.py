@@ -57,13 +57,13 @@ class TestTweetSuggestionService:
             },
         }
 
-        original_key = settings.google_api_key
-        settings.google_api_key = "test-key"
+        original_key = settings.openrouter_api_key
+        settings.openrouter_api_key = "test-openrouter-key"
         service = TweetSuggestionService()
         try:
             result = service.generate_suggestions(content, creativity=5, length="short")
         finally:
-            settings.google_api_key = original_key
+            settings.openrouter_api_key = original_key
 
         assert result is not None
         assert result.content_id == 1
@@ -76,8 +76,8 @@ class TestTweetSuggestionService:
     @patch("app.services.tweet_suggestions.Agent.run_sync")
     def test_generate_suggestions_podcast_supported(self, mock_run_sync) -> None:
         """Podcasts are supported for tweet suggestions."""
-        original_key = settings.google_api_key
-        settings.google_api_key = "test-key"
+        original_key = settings.openrouter_api_key
+        settings.openrouter_api_key = "test-openrouter-key"
         mock_payload = TweetSuggestionsPayload(
             suggestions=[
                 TweetSuggestionLLM(id=1, text="Podcast insight 1", style_label="a"),
@@ -126,7 +126,7 @@ class TestTweetSuggestionService:
         try:
             result = service.generate_suggestions(content, creativity=5)
         finally:
-            settings.google_api_key = original_key
+            settings.openrouter_api_key = original_key
 
         assert result is not None
         assert len(result.suggestions) == 3

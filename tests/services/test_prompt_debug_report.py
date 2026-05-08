@@ -162,7 +162,7 @@ def test_reconstruct_summarize_prompt_uses_research_template_for_pdf(
 
     assert snapshot.reconstruction_quality == "full"
     assert snapshot.system_prompt is not None
-    assert '"template": "research"' in snapshot.system_prompt
+    assert 'source_details: use template "research"' in snapshot.system_prompt
     assert any(note == "prompt_type=editorial_research" for note in snapshot.notes)
 
 

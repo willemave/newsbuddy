@@ -7,16 +7,15 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 # Add project root to import path when running as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from pydantic import BaseModel, Field
 
 from app.core.db import get_db, init_db
 from app.core.logging import get_logger, setup_logging
@@ -32,11 +31,13 @@ from app.services.admin_eval import (
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt
 from app.services.llm_summarization import resolve_summarization_output_type
+from app.services.summarization_templates import resolve_summarization_prompt_route
 
 logger = get_logger(__name__)
 
 EvalContentType = Literal["article", "podcast", "news"]
 LongformTemplate = Literal[
+    "source_aware_editorial_v2",
     "long_bullets_v1",
     "interleaved_v2",
     "structured_v1",
@@ -48,33 +49,35 @@ PromptType = Literal[
     "structured",
     "news",
     "editorial_narrative",
+    "editorial_podcast",
+    "editorial_substack",
+    "editorial_twitter",
+    "editorial_research",
+    "editorial_github",
+    "longform_artifact",
 ]
 
 ESTIMATED_CHARS_PER_TOKEN = 4
-
-
-class EditorialQuote(BaseModel):
-    """Quote snippet used by editorial narrative summaries."""
-
-    text: str = Field(min_length=10)
-    attribution: str | None = None
-
-
-class EditorialKeyPoint(BaseModel):
-    """Key point entry used in editorial narrative summaries."""
-
-    point: str = Field(min_length=10)
-
-
-class EditorialNarrativeSummary(BaseModel):
-    """Custom summary schema for editorial narrative prompt tests."""
-
-    title: str = Field(min_length=10, max_length=140)
-    editorial_narrative: str = Field(min_length=180)
-    quotes: list[EditorialQuote] = Field(min_length=2, max_length=6)
-    key_points: list[EditorialKeyPoint] = Field(min_length=4, max_length=12)
-    classification: Literal["to_read", "skip"]
-    summarization_date: str
+OPENROUTER_REASONING_OFF_ALIAS = "openrouter_deepseek_flash_reasoning_off"
+OPENROUTER_REASONING_ON_ALIAS = "openrouter_deepseek_flash_reasoning_on"
+REPORT_MODEL_SPECS = {
+    **EVAL_MODEL_SPECS,
+    OPENROUTER_REASONING_OFF_ALIAS: EVAL_MODEL_SPECS["openrouter_deepseek_flash"],
+    OPENROUTER_REASONING_ON_ALIAS: EVAL_MODEL_SPECS["openrouter_deepseek_flash"],
+}
+REPORT_MODEL_LABELS = {
+    **EVAL_MODEL_LABELS,
+    OPENROUTER_REASONING_OFF_ALIAS: "OpenRouter DeepSeek V4 Flash (Reasoning Off)",
+    OPENROUTER_REASONING_ON_ALIAS: "OpenRouter DeepSeek V4 Flash (Reasoning On)",
+}
+REPORT_MODEL_SETTINGS_BY_ALIAS: dict[str, dict[str, Any]] = {
+    OPENROUTER_REASONING_OFF_ALIAS: {
+        "openrouter_reasoning": {"enabled": False, "exclude": True},
+    },
+    OPENROUTER_REASONING_ON_ALIAS: {
+        "openrouter_reasoning": {"enabled": True, "exclude": True},
+    },
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -98,19 +101,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--models",
         type=str,
-        default=",".join(EVAL_MODEL_SPECS.keys()),
-        help="Comma-separated model aliases from admin eval.",
+        default=",".join(REPORT_MODEL_SPECS.keys()),
+        help="Comma-separated model aliases from admin eval/report aliases.",
     )
     parser.add_argument(
         "--longform-template",
         type=str,
         choices=[
+            "source_aware_editorial_v2",
             "long_bullets_v1",
             "interleaved_v2",
             "structured_v1",
             "editorial_narrative_v1",
         ],
-        default="long_bullets_v1",
+        default="source_aware_editorial_v2",
         help="Built-in long-form prompt template for article/podcast.",
     )
     parser.add_argument("--recent-pool-size", type=int, default=200)
@@ -173,8 +177,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--custom-longform-output-type",
         type=str,
-        choices=["long_bullets", "interleaved", "structured", "editorial_narrative"],
-        default="long_bullets",
+        choices=[
+            "long_bullets",
+            "interleaved",
+            "structured",
+            "editorial_narrative",
+            "editorial_podcast",
+            "editorial_substack",
+            "editorial_twitter",
+            "editorial_research",
+            "editorial_github",
+        ],
+        default="editorial_narrative",
         help="Output schema type to use when custom longform prompts are configured.",
     )
     parser.add_argument(
@@ -266,7 +280,7 @@ def validate_models(models: list[str]) -> list[str]:
     Raises:
         ValueError: If unknown model aliases were provided.
     """
-    unknown = [alias for alias in models if alias not in EVAL_MODEL_SPECS]
+    unknown = [alias for alias in models if alias not in REPORT_MODEL_SPECS]
     if unknown:
         raise ValueError(f"Unknown model aliases: {', '.join(unknown)}")
     if not models:
@@ -445,6 +459,8 @@ def extract_result_payload(result: Any) -> dict[str, Any]:
 def resolve_builtin_prompt_settings(
     content_type: EvalContentType,
     longform_template: LongformTemplate,
+    *,
+    source_url: str | None = None,
 ) -> tuple[PromptType, int, int]:
     """Resolve default prompt settings matching eval behavior.
 
@@ -458,6 +474,13 @@ def resolve_builtin_prompt_settings(
     if content_type == "news":
         return "news", 4, 0
 
+    if longform_template == "source_aware_editorial_v2":
+        prompt_type, max_bullet_points, max_quotes = resolve_summarization_prompt_route(
+            content_type,
+            url=source_url,
+        )
+        return cast(PromptType, prompt_type), max_bullet_points, max_quotes
+
     if longform_template == "interleaved_v2":
         return "interleaved", 8, 8
     if longform_template == "structured_v1":
@@ -467,51 +490,10 @@ def resolve_builtin_prompt_settings(
     return "long_bullets", 30, 3
 
 
-def generate_editorial_narrative_prompt(max_key_points: int, max_quotes: int) -> tuple[str, str]:
-    """Generate the built-in editorial narrative prompt.
-
-    Args:
-        max_key_points: Maximum number of key points.
-        max_quotes: Maximum number of quoted snippets.
-
-    Returns:
-        System prompt and user message template.
-    """
-    system_prompt = f"""You are an expert editorial analyst writing a narrative-first summary.
-
-Return a JSON object with exactly these fields:
-{{
-  "title": "Descriptive title (max 140 chars)",
-  "editorial_narrative": "2-4 paragraph editorial narrative. Start with a clear thesis, summarize the article, and weave in direct quotes naturally.",
-  "quotes": [
-    {{
-      "text": "Direct quote from the source (min 10 chars)",
-      "attribution": "Who said it (optional)"
-    }}
-  ],
-  "key_points": [
-    {{
-      "point": "Concrete key point"
-    }}
-  ],
-  "classification": "to_read" | "skip",
-  "summarization_date": "ISO 8601 timestamp"
-}}
-
-Guidelines:
-- The narrative must read like an editorial brief, not bullets.
-- Include 2-{max_quotes} direct quotes in both the narrative text and quotes array.
-- After the narrative, key_points should list 4-{max_key_points} concrete takeaways.
-- Preserve technical terms accurately and avoid spelling mistakes.
-- Never include markdown or extra fields outside the JSON object.
-"""
-    user_template = "Content:\n\n{content}"
-    return system_prompt, user_template
-
-
 def resolve_prompt_for_source(
     *,
     content_type: EvalContentType,
+    source_url: str | None,
     longform_template: LongformTemplate,
     custom_longform_system_prompt: str | None,
     custom_longform_user_template: str | None,
@@ -548,18 +530,13 @@ def resolve_prompt_for_source(
     prompt_type, max_bullet_points, max_quotes = resolve_builtin_prompt_settings(
         content_type,
         longform_template,
+        source_url=source_url,
     )
-    if prompt_type == "editorial_narrative":
-        system_prompt, user_template = generate_editorial_narrative_prompt(
-            max_key_points=max_bullet_points,
-            max_quotes=max_quotes,
-        )
-    else:
-        system_prompt, user_template = generate_summary_prompt(
-            prompt_type,
-            max_bullet_points=max_bullet_points,
-            max_quotes=max_quotes,
-        )
+    system_prompt, user_template = generate_summary_prompt(
+        prompt_type,
+        max_bullet_points=max_bullet_points,
+        max_quotes=max_quotes,
+    )
     return system_prompt, user_template, prompt_type
 
 
@@ -579,7 +556,7 @@ def resolve_available_models(
     skipped: list[dict[str, str]] = []
 
     for alias in models:
-        model_spec = EVAL_MODEL_SPECS[alias]
+        model_spec = REPORT_MODEL_SPECS[alias]
         provider = model_spec.split(":", 1)[0]
 
         if provider == "openai" and not settings.openai_api_key:
@@ -593,6 +570,11 @@ def resolve_available_models(
             continue
         if provider == "cerebras" and not settings.cerebras_api_key:
             skipped.append({"alias": alias, "reason": "CEREBRAS_API_KEY not configured"})
+            continue
+        if provider == "openrouter" and not (
+            settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
+        ):
+            skipped.append({"alias": alias, "reason": "OPENROUTER_API_KEY not configured"})
             continue
 
         available.append((alias, model_spec))
@@ -630,6 +612,7 @@ def build_prompt_definitions(
     for content_type in content_types:
         system_prompt, user_template, prompt_type = resolve_prompt_for_source(
             content_type=content_type,
+            source_url=None,
             longform_template=longform_template,
             custom_longform_system_prompt=custom_longform_system_prompt,
             custom_longform_user_template=custom_longform_user_template,
@@ -721,10 +704,16 @@ def get_agent_for_prompt_type(model_spec: str, prompt_type: PromptType, system_p
     Returns:
         Configured pydantic-ai agent.
     """
-    if prompt_type == "editorial_narrative":
-        return get_basic_agent(model_spec, EditorialNarrativeSummary, system_prompt)
     output_type = resolve_summarization_output_type(prompt_type)
     return get_basic_agent(model_spec, output_type, system_prompt)
+
+
+def build_model_run_settings(model_alias: str, timeout_seconds: int) -> dict[str, Any]:
+    """Build per-run model settings for report-only model variants."""
+    model_settings: dict[str, Any] = {"timeout": timeout_seconds}
+    for key, value in REPORT_MODEL_SETTINGS_BY_ALIAS.get(model_alias, {}).items():
+        model_settings[key] = value.copy() if isinstance(value, dict) else value
+    return model_settings
 
 
 def run_single_model_call(
@@ -767,6 +756,7 @@ def run_single_model_call(
     """
     system_prompt, user_template, prompt_type = resolve_prompt_for_source(
         content_type=source.content_type,
+        source_url=source.url,
         longform_template=longform_template,
         custom_longform_system_prompt=custom_longform_system_prompt,
         custom_longform_user_template=custom_longform_user_template,
@@ -793,7 +783,7 @@ def run_single_model_call(
             agent = get_agent_for_prompt_type(model_spec, prompt_type, system_prompt)
             result = agent.run_sync(
                 user_message,
-                model_settings={"timeout": timeout_seconds},
+                model_settings=build_model_run_settings(model_alias, timeout_seconds),
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
             usage = extract_usage(result)
@@ -810,7 +800,7 @@ def run_single_model_call(
             )
             return {
                 "model_alias": model_alias,
-                "model_label": EVAL_MODEL_LABELS.get(model_alias, model_alias),
+                "model_label": REPORT_MODEL_LABELS.get(model_alias, model_alias),
                 "model_spec": model_spec,
                 "status": "ok",
                 "attempt": attempt,
@@ -842,7 +832,7 @@ def run_single_model_call(
     assert last_error is not None
     return {
         "model_alias": model_alias,
-        "model_label": EVAL_MODEL_LABELS.get(model_alias, model_alias),
+        "model_label": REPORT_MODEL_LABELS.get(model_alias, model_alias),
         "model_spec": model_spec,
         "status": "error",
         "attempt": attempts,
@@ -1000,6 +990,40 @@ def _render_topics(topics: Any) -> str:
     return f'<ul class="topic-list">{"".join(topic_rows)}</ul>'
 
 
+def _render_source_details(source_details: Any) -> str:
+    """Render source-aware editorial detail fields."""
+    if not isinstance(source_details, dict) or not source_details:
+        return ""
+
+    rows: list[str] = []
+    for key, value in source_details.items():
+        label = key.replace("_", " ").title()
+        if isinstance(value, list):
+            items = [
+                _get_text(item, keys=("text", "point"))
+                for item in value
+                if _get_text(item, keys=("text", "point"))
+            ]
+            rendered = _render_string_list(items, class_name="source-detail-list")
+        elif isinstance(value, dict):
+            rendered = _render_source_details(value)
+        else:
+            rendered = f"<p>{html_escape(str(value))}</p>" if value is not None else ""
+        if rendered:
+            rows.append(
+                f"""
+                <div class="source-detail-row">
+                  <h6>{html_escape(label)}</h6>
+                  {rendered}
+                </div>
+                """
+            )
+
+    if not rows:
+        return ""
+    return f'<div class="source-details">{"".join(rows)}</div>'
+
+
 def _render_bulleted_points(points: Any) -> str:
     """Render long-bullet summary points."""
     if not isinstance(points, list) or not points:
@@ -1069,6 +1093,16 @@ def _render_output_payload(payload: dict[str, Any]) -> str:
                 <section class="output-section">
                   <h6>Quotes</h6>
                   {quotes_html}
+                </section>
+                """
+            )
+        source_details_html = _render_source_details(payload.get("source_details"))
+        if source_details_html:
+            blocks.append(
+                f"""
+                <section class="output-section">
+                  <h6>Source Details</h6>
+                  {source_details_html}
                 </section>
                 """
             )
@@ -1282,6 +1316,7 @@ def render_html(report_payload: dict[str, Any]) -> str:
                   </header>
                   <dl class="metrics">
                     <div><dt>Attempt</dt><dd>{cell["attempt"]}</dd></div>
+                    <div><dt>Prompt</dt><dd>{html_escape(str(cell.get("prompt_type", "unknown")))}</dd></div>
                     <div><dt>Latency</dt><dd>{cell["latency_ms"] if cell["latency_ms"] is not None else "n/a"} ms</dd></div>
                     <div><dt>Input Tokens</dt><dd>{usage.get("input_tokens") if usage.get("input_tokens") is not None else "n/a"}</dd></div>
                     <div><dt>Output Tokens</dt><dd>{usage.get("output_tokens") if usage.get("output_tokens") is not None else "n/a"}</dd></div>
@@ -1825,7 +1860,11 @@ def main() -> int:
             "custom_news_prompt_enabled": bool(custom_news_system_prompt),
         },
         "available_models": [
-            {"alias": alias, "label": EVAL_MODEL_LABELS.get(alias, alias), "model_spec": model_spec}
+            {
+                "alias": alias,
+                "label": REPORT_MODEL_LABELS.get(alias, alias),
+                "model_spec": model_spec,
+            }
             for alias, model_spec in available_models
         ],
         "skipped_models": skipped_models,

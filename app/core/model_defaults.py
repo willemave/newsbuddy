@@ -1,9 +1,11 @@
 """Central model tier defaults for LLM-backed features."""
 
 FAST_MODEL_SPEC = "cerebras:zai-glm-4.7"
+OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC = "openrouter:deepseek/deepseek-v4-flash"
 
 CHEAP_GOOGLE_MODEL_NAME = "gemini-3.1-flash-lite-preview"
-CHEAP_MODEL_SPEC = f"google:{CHEAP_GOOGLE_MODEL_NAME}"
+CHEAP_GOOGLE_MODEL_SPEC = f"google:{CHEAP_GOOGLE_MODEL_NAME}"
+CHEAP_MODEL_SPEC = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
 
 SMART_OPENAI_MODEL_NAME = "gpt-5.5"
 SMART_MODEL_SPEC = f"openai:{SMART_OPENAI_MODEL_NAME}"

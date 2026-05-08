@@ -131,6 +131,7 @@ class ProviderSettingsView(BaseModel):
     """Grouped provider settings with secret fields reduced to configured flags."""
 
     openai_api_key_configured: bool
+    openrouter_api_key_configured: bool
     anthropic_api_key_configured: bool
     google_api_key_configured: bool
     google_cloud_project_configured: bool
@@ -283,6 +284,7 @@ class Settings(BaseSettings):
 
     # External services
     openai_api_key: str | None = None
+    openrouter_api_key: str | None = None
     anthropic_api_key: str | None = None
     google_api_key: str | None = None
     google_cloud_project: str | None = None
@@ -394,6 +396,7 @@ class Settings(BaseSettings):
     # Firecrawl fallback extraction
     firecrawl_api_key: str | None = None
     firecrawl_timeout_seconds: int = Field(default=45, ge=1, le=300)
+    firecrawl_credit_cost_usd: float | None = Field(default=0.00083, ge=0.0)
 
     # Reddit / PRAW configuration (script flow)
     reddit_client_id: str | None = None
@@ -566,6 +569,7 @@ class Settings(BaseSettings):
     def providers(self) -> ProviderSettingsView:
         return ProviderSettingsView(
             openai_api_key_configured=bool(self.openai_api_key),
+            openrouter_api_key_configured=bool(self.openrouter_api_key),
             anthropic_api_key_configured=bool(self.anthropic_api_key),
             google_api_key_configured=bool(self.google_api_key),
             google_cloud_project_configured=bool(self.google_cloud_project),

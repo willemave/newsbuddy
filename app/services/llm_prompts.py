@@ -19,10 +19,10 @@ SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS: dict[str, SpecializedEditorialTemplateCo
         "source_name": "a podcast transcript or episode",
         "template": "podcast",
         "source_fields": [
-            '    "thesis": "The central claim or frame of the episode",',
-            '    "speakers": ["Named speakers or roles"],',
-            '    "notable_arguments": ["Important argument or perspective"],',
-            '    "practical_takeaways": ["Operational or practical takeaway"]',
+            "thesis: the central claim or frame of the episode",
+            "speakers: named speakers or roles",
+            "notable_arguments: important arguments or perspectives",
+            "practical_takeaways: operational or practical takeaways",
         ],
         "source_guidelines": [
             "Capture the guest or host thesis, not just the topic area.",
@@ -35,10 +35,10 @@ SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS: dict[str, SpecializedEditorialTemplateCo
         "source_name": "a newsletter or essay",
         "template": "substack",
         "source_fields": [
-            '    "thesis": "The author\'s central thesis",',
-            '    "supporting_arguments": ["Major supporting argument"],',
-            '    "evidence": ["Evidence, examples, or references the author uses"],',
-            '    "implications": ["What follows if the thesis is right"]',
+            "thesis: the author's central thesis",
+            "supporting_arguments: major supporting arguments",
+            "evidence: evidence, examples, or references the author uses",
+            "implications: what follows if the thesis is right",
         ],
         "source_guidelines": [
             "Treat the piece as an argument: identify the thesis, the support, and the implications.",
@@ -51,10 +51,10 @@ SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS: dict[str, SpecializedEditorialTemplateCo
         "source_name": "an X/Twitter post or linked thread",
         "template": "twitter",
         "source_fields": [
-            '    "primary_claim": "The main claim or assertion being made",',
-            '    "evidence": ["Evidence directly supplied in the post or linked context"],',
-            '    "caveats": ["Important missing context, uncertainty, or caveat"],',
-            '    "linked_context": ["Key context from links, screenshots, or embedded references when available"]',
+            "primary_claim: the main claim or assertion being made",
+            "evidence: evidence directly supplied in the post or linked context",
+            "caveats: important missing context, uncertainty, or caveats",
+            "linked_context: key context from links, screenshots, or embedded references",
         ],
         "source_guidelines": [
             "Distinguish clearly between what is asserted, what is evidenced, and what remains uncertain.",
@@ -67,11 +67,11 @@ SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS: dict[str, SpecializedEditorialTemplateCo
         "source_name": "a research paper or technical PDF",
         "template": "research",
         "source_fields": [
-            '    "hypothesis": "The central research question, thesis, or hypothesis",',
-            '    "methods": ["Method, dataset, experiment, or evidence base"],',
-            '    "arguments": ["Main claim or result supported by the work"],',
-            '    "limitations": ["Important limitation, confound, or scope boundary"],',
-            '    "implications": ["Practical or research implication"]',
+            "hypothesis: the central research question, thesis, or hypothesis",
+            "methods: method, dataset, experiment, or evidence base",
+            "arguments: main claims or results supported by the work",
+            "limitations: important limitations, confounds, or scope boundaries",
+            "implications: practical or research implications",
         ],
         "source_guidelines": [
             "Prioritize hypothesis, methods, results, and limitations over rhetorical framing.",
@@ -84,12 +84,12 @@ SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS: dict[str, SpecializedEditorialTemplateCo
         "source_name": "a GitHub repository or technical project documentation",
         "template": "github",
         "source_fields": [
-            '    "overview": "What the project is for and what problem it solves",',
-            '    "architecture": ["Core subsystem, design choice, or structural pattern"],',
-            '    "interfaces": ["CLI, API, SDK, workflow, or integration surface"],',
-            '    "setup_constraints": ["Important dependency, setup, or environment constraint"],',
-            '    "maturity_signals": ["Maintenance, documentation, tests, adoption, or stability signal"],',
-            '    "best_fit_use_cases": ["Who should use it and for what"]',
+            "overview: what the project is for and what problem it solves",
+            "architecture: core subsystems, design choices, or structural patterns",
+            "interfaces: CLI, API, SDK, workflow, or integration surface",
+            "setup_constraints: important dependency, setup, or environment constraints",
+            "maturity_signals: maintenance, documentation, tests, adoption, or stability signals",
+            "best_fit_use_cases: who should use it and for what",
         ],
         "source_guidelines": [
             "Summarize the repo like a technical product: purpose, architecture, interfaces, and adoption signals.",
@@ -129,6 +129,11 @@ def generate_summary_prompt(
     if normalized_type == "news":
         normalized_type = "news"
     content_type = normalized_type
+    news_key_point_limit = max(1, min(max_bullet_points, 3))
+    news_key_point_min = min(2, news_key_point_limit)
+    editorial_key_point_limit = max(1, min(max_bullet_points, 6))
+    editorial_key_point_min = min(4, editorial_key_point_limit)
+    editorial_quote_limit = max(1, min(max_quotes, 2)) if max_quotes else 0
 
     if content_type == "hackernews":
         system_message = f"""You are an expert content analyst. Analyze HackerNews discussions, which
@@ -172,28 +177,21 @@ Classification Guidelines:
 
     elif content_type == "news":
         system_message = f"""You are an expert news editor. Read provided article content and any additional
-aggregator context, then produce a concise JSON object with the following fields:
+aggregator context, then produce a concise summary matching the provided structured output schema.
 
-{{
-  "title": "Descriptive headline highlighting the core takeaway",
-  "article_url": "Canonical article URL",
-  "key_points": [
-    "Bullet #1 in 160 characters or less",
-    "Bullet #2",
-    "Bullet #3"  // include up to {max_bullet_points} total, prioritising impact
-  ],
-  "summary": "Optional 2-sentence overview (≤ 280 characters). Use null if redundant.",
-  "classification": "to_read" | "skip"
-}}
+Field guidance:
+- title: direct factual headline, <=95 characters; rewrite weak, generic, or source-label headlines.
+- article_url: canonical article URL when available.
+- key_points: include {news_key_point_min}-{news_key_point_limit} self-contained bullets, <=120 characters each.
+- summary: optional one-sentence overview, <=180 characters; use null if key_points cover it.
+- classification: use "to_read" for substantial signal and "skip" for low-value or promotional content.
 
-Guidelines:
+Rules:
 - Focus on why the story matters, not just what happened.
+- Prefer omission over padding. Do not add background, caveats, or second-order implications unless the source states them directly.
 - There may be technical terms in the content, please don't make any spelling errors.
 - Keep each key point self-contained, concrete, and free of markdown or numbering.
 - Prefer action verbs, quantitative figures, and clear implications.
-- Make the title a rewritten headline, not a source label, reaction, promotional framing, or placeholder.
-- If the source title is weak, generic, or token-like rewrite
-  it into a factual headline that names the subject and the change.
 - If the content is low-value or promotional, set classification to "skip" but still
   surface truthful key points.
 - Never include markdown, topics, quotes, or any extra fields.
@@ -204,15 +202,12 @@ Guidelines:
     elif content_type == "daily_news_rollup":
         system_message = """You are an expert news editor preparing a single daily rollup from many source stories.
 
-Return a JSON object with exactly these fields:
-{
-  "title": "Descriptive headline (max 110 characters) capturing the day's main themes",
-  "summary": "Required 2-sentence overview explaining the day at a glance (≤ 500 characters).",
-  "key_points": [
-    "One bullet for a distinct major topic, story cluster, or consequential development",
-    "A bullet may optionally use a second line for one short comment quote, for example: Main point.\\n\\"Quote\\" - commenter"
-  ]
-}
+Produce a rollup matching the provided structured output schema.
+
+Field guidance:
+- title: descriptive headline, <=110 characters, capturing the day's main themes.
+- summary: required two-sentence overview explaining the day at a glance, <=500 characters.
+- key_points: one bullet per distinct major topic, story cluster, or consequential development.
 
 Guidelines:
 - Cover the major themes of the day, not just the single top story.
@@ -233,45 +228,32 @@ Guidelines:
 
     elif content_type in SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS:
         config = SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS[content_type]
-        source_details_block = '  "source_details": {\n'
-        source_details_block += f'    "template": "{config["template"]}",\n'
-        source_details_block += "\n".join(config["source_fields"])
-        source_details_block += "\n  },\n"
+        source_fields_text = "\n".join(
+            f"- source_details.{field}" for field in config["source_fields"]
+        )
         source_guidelines_text = "\n".join(
             f"- {guideline}" for guideline in config["source_guidelines"]
         )
         system_message = f"""You are an expert editor writing an information-dense narrative summary for {config["source_name"]}.
 
-Return a JSON object with exactly these fields:
-{{
-  "title": "Descriptive title (max 110 characters)",
-  "editorial_narrative": "1-2 tight paragraphs with a clear thesis and factual synthesis",
-  "quotes": [
-    {{
-      "text": "Direct quote from the content (min 10 chars)",
-      "attribution": "Who said it (optional)"
-    }}
-  ],
-  "key_points": [
-    {{
-      "point": "Concrete key point"
-    }}
-  ],
-{source_details_block}  "classification": "to_read" | "skip",
-  "summarization_date": "ISO 8601 timestamp"
-}}
+Produce a summary matching the provided structured output schema.
 
-Guidelines:
+Field guidance:
+- title: descriptive title, <=110 characters.
+- editorial_narrative: one compact thesis-led paragraph, 90-150 words.
+- quotes: include exactly {editorial_quote_limit} direct quotes when the source contains usable quotes; otherwise include the strongest available quote.
+- key_points: include {editorial_key_point_min}-{editorial_key_point_limit} non-overlapping points, each <=22 words.
+- source_details: use template "{config["template"]}" and keep every value short, accurate, and source-grounded.
+{source_fields_text}
+- classification: use "to_read" for substantial insight or original reporting; otherwise use "skip".
+
+Rules:
 - Start the first paragraph with the core thesis or the most consequential takeaway.
-- Use only 1-2 paragraphs for the full narrative.
-- Keep the narrative heavily information-dense: every sentence should carry concrete signal (named entities, numbers, dates, constraints, implications).
-- Target roughly 140-220 words across the full narrative.
+- Use a second paragraph only when the source has two distinct claims.
+- Keep every sentence concrete: named entities, numbers, dates, constraints, implications.
 - Avoid filler, repetition, and generic framing.
-- Include 2-{max_quotes} direct quotes; integrate quotes naturally into the narrative prose when possible.
-- key_points: include 4-{max_bullet_points} non-overlapping points.
 - Each key point must be specific and evidence-oriented, not vague advice.
 - There may be technical terms in the content; preserve exact spelling.
-- Keep source_details accurate, concise, and fully grounded in the source. Do not invent structure that the source does not support.
 {source_guidelines_text}
 - Never include markdown or any fields outside this schema.
 
@@ -284,33 +266,20 @@ Classification Guidelines:
     elif content_type == "editorial_narrative":
         system_message = f"""You are an expert editor writing an information-dense narrative summary.
 
-Return a JSON object with exactly these fields:
-{{
-  "title": "Descriptive title (max 110 characters)",
-  "editorial_narrative": "1-2 tight paragraphs with a clear thesis and factual synthesis",
-  "quotes": [
-    {{
-      "text": "Direct quote from the content (min 10 chars)",
-      "attribution": "Who said it (optional)"
-    }}
-  ],
-  "key_points": [
-    {{
-      "point": "Concrete key point"
-    }}
-  ],
-  "classification": "to_read" | "skip",
-  "summarization_date": "ISO 8601 timestamp"
-}}
+Produce a summary matching the provided structured output schema.
 
-Guidelines:
+Field guidance:
+- title: descriptive title, <=110 characters.
+- editorial_narrative: one compact thesis-led paragraph, 90-150 words.
+- quotes: include exactly {editorial_quote_limit} direct quotes when the source contains usable quotes; otherwise include the strongest available quote.
+- key_points: include {editorial_key_point_min}-{editorial_key_point_limit} non-overlapping points, each <=22 words.
+- classification: use "to_read" for substantial insight or high-signal analysis; otherwise use "skip".
+
+Rules:
 - Start the first paragraph with the core thesis or the most consequential takeaway.
-- Use only 1-2 paragraphs for the full narrative.
-- Keep the narrative heavily information-dense: every sentence should carry concrete signal (named entities, numbers, dates, constraints, implications).
-- Keep it slightly shorter: target roughly 140-220 words across the full narrative.
+- Use a second paragraph only when the source has two distinct claims.
+- Keep every sentence concrete: named entities, numbers, dates, constraints, implications.
 - Avoid filler, repetition, and generic framing.
-- Include 2-{max_quotes} direct quotes; integrate at least 2 quotes naturally into the narrative prose.
-- key_points: include 4-{max_bullet_points} non-overlapping points.
 - Each key point must be specific and evidence-oriented, not vague advice.
 - There may be technical terms in the content; preserve exact spelling.
 - Never include markdown or any fields outside this schema.
@@ -324,33 +293,18 @@ Classification Guidelines:
 
     elif content_type == "long_bullets":
         system_message = f"""You are an expert content analyst. Produce an exhaustive bullet-first summary
-where each bullet can expand into a brief detail and supporting quotes.
+where each bullet can expand into a brief detail and supporting quotes. Match the
+provided structured output schema.
 
-Return a JSON object with exactly these fields:
-{{
-  "title": "Descriptive title (max 110 characters)",
-  "points": [
-    {{
-      "text": "One-sentence main bullet",
-      "detail": "2-3 sentences that expand the bullet",
-      "quotes": [
-        {{
-          "text": "Direct quote supporting the point (min 20 chars)",
-          "attribution": "Who said it (optional)",
-          "context": "Context if needed (optional)"
-        }}
-      ]
-    }}
-  ],
-  "classification": "to_read" | "skip",
-  "summarization_date": "ISO 8601 timestamp"
-}}
+Field guidance:
+- title: descriptive title, <=110 characters.
+- points: target 10-20 bullets; include up to {max_bullet_points} when needed for completeness.
+- point text: one concrete sentence.
+- point detail: 2-3 sentences with evidence, numbers, names, and implications.
+- quotes: 1-3 verbatim quotes per point that support the claim.
+- classification: use "to_read" for substantive information or analysis; otherwise use "skip".
 
 Guidelines:
-- points: target 10-20 bullets; include up to {max_bullet_points} when needed for completeness.
-- Each point must include 1-3 quotes that support the claim.
-- Each "text" is one sentence, concrete and specific.
-- "detail" expands the point with evidence, numbers, names, and implications.
 - Quotes must be verbatim from the content; avoid duplication across points.
 - There may be technical terms in the content, please don't make any spelling errors.
 - Never include markdown or extra fields.
@@ -370,39 +324,24 @@ Classification Guidelines:
         user_message = "Content:\n\n{content}"
 
     elif content_type == "structured":
-        system_message = f"""You are an expert content analyst. Return a structured JSON summary.
+        system_message = f"""You are an expert content analyst. Return a structured summary matching
+the provided output schema.
 
-Return a JSON object with exactly these fields:
-{{
-  "title": "Descriptive title (max 110 characters)",
-  "overview": "Brief overview paragraph (min 50 chars)",
-  "bullet_points": [
-    {{
-      "text": "Concrete key point",
-      "category": "optional category label"
-    }}
-  ],
-  "quotes": [
-    {{
-      "text": "Direct quote from the content (min 10 chars)",
-      "attribution": "Who said it (optional)",
-      "context": "Context if needed (optional)"
-    }}
-  ],
-  "topics": ["topic1", "topic2"],
-  "questions": ["question1"],
-  "counter_arguments": ["counter argument 1"],
-  "classification": "to_read" | "skip",
-  "summarization_date": "ISO 8601 timestamp",
-  "full_markdown": "Readable markdown form of the source"
-}}
+Field guidance:
+- title: descriptive title, <=110 characters.
+- overview: brief paragraph with the main argument or finding.
+- bullet_points: include 6-{max_bullet_points} high-signal points with optional category labels.
+- quotes: include up to {max_quotes} non-trivial direct quotes.
+- topics: concise topic labels.
+- questions: critical questions prompted by the content.
+- counter_arguments: credible objections or alternative perspectives.
+- classification: use "to_read" for substantive information or analysis; otherwise use "skip".
+- full_markdown: readable markdown form of the source when available.
 
 Guidelines:
-- bullet_points: include 6-{max_bullet_points} high-signal points.
-- quotes: include up to {max_quotes} non-trivial quotes.
 - Keep details specific with names, numbers, and implications.
 - There may be technical terms in the content, please don't make any spelling errors.
-- Never include markdown outside JSON or any extra fields.
+- Never include markdown outside schema fields or any extra fields.
 """
 
         user_message = "Content:\n\n{content}"
@@ -411,42 +350,19 @@ Guidelines:
         # Interleaved format v2: key points, quotes list, topic bullets
         system_message = f"""You are an expert content analyst creating interleaved summaries that
 surface top key points first, then expand each topic with focused bullets, and
-separate longer quotes into their own list.
+separate longer quotes into their own list. Match the provided structured output schema.
 
-Return a JSON object with exactly these fields:
-{{
-  "title": "Descriptive title (max 110 characters)",
-  "hook": "2-3 sentence hook (min 80 chars)",
-  "key_points": [
-    {{"text": "Key point 1"}},
-    {{"text": "Key point 2"}},
-    {{"text": "Key point 3"}}
-  ],
-  "topics": [
-    {{
-      "topic": "Topic name",
-      "bullets": [
-        {{"text": "Bullet 1"}},
-        {{"text": "Bullet 2"}}
-      ]
-    }}
-  ],
-  "quotes": [
-    {{
-      "text": "Longer direct quote (min 20 chars)",
-      "attribution": "Who said it (optional)",
-      "context": "Context if needed (optional)"
-    }}
-  ],
-  "takeaway": "2-3 sentence takeaway (min 80 chars)",
-  "classification": "to_read" | "skip",
-  "summarization_date": "ISO 8601 timestamp"
-}}
+Field guidance:
+- title: descriptive title, <=110 characters.
+- hook: 2-3 sentence opening with the main story.
+- key_points: 3-5 highest-signal items only; no quotes inside key_points.
+- topics: cover all major themes; each topic must have 2-3 focused bullets.
+- quotes: include up to {max_quotes} longer quotes that add signal.
+- takeaway: 2-3 sentence final synthesis.
+- classification: use "to_read" for substantive information or analysis; otherwise use "skip".
 
 Guidelines:
-- key_points: 3-5 total, highest signal items only. No quotes inside key_points.
-- topics: cover all major themes; each topic must have 2-3 bullets.
-- quotes: include up to {max_quotes} longer quotes that add signal; avoid duplication.
+- Avoid quote duplication.
 - Use concrete numbers, names, and data points when available.
 - There may be technical terms in the content, please don't make any spelling errors.
 - Never include markdown or extra fields.

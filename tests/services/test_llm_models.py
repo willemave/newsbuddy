@@ -5,6 +5,7 @@ import pytest
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.models.openrouter import OpenRouterModel
 from sqlalchemy.orm import Session
 
 from app.services import llm_models
@@ -19,6 +20,7 @@ def _settings(**kwargs):
         google_cloud_project=kwargs.get("google_cloud_project"),
         google_cloud_location=kwargs.get("google_cloud_location", "global"),
         cerebras_api_key=kwargs.get("cerebras_api_key"),
+        openrouter_api_key=kwargs.get("openrouter_api_key"),
     )
 
 
@@ -74,6 +76,13 @@ def test_resolve_model_uses_gpt_5_5_for_openai_default() -> None:
 
     assert provider == llm_models.LLMProvider.OPENAI.value
     assert model_spec == "openai:gpt-5.5"
+
+
+def test_resolve_model_google_default_stays_on_gemini() -> None:
+    provider, model_spec = llm_models.resolve_model(llm_models.LLMProvider.GOOGLE, None)
+
+    assert provider == llm_models.LLMProvider.GOOGLE.value
+    assert model_spec == "google:gemini-3.1-flash-lite-preview"
 
 
 def test_build_pydantic_model_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,6 +143,30 @@ def test_build_pydantic_model_google_uses_project_when_available(
 
     assert isinstance(model, GoogleModel)
     assert model._provider.name == "google-vertex"
+
+
+def test_build_pydantic_model_openrouter_uses_native_json_schema_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        llm_models,
+        "get_settings",
+        lambda: _settings(openrouter_api_key="test-key"),
+    )
+
+    model, model_settings = llm_models.build_pydantic_model("openrouter:deepseek/deepseek-v4-flash")
+
+    assert isinstance(model, OpenRouterModel)
+    assert model.profile.supports_json_schema_output is True
+    assert model.profile.supports_json_object_output is True
+    assert model_settings == {
+        "openrouter_provider": {
+            "require_parameters": True,
+            "sort": llm_models.OPENROUTER_PROVIDER_SORT,
+        },
+        "openrouter_reasoning": llm_models.OPENROUTER_REASONING_CONFIG,
+        "timeout": llm_models.OPENROUTER_MODEL_TIMEOUT_SECONDS,
+    }
 
 
 def test_resolve_effective_api_key_prefers_user_key(monkeypatch: pytest.MonkeyPatch) -> None:

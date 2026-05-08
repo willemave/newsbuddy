@@ -141,6 +141,16 @@ def test_estimate_vendor_cost_uses_google_alias_pricing(monkeypatch) -> None:
     assert cost == 0.008
 
 
+def test_estimate_vendor_cost_prices_openrouter_deepseek_flash() -> None:
+    cost = vendor_costs.estimate_vendor_cost_usd(
+        provider="openrouter",
+        model="openrouter:deepseek/deepseek-v4-flash",
+        usage={"input_tokens": 1_000, "output_tokens": 500},
+    )
+
+    assert cost == 0.00028
+
+
 def test_estimate_vendor_cost_uses_long_context_rates(monkeypatch) -> None:
     monkeypatch.setattr(
         vendor_costs,
@@ -241,6 +251,7 @@ def test_estimate_vendor_cost_uses_bundled_exa_search_pricing(monkeypatch) -> No
                 "exa_search_included_results": 10,
                 "x_posts_read_cost_usd": 0.005,
                 "x_users_read_cost_usd": 0.01,
+                "firecrawl_credit_cost_usd": 0.00083,
             },
         )(),
     )
@@ -269,6 +280,7 @@ def test_estimate_vendor_cost_uses_exa_additional_result_pricing(monkeypatch) ->
                 "exa_search_included_results": 10,
                 "x_posts_read_cost_usd": 0.005,
                 "x_users_read_cost_usd": 0.01,
+                "firecrawl_credit_cost_usd": 0.00083,
             },
         )(),
     )
@@ -297,6 +309,7 @@ def test_estimate_vendor_cost_uses_runware_unit_pricing(monkeypatch) -> None:
                 "exa_search_included_results": 10,
                 "x_posts_read_cost_usd": 0.005,
                 "x_users_read_cost_usd": 0.01,
+                "firecrawl_credit_cost_usd": 0.00083,
             },
         )(),
     )
@@ -308,3 +321,31 @@ def test_estimate_vendor_cost_uses_runware_unit_pricing(monkeypatch) -> None:
     )
 
     assert cost == 0.0038
+
+
+def test_estimate_vendor_cost_uses_firecrawl_credit_pricing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        vendor_costs,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "exa_search_request_cost_usd": 0.007,
+                "exa_content_result_cost_usd": 0.001,
+                "exa_summary_result_cost_usd": 0.001,
+                "exa_search_included_results": 10,
+                "x_posts_read_cost_usd": 0.005,
+                "x_users_read_cost_usd": 0.01,
+                "firecrawl_credit_cost_usd": 0.00134,
+            },
+        )(),
+    )
+
+    cost = vendor_costs.estimate_vendor_cost_usd(
+        provider="firecrawl",
+        model="scrape-v2",
+        usage={"request_count": 1, "resource_count": 2},
+    )
+
+    assert cost == 0.00268

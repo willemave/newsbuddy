@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from dataclasses import replace
 from enum import Enum, StrEnum
 from typing import Any, cast
 
@@ -14,18 +16,21 @@ from pydantic_ai.models.openai import (
     OpenAIResponsesModelSettings,
     ReasoningEffort,
 )
+from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.cerebras import CerebrasProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.settings import ModelSettings
 from sqlalchemy.orm import Session
 
 from app.core.model_defaults import (
-    CHEAP_MODEL_SPEC,
+    CHEAP_GOOGLE_MODEL_SPEC,
     DEEP_RESEARCH_MODEL_NAME,
     DEEP_RESEARCH_MODEL_SPEC,
     FAST_MODEL_SPEC,
+    OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
     SMART_ANTHROPIC_MODEL_SPEC,
     SMART_MODEL_SPEC,
 )
@@ -40,6 +45,7 @@ class LLMProvider(StrEnum):
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
     CEREBRAS = "cerebras"
+    OPENROUTER = "openrouter"
     DEEP_RESEARCH = "deep_research"
 
 
@@ -49,14 +55,16 @@ PROVIDER_PREFIXES: dict[str, str] = {
     LLMProvider.ANTHROPIC.value: "anthropic",
     LLMProvider.GOOGLE.value: "google",
     LLMProvider.CEREBRAS.value: "cerebras",
+    LLMProvider.OPENROUTER.value: "openrouter",
     LLMProvider.DEEP_RESEARCH.value: "deep_research",
 }
 
 PROVIDER_DEFAULTS: dict[str, str] = {
     LLMProvider.OPENAI.value: SMART_MODEL_SPEC,
     LLMProvider.ANTHROPIC.value: SMART_ANTHROPIC_MODEL_SPEC,
-    LLMProvider.GOOGLE.value: CHEAP_MODEL_SPEC,
+    LLMProvider.GOOGLE.value: CHEAP_GOOGLE_MODEL_SPEC,
     LLMProvider.CEREBRAS.value: FAST_MODEL_SPEC,
+    LLMProvider.OPENROUTER.value: OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
     LLMProvider.DEEP_RESEARCH.value: DEEP_RESEARCH_MODEL_SPEC,
 }
 
@@ -68,6 +76,9 @@ DEFAULT_MODEL = PROVIDER_DEFAULTS[DEFAULT_PROVIDER]
 PREFIX_TO_PROVIDER: dict[str, str] = {
     prefix: provider for provider, prefix in PROVIDER_PREFIXES.items()
 }
+OPENROUTER_MODEL_TIMEOUT_SECONDS = 120.0
+OPENROUTER_PROVIDER_SORT = "throughput"
+OPENROUTER_REASONING_CONFIG = {"enabled": True, "exclude": True}
 
 
 def resolve_model(
@@ -144,6 +155,8 @@ def resolve_effective_api_key(
         LLMProvider.ANTHROPIC.value: settings.anthropic_api_key,
         LLMProvider.GOOGLE.value: settings.google_api_key,
         LLMProvider.CEREBRAS.value: settings.cerebras_api_key,
+        LLMProvider.OPENROUTER.value: settings.openrouter_api_key
+        or os.getenv("OPENROUTER_API_KEY"),
     }
     return platform_keys.get(provider_name)
 
@@ -266,6 +279,48 @@ def build_pydantic_model(
             model_to_use,
             provider=OpenAIProvider(api_key=resolved_api_key),
         ), openai_model_settings
+
+    if provider_prefix == "openrouter" or model_spec.startswith("openrouter:"):
+        resolved_api_key = (
+            api_key_override or settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
+        )
+        if not resolved_api_key:
+            raise ValueError("OPENROUTER_API_KEY not configured in settings.")
+        model_to_use = (
+            model_name
+            if provider_prefix
+            else (model_spec.split(":", 1)[1] if ":" in model_spec else model_spec)
+        )
+        profile = OpenRouterProvider.model_profile(model_to_use)
+        if profile is not None:
+            # OpenRouter advertises structured_outputs/response_format for models such as
+            # DeepSeek V4 Flash, but pydantic-ai's default OpenRouter profile currently
+            # leaves native JSON-schema output disabled. Enable it for OpenRouter models
+            # we construct explicitly so Agent(..., NativeOutput(...)) uses response_format.
+            profile = replace(
+                profile,
+                supports_json_schema_output=True,
+                supports_json_object_output=True,
+            )
+        openrouter_model_settings = cast(
+            ModelSettings,
+            {
+                "openrouter_provider": {
+                    "require_parameters": True,
+                    "sort": OPENROUTER_PROVIDER_SORT,
+                },
+                "openrouter_reasoning": OPENROUTER_REASONING_CONFIG,
+                "timeout": OPENROUTER_MODEL_TIMEOUT_SECONDS,
+            },
+        )
+        return (
+            OpenRouterModel(
+                model_to_use,
+                provider=OpenRouterProvider(api_key=resolved_api_key),
+                profile=profile,
+            ),
+            openrouter_model_settings,
+        )
 
     return model_spec, None
 
