@@ -821,8 +821,6 @@ private struct AccountCard: View {
     }
 }
 
-// MARK: - Navigation
-
 // MARK: - Mark All Target
 
 private enum MarkAllTarget: String, CaseIterable {

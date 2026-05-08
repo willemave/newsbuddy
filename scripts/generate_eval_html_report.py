@@ -999,11 +999,7 @@ def _render_source_details(source_details: Any) -> str:
     for key, value in source_details.items():
         label = key.replace("_", " ").title()
         if isinstance(value, list):
-            items = [
-                _get_text(item, keys=("text", "point"))
-                for item in value
-                if _get_text(item, keys=("text", "point"))
-            ]
+            items = _collect_text_items(value, keys=("text", "point"))
             rendered = _render_string_list(items, class_name="source-detail-list")
         elif isinstance(value, dict):
             rendered = _render_source_details(value)
@@ -1803,12 +1799,12 @@ def main() -> int:
     )
 
     item_results: list[dict[str, Any]] = []
-    ordered_aliases = [alias for alias in models if any(alias == a for a, _ in available_models)]
     model_spec_map = dict(available_models)
+    ordered_aliases = [alias for alias in models if alias in model_spec_map]
+    model_pairs = [(alias, model_spec_map[alias]) for alias in ordered_aliases]
 
     for source in selected_sources:
         model_results_by_alias: dict[str, dict[str, Any]] = {}
-        model_pairs = [(alias, model_spec_map[alias]) for alias in ordered_aliases]
         for alias, model_spec in model_pairs:
             model_results_by_alias[alias] = run_single_model_call(
                 source=source,
