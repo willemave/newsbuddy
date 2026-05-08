@@ -7,6 +7,7 @@
 
 import os.log
 import SwiftUI
+import UIKit
 
 private let logger = Logger(subsystem: "com.newsly", category: "ShortFormView")
 
@@ -59,7 +60,17 @@ struct ShortFormView: View {
                                 .equatable()
                         }
 
-                        ShortNewsRow(item: item)
+                        ShortNewsRow(
+                            item: item,
+                            onDigDeeper: { selectedText in
+                                FeedDigDeeperAction.start(
+                                    selectedText: selectedText,
+                                    item: item,
+                                    visibleContentIds: items.prefix(15).map(\.id),
+                                    surface: .shortNews
+                                )
+                            }
+                        )
                             .equatable()
                             .accessibilityIdentifier("short.row.\(item.id)")
                             .id(item.id)
@@ -252,14 +263,7 @@ struct ShortFormView: View {
                     message: action.prompt,
                     screenContext: action.screenContext
                 )
-                ChatNavigationCoordinator.shared.open(
-                    ChatSessionRoute(
-                        sessionId: response.session.id,
-                        initialUserMessageText: response.userMessage.content,
-                        initialUserMessageTimestamp: response.userMessage.timestamp,
-                        pendingMessageId: response.messageId
-                    )
-                )
+                ChatNavigationCoordinator.shared.openAssistantTurn(response)
             } catch {
                 quickActionErrorMessage = error.localizedDescription
             }
@@ -333,13 +337,22 @@ private struct ShortNewsQuickActionChip: View {
 
 private struct ShortNewsRow: View, Equatable {
     let item: ContentSummary
+    var onDigDeeper: ((String) -> Void)?
 
-    private var titleWeight: Font.Weight {
-        .regular
+    static func == (lhs: ShortNewsRow, rhs: ShortNewsRow) -> Bool {
+        lhs.item == rhs.item
     }
 
     private var titleColor: Color {
         item.isRead ? .secondary : .primary
+    }
+
+    private var titleUIFont: UIFont {
+        .systemFont(ofSize: 18, weight: .regular)
+    }
+
+    private var snippetUIFont: UIFont {
+        .systemFont(ofSize: 13, weight: .regular)
     }
 
     private var hasPlatform: Bool {
@@ -365,13 +378,16 @@ private struct ShortNewsRow: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Headline
-            Text(item.displayTitle)
-                .font(.feedHeadline)
-                .fontWeight(titleWeight)
-                .foregroundColor(titleColor)
-                .lineLimit(3)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
+            SelectableText(
+                item.displayTitle,
+                textColor: UIColor(titleColor),
+                font: titleUIFont,
+                lineLimit: 3,
+                lineBreakMode: .byTruncatingTail,
+                onDigDeeper: onDigDeeper
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
 
             // Platform · source · comments · time metadata below headline
             let textParts = metadataTextParts
@@ -409,17 +425,15 @@ private struct ShortNewsRow: View, Equatable {
                         .font(.system(size: 11))
                         .foregroundStyle(Color.onSurfaceSecondary.opacity(0.6))
                         .padding(.top, 3)
-                    (
-                        Text("\(snippet.author): ")
-                            .font(.feedSnippet.weight(.semibold))
-                            .foregroundStyle(Color.onSurface.opacity(0.7))
-                        +
-                        Text(snippet.text)
-                            .font(.feedSnippet)
-                            .foregroundStyle(Color.onSurfaceSecondary)
+                    SelectableText(
+                        "\(snippet.author): \(snippet.text)",
+                        textColor: UIColor(Color.onSurfaceSecondary),
+                        font: snippetUIFont,
+                        lineLimit: 2,
+                        lineBreakMode: .byTruncatingTail,
+                        onDigDeeper: onDigDeeper
                     )
-                        .lineLimit(2)
-                        .lineSpacing(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.top, 2)
             }

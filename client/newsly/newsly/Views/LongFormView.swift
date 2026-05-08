@@ -45,8 +45,8 @@ struct LongFormView: View {
                                     .padding(.top, 16)
                                     .padding(.bottom, 24)
 
+                                let items = viewModel.currentItems()
                                 VStack(spacing: CardMetrics.cardSpacing) {
-                                    let items = viewModel.currentItems()
                                     let groups = bentoGroups(from: items)
                                     ForEach(groups.indices, id: \.self) { groupIndex in
                                         let group = groups[groupIndex]
@@ -54,6 +54,12 @@ struct LongFormView: View {
                                     }
                                 }
                                 .padding(.horizontal, Spacing.screenHorizontal)
+
+                                if items.contains(where: { !$0.isRead }) {
+                                    markAllLongFormButton
+                                        .padding(.horizontal, Spacing.screenHorizontal)
+                                        .padding(.vertical, 8)
+                                }
 
                                 if viewModel.state == .loadingMore {
                                     HStack {
@@ -68,13 +74,6 @@ struct LongFormView: View {
                         .refreshable {
                             await refreshLongFormSurface(forceReload: true)
                         }
-                        .simultaneousGesture(
-                            LongPressGesture(minimumDuration: 0.8).onEnded { _ in
-                                if viewModel.currentItems().contains(where: { !$0.isRead }) {
-                                    showMarkAllConfirmation = true
-                                }
-                            }
-                        )
                         .confirmationDialog(
                             "Mark all long-form content as read?",
                             isPresented: $showMarkAllConfirmation
@@ -167,24 +166,29 @@ struct LongFormView: View {
 
     @ViewBuilder
     private func cardLink(content: ContentSummary, variant: LongFormCard.Variant, allItems: [ContentSummary]) -> some View {
-        NavigationLink(
-            value: ContentDetailRoute(
-                summary: content,
-                allContentIds: allItems.map(\.id)
-            )
-        ) {
-            LongFormCard(
-                content: content,
-                variant: variant,
-                onMarkRead: {
-                    viewModel.markAsRead(content.id)
-                },
-                onToggleKnowledgeSave: {
-                    Task {
-                        await viewModel.toggleKnowledgeSave(content.id)
-                    }
+        LongFormCard(
+            content: content,
+            variant: variant,
+            onMarkRead: {
+                viewModel.markAsRead(content.id)
+            },
+            onToggleKnowledgeSave: {
+                Task {
+                    await viewModel.toggleKnowledgeSave(content.id)
                 }
-            )
+            },
+            onDigDeeper: { selectedText in
+                FeedDigDeeperAction.start(
+                    selectedText: selectedText,
+                    item: content,
+                    visibleContentIds: allItems.prefix(15).map(\.id),
+                    surface: .longForm
+                )
+            }
+        )
+        .contentShape(RoundedRectangle(cornerRadius: CardMetrics.cardCornerRadius, style: .continuous))
+        .onTapGesture {
+            onSelect(ContentDetailRoute(summary: content, allContentIds: allItems.map(\.id)))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("long.row.\(content.id)")
@@ -193,6 +197,20 @@ struct LongFormView: View {
                 viewModel.loadMoreTrigger.send(())
             }
         }
+    }
+
+    private var markAllLongFormButton: some View {
+        Button {
+            showMarkAllConfirmation = true
+        } label: {
+            Text("Mark All as Read")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color.surfaceSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

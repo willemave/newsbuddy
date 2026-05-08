@@ -6,12 +6,14 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct LongFormCard: View {
     let content: ContentSummary
     var variant: Variant = .hero
     var onMarkRead: (() -> Void)?
     var onToggleKnowledgeSave: (() -> Void)?
+    var onDigDeeper: ((String) -> Void)?
 
     enum Variant {
         case hero
@@ -56,22 +58,30 @@ struct LongFormCard: View {
                 .padding(.bottom, 8)
 
                 // Headline
-                Text(content.displayTitle)
-                    .font(variant == .hero ? .terracottaHeadlineLarge : .terracottaHeadlineSmall)
-                    .foregroundColor(content.isRead ? Color.onSurfaceSecondary : Color.onSurface)
-                    .lineLimit(variant == .hero ? 3 : 2)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 8)
+                SelectableText(
+                    content.displayTitle,
+                    textColor: UIColor(content.isRead ? Color.onSurfaceSecondary : Color.onSurface),
+                    font: headlineUIFont,
+                    lineLimit: variant == .hero ? 3 : 2,
+                    lineBreakMode: .byTruncatingTail,
+                    onDigDeeper: onDigDeeper
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 8)
 
                 // Description (hero only gets more lines)
                 if let summary = summaryText {
-                    Text(summary)
-                        .font(variant == .hero ? .terracottaBodyMedium : .terracottaBodySmall)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .lineLimit(variant == .hero ? 3 : 2)
-                        .multilineTextAlignment(.leading)
-                        .padding(.bottom, 12)
+                    SelectableText(
+                        summary,
+                        textColor: UIColor(Color.onSurfaceSecondary),
+                        font: summaryUIFont,
+                        lineLimit: variant == .hero ? 3 : 2,
+                        lineBreakMode: .byTruncatingTail,
+                        onDigDeeper: onDigDeeper
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 12)
                 }
 
                 // Footer: source + actions (hero variant only)
@@ -186,6 +196,16 @@ struct LongFormCard: View {
             return newsSummary
         }
         return nil
+    }
+
+    private var headlineUIFont: UIFont {
+        let size: CGFloat = variant == .hero ? 28 : 18
+        return UIFont(name: "Newsreader", size: size) ?? .systemFont(ofSize: size, weight: .regular)
+    }
+
+    private var summaryUIFont: UIFont {
+        let size: CGFloat = variant == .hero ? 14 : 12
+        return UIFont(name: "Inter", size: size) ?? .systemFont(ofSize: size, weight: .regular)
     }
 
     private var sourceLabel: String {

@@ -11,13 +11,14 @@ class DigDeeperTextView: UITextView {
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(digDeeperAction(_:)) {
-            return selectedRange.length > 0
+            return onDigDeeper != nil && selectedRange.length > 0
         }
         return super.canPerformAction(action, withSender: sender)
     }
 
     override func buildMenu(with builder: any UIMenuBuilder) {
         super.buildMenu(with: builder)
+        guard onDigDeeper != nil else { return }
 
         let digDeeperAction = UIAction(
             title: "Dig Deeper",
