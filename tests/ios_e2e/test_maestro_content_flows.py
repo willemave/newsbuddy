@@ -568,7 +568,6 @@ def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(
     db_session.refresh(test_user)
     assert test_user.has_completed_onboarding is True
     assert test_user.has_completed_new_user_tutorial is True
-    assert test_user.news_list_preference_prompt is not None
 
     configs = (
         db_session.query(UserScraperConfig).filter(UserScraperConfig.user_id == test_user.id).all()

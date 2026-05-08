@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, create_refresh_token
 from app.models.schema import UserIntegrationConnection
-from app.services.news_list_preferences import DEFAULT_NEWS_LIST_PREFERENCE_PROMPT
 
 
 @pytest.fixture
@@ -276,7 +275,6 @@ def test_get_current_user_info(
     assert data["email"] == "testme@icloud.com"
     assert data["full_name"] == "Test Me User"
     assert data["twitter_username"] is None
-    assert data["news_list_preference_prompt"] == DEFAULT_NEWS_LIST_PREFERENCE_PROMPT
     assert data["council_personas"] == []
     assert data["has_x_bookmark_sync"] is False
 
@@ -346,7 +344,6 @@ def test_update_current_user_info(
                     "sort_order": 2,
                 },
             ],
-            "news_list_preference_prompt": "Prefer semiconductors, infrastructure, and AI models.",
         },
     )
     assert response.status_code == 200
@@ -354,7 +351,6 @@ def test_update_current_user_info(
     data = response.json()
     assert data["full_name"] == "Updated Name"
     assert data["twitter_username"] == "willem_aw"
-    assert data["news_list_preference_prompt"].startswith("Prefer semiconductors")
     assert [persona["display_name"] for persona in data["council_personas"]] == [
         "Albert Einstein",
         "Alan Turing",
@@ -364,7 +360,6 @@ def test_update_current_user_info(
     db_session.refresh(test_user)
     assert test_user.full_name == "Updated Name"
     assert test_user.twitter_username == "willem_aw"
-    assert test_user.news_list_preference_prompt.startswith("Prefer semiconductors")
     assert test_user.council_personas[0]["id"] == "einstein"
 
 
@@ -397,34 +392,6 @@ def test_update_current_user_info_rejects_invalid_council_persona_count(
 
     assert response.status_code == 422
     assert "at least 2 item" in str(response.json()).lower()
-
-
-@pytest.mark.usefixtures("production_settings")
-def test_update_current_user_info_empty_prompt_falls_back_to_default(
-    auth_client: TestClient,
-    db_session: Session,
-    user_factory,
-    auth_headers_factory,
-) -> None:
-    """Blank prompt updates should clear stored value and return the default prompt."""
-    test_user = user_factory(
-        apple_id="001234.test.blankprompt",
-        email="blankprompt@icloud.com",
-        full_name="Blank Prompt",
-        news_list_preference_prompt="Keep macro and chips only.",
-    )
-
-    response = auth_client.patch(
-        "/auth/me",
-        headers=auth_headers_factory(test_user),
-        json={"news_list_preference_prompt": "   "},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["news_list_preference_prompt"] == DEFAULT_NEWS_LIST_PREFERENCE_PROMPT
-
-    db_session.refresh(test_user)
-    assert test_user.news_list_preference_prompt is None
 
 
 @pytest.mark.usefixtures("production_settings")

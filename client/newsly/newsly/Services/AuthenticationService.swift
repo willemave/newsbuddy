@@ -119,7 +119,6 @@ final class AuthenticationService: NSObject {
     func updateCurrentUserProfile(
         fullName: String? = nil,
         twitterUsername: String? = nil,
-        newsListPreferencePrompt: String? = nil,
         councilPersonas: [CouncilPersona]? = nil
     ) async throws -> User {
         guard let token = KeychainManager.shared.getToken(key: .accessToken) else {
@@ -135,7 +134,6 @@ final class AuthenticationService: NSObject {
         let body = UpdateUserProfileRequest(
             fullName: fullName,
             twitterUsername: twitterUsername,
-            newsListPreferencePrompt: newsListPreferencePrompt,
             councilPersonas: councilPersonas
         )
         request.httpBody = try JSONEncoder().encode(body)

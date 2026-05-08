@@ -37,10 +37,6 @@ from app.models.user import (
     UserResponse,
     resolve_user_council_personas,
 )
-from app.services.news_list_preferences import (
-    normalize_news_list_preference_prompt,
-    resolve_user_news_list_preference_prompt,
-)
 from app.services.x_integration import has_active_x_connection, normalize_twitter_username
 from app.templates import templates
 
@@ -56,7 +52,6 @@ def _build_user_response(db: Session, user: User) -> UserResponse:
     return response.model_copy(
         update={
             "has_x_bookmark_sync": has_sync,
-            "news_list_preference_prompt": resolve_user_news_list_preference_prompt(user),
             "council_personas": resolve_user_council_personas(user),
         }
     )
@@ -362,11 +357,6 @@ def update_current_user_info(
             current_user.twitter_username = normalize_twitter_username(payload.twitter_username)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    if payload.news_list_preference_prompt is not None:
-        current_user.news_list_preference_prompt = normalize_news_list_preference_prompt(
-            payload.news_list_preference_prompt
-        )
 
     if payload.council_personas is not None:
         current_user.council_personas = [

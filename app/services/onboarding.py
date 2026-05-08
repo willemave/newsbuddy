@@ -58,7 +58,6 @@ from app.services.feed_resolution import resolve_feed_candidate
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_agents import get_basic_agent
 from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
-from app.services.news_list_preferences import normalize_news_list_preference_prompt
 from app.services.queue import TaskType
 from app.services.scraper_configs import (
     ScraperConfigAlreadyExistsError,
@@ -569,17 +568,11 @@ def complete_onboarding(
         OnboardingCompleteResponse with status and inbox count.
     """
     normalized_username: str | None = None
-    normalized_news_list_preference_prompt: str | None = None
     configured_source_count = 0
     feed_config_ids_for_backfill: list[int] = []
     should_update_twitter_username = request.twitter_username is not None
     if should_update_twitter_username:
         normalized_username = normalize_twitter_username(request.twitter_username)
-    should_update_news_list_preference_prompt = request.news_list_preference_prompt is not None
-    if should_update_news_list_preference_prompt:
-        normalized_news_list_preference_prompt = normalize_news_list_preference_prompt(
-            request.news_list_preference_prompt
-        )
 
     created_types: set[str] = set()
     selections = request.selected_sources
@@ -685,8 +678,6 @@ def complete_onboarding(
     if user:
         if should_update_twitter_username and user.twitter_username != normalized_username:
             user.twitter_username = normalized_username
-        if should_update_news_list_preference_prompt:
-            user.news_list_preference_prompt = normalized_news_list_preference_prompt
         user.has_completed_onboarding = True
         db.commit()
 

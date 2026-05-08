@@ -195,9 +195,6 @@ def main(argv: list[str] | None = None) -> int:
             apple_id=source_user.apple_id if source_user else None,
             email=source_user.email if source_user else None,
             full_name=source_user.full_name if source_user else None,
-            news_list_preference_prompt=(
-                source_user.news_list_preference_prompt if source_user else None
-            ),
         ),
         input_mode="news_item_records",
         news_item_records=[_serialize_news_item(row) for row in rows],

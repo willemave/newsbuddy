@@ -51,7 +51,6 @@ struct User: Codable, Identifiable, Equatable {
     let email: String
     let fullName: String?
     let twitterUsername: String?
-    let newsListPreferencePrompt: String
     let councilPersonas: [CouncilPersona]
     let hasXBookmarkSync: Bool
     let isAdmin: Bool
@@ -67,7 +66,6 @@ struct User: Codable, Identifiable, Equatable {
         case email
         case fullName = "full_name"
         case twitterUsername = "twitter_username"
-        case newsListPreferencePrompt = "news_list_preference_prompt"
         case councilPersonas = "council_personas"
         case hasXBookmarkSync = "has_x_bookmark_sync"
         case isAdmin = "is_admin"
@@ -84,7 +82,6 @@ struct User: Codable, Identifiable, Equatable {
         email: String,
         fullName: String?,
         twitterUsername: String?,
-        newsListPreferencePrompt: String,
         councilPersonas: [CouncilPersona] = [],
         hasXBookmarkSync: Bool,
         isAdmin: Bool,
@@ -99,7 +96,6 @@ struct User: Codable, Identifiable, Equatable {
         self.email = email
         self.fullName = fullName
         self.twitterUsername = twitterUsername
-        self.newsListPreferencePrompt = newsListPreferencePrompt
         self.councilPersonas = councilPersonas
         self.hasXBookmarkSync = hasXBookmarkSync
         self.isAdmin = isAdmin
@@ -117,8 +113,6 @@ struct User: Codable, Identifiable, Equatable {
         email = try container.decode(String.self, forKey: .email)
         fullName = try container.decodeIfPresent(String.self, forKey: .fullName)
         twitterUsername = try container.decodeIfPresent(String.self, forKey: .twitterUsername)
-        newsListPreferencePrompt =
-            try container.decodeIfPresent(String.self, forKey: .newsListPreferencePrompt) ?? ""
         councilPersonas =
             try container.decodeIfPresent([CouncilPersona].self, forKey: .councilPersonas) ?? []
         hasXBookmarkSync = try container.decodeIfPresent(Bool.self, forKey: .hasXBookmarkSync) ?? false
@@ -178,25 +172,21 @@ struct AccessTokenResponse: Codable {
 struct UpdateUserProfileRequest: Codable {
     let fullName: String?
     let twitterUsername: String?
-    let newsListPreferencePrompt: String?
     let councilPersonas: [CouncilPersona]?
 
     init(
         fullName: String? = nil,
         twitterUsername: String? = nil,
-        newsListPreferencePrompt: String? = nil,
         councilPersonas: [CouncilPersona]? = nil
     ) {
         self.fullName = fullName
         self.twitterUsername = twitterUsername
-        self.newsListPreferencePrompt = newsListPreferencePrompt
         self.councilPersonas = councilPersonas
     }
 
     enum CodingKeys: String, CodingKey {
         case fullName = "full_name"
         case twitterUsername = "twitter_username"
-        case newsListPreferencePrompt = "news_list_preference_prompt"
         case councilPersonas = "council_personas"
     }
 }

@@ -141,7 +141,6 @@ final class OnboardingStateStoreTests: XCTestCase {
             email: "user\(id)@example.com",
             fullName: "User \(id)",
             twitterUsername: nil,
-            newsListPreferencePrompt: "",
             hasXBookmarkSync: false,
             isAdmin: false,
             isActive: true,

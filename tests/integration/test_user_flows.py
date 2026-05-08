@@ -109,7 +109,6 @@ def test_onboarding_complete_seeds_configs_tasks_and_visible_content(
             "profile_summary": "Follows AI product launches and engineering infra shifts.",
             "inferred_topics": ["AI", "infrastructure"],
             "twitter_username": "@willem_aw",
-            "news_list_preference_prompt": "Prefer AI launches and engineering wins.",
         },
     )
 
@@ -122,7 +121,6 @@ def test_onboarding_complete_seeds_configs_tasks_and_visible_content(
     db_session.refresh(test_user)
     assert test_user.has_completed_onboarding is True
     assert test_user.twitter_username == "willem_aw"
-    assert test_user.news_list_preference_prompt.startswith("Prefer AI launches")
 
     scraper_types = {
         row.scraper_type

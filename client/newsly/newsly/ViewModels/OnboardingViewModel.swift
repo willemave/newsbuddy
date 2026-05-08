@@ -7,13 +7,6 @@
 
 import Foundation
 
-private let defaultNewsListPreferencePrompt =
-    "Curate a high-signal news list across all sources using these principles: "
-    + "prefer original reporting over commentary; prioritize concrete developments, technical insight, "
-    + "firsthand company or product updates, meaningful data, and strong analysis; reward pieces that "
-    + "add context, synthesis, or clear implications; avoid memes, engagement bait, vague reactions, "
-    + "spammy vendor copy, repetitive hype, and low-context chatter unless they contain genuinely new information."
-
 private let onboardingDiscoveryPollingTimeoutSeconds: TimeInterval = 120
 private let onboardingDiscoveryPollingIntervalNanoseconds: UInt64 = 500_000_000
 
@@ -118,7 +111,6 @@ final class OnboardingViewModel: ObservableObject {
     @Published var topicSummary: String?
     @Published var inferredTopics: [String] = []
     @Published var twitterUsername: String = ""
-    @Published var newsListPreferencePrompt: String = ""
 
     private let service: OnboardingService
     private let dictationService: any SpeechTranscribing
@@ -141,11 +133,6 @@ final class OnboardingViewModel: ObservableObject {
         self.dictationService = dictationService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
         self.onboardingStateStore = onboardingStateStore
         self.twitterUsername = user.twitterUsername ?? ""
-        let trimmedPrompt = user.newsListPreferencePrompt.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
-        self.newsListPreferencePrompt =
-            trimmedPrompt.isEmpty ? defaultNewsListPreferencePrompt : user.newsListPreferencePrompt
 
         if !user.hasCompletedOnboarding,
            let snapshot = onboardingStateStore.progress(userId: user.id)
@@ -347,8 +334,7 @@ final class OnboardingViewModel: ObservableObject {
                 selectedAggregators: buildSelectedAggregators(),
                 profileSummary: isPersonalized ? topicSummary : nil,
                 inferredTopics: isPersonalized ? inferredTopics : nil,
-                twitterUsername: normalizedTwitterUsername(),
-                newsListPreferencePrompt: normalizedNewsListPreferencePrompt()
+                twitterUsername: normalizedTwitterUsername()
             )
             let response = try await service.complete(request: request)
             completionResponse = response
@@ -492,11 +478,6 @@ final class OnboardingViewModel: ObservableObject {
         let trimmed = twitterUsername.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
-    }
-
-    private func normalizedNewsListPreferencePrompt() -> String? {
-        let trimmed = newsListPreferencePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func handleAudioError(_ error: Error) {
