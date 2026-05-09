@@ -651,12 +651,22 @@ class GeneratedNewsSummary(NewsSummary):
         max_length=3,
         description="2-3 headline-ready bullet points summarizing the article",
     )
-    summary: str | None = Field(
-        None,
-        min_length=0,
+    summary: str = Field(
+        ...,
+        min_length=1,
         max_length=180,
-        description="Optional one-sentence overview, <=180 characters.",
+        description="Required one-sentence overview, <=180 characters.",
     )
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def normalize_summary(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            cleaned = " ".join(value.split()).strip()
+            if not cleaned:
+                raise ValueError("summary must not be blank")
+            return cleaned
+        return value
 
 
 class DailyNewsRollupSummary(BaseModel):

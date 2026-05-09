@@ -9,7 +9,8 @@ def test_news_prompt_uses_short_hard_caps() -> None:
     assert "title: direct factual headline, <=95 characters" in system_prompt
     assert "key_points: include 2-3 self-contained bullets" in system_prompt
     assert "<=120 characters each" in system_prompt
-    assert "one-sentence overview, <=180 characters" in system_prompt
+    assert "required one-sentence overview, <=180 characters" in system_prompt
+    assert "never null or empty" in system_prompt
     assert '"title"' not in system_prompt
     assert "Return a JSON object" not in system_prompt
 

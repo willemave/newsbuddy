@@ -559,6 +559,67 @@ def test_process_news_item_reuses_generated_short_digest(db_session) -> None:
     assert item.summary_text == "Generated summary text."
 
 
+def test_process_news_item_fills_missing_summary_text_from_existing_key_point(
+    db_session,
+) -> None:
+    item = NewsItem(
+        ingest_key="news-item-generated-summary-without-text",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="generated-summary-no-text-1",
+        article_url="https://example.com/story-6a",
+        article_title="Example story 6a",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=1261",
+        summary_title="Generated digest title",
+        summary_key_points=["Generated point"],
+        summary_text=None,
+        raw_metadata={
+            "summary": {
+                "title": "Generated digest title",
+                "article_url": "https://example.com/story-6a",
+                "key_points": ["Generated point"],
+            },
+            "summary_kind": "short_news",
+            "summary_version": 1,
+        },
+        status="ready",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    calls = 0
+
+    def _summarize(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return NewsSummary(
+            title="Should not be used",
+            article_url=item.article_url,
+            key_points=["Unexpected"],
+            summary="Unexpected",
+        )
+
+    result = process_news_item(
+        db_session,
+        news_item_id=_require_id(item.id),
+        summarizer=_summarizer(_summarize),
+    )
+
+    db_session.refresh(item)
+    summary_metadata = _metadata(_metadata(item.raw_metadata)["summary"])
+    assert result.success is True
+    assert result.used_existing_summary is True
+    assert result.generated_summary is False
+    assert calls == 0
+    assert item.summary_key_points == ["Generated point"]
+    assert item.summary_text == "Generated point"
+    assert summary_metadata["summary"] == "Generated point"
+
+
 def test_process_news_item_ignores_void_placeholder_titles(db_session) -> None:
     item = NewsItem(
         ingest_key="news-item-void-title",

@@ -183,7 +183,7 @@ Field guidance:
 - title: direct factual headline, <=95 characters; rewrite weak, generic, or source-label headlines.
 - article_url: canonical article URL when available.
 - key_points: include {news_key_point_min}-{news_key_point_limit} self-contained bullets, <=120 characters each.
-- summary: optional one-sentence overview, <=180 characters; use null if key_points cover it.
+- summary: required one-sentence overview, <=180 characters; never null or empty.
 - classification: use "to_read" for substantial signal and "skip" for low-value or promotional content.
 
 Rules:

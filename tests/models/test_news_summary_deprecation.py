@@ -26,7 +26,13 @@ def test_news_summary_ignores_legacy_fields(caplog) -> None:
 def test_generated_news_summary_requires_title_and_key_points() -> None:
     """Generated news summaries should reject partial model outputs."""
     with pytest.raises(ValidationError):
-        GeneratedNewsSummary.model_validate({"classification": "skip", "key_points": []})
+        GeneratedNewsSummary.model_validate(
+            {
+                "classification": "skip",
+                "key_points": [],
+                "summary": "Short overview.",
+            }
+        )
 
     summary = GeneratedNewsSummary.model_validate(
         {
@@ -35,6 +41,7 @@ def test_generated_news_summary_requires_title_and_key_points() -> None:
                 "A concrete point from the source",
                 "A second concrete point from the source",
             ],
+            "summary": "Short overview.",
         }
     )
 
@@ -43,6 +50,29 @@ def test_generated_news_summary_requires_title_and_key_points() -> None:
         "A concrete point from the source",
         "A second concrete point from the source",
     ]
+    assert summary.summary == "Short overview."
+
+
+def test_generated_news_summary_requires_non_blank_summary() -> None:
+    """Generated news summaries must include the API summary field."""
+    payload = {
+        "title": "Specific generated headline",
+        "key_points": [
+            "A concrete point from the source",
+            "A second concrete point from the source",
+        ],
+    }
+
+    with pytest.raises(ValidationError):
+        GeneratedNewsSummary.model_validate(payload)
+
+    with pytest.raises(ValidationError):
+        GeneratedNewsSummary.model_validate({**payload, "summary": "   "})
+
+    summary = GeneratedNewsSummary.model_validate({**payload, "summary": "  Short   overview.  "})
+
+    assert summary.summary == "Short overview."
+    assert "summary" in GeneratedNewsSummary.model_json_schema()["required"]
 
 
 def test_generated_news_summary_enforces_generation_limits() -> None:
@@ -52,6 +82,7 @@ def test_generated_news_summary_enforces_generation_limits() -> None:
             {
                 "title": "x" * 96,
                 "key_points": ["Point one", "Point two"],
+                "summary": "Short overview.",
             }
         )
 
@@ -60,6 +91,7 @@ def test_generated_news_summary_enforces_generation_limits() -> None:
             {
                 "title": "Specific generated headline",
                 "key_points": ["Only one point"],
+                "summary": "Short overview.",
             }
         )
 
@@ -68,5 +100,6 @@ def test_generated_news_summary_enforces_generation_limits() -> None:
             {
                 "title": "Specific generated headline",
                 "key_points": ["Point one", "x" * 121],
+                "summary": "Short overview.",
             }
         )

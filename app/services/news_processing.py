@@ -207,12 +207,30 @@ def _fallback_summary(item: NewsItem, raw_metadata: dict[str, Any]) -> NewsSumma
     )
 
 
+def _resolve_summary_text(
+    summary: NewsSummary,
+    normalized_key_points: list[str],
+    existing_summary_text: str | None,
+) -> str | None:
+    return (
+        _clean_string(summary.summary)
+        or (normalized_key_points[0] if normalized_key_points else None)
+        or _clean_string(existing_summary_text)
+    )
+
+
 def _persist_summary(item: NewsItem, summary: NewsSummary, raw_metadata: dict[str, Any]) -> None:
+    normalized_key_points = _normalize_key_points(summary.key_points)
+    resolved_summary_text = _resolve_summary_text(
+        summary,
+        normalized_key_points,
+        item.summary_text,
+    )
     resolved_title = resolve_title_candidate(
         summary.title,
         item.article_title,
         item.summary_title,
-        summary_text=summary.summary or item.summary_text,
+        summary_text=resolved_summary_text,
     )
     if resolved_title:
         item.summary_title = resolved_title
@@ -222,11 +240,13 @@ def _persist_summary(item: NewsItem, summary: NewsSummary, raw_metadata: dict[st
     if normalized_article_url:
         item.article_url = normalized_article_url
         item.canonical_story_url = normalized_article_url
-    item.summary_key_points = _normalize_key_points(summary.key_points)
-    item.summary_text = _clean_string(summary.summary) or item.summary_text
+    item.summary_key_points = normalized_key_points
+    item.summary_text = resolved_summary_text or item.summary_text
     raw_summary = summary.model_dump(mode="json", by_alias=True, exclude_none=True)
     if resolved_title:
         raw_summary["title"] = resolved_title
+    if resolved_summary_text:
+        raw_summary["summary"] = resolved_summary_text
     raw_metadata["summary"] = raw_summary
     raw_metadata["summary_kind"] = SUMMARY_KIND_SHORT_NEWS
     raw_metadata["summary_version"] = SUMMARY_VERSION_V1
