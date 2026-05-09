@@ -1617,26 +1617,41 @@ struct ContentDetailView: View {
                             .padding(.vertical, 16)
                         }
                     } else {
-                        // Comments mode — segmented tabs
-                        VStack(spacing: 0) {
-                            if !discussion.links.isEmpty {
-                                Picker("Tab", selection: $discussionTab) {
-                                    ForEach(DiscussionTab.allCases, id: \.self) { tab in
-                                        Text(tab.rawValue).tag(tab)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 10)
-                            }
-
+                        if discussion.summary != nil {
                             ScrollView {
                                 let commentIndex = buildDiscussionCommentIndex(from: discussion.comments)
-                                switch discussionTab {
-                                case .comments:
-                                    commentsTabContent(commentIndex: commentIndex)
-                                case .links:
-                                    linksTabContent(discussion: discussion, commentsByID: commentIndex.commentsByID)
+                                VStack(alignment: .leading, spacing: 0) {
+                                    discussionSummaryContent(discussion)
+                                    if !discussion.links.isEmpty {
+                                        linksTabContent(discussion: discussion, commentsByID: commentIndex.commentsByID)
+                                    }
+                                    if !discussion.comments.isEmpty {
+                                        commentsTabContent(commentIndex: commentIndex)
+                                    }
+                                }
+                            }
+                        } else {
+                            // Comments mode — segmented tabs
+                            VStack(spacing: 0) {
+                                if !discussion.links.isEmpty {
+                                    Picker("Tab", selection: $discussionTab) {
+                                        ForEach(DiscussionTab.allCases, id: \.self) { tab in
+                                            Text(tab.rawValue).tag(tab)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 10)
+                                }
+
+                                ScrollView {
+                                    let commentIndex = buildDiscussionCommentIndex(from: discussion.comments)
+                                    switch discussionTab {
+                                    case .comments:
+                                        commentsTabContent(commentIndex: commentIndex)
+                                    case .links:
+                                        linksTabContent(discussion: discussion, commentsByID: commentIndex.commentsByID)
+                                    }
                                 }
                             }
                         }
@@ -1807,6 +1822,131 @@ struct ContentDetailView: View {
             current = parent
         }
         return false
+    }
+
+    @ViewBuilder
+    private func discussionSummaryContent(_ discussion: ContentDiscussion) -> some View {
+        if let summary = discussion.summary {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Community Summary")
+                        .font(.headline)
+
+                    Text(summary.overview)
+                        .font(.callout)
+                        .foregroundColor(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let urlString = summary.externalDiscussionURL ?? discussion.discussionURL ?? discussion.sourceURL,
+                       let url = URL(string: urlString) {
+                        Link(destination: url) {
+                            Label("Open original discussion", systemImage: "arrow.up.right.square")
+                        }
+                        .font(.subheadline)
+                        .padding(.top, 4)
+                    }
+                }
+
+                if !summary.topics.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Key Topics")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+
+                        ForEach(summary.topics) { topic in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(topic.title)
+                                    .font(.callout)
+                                    .fontWeight(.semibold)
+                                Text(topic.summary)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if let stance = topic.stance {
+                                    Text(stance)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.surfaceSecondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+
+                if !summary.representativeComments.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Representative Comments")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+
+                        ForEach(summary.representativeComments) { comment in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(comment.author ?? "unknown")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.secondary)
+                                Text(comment.text)
+                                    .font(.subheadline)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if let reason = comment.reason {
+                                    Text(reason)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.surfaceSecondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+
+                if !summary.notableLinks.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Notable Links")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+
+                        ForEach(summary.notableLinks) { link in
+                            if let url = URL(string: link.url) {
+                                Link(destination: url) {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "arrow.up.right.square")
+                                            Text(link.title ?? link.url)
+                                                .fontWeight(.medium)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                        .font(.subheadline)
+
+                                        if let reason = link.reason {
+                                            Text(reason)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(12)
+                                .background(Color.surfaceSecondary)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+        }
     }
 
     @ViewBuilder

@@ -113,6 +113,8 @@ enum E2ETestLaunch {
     static let completeTutorialKey = "newslyE2ECompleteTutorial"
     static let onboardingFixtureKey = "newslyE2EOnboardingFixture"
     static let openChatSessionIdKey = "newslyE2EOpenChatSessionId"
+    static let openContentIdKey = "newslyE2EOpenContentId"
+    static let openContentTypeKey = "newslyE2EOpenContentType"
     static let fakeSpeechEnabledKey = "newslyE2EFakeSpeechEnabled"
     static let fakeSpeechTranscriptKey = "newslyE2EFakeSpeechTranscript"
 
@@ -165,6 +167,16 @@ enum E2ETestLaunch {
     static var openChatSessionId: Int? {
         guard isEnabled else { return nil }
         return int(for: openChatSessionIdKey)
+    }
+
+    static var openContentId: Int? {
+        guard isEnabled else { return nil }
+        return int(for: openContentIdKey)
+    }
+
+    static var openContentType: String? {
+        guard isEnabled else { return nil }
+        return string(for: openContentTypeKey)
     }
 
     static var fakeSpeechEnabled: Bool {

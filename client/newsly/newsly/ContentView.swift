@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var knowledgePath = NavigationPath()
     @State private var isRestoringPath = false
     @State private var hasAppliedE2EOpenChatRoute = false
+    @State private var hasAppliedE2EOpenContentRoute = false
     @Environment(\.scenePhase) private var scenePhase
 
     @MainActor
@@ -139,6 +140,7 @@ struct ContentView: View {
         .onAppear {
             tabCoordinator.ensureInitialLoads()
             restoreIfNeeded()
+            applyE2EOpenContentRouteIfNeeded()
             applyE2EOpenChatRouteIfNeeded()
         }
         .onChange(of: tabCoordinator.selectedTab) { _, newValue in
@@ -148,6 +150,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 restoreIfNeeded()
+                applyE2EOpenContentRouteIfNeeded()
                 applyE2EOpenChatRouteIfNeeded()
             }
         }
@@ -225,6 +228,34 @@ struct ContentView: View {
         Task { @MainActor in
             await Task.yield()
             openChatSession(route: ChatSessionRoute(sessionId: sessionId))
+        }
+    }
+
+    private func applyE2EOpenContentRouteIfNeeded() {
+        guard !hasAppliedE2EOpenContentRoute else { return }
+        guard let contentId = E2ETestLaunch.openContentId else { return }
+
+        hasAppliedE2EOpenContentRoute = true
+        let rawType = E2ETestLaunch.openContentType ?? ContentType.news.rawValue
+        let contentType = ContentType(rawValue: rawType) ?? .news
+        let route = ContentDetailRoute(
+            contentId: contentId,
+            contentType: contentType,
+            allContentIds: [contentId]
+        )
+
+        Task { @MainActor in
+            await Task.yield()
+            switch contentType {
+            case .news:
+                tabCoordinator.selectedTab = .shortNews
+                shortFormPath = NavigationPath()
+                shortFormPath.append(route)
+            case .article, .podcast:
+                tabCoordinator.selectedTab = .longContent
+                longFormPath = NavigationPath()
+                longFormPath.append(route)
+            }
         }
     }
 }

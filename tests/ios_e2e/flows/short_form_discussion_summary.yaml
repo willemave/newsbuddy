@@ -1,0 +1,27 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenContentType: news
+      newslyE2EOpenContentId: "${CONTENT_ID}"
+- assertVisible:
+    id: content.detail.screen
+- tapOn:
+    id: content.discussion.open
+- assertVisible:
+    id: content.discussion.sheet
+- assertVisible: "Community Summary"
+- assertVisible: "${SUMMARY_OVERVIEW}"
+- assertVisible: "Key Topics"
+- assertVisible: "${TOPIC_TITLE}"
+- assertVisible: "Open original discussion"

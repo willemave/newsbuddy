@@ -14,6 +14,7 @@ from app.models.schema import (
     ContentKnowledgeSave,
     ContentReadStatus,
     NewsItem,
+    NewsItemDiscussion,
     OnboardingDiscoveryLane,
     OnboardingDiscoveryRun,
     ProcessingTask,
@@ -263,6 +264,111 @@ def test_short_form_detail_discussion_sheet_renders_embedded_comments(
         extra_env={
             "CONTENT_ID": str(news_item.id),
             "COMMENT_ID": comment_id,
+        },
+    )
+
+
+def test_short_form_detail_discussion_sheet_renders_discussion_summary(
+    run_ios_flow,
+    db_session,
+) -> None:
+    """Comments button should render the new stored news-item discussion summary."""
+    summary_overview = (
+        "Developers compare parser ergonomics, runtime tradeoffs, and deployment risks."
+    )
+    topic_title = "Parser ergonomics"
+    news_item = NewsItem(
+        ingest_key="ios-e2e-discussion-summary",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="ios-e2e-discussion-summary",
+        canonical_item_url="https://news.ycombinator.com/item?id=515151",
+        canonical_story_url="https://example.com/parser-runtime",
+        article_url="https://example.com/parser-runtime",
+        article_title="A Practical Parser Runtime for Production Systems",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=515151",
+        summary_title="A Practical Parser Runtime for Production Systems",
+        summary_key_points=[
+            "The runtime emphasizes predictable production behavior over maximal cleverness."
+        ],
+        summary_text="A practical parser runtime for production systems.",
+        raw_metadata={
+            "discussion_url": "https://news.ycombinator.com/item?id=515151",
+            "summary": {
+                "article_url": "https://example.com/parser-runtime",
+                "summary": "A practical parser runtime for production systems.",
+                "key_points": [
+                    "The runtime emphasizes predictable production behavior over "
+                    "maximal cleverness."
+                ],
+            },
+        },
+        status="ready",
+        published_at=datetime.now(UTC).replace(tzinfo=None),
+        ingested_at=datetime.now(UTC).replace(tzinfo=None),
+        processed_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(news_item)
+    db_session.flush()
+    db_session.add(
+        NewsItemDiscussion(
+            news_item_id=news_item.id,
+            platform="hackernews",
+            external_id="515151",
+            discussion_url="https://news.ycombinator.com/item?id=515151",
+            title=news_item.summary_title,
+            comment_count=37,
+            fetched_comment_count=24,
+            raw_comments_ref={"provider": "local", "key": "ios-e2e-discussion-summary.json"},
+            raw_comments_sha256="0" * 64,
+            summary={
+                "overview": summary_overview,
+                "topics": [
+                    {
+                        "title": topic_title,
+                        "summary": (
+                            "Commenters focus on simpler grammar changes and clearer failures."
+                        ),
+                        "stance": "Mostly supportive, with concerns about migration cost.",
+                    }
+                ],
+                "notable_links": [
+                    {
+                        "url": "https://example.com/parser-notes",
+                        "title": "Parser notes",
+                        "reason": "Background material linked by the discussion.",
+                    }
+                ],
+                "representative_comments": [
+                    {
+                        "comment_id": "summary-comment-1",
+                        "author": "alice",
+                        "text": "The ergonomics matter more than another percent of throughput.",
+                        "reason": "Captures the thread's practical framing.",
+                    }
+                ],
+                "external_discussion_url": "https://news.ycombinator.com/item?id=515151",
+                "generated_at": datetime.now(UTC).isoformat(),
+            },
+            summary_status="completed",
+            summary_version=1,
+            summary_model="test-model",
+            summary_generated_at=datetime.now(UTC).replace(tzinfo=None),
+            last_refresh_status="completed",
+            last_comments_fetched_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+    )
+    db_session.commit()
+
+    run_ios_flow(
+        "short_form_discussion_summary.yaml",
+        extra_env={
+            "CONTENT_ID": str(news_item.id),
+            "SUMMARY_OVERVIEW": summary_overview,
+            "TOPIC_TITLE": topic_title,
         },
     )
 

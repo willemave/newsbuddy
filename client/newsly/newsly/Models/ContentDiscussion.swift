@@ -19,7 +19,41 @@ struct ContentDiscussion: Codable {
     let comments: [DiscussionComment]
     let discussionGroups: [DiscussionGroup]
     let links: [DiscussionLink]
+    let summary: DiscussionSummary?
+    let commentCount: Int?
     let stats: [String: AnyCodable]
+
+    init(
+        contentId: Int,
+        status: String,
+        mode: String,
+        platform: String?,
+        sourceURL: String?,
+        discussionURL: String?,
+        fetchedAt: String?,
+        errorMessage: String?,
+        comments: [DiscussionComment],
+        discussionGroups: [DiscussionGroup],
+        links: [DiscussionLink],
+        summary: DiscussionSummary? = nil,
+        commentCount: Int? = nil,
+        stats: [String: AnyCodable]
+    ) {
+        self.contentId = contentId
+        self.status = status
+        self.mode = mode
+        self.platform = platform
+        self.sourceURL = sourceURL
+        self.discussionURL = discussionURL
+        self.fetchedAt = fetchedAt
+        self.errorMessage = errorMessage
+        self.comments = comments
+        self.discussionGroups = discussionGroups
+        self.links = links
+        self.summary = summary
+        self.commentCount = commentCount
+        self.stats = stats
+    }
 
     enum CodingKeys: String, CodingKey {
         case contentId = "content_id"
@@ -33,12 +67,14 @@ struct ContentDiscussion: Codable {
         case comments
         case discussionGroups = "discussion_groups"
         case links
+        case summary
+        case commentCount = "comment_count"
         case stats
     }
 
     var hasRenderableContent: Bool {
         if mode == "comments" {
-            return !comments.isEmpty || !links.isEmpty
+            return summary != nil || !comments.isEmpty || !links.isEmpty
         }
         if mode == "discussion_list" {
             return !discussionGroups.isEmpty || !links.isEmpty
@@ -69,6 +105,64 @@ struct ContentDiscussion: Codable {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+}
+
+struct DiscussionSummary: Codable {
+    let overview: String
+    let topics: [DiscussionSummaryTopic]
+    let notableLinks: [DiscussionSummaryLink]
+    let representativeComments: [DiscussionSummaryComment]
+    let externalDiscussionURL: String?
+    let generatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case overview
+        case topics
+        case notableLinks = "notable_links"
+        case representativeComments = "representative_comments"
+        case externalDiscussionURL = "external_discussion_url"
+        case generatedAt = "generated_at"
+    }
+}
+
+struct DiscussionSummaryTopic: Codable, Identifiable {
+    let title: String
+    let summary: String
+    let stance: String?
+
+    var id: String { "\(title)-\(summary)" }
+}
+
+struct DiscussionSummaryLink: Codable, Identifiable {
+    let url: String
+    let title: String?
+    let reason: String?
+    let sourceCommentID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url
+        case title
+        case reason
+        case sourceCommentID = "source_comment_id"
+    }
+
+    var id: String { url }
+}
+
+struct DiscussionSummaryComment: Codable, Identifiable {
+    let commentID: String?
+    let author: String?
+    let text: String
+    let reason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case commentID = "comment_id"
+        case author
+        case text
+        case reason
+    }
+
+    var id: String { commentID ?? "\(author ?? "unknown")-\(text)" }
 }
 
 struct DiscussionComment: Codable, Identifiable {
