@@ -13,6 +13,7 @@ from app.services.news_ingestion import (
     should_enqueue_news_item_enrichment,
     upsert_news_item,
 )
+from app.services.news_item_discussions import sync_news_item_discussion_from_news_item
 from app.services.queue import TaskType, get_queue_service
 from app.services.scraper_configs import (
     ensure_inbox_status,
@@ -127,6 +128,8 @@ class BaseScraper(ABC):
                         news_item, was_created = upsert_news_item(db, payload)
                         db.commit()
                         db.refresh(news_item)
+                        if sync_news_item_discussion_from_news_item(db, news_item) is not None:
+                            db.commit()
                         if should_enqueue_news_item_enrichment(
                             news_item=news_item,
                             was_created=was_created,

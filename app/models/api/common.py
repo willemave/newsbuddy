@@ -433,6 +433,8 @@ class ContentDiscussionResponse(BaseModel):
     comments: list[DiscussionCommentResponse] = Field(default_factory=list)
     discussion_groups: list[DiscussionGroupResponse] = Field(default_factory=list)
     links: list[DiscussionLinkResponse] = Field(default_factory=list)
+    summary: dict[str, Any] | None = None
+    comment_count: int | None = None
     stats: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -824,7 +824,15 @@ Summary shapes live in `app/models/metadata.py` and `app/models/summary_contract
 
 ### 10.8 Discussion fetching
 
-`app/services/discussion_fetcher.py` persists separate discussion payloads for eligible content.
+`app/services/discussion_fetcher.py` persists separate discussion payloads for eligible long-form
+content and unsupported/legacy news discussions.
+
+`app/services/news_item_discussions.py` is the canonical path for Hacker News and Reddit
+short-form news discussions. It keeps one latest `news_item_discussions` row per
+`news_items` row, stores raw fetched comments in object storage, stores the latest structured
+summary in the database, and enforces a one-hour refresh TTL. Scrape-time comment counts are
+captured during news ingestion without fetching full comment trees; the scheduled
+`DiscussionComments` scraper refreshes due raw comments and summaries.
 
 Supported discussion sources include:
 

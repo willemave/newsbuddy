@@ -14,7 +14,6 @@ from app.core.logging import get_logger
 from app.models.contracts import NewsItemStatus
 from app.models.metadata import NewsSummary
 from app.models.schema import NewsItem
-from app.services.discussion_fetcher import fetch_and_store_news_item_discussion
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.news_article_bodies import get_news_item_article_body_resolver
 from app.services.news_relations import reconcile_news_item_relation
@@ -24,7 +23,6 @@ from app.utils.url_utils import normalize_http_url
 
 logger = get_logger(__name__)
 
-DISCUSSION_COMMENT_CAP = 50
 MAX_DISCUSSION_SNIPPETS = 5
 
 
@@ -348,33 +346,6 @@ def process_news_item(
     try:
         article_body_resolver = get_news_item_article_body_resolver()
         article_body_text = article_body_resolver.resolve_text(db, news_item=item)
-
-        discussion_payload = raw_metadata.get("discussion_payload")
-        if not isinstance(discussion_payload, dict):
-            discussion_result = fetch_and_store_news_item_discussion(
-                db,
-                news_item_id=_require_news_item_id(item),
-                comment_cap=DISCUSSION_COMMENT_CAP,
-            )
-            db.refresh(item)
-            raw_metadata = dict(item.raw_metadata or {})
-            if not discussion_result.success:
-                logger.warning(
-                    (
-                        "News item discussion fetch failed during processing; "
-                        "continuing without discussion context"
-                    ),
-                    extra={
-                        "component": "news_processing",
-                        "operation": "process_news_item.fetch_discussion",
-                        "item_id": str(news_item_id),
-                        "context_data": {
-                            "discussion_status": discussion_result.status,
-                            "discussion_error": discussion_result.error_message,
-                            "retryable": discussion_result.retryable,
-                        },
-                    },
-                )
 
         summary_to_persist = _extract_existing_summary(item)
         used_existing_summary = bool(

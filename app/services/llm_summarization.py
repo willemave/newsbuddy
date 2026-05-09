@@ -18,6 +18,7 @@ from app.models.longform_artifacts import LongformArtifactEnvelope
 from app.models.metadata import (
     BulletedSummary,
     ContentType,
+    DiscussionSummary,
     EditorialNarrativeSummary,
     GeneratedEditorialNarrativeSummary,
     GeneratedNewsSummary,
@@ -45,6 +46,7 @@ SummarizationPromptType = Literal[
     "interleaved",
     "long_bullets",
     "news",
+    "discussion_summary",
     "editorial_narrative",
     "editorial_podcast",
     "editorial_substack",
@@ -62,6 +64,7 @@ SummarizationOutputType = (
     | type[LongformArtifactEnvelope]
     | type[GeneratedNewsSummary]
     | type[NewsSummary]
+    | type[DiscussionSummary]
 )
 
 CONTEXT_LENGTH_ERROR_HINTS: tuple[str, ...] = (
@@ -124,6 +127,8 @@ def resolve_summarization_output_type(
     """Return the pydantic output type for a canonical summarization prompt type."""
     if prompt_type == "longform_artifact":
         return LongformArtifactEnvelope
+    if prompt_type == "discussion_summary":
+        return DiscussionSummary
     if prompt_type == "news":
         return GeneratedNewsSummary
     if is_editorial_prompt_type(prompt_type):
@@ -155,6 +160,12 @@ def resolve_summarization_spec(
     elif normalized_type == "news":
         prompt_type = "news"
         default_model_spec = models.get("news", default_article_model)
+    elif normalized_type == "discussion_summary":
+        prompt_type = "discussion_summary"
+        default_model_spec = models.get(
+            "discussion_summary",
+            models.get("news", default_article_model),
+        )
     elif normalized_type == "longform_artifact":
         prompt_type = "longform_artifact"
         default_model_spec = models.get("longform_artifact", editorial_default_model)
@@ -168,6 +179,7 @@ def resolve_summarization_spec(
         "interleaved",
         "long_bullets",
         "news",
+        "discussion_summary",
         "structured",
         "longform_artifact",
     }:
@@ -218,6 +230,7 @@ def _clip_payload(payload: str, max_chars: int) -> tuple[str, bool]:
 
 DEFAULT_SUMMARIZATION_MODELS: dict[str, str] = {
     "news": CHEAP_MODEL_SPEC,
+    "discussion_summary": CHEAP_MODEL_SPEC,
     "article": ARTICLE_PODCAST_SUMMARY_MODEL_SPEC,
     "podcast": ARTICLE_PODCAST_SUMMARY_MODEL_SPEC,
     "interleaved": SMART_MODEL_SPEC,

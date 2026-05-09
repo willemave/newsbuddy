@@ -1,0 +1,904 @@
+"""Per-news-item discussion refresh, storage, and summarization."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any
+from urllib.parse import urlparse
+
+import httpx
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from app.core.logging import get_logger
+from app.core.settings import get_settings
+from app.models.metadata import DiscussionSummary
+from app.models.schema import NewsItem, NewsItemDiscussion
+from app.services.discussion_fetcher import (
+    DiscussionFetchError,
+    _clean_html_text,
+    _compact_text,
+    _extract_anchor_titles_from_html,
+    _extract_hn_item_id,
+    _extract_links_from_comments,
+    _extract_reddit_submission_id,
+    _get_reddit_client,
+    _is_reddit_more_comments,
+    _is_retryable_reddit_error,
+    _normalize_reddit_discussion_url,
+    _unix_to_iso,
+)
+from app.services.gateways.object_storage_gateway import (
+    ObjectStorageGateway,
+    get_object_storage_gateway,
+)
+from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
+from app.utils.news_titles import get_news_article_title, get_news_summary_title
+from app.utils.url_utils import normalize_http_url
+
+logger = get_logger(__name__)
+
+DISCUSSION_REFRESH_TTL = timedelta(hours=1)
+NEWS_DISCUSSION_SUMMARY_VERSION = 1
+MAX_STORED_COMMENTS = 1_000
+MAX_SUMMARY_COMMENTS = 200
+MAX_SUMMARY_LINKS = 50
+
+HN_ALGOLIA_ITEM_URL = "https://hn.algolia.com/api/v1/items/{item_id}"
+HN_FIREBASE_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{item_id}.json"
+SUPPORTED_DISCUSSION_PLATFORMS = frozenset({"hackernews", "reddit"})
+
+
+@dataclass(frozen=True)
+class NewsItemDiscussionRefreshResult:
+    """Outcome for one news-item discussion refresh."""
+
+    success: bool
+    status: str
+    error_message: str | None = None
+    refreshed: bool = False
+    summarized: bool = False
+    retryable: bool = True
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _clean_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = " ".join(value.split()).strip()
+    return cleaned or None
+
+
+def _coerce_non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float) and value.is_integer():
+        integer = int(value)
+        return integer if integer >= 0 else None
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "")
+        if cleaned.isdigit():
+            return int(cleaned)
+    return None
+
+
+def _normalize_platform(value: Any) -> str:
+    cleaned = _clean_string(value)
+    if not cleaned:
+        return ""
+    normalized = cleaned.lower()
+    if normalized == "hn":
+        return "hackernews"
+    return normalized
+
+
+def _is_hackernews_url(url: str | None) -> bool:
+    if not url:
+        return False
+    parsed = urlparse(url)
+    return "ycombinator.com" in parsed.netloc.lower() and "item" in url
+
+
+def _is_reddit_url(url: str | None) -> bool:
+    if not url:
+        return False
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    return "reddit.com" in host or host.endswith("redd.it")
+
+
+def _is_supported_platform(platform: str, discussion_url: str | None) -> bool:
+    if platform in SUPPORTED_DISCUSSION_PLATFORMS:
+        return True
+    if _is_hackernews_url(discussion_url):
+        return True
+    return _is_reddit_url(discussion_url)
+
+
+def is_supported_news_item_discussion(item: NewsItem) -> bool:
+    """Return whether the news item's discussion should use the new pipeline."""
+    platform = _normalize_platform(item.platform)
+    discussion_url = normalize_http_url(item.discussion_url or item.canonical_item_url)
+    return _is_supported_platform(platform, discussion_url)
+
+
+def _extract_nested(mapping: dict[str, Any], path: tuple[str, ...]) -> Any:
+    current: Any = mapping
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _extract_comment_count_from_metadata(raw_metadata: dict[str, Any]) -> int | None:
+    for candidate in (
+        raw_metadata.get("comment_count"),
+        raw_metadata.get("comments_count"),
+        _extract_nested(raw_metadata, ("aggregator", "metadata", "comments_count")),
+        _extract_nested(raw_metadata, ("aggregator", "metadata", "comment_count")),
+        _extract_nested(raw_metadata, ("items", "metadata", "comments_count")),
+    ):
+        value = _coerce_non_negative_int(candidate)
+        if value is not None:
+            return value
+
+    items = raw_metadata.get("items")
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            value = _coerce_non_negative_int(_extract_nested(item, ("metadata", "comments_count")))
+            if value is not None:
+                return value
+    return None
+
+
+def _extract_score_from_metadata(raw_metadata: dict[str, Any]) -> int | None:
+    for candidate in (
+        raw_metadata.get("score"),
+        _extract_nested(raw_metadata, ("aggregator", "metadata", "score")),
+    ):
+        value = _coerce_non_negative_int(candidate)
+        if value is not None:
+            return value
+    return None
+
+
+def _extract_aggregator(raw_metadata: dict[str, Any]) -> dict[str, Any]:
+    aggregator = raw_metadata.get("aggregator")
+    return aggregator if isinstance(aggregator, dict) else {}
+
+
+def _resolve_external_id(
+    *,
+    platform: str,
+    item: NewsItem,
+    raw_metadata: dict[str, Any],
+    discussion_url: str | None,
+) -> str | None:
+    aggregator = _extract_aggregator(raw_metadata)
+    external_id = (
+        _clean_string(item.source_external_id)
+        or _clean_string(aggregator.get("external_id"))
+        or _clean_string(raw_metadata.get("source_external_id"))
+    )
+    if external_id:
+        return external_id
+    if platform == "hackernews" and discussion_url:
+        return _extract_hn_item_id(discussion_url)
+    if platform == "reddit" and discussion_url:
+        return _extract_reddit_submission_id(discussion_url)
+    return None
+
+
+def _resolve_discussion_url(platform: str, item: NewsItem) -> str | None:
+    for candidate in (item.discussion_url, item.canonical_item_url):
+        normalized = normalize_http_url(candidate)
+        if normalized:
+            if platform == "reddit":
+                return _normalize_reddit_discussion_url(normalized) or normalized
+            return normalized
+    return None
+
+
+def _thread_title(item: NewsItem, raw_metadata: dict[str, Any]) -> str | None:
+    aggregator = _extract_aggregator(raw_metadata)
+    return (
+        get_news_summary_title(raw_metadata)
+        or get_news_article_title(raw_metadata)
+        or _clean_string(aggregator.get("title"))
+        or _clean_string(item.summary_title)
+        or _clean_string(item.article_title)
+    )
+
+
+def sync_news_item_discussion_from_news_item(
+    db: Session,
+    news_item: NewsItem,
+) -> NewsItemDiscussion | None:
+    """Create or update the latest discussion row with scrape-time count metadata.
+
+    This is intentionally count-only. Full comments and summaries are fetched by
+    the scheduled discussion scraper when the TTL allows it.
+    """
+    raw_metadata = dict(news_item.raw_metadata or {})
+    platform = _normalize_platform(news_item.platform or raw_metadata.get("platform"))
+    discussion_url = _resolve_discussion_url(platform, news_item)
+
+    if not _is_supported_platform(platform, discussion_url):
+        return None
+    if platform not in SUPPORTED_DISCUSSION_PLATFORMS:
+        platform = "hackernews" if _is_hackernews_url(discussion_url) else "reddit"
+
+    external_id = _resolve_external_id(
+        platform=platform,
+        item=news_item,
+        raw_metadata=raw_metadata,
+        discussion_url=discussion_url,
+    )
+    if external_id is None and discussion_url is None:
+        return None
+
+    row = (
+        db.query(NewsItemDiscussion).filter(NewsItemDiscussion.news_item_id == news_item.id).first()
+    )
+    if row is None:
+        row = NewsItemDiscussion(
+            news_item_id=news_item.id,
+            platform=platform,
+            summary_status="not_ready",
+            last_refresh_status="pending",
+        )
+        db.add(row)
+
+    row.platform = platform
+    row.external_id = external_id
+    row.discussion_url = discussion_url
+    row.title = _thread_title(news_item, raw_metadata) or row.title
+    aggregator = _extract_aggregator(raw_metadata)
+    row.author = _clean_string(aggregator.get("author")) or row.author
+    score = _extract_score_from_metadata(raw_metadata)
+    if score is not None:
+        row.score = score
+    comment_count = _extract_comment_count_from_metadata(raw_metadata)
+    if comment_count is not None:
+        row.comment_count = comment_count
+    row.last_count_checked_at = _utcnow_naive()
+    return row
+
+
+def sync_missing_news_item_discussions(db: Session, *, limit: int = 500) -> int:
+    """Backfill latest discussion rows for supported news items missing one."""
+    existing_ids = db.query(NewsItemDiscussion.news_item_id)
+    candidates = (
+        db.query(NewsItem)
+        .filter(NewsItem.id.notin_(existing_ids))
+        .filter(
+            or_(
+                NewsItem.platform.in_(["hackernews", "reddit", "hn"]),
+                NewsItem.discussion_url.ilike("%ycombinator.com%"),
+                NewsItem.discussion_url.ilike("%reddit.com%"),
+                NewsItem.canonical_item_url.ilike("%ycombinator.com%"),
+                NewsItem.canonical_item_url.ilike("%reddit.com%"),
+            )
+        )
+        .order_by(NewsItem.ingested_at.desc(), NewsItem.id.desc())
+        .limit(limit)
+        .all()
+    )
+    created_or_updated = 0
+    for item in candidates:
+        if sync_news_item_discussion_from_news_item(db, item) is not None:
+            created_or_updated += 1
+    if created_or_updated:
+        db.commit()
+    return created_or_updated
+
+
+def _fetch_json(client: httpx.Client, url: str, *, retryable_404: bool = False) -> dict[str, Any]:
+    response = client.get(url)
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        raise DiscussionFetchError(
+            f"HTTP {status_code} while fetching discussion",
+            retryable=(
+                status_code >= 500 or status_code == 429 or (status_code == 404 and retryable_404)
+            ),
+        ) from exc
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise DiscussionFetchError("Discussion endpoint returned a non-object payload")
+    return payload
+
+
+def _build_comment_source_url(platform: str, discussion_url: str, comment_id: str) -> str:
+    if platform == "hackernews":
+        return f"https://news.ycombinator.com/item?id={comment_id}"
+    return discussion_url
+
+
+def _normalize_hn_comment(
+    node: dict[str, Any],
+    *,
+    depth: int,
+    parent_id: str | None,
+    discussion_url: str,
+) -> dict[str, Any] | None:
+    comment_id = _clean_string(str(node.get("id"))) if node.get("id") is not None else None
+    raw_html = str(node.get("text") or "")
+    text = _clean_html_text(raw_html)
+    if not comment_id or not text:
+        return None
+    return {
+        "comment_id": comment_id,
+        "parent_id": parent_id,
+        "author": _clean_string(node.get("author")) or "unknown",
+        "text": text,
+        "compact_text": _compact_text(text),
+        "depth": depth,
+        "created_at": node.get("created_at") or _unix_to_iso(node.get("created_at_i")),
+        "source_url": _build_comment_source_url("hackernews", discussion_url, comment_id),
+    }
+
+
+def _fetch_hackernews_comments(
+    *,
+    external_id: str,
+    discussion_url: str,
+) -> dict[str, Any]:
+    timeout = httpx.Timeout(timeout=get_settings().http_timeout_seconds, connect=10.0)
+    with httpx.Client(timeout=timeout) as client:
+        firebase_item = _fetch_json(
+            client,
+            HN_FIREBASE_ITEM_URL.format(item_id=external_id),
+            retryable_404=False,
+        )
+        algolia_item = _fetch_json(
+            client,
+            HN_ALGOLIA_ITEM_URL.format(item_id=external_id),
+            retryable_404=False,
+        )
+
+    comments: list[dict[str, Any]] = []
+    url_titles: dict[str, str] = {}
+    total_seen = 0
+    cap_reached = False
+
+    def walk(nodes: Iterable[Any], depth: int, parent_id: str | None) -> None:
+        nonlocal total_seen, cap_reached
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            if len(comments) >= MAX_STORED_COMMENTS:
+                cap_reached = True
+                return
+
+            total_seen += 1
+            raw_html = str(node.get("text") or "")
+            if raw_html:
+                url_titles.update(_extract_anchor_titles_from_html(raw_html))
+
+            comment = _normalize_hn_comment(
+                node,
+                depth=depth,
+                parent_id=parent_id,
+                discussion_url=discussion_url,
+            )
+            next_parent_id = parent_id
+            if comment is not None:
+                comments.append(comment)
+                next_parent_id = comment["comment_id"]
+
+            children = node.get("children")
+            if isinstance(children, list):
+                walk(children, depth + 1, next_parent_id)
+                if cap_reached:
+                    return
+
+    children = algolia_item.get("children")
+    if isinstance(children, list):
+        walk(children, depth=0, parent_id=None)
+
+    links = _extract_links_from_comments(comments, url_titles=url_titles)
+    return {
+        "platform": "hackernews",
+        "external_id": external_id,
+        "discussion_url": discussion_url,
+        "thread": {
+            "title": _clean_string(firebase_item.get("title"))
+            or _clean_string(algolia_item.get("title")),
+            "author": _clean_string(firebase_item.get("by"))
+            or _clean_string(algolia_item.get("author")),
+            "score": _coerce_non_negative_int(firebase_item.get("score"))
+            or _coerce_non_negative_int(algolia_item.get("points")),
+            "comment_count": _coerce_non_negative_int(firebase_item.get("descendants")),
+            "created_at": _unix_to_iso(firebase_item.get("time")) or algolia_item.get("created_at"),
+        },
+        "comments": comments,
+        "links": links,
+        "stats": {
+            "provider": "algolia",
+            "declared_comment_count": _coerce_non_negative_int(firebase_item.get("descendants")),
+            "fetched_count": len(comments),
+            "total_seen": total_seen,
+            "stored_comment_cap": MAX_STORED_COMMENTS,
+            "cap_reached": cap_reached,
+        },
+    }
+
+
+def _fetch_reddit_comments(
+    *,
+    external_id: str,
+    discussion_url: str,
+) -> dict[str, Any]:
+    canonical_url = _normalize_reddit_discussion_url(discussion_url) or discussion_url
+    client = _get_reddit_client()
+    if client is None:
+        raise DiscussionFetchError(
+            "Reddit API credentials not configured",
+            retryable=False,
+        )
+
+    try:
+        submission = client.submission(id=external_id)
+        submission.comment_sort = "top"
+        _ = submission.title
+        submission.comments.replace_more(limit=0)
+    except Exception as exc:  # noqa: BLE001
+        raise DiscussionFetchError(
+            f"Reddit API request failed: {exc}",
+            retryable=_is_retryable_reddit_error(exc),
+        ) from exc
+
+    comments: list[dict[str, Any]] = []
+    url_titles: dict[str, str] = {}
+    cap_reached = False
+    total_seen = 0
+
+    def walk(nodes: Iterable[Any], depth: int, parent_id: str | None) -> None:
+        nonlocal cap_reached, total_seen
+        for node in nodes:
+            if len(comments) >= MAX_STORED_COMMENTS:
+                cap_reached = True
+                return
+            if _is_reddit_more_comments(node):
+                continue
+
+            total_seen += 1
+            body_html = getattr(node, "body_html", None) or ""
+            if body_html:
+                url_titles.update(_extract_anchor_titles_from_html(str(body_html)))
+            body = getattr(node, "body", None) or body_html or ""
+            text = _clean_html_text(str(body))
+            comment_id = str(getattr(node, "id", "") or "").strip()
+
+            if text and comment_id:
+                author_obj = getattr(node, "author", None)
+                author = getattr(author_obj, "name", None) or "unknown"
+                comments.append(
+                    {
+                        "comment_id": comment_id,
+                        "parent_id": parent_id,
+                        "author": author,
+                        "text": text,
+                        "compact_text": _compact_text(text),
+                        "depth": depth,
+                        "created_at": _unix_to_iso(getattr(node, "created_utc", None)),
+                        "source_url": canonical_url,
+                    }
+                )
+
+            replies = getattr(node, "replies", None)
+            if replies:
+                walk(replies, depth + 1, comment_id or parent_id)
+                if cap_reached:
+                    return
+
+    walk(submission.comments, depth=0, parent_id=None)
+    links = _extract_links_from_comments(comments, url_titles=url_titles)
+    return {
+        "platform": "reddit",
+        "external_id": external_id,
+        "discussion_url": canonical_url,
+        "thread": {
+            "title": _clean_string(getattr(submission, "title", None)),
+            "author": _clean_string(getattr(getattr(submission, "author", None), "name", None)),
+            "score": _coerce_non_negative_int(getattr(submission, "score", None)),
+            "comment_count": _coerce_non_negative_int(getattr(submission, "num_comments", None)),
+            "created_at": _unix_to_iso(getattr(submission, "created_utc", None)),
+            "subreddit": _clean_string(
+                getattr(getattr(submission, "subreddit", None), "display_name", None)
+            ),
+        },
+        "comments": comments,
+        "links": links,
+        "stats": {
+            "provider": "reddit",
+            "declared_comment_count": _coerce_non_negative_int(
+                getattr(submission, "num_comments", None)
+            ),
+            "fetched_count": len(comments),
+            "total_seen": total_seen,
+            "stored_comment_cap": MAX_STORED_COMMENTS,
+            "cap_reached": cap_reached,
+        },
+    }
+
+
+def _fetch_discussion_comments(row: NewsItemDiscussion) -> dict[str, Any]:
+    if not row.external_id:
+        raise DiscussionFetchError("Discussion external id is missing", retryable=False)
+    if not row.discussion_url:
+        raise DiscussionFetchError("Discussion URL is missing", retryable=False)
+    if row.platform == "hackernews":
+        return _fetch_hackernews_comments(
+            external_id=row.external_id,
+            discussion_url=row.discussion_url,
+        )
+    if row.platform == "reddit":
+        return _fetch_reddit_comments(
+            external_id=row.external_id,
+            discussion_url=row.discussion_url,
+        )
+    raise DiscussionFetchError(f"Unsupported discussion platform: {row.platform}", retryable=False)
+
+
+def _canonical_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _build_storage_key(*, news_item_id: int, sha256: str) -> str:
+    prefix = get_settings().storage.content_body_storage_prefix.strip("/")
+    return f"{prefix}/news-item-discussions/{news_item_id}/comments-{sha256}.json"
+
+
+def _persist_raw_comments(
+    *,
+    news_item_id: int,
+    raw_payload: dict[str, Any],
+    gateway: ObjectStorageGateway | None,
+) -> tuple[dict[str, Any], str]:
+    encoded = _canonical_json(raw_payload)
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    storage_key = _build_storage_key(news_item_id=news_item_id, sha256=digest)
+    storage_gateway = gateway or get_object_storage_gateway()
+    stored = storage_gateway.put_text(
+        key=storage_key,
+        text=json.dumps(raw_payload, ensure_ascii=False, indent=2, sort_keys=True),
+        content_type="application/json",
+    )
+    comments = raw_payload.get("comments")
+    return (
+        {
+            "kind": "storage",
+            "storage_provider": stored.provider,
+            "storage_bucket": stored.bucket,
+            "storage_key": stored.key,
+            "content_format": "json",
+            "sha256": digest,
+            "byte_size": stored.size_bytes,
+            "comment_count": len(comments) if isinstance(comments, list) else 0,
+            "updated_at": _utcnow_naive().isoformat(),
+        },
+        digest,
+    )
+
+
+def _build_summary_prompt(
+    *,
+    row: NewsItemDiscussion,
+    raw_payload: dict[str, Any],
+) -> str:
+    comments = raw_payload.get("comments")
+    comment_items = comments if isinstance(comments, list) else []
+    links = raw_payload.get("links")
+    link_items = links if isinstance(links, list) else []
+    raw_stats = raw_payload.get("stats")
+    stats = raw_stats if isinstance(raw_stats, dict) else {}
+
+    lines = [
+        f"Platform: {row.platform}",
+        f"Discussion URL: {row.discussion_url or ''}",
+    ]
+    if row.title:
+        lines.append(f"Thread title: {row.title}")
+    if row.comment_count is not None:
+        lines.append(f"Declared comment count: {row.comment_count}")
+    if stats.get("fetched_count") is not None:
+        lines.append(f"Fetched comments: {stats.get('fetched_count')}")
+
+    lines.append("")
+    lines.append("Comments:")
+    for comment in comment_items[:MAX_SUMMARY_COMMENTS]:
+        if not isinstance(comment, dict):
+            continue
+        comment_id = _clean_string(comment.get("comment_id")) or "unknown"
+        author = _clean_string(comment.get("author")) or "unknown"
+        depth = _coerce_non_negative_int(comment.get("depth")) or 0
+        text = _clean_string(comment.get("compact_text") or comment.get("text"))
+        if not text:
+            continue
+        lines.append(f"- [{comment_id}] {author} depth={depth}: {text}")
+
+    if link_items:
+        lines.append("")
+        lines.append("Extracted links:")
+        for link in link_items[:MAX_SUMMARY_LINKS]:
+            if not isinstance(link, dict):
+                continue
+            url = _clean_string(link.get("url"))
+            if not url:
+                continue
+            title = _clean_string(link.get("title"))
+            link_comment_id = _clean_string(link.get("comment_id"))
+            label = f" ({title})" if title else ""
+            source = f" from comment {link_comment_id}" if link_comment_id else ""
+            lines.append(f"- {url}{label}{source}")
+
+    return "\n".join(lines)
+
+
+def _summarize_discussion(
+    db: Session,
+    *,
+    row: NewsItemDiscussion,
+    news_item: NewsItem,
+    raw_payload: dict[str, Any],
+    summarizer: ContentSummarizer | None,
+) -> DiscussionSummary:
+    content_summarizer = summarizer or get_content_summarizer()
+    summary = content_summarizer.summarize(
+        _build_summary_prompt(row=row, raw_payload=raw_payload),
+        content_type="discussion_summary",
+        title=row.title,
+        content_id=f"news_item_discussion:{row.news_item_id}",
+        db=db,
+        usage_persist={
+            "feature": "news_discussions",
+            "operation": "news_discussions.summarize",
+            "source": "discussion_scraper",
+            "user_id": news_item.owner_user_id,
+            "metadata": {
+                "news_item_id": row.news_item_id,
+                "news_item_discussion_id": row.id,
+                "platform": row.platform,
+            },
+        },
+    )
+    if not isinstance(summary, DiscussionSummary):
+        raise TypeError(
+            "Discussion summarizer returned an invalid payload: "
+            f"{type(summary).__name__ if summary is not None else 'None'}"
+        )
+    return summary
+
+
+def _mark_refresh_failure(
+    db: Session,
+    *,
+    row: NewsItemDiscussion,
+    error_message: str,
+    retryable: bool,
+) -> NewsItemDiscussionRefreshResult:
+    now = _utcnow_naive()
+    row.last_refresh_status = "failed"
+    row.last_refresh_error = error_message
+    row.next_refresh_after = now + DISCUSSION_REFRESH_TTL
+    if row.summary is None:
+        row.summary_status = "failed"
+    db.commit()
+    return NewsItemDiscussionRefreshResult(
+        success=False,
+        status="failed",
+        error_message=error_message,
+        retryable=retryable,
+    )
+
+
+def refresh_news_item_discussion(
+    db: Session,
+    *,
+    news_item_id: int,
+    force: bool = False,
+    gateway: ObjectStorageGateway | None = None,
+    summarizer: ContentSummarizer | None = None,
+) -> NewsItemDiscussionRefreshResult:
+    """Refresh comments and summary for one news item when the TTL allows it."""
+    item = db.query(NewsItem).filter(NewsItem.id == news_item_id).first()
+    if item is None:
+        return NewsItemDiscussionRefreshResult(
+            success=False,
+            status="failed",
+            error_message="News item not found",
+            retryable=False,
+        )
+
+    row = sync_news_item_discussion_from_news_item(db, item)
+    if row is None:
+        return NewsItemDiscussionRefreshResult(
+            success=False,
+            status="unsupported",
+            error_message="News item does not have a supported discussion source",
+            retryable=False,
+        )
+
+    now = _utcnow_naive()
+    if (
+        not force
+        and row.next_refresh_after is not None
+        and row.next_refresh_after > now
+        and (row.raw_comments_ref is not None or row.last_refresh_status == "failed")
+    ):
+        db.commit()
+        return NewsItemDiscussionRefreshResult(
+            success=row.last_refresh_status != "failed",
+            status="skipped",
+            error_message=row.last_refresh_error,
+            refreshed=False,
+            summarized=False,
+            retryable=row.last_refresh_status != "failed",
+        )
+
+    try:
+        raw_payload = _fetch_discussion_comments(row)
+    except DiscussionFetchError as exc:
+        return _mark_refresh_failure(
+            db,
+            row=row,
+            error_message=str(exc),
+            retryable=exc.retryable,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "News item discussion fetch failed",
+            extra={
+                "component": "news_item_discussions",
+                "operation": "refresh.fetch",
+                "item_id": str(news_item_id),
+                "context_data": {"platform": row.platform, "error": str(exc)},
+            },
+        )
+        return _mark_refresh_failure(
+            db,
+            row=row,
+            error_message=str(exc),
+            retryable=True,
+        )
+
+    raw_thread = raw_payload.get("thread")
+    thread = raw_thread if isinstance(raw_thread, dict) else {}
+    row.title = _clean_string(thread.get("title")) or row.title
+    row.author = _clean_string(thread.get("author")) or row.author
+    score = _coerce_non_negative_int(thread.get("score"))
+    if score is not None:
+        row.score = score
+    comment_count = _coerce_non_negative_int(thread.get("comment_count"))
+    if comment_count is not None:
+        row.comment_count = comment_count
+    row.fetched_comment_count = _coerce_non_negative_int(
+        _extract_nested(raw_payload, ("stats", "fetched_count"))
+    )
+    row.last_count_checked_at = now
+    row.last_comments_fetched_at = now
+    row.next_refresh_after = now + DISCUSSION_REFRESH_TTL
+
+    raw_ref, raw_sha = _persist_raw_comments(
+        news_item_id=news_item_id,
+        raw_payload=raw_payload,
+        gateway=gateway,
+    )
+    previous_sha = row.raw_comments_sha256
+    row.raw_comments_ref = raw_ref
+    row.raw_comments_sha256 = raw_sha
+    row.last_refresh_status = "completed"
+    row.last_refresh_error = None
+
+    should_summarize = bool(raw_payload.get("comments")) and (
+        row.summary is None or row.summary_status != "completed" or previous_sha != raw_sha
+    )
+    summarized = False
+    if should_summarize:
+        try:
+            summary = _summarize_discussion(
+                db,
+                row=row,
+                news_item=item,
+                raw_payload=raw_payload,
+                summarizer=summarizer,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "News item discussion summarization failed",
+                extra={
+                    "component": "news_item_discussions",
+                    "operation": "refresh.summarize",
+                    "item_id": str(news_item_id),
+                    "context_data": {"platform": row.platform, "error": str(exc)},
+                },
+            )
+            row.summary_status = "failed"
+            row.last_refresh_status = "failed"
+            row.last_refresh_error = str(exc)
+            db.commit()
+            return NewsItemDiscussionRefreshResult(
+                success=False,
+                status="failed",
+                error_message=str(exc),
+                refreshed=True,
+                summarized=False,
+                retryable=True,
+            )
+
+        if summary.external_discussion_url is None and row.discussion_url:
+            summary.external_discussion_url = row.discussion_url
+        row.summary = summary.model_dump(mode="json", exclude_none=True)
+        row.summary_status = "completed"
+        row.summary_version = NEWS_DISCUSSION_SUMMARY_VERSION
+        row.summary_model = getattr(summarizer, "model_hint", None) if summarizer else None
+        row.summary_generated_at = _utcnow_naive()
+        summarized = True
+    elif row.summary is None:
+        row.summary_status = "not_ready"
+
+    db.commit()
+    return NewsItemDiscussionRefreshResult(
+        success=True,
+        status="completed",
+        refreshed=True,
+        summarized=summarized,
+        retryable=True,
+    )
+
+
+def refresh_due_news_item_discussions(
+    db: Session,
+    *,
+    limit: int = 10,
+    summarizer: ContentSummarizer | None = None,
+) -> list[NewsItemDiscussionRefreshResult]:
+    """Refresh due HN/Reddit discussion rows for the scheduled scraper."""
+    sync_missing_news_item_discussions(db, limit=max(limit * 10, 50))
+    now = _utcnow_naive()
+    rows = (
+        db.query(NewsItemDiscussion)
+        .filter(NewsItemDiscussion.platform.in_(list(SUPPORTED_DISCUSSION_PLATFORMS)))
+        .filter(
+            or_(
+                NewsItemDiscussion.next_refresh_after.is_(None),
+                NewsItemDiscussion.next_refresh_after <= now,
+            )
+        )
+        .order_by(
+            NewsItemDiscussion.next_refresh_after.asc().nullsfirst(),
+            NewsItemDiscussion.updated_at.asc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+    results: list[NewsItemDiscussionRefreshResult] = []
+    for row in rows:
+        news_item_id = row.news_item_id
+        if news_item_id is None:
+            continue
+        results.append(
+            refresh_news_item_discussion(
+                db,
+                news_item_id=news_item_id,
+                summarizer=summarizer,
+            )
+        )
+    return results

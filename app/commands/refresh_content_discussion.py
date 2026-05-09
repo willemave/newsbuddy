@@ -10,6 +10,7 @@ from app.models.schema import ContentDiscussion
 from app.queries import get_content_discussion as get_content_discussion_query
 from app.queries import get_news_item_discussion as get_news_item_discussion_query
 from app.repositories.content_detail_repository import get_visible_content
+from app.services import news_item_discussions
 from app.services.discussion_fetcher import (
     fetch_and_store_discussion,
     fetch_and_store_news_item_discussion,
@@ -53,7 +54,12 @@ def refresh_news_item_discussion(
     if item is None:
         raise HTTPException(status_code=404, detail="News item not found")
 
-    if item.legacy_content_id is not None:
+    if news_item_discussions.is_supported_news_item_discussion(item):
+        news_item_discussions.refresh_news_item_discussion(
+            db,
+            news_item_id=news_item_id,
+        )
+    elif item.legacy_content_id is not None:
         fetch_and_store_discussion(db, content_id=item.legacy_content_id)
     else:
         fetch_and_store_news_item_discussion(db, news_item_id=news_item_id)

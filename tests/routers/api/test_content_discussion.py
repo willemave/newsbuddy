@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from app.commands import refresh_content_discussion as refresh_discussion_command
 from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import ContentDiscussion, NewsItem
+from app.models.schema import ContentDiscussion, NewsItem, NewsItemDiscussion
 
 
 def test_get_content_discussion_returns_not_ready_when_missing(
@@ -296,11 +296,10 @@ def test_refresh_content_discussion_returns_refreshed_payload(
     assert payload["comments"][0]["author"] == "fresh-user"
 
 
-def test_refresh_news_item_discussion_uses_legacy_content_payload(
+def test_refresh_news_item_discussion_uses_news_item_discussion_summary_for_reddit(
     client,
     content_factory,
     db_session,
-    discussion_payload_factory,
     news_item_factory,
     test_user,
     monkeypatch,
@@ -328,34 +327,48 @@ def test_refresh_news_item_discussion_uses_legacy_content_payload(
         legacy_content_id=content.id,
     )
 
-    def _refresh_and_store(db, *, content_id: int, comment_cap: int = 500):
-        del comment_cap
-        assert content_id == content.id
-        row = db.query(ContentDiscussion).filter(ContentDiscussion.content_id == content_id).first()
+    def _refresh_and_store(db, *, news_item_id: int, force: bool = False):
+        del force
+        assert news_item_id == news_item.id
+        row = (
+            db.query(NewsItemDiscussion)
+            .filter(NewsItemDiscussion.news_item_id == news_item_id)
+            .first()
+        )
         if row is None:
-            row = ContentDiscussion(content_id=content_id)
+            row = NewsItemDiscussion(news_item_id=news_item_id, platform="reddit")
             db.add(row)
         row.platform = "reddit"
-        row.status = "completed"
-        row.discussion_data = discussion_payload_factory(
-            discussion_url="https://www.reddit.com/r/test/comments/abc123/thread/",
-            comments=[
+        row.external_id = "abc123"
+        row.discussion_url = "https://www.reddit.com/r/test/comments/abc123/thread/"
+        row.comment_count = 3
+        row.fetched_comment_count = 2
+        row.summary_status = "completed"
+        row.last_refresh_status = "completed"
+        row.last_comments_fetched_at = datetime(2026, 4, 13, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        row.summary = {
+            "overview": "Reddit commenters focused on deployment risk and tradeoffs.",
+            "topics": [
                 {
-                    "comment_id": "reddit-refresh",
-                    "author": "redditor",
-                    "text": "Fresh reddit comment",
-                    "compact_text": "Fresh reddit comment",
-                    "depth": 0,
+                    "title": "Deployment risk",
+                    "summary": "Several comments called out operational complexity.",
                 }
             ],
-            links=[],
-            stats={"fetched_count": 1},
-        )
+            "notable_links": [
+                {
+                    "url": "https://example.com/deep-dive",
+                    "title": "Deep dive",
+                    "reason": "Adds context from the thread.",
+                }
+            ],
+            "representative_comments": [],
+            "external_discussion_url": "https://www.reddit.com/r/test/comments/abc123/thread/",
+        }
         db.commit()
 
     monkeypatch.setattr(
-        refresh_discussion_command,
-        "fetch_and_store_discussion",
+        refresh_discussion_command.news_item_discussions,
+        "refresh_news_item_discussion",
         _refresh_and_store,
     )
 
@@ -365,8 +378,9 @@ def test_refresh_news_item_discussion_uses_legacy_content_payload(
     payload = response.json()
     assert payload["status"] == "completed"
     assert payload["mode"] == "comments"
-    assert payload["comments"][0]["comment_id"] == "reddit-refresh"
-    assert payload["comments"][0]["author"] == "redditor"
+    assert payload["summary"]["overview"].startswith("Reddit commenters")
+    assert payload["comment_count"] == 3
+    assert payload["links"][0]["url"] == "https://example.com/deep-dive"
 
 
 def test_refresh_news_item_discussion_updates_embedded_payload(

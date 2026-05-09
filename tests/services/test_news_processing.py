@@ -9,7 +9,6 @@ from app.models.metadata import ContentType, NewsSummary
 from app.models.schema import Content, NewsItem
 from app.services import news_article_enrichment as news_article_enrichment_module
 from app.services import news_processing as news_processing_module
-from app.services.discussion_fetcher import DiscussionFetchResult
 from app.services.news_article_bodies import NEWS_ARTICLE_BODY_REF_KEY
 from app.services.news_article_enrichment import enrich_news_item_article
 from app.services.news_processing import process_news_item
@@ -201,10 +200,7 @@ def test_process_news_item_finalizes_summary(
     assert item.status == "ready"
 
 
-def test_process_news_item_fetches_discussion_via_public_news_item_flow(
-    db_session,
-    monkeypatch,
-) -> None:
+def test_process_news_item_uses_existing_discussion_snippets(db_session) -> None:
     item = NewsItem(
         ingest_key="news-item-discussion-flow",
         visibility_scope="global",
@@ -216,7 +212,27 @@ def test_process_news_item_fetches_discussion_via_public_news_item_flow(
         article_title="Story with discussion",
         article_domain="example.com",
         discussion_url="https://news.ycombinator.com/item?id=777",
-        raw_metadata={"excerpt": "Example excerpt"},
+        raw_metadata={
+            "excerpt": "Example excerpt",
+            "discussion_status": "completed",
+            "discussion_payload": {
+                "mode": "comments",
+                "source_url": "https://news.ycombinator.com/item?id=777",
+                "comments": [
+                    {
+                        "comment_id": "c1",
+                        "author": "alice",
+                        "text": "This changed the market.",
+                        "compact_text": "This changed the market.",
+                        "depth": 0,
+                    }
+                ],
+                "compact_comments": ["This changed the market."],
+                "discussion_groups": [],
+                "links": [],
+                "stats": {"declared_comment_count": 1},
+            },
+        },
         status="pending",
     )
     db_session.add(item)
@@ -224,34 +240,6 @@ def test_process_news_item_fetches_discussion_via_public_news_item_flow(
     db_session.refresh(item)
 
     captured: dict[str, object] = {}
-
-    def _fetch_and_store(db, *, news_item_id: int, comment_cap: int):
-        assert news_item_id == item.id
-        assert comment_cap > 0
-        persisted_item = db.get(NewsItem, news_item_id)
-        assert persisted_item is not None
-        metadata = dict(persisted_item.raw_metadata or {})
-        metadata["discussion_payload"] = {
-            "mode": "comments",
-            "source_url": persisted_item.discussion_url,
-            "comments": [
-                {
-                    "comment_id": "c1",
-                    "author": "alice",
-                    "text": "This changed the market.",
-                    "compact_text": "This changed the market.",
-                    "depth": 0,
-                }
-            ],
-            "compact_comments": ["This changed the market."],
-            "discussion_groups": [],
-            "links": [],
-            "stats": {"declared_comment_count": 1},
-        }
-        metadata["discussion_status"] = "completed"
-        persisted_item.raw_metadata = metadata
-        db.commit()
-        return DiscussionFetchResult(success=True, status="completed", retryable=False)
 
     def _summarize(prompt: str, **_kwargs):
         captured["prompt"] = prompt
@@ -261,12 +249,6 @@ def test_process_news_item_fetches_discussion_via_public_news_item_flow(
             key_points=["Fresh point"],
             summary="Fresh summary text.",
         )
-
-    monkeypatch.setattr(
-        news_processing_module,
-        "fetch_and_store_news_item_discussion",
-        _fetch_and_store,
-    )
 
     result = process_news_item(
         db_session,
@@ -283,9 +265,8 @@ def test_process_news_item_fetches_discussion_via_public_news_item_flow(
     assert item.status == "ready"
 
 
-def test_process_news_item_continues_when_discussion_fetch_fails(
+def test_process_news_item_does_not_fetch_discussion_during_processing(
     db_session,
-    monkeypatch,
 ) -> None:
     item = NewsItem(
         ingest_key="news-item-discussion-failure",
@@ -305,36 +286,6 @@ def test_process_news_item_continues_when_discussion_fetch_fails(
     db_session.commit()
     db_session.refresh(item)
 
-    def _fetch_and_store(db, *, news_item_id: int, comment_cap: int):
-        persisted_item = db.get(NewsItem, news_item_id)
-        assert persisted_item is not None
-        metadata = dict(persisted_item.raw_metadata or {})
-        metadata["discussion_payload"] = {
-            "mode": "none",
-            "source_url": persisted_item.discussion_url,
-            "comments": [],
-            "compact_comments": [],
-            "discussion_groups": [],
-            "links": [],
-            "stats": {},
-        }
-        metadata["discussion_status"] = "failed"
-        metadata["discussion_error"] = "Discussion fetch failed: blocked"
-        persisted_item.raw_metadata = metadata
-        db.commit()
-        return DiscussionFetchResult(
-            success=False,
-            status="failed",
-            error_message="Discussion fetch failed: blocked",
-            retryable=False,
-        )
-
-    monkeypatch.setattr(
-        news_processing_module,
-        "fetch_and_store_news_item_discussion",
-        _fetch_and_store,
-    )
-
     result = process_news_item(
         db_session,
         news_item_id=_require_id(item.id),
@@ -352,8 +303,8 @@ def test_process_news_item_continues_when_discussion_fetch_fails(
     assert result.success is True
     assert item.status == "ready"
     item_metadata = _metadata(item.raw_metadata)
-    assert item_metadata["discussion_status"] == "failed"
-    assert item_metadata["discussion_error"] == "Discussion fetch failed: blocked"
+    assert "discussion_status" not in item_metadata
+    assert "discussion_error" not in item_metadata
 
 
 def test_process_news_item_marks_failure_on_invalid_summary_payload(

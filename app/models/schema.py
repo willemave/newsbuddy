@@ -367,6 +367,44 @@ class NewsItem(Base):
         self.raw_metadata = set_news_summary_title(self.raw_metadata, value)
 
 
+class NewsItemDiscussion(Base):
+    """Latest discussion comments and summary for one short-form news item."""
+
+    __tablename__ = "news_item_discussions"
+
+    id = Column(Integer, primary_key=True)
+    news_item_id = Column(Integer, nullable=False)
+    platform = Column(String(50), nullable=False)
+    external_id = Column(String(255), nullable=True)
+    discussion_url = Column(String(2048), nullable=True)
+    title = Column(String(500), nullable=True)
+    author = Column(String(255), nullable=True)
+    score = Column(Integer, nullable=True)
+    comment_count = Column(Integer, nullable=True)
+    raw_comments_ref = Column(JSON, nullable=True)
+    raw_comments_sha256 = Column(String(64), nullable=True)
+    fetched_comment_count = Column(Integer, nullable=True)
+    last_count_checked_at = Column(DateTime, nullable=True)
+    last_comments_fetched_at = Column(DateTime, nullable=True)
+    next_refresh_after = Column(DateTime, nullable=True)
+    summary = Column(JSON, nullable=True)
+    summary_status = Column(String(20), nullable=False, default="not_ready")
+    summary_version = Column(Integer, nullable=True)
+    summary_model = Column(String(100), nullable=True)
+    summary_generated_at = Column(DateTime, nullable=True)
+    last_refresh_status = Column(String(20), nullable=False, default="pending")
+    last_refresh_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("news_item_id", name="uq_news_item_discussions_news_item"),
+        Index("idx_news_item_discussions_platform_external", "platform", "external_id"),
+        Index("idx_news_item_discussions_next_refresh", "next_refresh_after"),
+        Index("idx_news_item_discussions_status", "last_refresh_status"),
+    )
+
+
 class NewsItemReadStatus(Base):
     """Track which visible news items have been read by which user."""
 

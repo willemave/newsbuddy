@@ -674,6 +674,82 @@ class GeneratedNewsSummary(NewsSummary):
         return value
 
 
+class DiscussionSummaryTopic(BaseModel):
+    """One high-signal theme from a comment discussion."""
+
+    title: str = Field(..., min_length=2, max_length=90)
+    summary: str = Field(..., min_length=10, max_length=500)
+    stance: str | None = Field(
+        None,
+        max_length=120,
+        description="Optional split of opinion or prevailing sentiment for this theme",
+    )
+
+
+class DiscussionSummaryLink(BaseModel):
+    """Interesting link surfaced by a discussion summary."""
+
+    url: str = Field(..., min_length=1, max_length=2048)
+    title: str | None = Field(None, max_length=240)
+    reason: str | None = Field(None, max_length=300)
+    source_comment_id: str | None = Field(None, max_length=120)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        adapter = TypeAdapter(HttpUrl)
+        return str(adapter.validate_python(value))
+
+
+class DiscussionSummaryComment(BaseModel):
+    """Representative comment selected by the discussion summarizer."""
+
+    comment_id: str | None = Field(None, max_length=120)
+    author: str | None = Field(None, max_length=120)
+    text: str = Field(..., min_length=1, max_length=500)
+    reason: str | None = Field(None, max_length=220)
+
+
+class DiscussionSummary(BaseModel):
+    """Structured summary of one news item's external discussion."""
+
+    overview: str = Field(
+        ...,
+        min_length=20,
+        max_length=900,
+        description="Short synthesis of the most important discussion takeaways",
+    )
+    topics: list[DiscussionSummaryTopic] = Field(
+        ...,
+        min_length=1,
+        max_length=8,
+        description="Major themes, disagreements, critiques, or useful context",
+    )
+    notable_links: list[DiscussionSummaryLink] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Interesting links mentioned by commenters",
+    )
+    representative_comments: list[DiscussionSummaryComment] = Field(
+        default_factory=list,
+        max_length=6,
+        description="Small set of representative comments with attribution",
+    )
+    external_discussion_url: str | None = Field(None, max_length=2048)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("external_discussion_url")
+    @classmethod
+    def validate_external_discussion_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        adapter = TypeAdapter(HttpUrl)
+        return str(adapter.validate_python(value))
+
+
 class DailyNewsRollupSummary(BaseModel):
     """Multi-source daily rollup payload for one user's digest."""
 
@@ -796,6 +872,7 @@ SummaryPayload = (
     | LongformArtifactEnvelope
     | NewsSummary
     | GeneratedNewsSummary
+    | DiscussionSummary
 )
 
 
@@ -867,6 +944,7 @@ class BaseContentMetadata(BaseModel):
                 GeneratedEditorialNarrativeSummary,
                 LongformArtifactEnvelope,
                 NewsSummary,
+                DiscussionSummary,
             ),
         ):
             return value
@@ -881,7 +959,7 @@ class BaseContentMetadata(BaseModel):
         raise ValueError(
             "Summary must be StructuredSummary, InterleavedSummary, InterleavedSummaryV2, "
             "BulletedSummary, EditorialNarrativeSummary, LongformArtifactEnvelope, "
-            "NewsSummary, or dict"
+            "NewsSummary, DiscussionSummary, or dict"
         )
 
 

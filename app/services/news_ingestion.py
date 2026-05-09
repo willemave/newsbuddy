@@ -75,6 +75,21 @@ def _clean_title(value: Any) -> str | None:
     return clean_title(value)
 
 
+def _coerce_non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float) and value.is_integer():
+        integer = int(value)
+        return integer if integer >= 0 else None
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "")
+        if cleaned.isdigit():
+            return int(cleaned)
+    return None
+
+
 def _normalize_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         if value.tzinfo is None:
@@ -125,6 +140,37 @@ def _normalize_url(value: Any) -> str | None:
     if cleaned is None:
         return None
     return normalize_http_url(cleaned) or cleaned
+
+
+def _extract_comment_count(metadata: dict[str, Any]) -> int | None:
+    aggregator = metadata.get("aggregator")
+    aggregator_meta = aggregator if isinstance(aggregator, dict) else {}
+    aggregator_details = aggregator_meta.get("metadata")
+    aggregator_details_meta = aggregator_details if isinstance(aggregator_details, dict) else {}
+
+    for candidate in (
+        metadata.get("comment_count"),
+        metadata.get("comments_count"),
+        aggregator_details_meta.get("comment_count"),
+        aggregator_details_meta.get("comments_count"),
+    ):
+        value = _coerce_non_negative_int(candidate)
+        if value is not None:
+            return value
+
+    items = metadata.get("items")
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_meta = item.get("metadata")
+            item_metadata = item_meta if isinstance(item_meta, dict) else {}
+            value = _coerce_non_negative_int(
+                item_metadata.get("comment_count") or item_metadata.get("comments_count")
+            )
+            if value is not None:
+                return value
+    return None
 
 
 _SOURCE_LABELS_BY_PLATFORM: dict[str, str] = {
@@ -395,6 +441,9 @@ def build_news_item_upsert_input_from_scraped_item(item: dict[str, Any]) -> News
         article_title=article_title,
         summary_title=materialized_summary_title,
     )
+    comment_count = _extract_comment_count(normalized_metadata)
+    if comment_count is not None:
+        normalized_metadata["comment_count"] = comment_count
 
     return NewsItemUpsertInput(
         visibility_scope=normalized_scope,
@@ -462,6 +511,9 @@ def build_news_item_upsert_input_from_content(content: Content) -> NewsItemUpser
         article_title=(_clean_title(article_meta.get("title")) or _clean_title(content.title)),
         summary_title=materialized_summary_title,
     )
+    comment_count = _extract_comment_count(normalized_metadata)
+    if comment_count is not None:
+        normalized_metadata["comment_count"] = comment_count
 
     return NewsItemUpsertInput(
         visibility_scope=visibility_scope,

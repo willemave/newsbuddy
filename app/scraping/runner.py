@@ -6,6 +6,7 @@ from app.models.scraper_runs import ScraperStats
 from app.scraping.aggregators import load_aggregator_scrapers
 from app.scraping.atom_unified import AtomScraper
 from app.scraping.base import BaseScraper
+from app.scraping.discussion_comments import DiscussionCommentsScraper
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 from app.scraping.reddit_unified import RedditUnifiedScraper
 from app.scraping.substack_unified import SubstackScraper
@@ -45,6 +46,7 @@ class ScraperRunner:
             PodcastUnifiedScraper(),
             # YouTubeUnifiedScraper(),  # Disabled - not working
             AtomScraper(),
+            DiscussionCommentsScraper(),
         ]
 
     def run_all(self) -> dict[str, int]:
