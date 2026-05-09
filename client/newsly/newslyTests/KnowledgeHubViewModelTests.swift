@@ -22,6 +22,7 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         XCTAssertEqual(chatService.receivedScreenTitles, ["Knowledge"])
         XCTAssertEqual(chatService.receivedQueries, [nil])
         XCTAssertEqual(chatService.receivedNotes, [nil])
+        XCTAssertEqual(chatService.receivedAssistantActions, [nil])
         XCTAssertEqual(viewModel.sessions.map(\.id), [91])
     }
 
@@ -67,6 +68,34 @@ final class KnowledgeHubViewModelTests: XCTestCase {
                 nil,
                 nil,
             ]
+        )
+        XCTAssertEqual(chatService.receivedAssistantActions, [nil, nil, nil, nil])
+    }
+
+    func testInterestingUnreadNewsActionUsesAssistantActionIntent() async {
+        let chatService = MockKnowledgeHubChatService(
+            turnResponses: [.success(makeAssistantTurnResponse(sessionId: 14))]
+        )
+        let viewModel = KnowledgeHubViewModel(chatService: chatService)
+
+        _ = await viewModel.startInterestingUnreadNewsChat()
+
+        XCTAssertEqual(
+            chatService.receivedMessages,
+            [
+                "Look at my unread fast-news items and pick the most interesting stories I should pay attention to."
+            ]
+        )
+        XCTAssertEqual(chatService.receivedQueries, ["most interesting unread fast-news items"])
+        XCTAssertEqual(
+            chatService.receivedNotes,
+            [
+                "Use the unread fast-news tool result as the candidate set. Do not rely on currently visible rows only."
+            ]
+        )
+        XCTAssertEqual(
+            chatService.receivedAssistantActions,
+            [AssistantActionIntent.pickInterestingUnreadNews]
         )
     }
 
@@ -216,6 +245,7 @@ private final class MockKnowledgeHubChatService: KnowledgeHubChatServicing {
     var receivedScreenTitles: [String?] = []
     var receivedQueries: [String?] = []
     var receivedNotes: [String?] = []
+    var receivedAssistantActions: [String?] = []
 
     private var pageResponses: [Result<ChatSessionListResponse, Error>]
     private var turnResponses: [Result<AssistantTurnResponse, Error>]
@@ -230,10 +260,12 @@ private final class MockKnowledgeHubChatService: KnowledgeHubChatServicing {
 
     func listSessionsPage(
         contentId: Int?,
+        newsItemId: Int?,
         limit: Int,
         cursor: String?
     ) async throws -> ChatSessionListResponse {
         XCTAssertNil(contentId)
+        XCTAssertNil(newsItemId)
         requestedPageLimits.append(limit)
         requestedPageCursors.append(cursor)
 
@@ -256,6 +288,7 @@ private final class MockKnowledgeHubChatService: KnowledgeHubChatServicing {
         receivedScreenTitles.append(screenContext.screenTitle)
         receivedQueries.append(screenContext.query)
         receivedNotes.append(screenContext.note)
+        receivedAssistantActions.append(screenContext.assistantAction)
 
         guard !turnResponses.isEmpty else {
             XCTFail("Missing mock assistant turn response")
@@ -267,12 +300,14 @@ private final class MockKnowledgeHubChatService: KnowledgeHubChatServicing {
 
     func createSession(
         contentId: Int?,
+        newsItemId: Int?,
         topic: String?,
         provider: ChatModelProvider?,
         modelHint: String?,
         initialMessage: String?
     ) async throws -> ChatSessionSummary {
         XCTAssertNil(contentId)
+        XCTAssertNil(newsItemId)
         XCTAssertNil(topic)
         XCTAssertNil(provider)
         XCTAssertNil(modelHint)

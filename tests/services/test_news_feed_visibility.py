@@ -12,9 +12,10 @@ from app.constants import (
     AGGREGATOR_SCRAPER_TYPE,
 )
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
-from app.models.schema import NewsItem, UserScraperConfig
+from app.models.schema import NewsItem, NewsItemReadStatus, UserScraperConfig
 from app.services.news_feed import (
     count_unread_news_items,
+    list_unread_visible_news_items,
     list_visible_news_items,
 )
 
@@ -132,6 +133,50 @@ def test_visibility_filters_global_items_to_user_aggregator_picks(
     assert titles == ["HN story"]
 
 
+def test_list_unread_visible_news_items_uses_visible_unread_rows(
+    db_session, test_user, base_time
+) -> None:
+    user_id = test_user.id
+    assert user_id is not None
+
+    visible_unread = _global_news_item(
+        db_session,
+        ingest_key="hn-unread",
+        platform="hackernews",
+        title="Visible unread story",
+        article_url="https://example.com/unread",
+        ingested_at=base_time + timedelta(minutes=2),
+    )
+    visible_read = _global_news_item(
+        db_session,
+        ingest_key="hn-read",
+        platform="hackernews",
+        title="Visible read story",
+        article_url="https://example.com/read",
+        ingested_at=base_time + timedelta(minutes=1),
+    )
+    _global_news_item(
+        db_session,
+        ingest_key="techmeme-unread",
+        platform="techmeme",
+        title="Hidden unread story",
+        article_url="https://example.com/hidden",
+        ingested_at=base_time,
+    )
+    _add_aggregator_subscription(db_session, user_id=user_id, key="hackernews")
+    db_session.add(NewsItemReadStatus(user_id=user_id, news_item_id=visible_read.id))
+    db_session.commit()
+
+    rows, total = list_unread_visible_news_items(
+        db_session,
+        user_id=user_id,
+        limit=10,
+    )
+
+    assert total == 1
+    assert [item.id for item in rows] == [visible_unread.id]
+
+
 def test_visibility_filters_brutalist_topics(db_session, test_user, base_time) -> None:
     user_id = test_user.id
     assert user_id is not None
@@ -163,9 +208,7 @@ def test_visibility_filters_brutalist_topics(db_session, test_user, base_time) -
     assert titles == ["Brutalist science"]
 
 
-def test_visibility_paginates_all_visible_feed_items(
-    db_session, test_user, base_time
-) -> None:
+def test_visibility_paginates_all_visible_feed_items(db_session, test_user, base_time) -> None:
     user_id = test_user.id
     assert user_id is not None
 

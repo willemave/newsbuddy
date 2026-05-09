@@ -137,6 +137,33 @@ struct RetryCouncilBranchRequest: Codable {
     }
 }
 
+enum AssistantActionIntent {
+    static let pickInterestingUnreadNews = "pick_interesting_unread_news"
+}
+
+enum InterestingUnreadNewsAssistantAction {
+    static let prompt = (
+        "Look at my unread fast-news items and pick the most interesting "
+        + "stories I should pay attention to."
+    )
+
+    private static let query = "most interesting unread fast-news items"
+    private static let note = (
+        "Use the unread fast-news tool result as the candidate set. "
+        + "Do not rely on currently visible rows only."
+    )
+
+    static func screenContext(screenType: String, screenTitle: String) -> AssistantScreenContext {
+        AssistantScreenContext(
+            screenType: screenType,
+            screenTitle: screenTitle,
+            query: query,
+            note: note,
+            assistantAction: AssistantActionIntent.pickInterestingUnreadNews
+        )
+    }
+}
+
 struct AssistantScreenContext: Codable, Equatable {
     private static let maxVisibleContentIds = 15
 
@@ -149,6 +176,7 @@ struct AssistantScreenContext: Codable, Equatable {
     let selectedTopic: String?
     let query: String?
     let note: String?
+    let assistantAction: String?
 
     init(
         screenType: String,
@@ -159,7 +187,8 @@ struct AssistantScreenContext: Codable, Equatable {
         visibleNewsItemIds: [Int] = [],
         selectedTopic: String? = nil,
         query: String? = nil,
-        note: String? = nil
+        note: String? = nil,
+        assistantAction: String? = nil
     ) {
         self.screenType = screenType
         self.screenTitle = screenTitle
@@ -170,6 +199,7 @@ struct AssistantScreenContext: Codable, Equatable {
         self.selectedTopic = selectedTopic
         self.query = query
         self.note = note
+        self.assistantAction = assistantAction
     }
 
     enum CodingKeys: String, CodingKey {
@@ -182,6 +212,7 @@ struct AssistantScreenContext: Codable, Equatable {
         case selectedTopic = "selected_topic"
         case query
         case note
+        case assistantAction = "assistant_action"
     }
 }
 

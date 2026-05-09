@@ -159,6 +159,16 @@ class KnowledgeHubViewModel: ObservableObject {
         )
     }
 
+    func startInterestingUnreadNewsChat() async -> ChatSessionRoute? {
+        await startHubAssistantTurn(
+            message: InterestingUnreadNewsAssistantAction.prompt,
+            screenContext: InterestingUnreadNewsAssistantAction.screenContext(
+                screenType: "knowledge_hub",
+                screenTitle: "Knowledge"
+            )
+        )
+    }
+
     func startFindArticlesChat() async -> ChatSessionRoute? {
         await startHubAssistantTurn(
             message: "Find a few new articles or sources I should read next based on what I've been reading."

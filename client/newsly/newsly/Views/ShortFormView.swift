@@ -208,6 +208,16 @@ struct ShortFormView: View {
 
         return [
             ShortNewsQuickAction(
+                id: "best_unread",
+                title: "Best Unread",
+                systemImage: "sparkles",
+                prompt: InterestingUnreadNewsAssistantAction.prompt,
+                screenContext: InterestingUnreadNewsAssistantAction.screenContext(
+                    screenType: "short_news_feed",
+                    screenTitle: "Fast read"
+                )
+            ),
+            ShortNewsQuickAction(
                 id: "summarize_top_15",
                 title: "Summarize Top 15",
                 systemImage: "text.alignleft",
@@ -351,10 +361,6 @@ private struct ShortNewsRow: View, Equatable {
         .systemFont(ofSize: 18, weight: .regular)
     }
 
-    private var snippetUIFont: UIFont {
-        .systemFont(ofSize: 13, weight: .regular)
-    }
-
     private var hasPlatform: Bool {
         item.platform?.isEmpty == false
     }
@@ -416,26 +422,6 @@ private struct ShortNewsRow: View, Equatable {
                     }
                 }
                 .lineLimit(1)
-            }
-
-            // Discussion snippet
-            if let snippet = item.discussionSnippet {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "bubble.left.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.onSurfaceSecondary.opacity(0.6))
-                        .padding(.top, 3)
-                    SelectableText(
-                        "\(snippet.author): \(snippet.text)",
-                        textColor: UIColor(Color.onSurfaceSecondary),
-                        font: snippetUIFont,
-                        lineLimit: 2,
-                        lineBreakMode: .byTruncatingTail,
-                        onDigDeeper: onDigDeeper
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.top, 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

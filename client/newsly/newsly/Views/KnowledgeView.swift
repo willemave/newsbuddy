@@ -29,6 +29,12 @@ struct KnowledgeView: View {
             subtitle: "Most interesting discussions",
             run: { viewModel in await viewModel.startCommentsChat() }
         ),
+        HubAction(
+            icon: "sparkles",
+            title: "Best Unread",
+            subtitle: "Most interesting fast-news stories",
+            run: { viewModel in await viewModel.startInterestingUnreadNewsChat() }
+        ),
     ]
 
     private let discoveryActions: [HubAction] = [

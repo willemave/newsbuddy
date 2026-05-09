@@ -55,6 +55,7 @@ from app.services.llm_models import (
     build_pydantic_model,
     resolve_effective_api_key,
 )
+from app.services.news_feed import list_unread_visible_news_items
 from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
 from app.services.sandbox_runtime import (
     PersonalLibrarySandboxSession,
@@ -79,6 +80,7 @@ ASSISTANT_SESSION_TYPES = {
 }
 _agents: dict[tuple[str, str], Agent[AssistantDeps, str]] = {}
 URL_ADAPTER = TypeAdapter(HttpUrl)
+ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS = "pick_interesting_unread_news"
 
 ASSISTANT_OPENAI_REASONING_EFFORT: ReasoningEffort = "low"
 
@@ -97,6 +99,7 @@ ASSISTANT_SYSTEM_PROMPT = (
     "call search_knowledge first.\n"
     "- If the user asks about their in-app feed or inbox, call search_content "
     "and search_news as needed.\n"
+    "- If turn instructions require list_unread_news_items, call it before answering.\n"
     "- If the user asks about a specific followed feed, newsletter, or podcast, "
     "call search_subscription_feeds first.\n"
     "- For broad current-events or recent factual questions, call search_web first.\n"
@@ -339,8 +342,26 @@ def _should_route_to_feed_finder(user_text: str) -> bool:
     return has_feed_hint and has_action_hint
 
 
-def _build_turn_instructions(user_text: str) -> str | None:
+def _build_turn_instructions(
+    user_text: str,
+    screen_context: AssistantScreenContext | None = None,
+) -> str | None:
     """Build per-turn routing instructions for the assistant agent."""
+
+    if (
+        screen_context is not None
+        and screen_context.assistant_action == ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS
+    ):
+        return (
+            "For this turn, call list_unread_news_items before answering. "
+            "Use the returned unread in-app fast-news items as the candidate set. "
+            "Pick the most interesting stories by prioritizing surprising, important, "
+            "high-signal, or discussion-worthy items over generic recency. "
+            "For each pick, name the story and briefly explain why it is worth attention. "
+            "If the tool returns no items, say there are no unread fast-news items. "
+            "Do not mark items read, save items, subscribe to feeds, or take any mutation. "
+            "Only call search_web if it is needed to clarify a selected story."
+        )
 
     if _is_small_talk(user_text):
         return None
@@ -537,6 +558,95 @@ def _format_content_hits(
     if len(lines) == 1:
         return f'No in-app content matched "{query}".'
     return "\n".join(lines)
+
+
+def _truncate_tool_text(value: object, *, max_chars: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.strip().split())
+    if not text:
+        return None
+    if len(text) <= max_chars:
+        return text
+    return f"{text[: max_chars - 3].rstrip()}..."
+
+
+def _news_item_sort_timestamp_text(item: NewsItem) -> str | None:
+    timestamp = item.published_at or item.processed_at or item.ingested_at or item.created_at
+    if timestamp is None:
+        return None
+    return timestamp.isoformat()
+
+
+def _news_item_top_comment(item: NewsItem) -> dict[str, str] | None:
+    raw_metadata = item.raw_metadata if isinstance(item.raw_metadata, dict) else {}
+    raw_top_comment = raw_metadata.get("top_comment")
+    if not isinstance(raw_top_comment, dict):
+        return None
+
+    text = _truncate_tool_text(raw_top_comment.get("text"), max_chars=500)
+    if not text:
+        return None
+    author = _truncate_tool_text(raw_top_comment.get("author"), max_chars=80) or "unknown"
+    return {"author": author, "text": text}
+
+
+def _serialize_unread_news_item(item: NewsItem) -> dict[str, object]:
+    title = resolve_news_display_title(
+        item.raw_metadata,
+        summary_text=item.summary_text,
+        fallback=f"News item {item.id}",
+    )
+    url = (
+        item.article_url
+        or item.canonical_story_url
+        or item.discussion_url
+        or item.canonical_item_url
+        or ""
+    )
+    key_points = [
+        point
+        for point in (
+            _truncate_tool_text(raw_point, max_chars=220)
+            for raw_point in (item.summary_key_points or [])
+        )
+        if point
+    ]
+    payload: dict[str, object] = {
+        "id": item.id,
+        "title": title,
+        "source": item.source_label or item.platform or "unknown",
+        "platform": item.platform,
+        "url": url,
+        "summary": _truncate_tool_text(item.summary_text, max_chars=520),
+        "key_points": key_points[:6],
+        "sort_timestamp": _news_item_sort_timestamp_text(item),
+    }
+    top_comment = _news_item_top_comment(item)
+    if top_comment is not None:
+        payload["top_comment"] = top_comment
+    return payload
+
+
+def _build_unread_news_items_payload(
+    db: Session,
+    *,
+    user_id: int,
+    limit: int,
+) -> dict[str, object]:
+    normalized_limit = max(1, min(limit, 200))
+    items, total_count = list_unread_visible_news_items(
+        db,
+        user_id=user_id,
+        limit=normalized_limit,
+    )
+    return {
+        "items": [_serialize_unread_news_item(item) for item in items],
+        "total_count": total_count,
+        "returned_count": len(items),
+        "truncated": total_count > len(items),
+        "limit": normalized_limit,
+    }
 
 
 def _build_agent_cache_key(model_spec: str, api_key_override: str | None) -> tuple[str, str]:
@@ -744,6 +854,19 @@ def _get_or_create_agent(
             news_item_rows=news_item_rows,
             total_news_item_matches=total_news_item_matches,
         )
+
+    @agent.tool(name="list_unread_news_items")
+    def list_unread_news_items_tool(
+        ctx: RunContext[AssistantDeps],
+        limit: int = 100,
+    ) -> dict[str, object]:
+        """List unread visible fast-news items for the current user."""
+        with ctx.deps.session_factory() as db:
+            return _build_unread_news_items_payload(
+                db,
+                user_id=ctx.deps.user_id,
+                limit=limit,
+            )
 
     @agent.tool
     def add_item_to_feed(
@@ -1031,6 +1154,8 @@ def build_screen_context_snapshot(
         lines.append(f"Query: {screen_context.query}")
     if screen_context.note:
         lines.append(f"Client Note: {screen_context.note}")
+    if screen_context.assistant_action:
+        lines.append(f"Assistant Action: {screen_context.assistant_action}")
 
     candidate_ids: list[int] = []
     if screen_context.content_id:
@@ -1154,7 +1279,7 @@ def run_assistant_turn_sync(
 ):
     """Run one assistant turn synchronously and return the raw agent result."""
     agent = _get_or_create_agent(model_spec, api_key_override=provider_api_key)
-    turn_instructions = _build_turn_instructions(user_prompt)
+    turn_instructions = _build_turn_instructions(user_prompt, deps.screen_context)
     prompt_sections: list[str] = []
     if turn_instructions:
         prompt_sections.append(f"Turn instructions:\n{turn_instructions}")

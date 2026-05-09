@@ -6,7 +6,7 @@ from pydantic_ai.models.test import TestModel
 
 from app.core.settings import get_settings
 from app.models.internal.assistant import AssistantScreenContext
-from app.models.schema import Content, ContentStatusEntry, UserScraperConfig
+from app.models.schema import Content, ContentStatusEntry, NewsItemReadStatus, UserScraperConfig
 from app.repositories.search_repository import (
     search_news,
     search_subscription_feeds,
@@ -70,6 +70,22 @@ def test_build_turn_instructions_prefers_content_search_for_feed_summary() -> No
     assert instructions is not None
     assert "search_content" in instructions
     assert "search_news" in instructions
+
+
+def test_build_turn_instructions_requires_unread_news_tool_for_action() -> None:
+    """The unread-news quick action should force the dedicated news tool."""
+
+    instructions = assistant_router._build_turn_instructions(
+        "Pick the best stories.",
+        AssistantScreenContext(
+            screen_type="short_news_feed",
+            assistant_action=assistant_router.ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS,
+        ),
+    )
+
+    assert instructions is not None
+    assert "list_unread_news_items" in instructions
+    assert "Do not mark items read" in instructions
 
 
 def test_build_turn_instructions_skips_small_talk() -> None:
@@ -273,6 +289,63 @@ def test_format_content_hits_includes_news_item_section(visible_news_item) -> No
     assert "Recent News Items:" in formatted
     assert f"[news:{visible_news_item.id}]" in formatted
     assert "summary:" in formatted
+
+
+def test_unread_news_items_payload_filters_read_items_and_reports_truncation(
+    db_session,
+    test_user,
+    news_item_factory,
+) -> None:
+    """Unread-news tool payload should expose unread visible rows with counts."""
+
+    older_unread = news_item_factory(
+        summary_title="Older unread story",
+        summary_text="Older unread summary",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        ingested_at=(datetime.now(UTC) - timedelta(hours=3)).replace(tzinfo=None),
+    )
+    read_item = news_item_factory(
+        summary_title="Already read story",
+        summary_text="Already read summary",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        ingested_at=(datetime.now(UTC) - timedelta(hours=2)).replace(tzinfo=None),
+    )
+    newer_unread = news_item_factory(
+        summary_title="Newer unread story",
+        summary_text="Newer unread summary",
+        summary_key_points=["Newer unread point"],
+        raw_metadata={"top_comment": {"author": "Reader", "text": "Sharp comment"}},
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        ingested_at=(datetime.now(UTC) - timedelta(hours=1)).replace(tzinfo=None),
+    )
+    db_session.add(NewsItemReadStatus(user_id=test_user.id, news_item_id=read_item.id))
+    db_session.commit()
+
+    payload = assistant_router._build_unread_news_items_payload(
+        db_session,
+        user_id=test_user.id,
+        limit=1,
+    )
+
+    assert payload["total_count"] == 2
+    assert payload["returned_count"] == 1
+    assert payload["truncated"] is True
+    items = payload["items"]
+    assert isinstance(items, list)
+    assert all(isinstance(item, dict) for item in items)
+    assert [item["id"] for item in items] == [newer_unread.id]
+    assert items[0]["title"] == "Newer unread story"
+    assert items[0]["summary"] == "Newer unread summary"
+    assert items[0]["key_points"] == ["Newer unread point"]
+    assert items[0]["top_comment"] == {
+        "author": "Reader",
+        "text": "Sharp comment",
+    }
+    assert read_item.id not in {item["id"] for item in items}
+    assert older_unread.id not in {item["id"] for item in items}
 
 
 def test_search_news_returns_recent_visible_rows(
