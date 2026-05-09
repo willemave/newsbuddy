@@ -569,7 +569,11 @@ class StructuredSummary(BaseModel):
 
 GeneratedNewsKeyPoint = Annotated[
     str,
-    Field(min_length=1, max_length=120, description="Concrete news bullet, <=120 characters."),
+    Field(
+        min_length=1,
+        max_length=220,
+        description="Concrete news point, usually one complete sentence, <=220 characters.",
+    ),
 ]
 
 
@@ -589,8 +593,9 @@ class NewsSummary(BaseModel):
                     "Initial rollout targets enterprise customers later expanding to prosumers",
                 ],
                 "summary": (
-                    "OpenAI debuts GPT-5 with native multi-agent features and "
-                    "enterprise-first rollout."
+                    "OpenAI debuts GPT-5 with native multi-agent features for enterprise "
+                    "customers. The launch positions agent orchestration as a first-party "
+                    "workflow instead of a plug-in layer."
                 ),
                 "classification": "to_read",
                 "summarization_date": "2025-09-22T10:30:00Z",
@@ -648,14 +653,14 @@ class GeneratedNewsSummary(NewsSummary):
     key_points: list[GeneratedNewsKeyPoint] = Field(
         ...,
         min_length=2,
-        max_length=3,
-        description="2-3 headline-ready bullet points summarizing the article",
+        max_length=4,
+        description="2-4 headline-ready points summarizing the article",
     )
     summary: str = Field(
         ...,
         min_length=1,
-        max_length=180,
-        description="Required one-sentence overview, <=180 characters.",
+        max_length=500,
+        description="Required short overview paragraph, 2-3 natural sentences, <=500 characters.",
     )
 
     @field_validator("summary", mode="before")

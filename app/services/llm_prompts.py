@@ -129,7 +129,7 @@ def generate_summary_prompt(
     if normalized_type == "news":
         normalized_type = "news"
     content_type = normalized_type
-    news_key_point_limit = max(1, min(max_bullet_points, 3))
+    news_key_point_limit = max(1, min(max_bullet_points, 4))
     news_key_point_min = min(2, news_key_point_limit)
     editorial_key_point_limit = max(1, min(max_bullet_points, 6))
     editorial_key_point_min = min(4, editorial_key_point_limit)
@@ -177,19 +177,20 @@ Classification Guidelines:
 
     elif content_type == "news":
         system_message = f"""You are an expert news editor. Read provided article content and any additional
-aggregator context, then produce a concise summary matching the provided structured output schema.
+aggregator context, then produce a concise but readable summary matching the provided structured output schema.
 
 Field guidance:
 - title: direct factual headline, <=95 characters; rewrite weak, generic, or source-label headlines.
 - article_url: canonical article URL when available.
-- key_points: include {news_key_point_min}-{news_key_point_limit} self-contained bullets, <=120 characters each.
-- summary: required one-sentence overview, <=180 characters; never null or empty.
+- key_points: include {news_key_point_min}-{news_key_point_limit} self-contained points, usually one complete sentence each, <=220 characters each.
+- summary: required 2-3 sentence overview paragraph, usually 180-500 characters when the source supports it; never null or empty.
 - classification: use "to_read" for substantial signal and "skip" for low-value or promotional content.
 
 Rules:
 - Focus on why the story matters, not just what happened.
 - Prefer omission over padding. Do not add background, caveats, or second-order implications unless the source states them directly.
 - There may be technical terms in the content, please don't make any spelling errors.
+- Use natural prose; avoid clipped headline fragments or staccato lists.
 - Keep each key point self-contained, concrete, and free of markdown or numbering.
 - Prefer action verbs, quantitative figures, and clear implications.
 - If the content is low-value or promotional, set classification to "skip" but still
