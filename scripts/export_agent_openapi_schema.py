@@ -21,7 +21,6 @@ ALLOWED_OPERATIONS: dict[tuple[str, str], dict[str, Any]] = {
     ("/api/agent/onboarding", "post"): {"tags": ["onboarding"]},
     ("/api/agent/onboarding/{run_id}", "get"): {"tags": ["onboarding"]},
     ("/api/agent/onboarding/{run_id}/complete", "post"): {"tags": ["onboarding"]},
-    ("/api/agent/digests", "post"): {"tags": ["news"]},
     ("/api/agent/cli/link/start", "post"): {"tags": ["auth"]},
     ("/api/agent/cli/link/{session_id}/approve", "post"): {"tags": ["auth"]},
     ("/api/agent/cli/link/{session_id}", "get"): {"tags": ["auth"]},

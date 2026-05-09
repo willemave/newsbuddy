@@ -89,7 +89,6 @@ class QueueSettingsView(BaseModel):
     checkout_timeout_minutes: int
     queue_backpressure_max_pending_content: int
     queue_backpressure_max_pending_process_news_item: int
-    queue_backpressure_max_pending_generate_agent_digest: int
     max_retry_attempts: int
     max_retries: int
 
@@ -257,14 +256,13 @@ class Settings(BaseSettings):
     checkout_timeout_minutes: int = 30
     queue_backpressure_max_pending_content: int = Field(default=150, ge=1)
     queue_backpressure_max_pending_process_news_item: int = Field(default=75, ge=1)
-    queue_backpressure_max_pending_generate_agent_digest: int = Field(default=5, ge=1)
 
     # Content processing
     max_content_length: int = 100_000
     max_retry_attempts: int = 3
     max_retries: int = 3
 
-    # News-native digest pipeline
+    # News list ranking
     news_embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
     news_embedding_device: str = "auto"  # auto, cpu, cuda, mps
     news_list_reranker_enabled: bool = False
@@ -524,9 +522,6 @@ class Settings(BaseSettings):
             queue_backpressure_max_pending_content=self.queue_backpressure_max_pending_content,
             queue_backpressure_max_pending_process_news_item=(
                 self.queue_backpressure_max_pending_process_news_item
-            ),
-            queue_backpressure_max_pending_generate_agent_digest=(
-                self.queue_backpressure_max_pending_generate_agent_digest
             ),
             max_retry_attempts=self.max_retry_attempts,
             max_retries=self.max_retries,

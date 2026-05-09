@@ -114,9 +114,6 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
     TaskType.DISCOVER_FEEDS: TaskSpec(
         TaskType.DISCOVER_FEEDS, TaskQueue.CONTENT, TaskPayload, "discover_feeds"
     ),
-    TaskType.GENERATE_AGENT_DIGEST: TaskSpec(
-        TaskType.GENERATE_AGENT_DIGEST, TaskQueue.CONTENT, UserPayload, "generate_agent_digest"
-    ),
     TaskType.ONBOARDING_DISCOVER: TaskSpec(
         TaskType.ONBOARDING_DISCOVER, TaskQueue.ONBOARDING, UserPayload, "onboarding_discover"
     ),

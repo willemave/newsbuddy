@@ -154,7 +154,7 @@ newsly-agent content submit "https://example.com/great-post" --wait
 # Browse your unread content
 newsly-agent content list --read-filter unread --limit 20
 
-# Get today's fast news digests
+# Browse today's short-form news
 newsly-agent news list --read-filter unread
 
 # Convert a news item into a full article

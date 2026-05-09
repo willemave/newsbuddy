@@ -153,7 +153,7 @@ final class RevealPhysicsScene: SKScene {
         "Stack", "Debug", "Deploy", "React", "Chips", "Token",
         "Linux", "Neural", "Crypto", "Quantum", "Silicon", "Infra",
         // News & media
-        "News", "Brief", "Story", "Signal", "Digest", "Thread",
+        "News", "Brief", "Story", "Signal", "Update", "Thread",
         "Report", "Source", "Curated", "Insight", "Trends",
         "Headline", "Summary", "Podcast", "Opinion", "Analysis",
         "Breaking", "Editorial",

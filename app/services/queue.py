@@ -763,9 +763,6 @@ class QueueService:
         pending_process_news_item = int(
             content_pending_by_type.get(TaskType.PROCESS_NEWS_ITEM.value, 0)
         )
-        pending_generate_agent_digest = int(
-            content_pending_by_type.get(TaskType.GENERATE_AGENT_DIGEST.value, 0)
-        )
         reasons: list[str] = []
         if content_pending >= queue_settings.queue_backpressure_max_pending_content:
             reasons.append("content_queue_backlog")
@@ -774,26 +771,17 @@ class QueueService:
             >= queue_settings.queue_backpressure_max_pending_process_news_item
         ):
             reasons.append("process_news_item_backlog")
-        if (
-            pending_generate_agent_digest
-            >= queue_settings.queue_backpressure_max_pending_generate_agent_digest
-        ):
-            reasons.append("generate_agent_digest_backlog")
         return {
             "should_throttle": bool(reasons),
             "reasons": reasons,
             "counts": {
                 "pending_content": content_pending,
                 "pending_process_news_item": pending_process_news_item,
-                "pending_generate_agent_digest": pending_generate_agent_digest,
             },
             "thresholds": {
                 "pending_content": queue_settings.queue_backpressure_max_pending_content,
                 "pending_process_news_item": (
                     queue_settings.queue_backpressure_max_pending_process_news_item
-                ),
-                "pending_generate_agent_digest": (
-                    queue_settings.queue_backpressure_max_pending_generate_agent_digest
                 ),
             },
         }

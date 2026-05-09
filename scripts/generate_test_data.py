@@ -58,8 +58,6 @@ sys.path.insert(0, PROJECT_ROOT)
 from sqlalchemy.orm import Session
 
 from app.constants import (
-    CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
-    CONTENT_STATUS_DIGEST_SOURCE,
     CONTENT_STATUS_INBOX,
     SUMMARY_KIND_LONG_BULLETS,
     SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE,
@@ -74,7 +72,6 @@ from app.models.metadata import (
     ArticleMetadata,
     BulletedSummary,
     BulletSummaryPoint,
-    ContentClassification,
     ContentQuote,
     ContentStatus,
     ContentType,
@@ -95,7 +92,6 @@ from app.models.metadata import (
 from app.models.schema import Content, ContentDiscussion, ContentReadStatus, ContentStatusEntry
 from app.models.user import User
 from app.services.news_ingestion import backfill_news_items_from_contents
-from app.services.twitter_share import canonical_tweet_url
 
 # Sample data pools
 ARTICLE_SOURCES = [
@@ -971,103 +967,6 @@ class NewsGenerator:
         }
 
 
-class XDigestTweetGenerator:
-    """Generate digest-only X post test data for a specific user."""
-
-    @staticmethod
-    def generate(
-        *,
-        user_id: int,
-        status: str = ContentStatus.COMPLETED.value,
-        source_type: str = "x_timeline",
-    ) -> dict[str, Any]:
-        """Generate a completed X digest item with production-shaped metadata."""
-        tweet_id = str(random.randint(10**17, (10**18) - 1))
-        tweet_url = canonical_tweet_url(tweet_id)
-        author_username, author_name = random.choice(X_AUTHORS)
-        tweet_text = random.choice(X_POST_TEXTS)
-        source_label = "X Following" if source_type == "x_timeline" else random.choice(X_LISTS)
-        created_at = random_datetime(3)
-        processed_at = min(
-            created_at + timedelta(minutes=random.randint(2, 45)),
-            utc_now_naive(),
-        )
-        metadata = {
-            "digest_visibility": CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
-            "platform": "twitter",
-            "source_type": source_type,
-            "source_label": source_label,
-            "source": source_label,
-            "discussion_url": tweet_url,
-            "submitted_via": "scripts.generate_test_data",
-            "submitted_by_user_id": user_id,
-            "filter_score": round(random.uniform(0.74, 0.97), 2),
-            "filter_reason": (
-                "Includes a concrete product, engineering, or market update with enough"
-                " substance to improve the daily digest."
-            ),
-            "filter_threshold": 0.7,
-            "tweet_id": tweet_id,
-            "tweet_url": tweet_url,
-            "tweet_author": author_name,
-            "tweet_author_username": author_username,
-            "tweet_created_at": created_at,
-            "tweet_like_count": random.randint(12, 1800),
-            "tweet_retweet_count": random.randint(2, 240),
-            "tweet_reply_count": random.randint(1, 80),
-            "tweet_text": tweet_text,
-            "tweet_external_urls": [],
-            "article": {
-                "url": tweet_url,
-                "title": tweet_text[:280],
-                "source_domain": "x.com",
-            },
-            "aggregator": {
-                "name": "X",
-                "title": tweet_text,
-                "url": tweet_url,
-                "external_id": tweet_id,
-                "author": author_name,
-                "metadata": {
-                    "likes": random.randint(12, 1800),
-                    "retweets": random.randint(2, 240),
-                    "replies": random.randint(1, 80),
-                },
-            },
-            "summary_kind": SUMMARY_KIND_SHORT_NEWS,
-            "summary_version": SUMMARY_VERSION_V1,
-            "summary": {
-                "title": tweet_text[:120],
-                "article_url": tweet_url,
-                "key_points": [
-                    "Concrete update with immediate implications for builders or operators.",
-                    "Specific metric or implementation detail gives the post signal.",
-                    "Worth including in a compact daily digest for tracking industry movement.",
-                ],
-                "summary": tweet_text[:280],
-                "classification": ContentClassification.TO_READ.value,
-                "summarization_date": processed_at,
-            },
-        }
-        return {
-            "content_type": ContentType.NEWS.value,
-            "url": f"{tweet_url}#newsly-digest-user-{user_id}",
-            "source_url": tweet_url,
-            "title": tweet_text[:280],
-            "source": source_label,
-            "platform": "twitter",
-            "status": status,
-            "classification": ContentClassification.TO_READ.value,
-            "content_metadata": metadata,
-            "created_at": created_at,
-            "publication_date": created_at,
-            "processed_at": processed_at if status == ContentStatus.COMPLETED.value else None,
-            "is_aggregate": False,
-            "target_user_id": user_id,
-            "target_status": CONTENT_STATUS_DIGEST_SOURCE,
-        }
-
-
 def generate_test_data(
     num_articles: int = 10,
     num_podcasts: int = 5,
@@ -1077,7 +976,6 @@ def generate_test_data(
     podcast_summary_format: str = "mixed",
     news_days_back: int = 5,
     target_user_ids: list[int] | None = None,
-    num_x_posts: int = 0,
 ) -> list[dict[str, Any]]:
     """
     Generate a mix of test data across all content types.
@@ -1088,8 +986,7 @@ def generate_test_data(
         num_news: Number of news items to generate
         include_pending: Include some items in pending/processing states
         news_days_back: Spread generated news across this many recent UTC days
-        target_user_ids: Optional target users for digest-only X items
-        num_x_posts: Number of digest-only X items to generate
+        target_user_ids: Optional target users for inbox assignment
 
     Returns:
         List of content dictionaries ready for database insertion
@@ -1124,16 +1021,6 @@ def generate_test_data(
                 day_offset=i % max(news_days_back, 1),
             )
         )
-
-    if num_x_posts > 0 and target_user_ids:
-        x_target_user_id = target_user_ids[0]
-        for i in range(num_x_posts):
-            data.append(
-                XDigestTweetGenerator.generate(
-                    user_id=x_target_user_id,
-                    source_type="x_timeline" if i % 2 == 0 else "x_list",
-                )
-            )
 
     return data
 
@@ -1338,12 +1225,6 @@ def main():
     parser.add_argument("--podcasts", type=int, default=5, help="Number of podcasts to generate")
     parser.add_argument("--news", type=int, default=30, help="Number of news items to generate")
     parser.add_argument(
-        "--x-posts",
-        type=int,
-        default=0,
-        help="Number of digest-only X posts to generate for the first target user",
-    )
-    parser.add_argument(
         "--news-days-back",
         type=int,
         default=5,
@@ -1399,7 +1280,6 @@ def main():
     print(f"  - {args.articles} articles")
     print(f"  - {args.podcasts} podcasts")
     print(f"  - {args.news} news items")
-    print(f"  - {args.x_posts} digest-only X post(s)")
     print(f"  - News spread across {args.news_days_back} day(s)")
 
     init_db()
@@ -1416,12 +1296,6 @@ def main():
             print("  - Inbox assignment user IDs: all users")
         else:
             print(f"  - Inbox assignment user IDs: {', '.join(map(str, user_ids))}")
-        if args.x_posts and not user_ids:
-            parser.error(
-                "--x-posts requires --user-ids or --logged-in-user "
-                "so the digest items can be user-scoped."
-            )
-
         data = generate_test_data(
             num_articles=args.articles,
             num_podcasts=args.podcasts,
@@ -1431,23 +1305,16 @@ def main():
             podcast_summary_format=args.podcast_summary_format,
             news_days_back=args.news_days_back,
             target_user_ids=user_ids,
-            num_x_posts=args.x_posts,
         )
 
         if args.dry_run:
             print(f"\nDry run - generated {len(data)} items (not inserted)")
             article_sample = next((d for d in data if d["content_type"] == "article"), None)
-            x_sample = next((d for d in data if d["platform"] == "twitter"), None)
             if article_sample:
                 print("\nSample article:")
                 print(f"  Title: {article_sample['title']}")
                 print(f"  Source: {article_sample['source']}")
                 print(f"  Status: {article_sample['status']}")
-            if x_sample:
-                print("\nSample X digest item:")
-                print(f"  Title: {x_sample['title']}")
-                print(f"  URL: {x_sample['source_url']}")
-                print(f"  Target user: {x_sample['target_user_id']}")
             return
 
         # Insert into database

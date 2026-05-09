@@ -8,7 +8,7 @@ Business-logic layer for LLM access, content analysis and submission, chat, disc
 ## Runtime behavior
 - Holds the orchestration-heavy logic that routers and handlers call into, including URL analysis, summarization, chat turns, discovery, and image generation.
 - Contains adapter services for multiple model providers, telemetry/tracing, prompt construction, metadata merging, and provider usage accounting.
-- Implements end-user features such as favorites, read state, feed subscription, tweet suggestions, daily digests, and onboarding workflows.
+- Implements end-user features such as favorites, read state, feed subscription, tweet suggestions, short-form news, and onboarding workflows.
 
 ## Inventory scope
 - Direct file inventory for `app/services`.

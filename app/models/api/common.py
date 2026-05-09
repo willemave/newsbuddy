@@ -1300,18 +1300,3 @@ class AgentOnboardingCompleteRequest(BaseModel):
     source_ids: list[int] = Field(default_factory=list)
     selected_subreddits: list[str] = Field(default_factory=list)
     selected_aggregators: list[OnboardingSelectedAggregator] = Field(default_factory=list)
-
-
-class AgentDigestRequest(BaseModel):
-    """Agent digest generation request for arbitrary windows."""
-
-    start_at: datetime
-    end_at: datetime
-    form: Literal["short", "long"] = "short"
-
-
-class AgentDigestResponse(BaseModel):
-    """Async agent digest generation response."""
-
-    job_id: int
-    status: str = "queued"

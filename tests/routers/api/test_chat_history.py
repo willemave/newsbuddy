@@ -27,7 +27,7 @@ def _multi_step_message_list() -> str:
         {
             "parts": [
                 {
-                    "content": "Dig deeper into these digest bullets.",
+                    "content": "Dig deeper into these news bullets.",
                     "timestamp": "2026-03-08T17:05:02.295881Z",
                     "part_kind": "user-prompt",
                 }
@@ -41,7 +41,7 @@ def _multi_step_message_list() -> str:
         {
             "parts": [
                 {
-                    "content": "I'll research each of these digest bullets first.",
+                    "content": "I'll research each of these news bullets first.",
                     "id": None,
                     "provider_name": None,
                     "provider_details": None,
@@ -113,7 +113,7 @@ def _multi_step_message_list() -> str:
 def test_extract_messages_for_display_hides_intermediate_agent_scaffolding(db_session) -> None:
     session = ChatSession(
         user_id=123,
-        title="Digest chat",
+        title="News chat",
         session_type="article_brain",
         llm_provider="anthropic",
         llm_model="anthropic:claude-opus-4-6",
@@ -149,7 +149,7 @@ def test_extract_messages_for_display_hides_intermediate_agent_scaffolding(db_se
     display_messages = _extract_messages_for_display(db_session, session.id)
 
     assert [message.role.value for message in display_messages] == ["user", "tool", "assistant"]
-    assert display_messages[0].content == "Dig deeper into these digest bullets."
+    assert display_messages[0].content == "Dig deeper into these news bullets."
     assert display_messages[1].display_type.value == "process_summary"
     assert display_messages[1].content == "Thinking • Executed 1 tool and reviewed sources"
     assert display_messages[2].content == "Final deep-dive answer."
@@ -159,7 +159,7 @@ def test_extract_messages_for_display_hides_intermediate_agent_scaffolding(db_se
 def test_extract_messages_for_display_omits_process_summary_for_simple_turn(db_session) -> None:
     session = ChatSession(
         user_id=123,
-        title="Digest chat",
+        title="News chat",
         session_type="article_brain",
         llm_provider="anthropic",
         llm_model="anthropic:claude-opus-4-6",
@@ -297,7 +297,7 @@ def test_extract_messages_for_display_sanitizes_legacy_model_facing_user_prompt(
 def test_extract_last_message_preview_prefers_final_assistant_text(db_session) -> None:
     session = ChatSession(
         user_id=123,
-        title="Digest chat",
+        title="News chat",
         session_type="article_brain",
         llm_provider="anthropic",
         llm_model="anthropic:claude-opus-4-6",

@@ -26,7 +26,6 @@ def test_build_news_item_upsert_input_from_content_infers_user_scope() -> None:
         platform="twitter",
         status="completed",
         content_metadata={
-            "digest_visibility": "digest_only",
             "submitted_by_user_id": 7,
             "tweet_id": "123",
             "tweet_url": "https://x.com/i/status/123",

@@ -13,7 +13,7 @@ Folder-by-folder reference for the SwiftUI app, share extension, project metadat
 | `20-app-target-root.md` | `client/newsly/newsly` | SwiftUI app target root containing the `App` entrypoint, primary tab container, Info.plist metadata, and target entitlements. |
 | `30-models.md` | `client/newsly/newsly/Models` | Typed client-side models for API payloads, navigation routes, summaries, content metadata, discovery results, chat, onboarding, and live voice. |
 | `31-models-generated.md` | `client/newsly/newsly/Models/Generated` | Generated API contract models synchronized from the backend schema for places where the client wants compile-time alignment with exported OpenAPI contracts. |
-| `40-repositories.md` | `client/newsly/newsly/Repositories` | Repository layer that wraps `APIClient` calls for content, read-state, and daily digest endpoints into higher-level async methods used by view models. |
+| `40-repositories.md` | `client/newsly/newsly/Repositories` | Repository layer that wraps `APIClient` calls for content and read-state endpoints into higher-level async methods used by view models. |
 | `50-services.md` | `client/newsly/newsly/Services` | App services for authentication, API transport, websocket voice, image caching, notifications, settings, chat helpers, discovery, and background/shared state. |
 | `60-shared.md` | `client/newsly/newsly/Shared` | Shared observable state and container helpers reused across tabs, detail flows, onboarding, and the share extension. |
 | `70-view-models.md` | `client/newsly/newsly/ViewModels` | ObservableObject view models coordinating repositories, services, and navigation state for list/detail screens, onboarding, discovery, live voice, and chat. |
@@ -26,7 +26,7 @@ Folder-by-folder reference for the SwiftUI app, share extension, project metadat
 | `86-views-library.md` | `client/newsly/newsly/Views/Library` | Library-oriented SwiftUI surfaces for saved/favorited content. |
 | `90-share-extension.md` | `client/newsly/ShareExtension` | Share extension target that receives shared URLs from iOS, reads shared auth state, and forwards submissions into the backend pipeline. |
 | `94-scripts.md` | `client/newsly/scripts` | Client-specific helper scripts for regenerating derived assets such as API contracts. |
-| `95-tests.md` | `client/newsly/newslyTests` | Focused iOS unit tests covering share routing, onboarding animation progress, and news-digest dig-deeper behavior. |
+| `95-tests.md` | `client/newsly/newslyTests` | Focused iOS unit tests covering share routing, onboarding animation progress, and news dig-deeper behavior. |
 | `96-xcode-project.md` | `client/newsly/newsly.xcodeproj` | Xcode project metadata including schemes, workspace settings, package resolution, and target membership for the app and share extension. |
 
 ## Concat command

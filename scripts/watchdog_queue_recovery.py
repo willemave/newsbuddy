@@ -4,7 +4,7 @@
 Runs the same safety actions operators have been running manually:
 1. Move media tasks into the dedicated media queue.
 2. Requeue stale media processing tasks.
-3. Requeue stale content, agent digest, and integration processing tasks.
+3. Requeue stale content, news item, and integration processing tasks.
 
 The script supports one-shot mode (cron) and loop mode (supervisor/systemd).
 """
@@ -75,7 +75,6 @@ class WatchdogRunResult:
     requeued_media: ActionResult
     requeued_process_content: ActionResult
     requeued_process_news_item: ActionResult
-    requeued_generate_agent_digest: ActionResult
     requeued_sync_integration: ActionResult
 
     @property
@@ -86,7 +85,6 @@ class WatchdogRunResult:
             + self.requeued_media.touched_count
             + self.requeued_process_content.touched_count
             + self.requeued_process_news_item.touched_count
-            + self.requeued_generate_agent_digest.touched_count
             + self.requeued_sync_integration.touched_count
         )
 
@@ -228,7 +226,6 @@ def _record_watchdog_events(result: WatchdogRunResult) -> None:
         result.requeued_media,
         result.requeued_process_content,
         result.requeued_process_news_item,
-        result.requeued_generate_agent_digest,
         result.requeued_sync_integration,
     ]
     for action in action_results:
@@ -267,9 +264,6 @@ def _record_watchdog_events(result: WatchdogRunResult) -> None:
                 "requeued_media": result.requeued_media.touched_count,
                 "requeued_process_content": result.requeued_process_content.touched_count,
                 "requeued_process_news_item": result.requeued_process_news_item.touched_count,
-                "requeued_generate_agent_digest": (
-                    result.requeued_generate_agent_digest.touched_count
-                ),
                 "requeued_sync_integration": result.requeued_sync_integration.touched_count,
                 "dry_run": result.dry_run,
             },
@@ -287,8 +281,6 @@ def _send_slack_alert(webhook_url: str, result: WatchdogRunResult) -> tuple[bool
             f" requeue_media={result.requeued_media.touched_count}"
             f" requeue_process_content={result.requeued_process_content.touched_count}"
             f" requeue_process_news_item={result.requeued_process_news_item.touched_count}"
-            f" requeue_generate_agent_digest="
-            f"{result.requeued_generate_agent_digest.touched_count}"
             f" requeue_sync_integration={result.requeued_sync_integration.touched_count}"
         )
     }
@@ -336,7 +328,6 @@ def run_watchdog_once(
     transcribe_stale_hours: float | None = None,
     process_content_stale_hours: float,
     process_news_item_stale_hours: float | None = None,
-    generate_agent_digest_stale_hours: float | None = None,
     sync_integration_stale_hours: float | None = None,
     alert_threshold: int,
     slack_webhook_url: str | None,
@@ -349,9 +340,6 @@ def run_watchdog_once(
         media_stale_hours
         if media_stale_hours is not None
         else (transcribe_stale_hours if transcribe_stale_hours is not None else 2.0)
-    )
-    effective_generate_agent_digest_stale_hours = (
-        generate_agent_digest_stale_hours if generate_agent_digest_stale_hours is not None else 2.0
     )
     effective_sync_integration_stale_hours = (
         sync_integration_stale_hours if sync_integration_stale_hours is not None else 2.0
@@ -391,14 +379,6 @@ def run_watchdog_once(
         dry_run=dry_run,
         limit=action_limit,
     )
-    requeued_generate_agent_digest = _requeue_stale_tasks(
-        session,
-        task_types=[TaskType.GENERATE_AGENT_DIGEST.value],
-        action_name="requeue_stale_generate_agent_digest",
-        stale_hours=effective_generate_agent_digest_stale_hours,
-        dry_run=dry_run,
-        limit=action_limit,
-    )
     requeued_sync_integration = _requeue_stale_tasks(
         session,
         task_types=[TaskType.SYNC_INTEGRATION.value],
@@ -417,7 +397,6 @@ def run_watchdog_once(
         requeued_media=requeued_media,
         requeued_process_content=requeued_process_content,
         requeued_process_news_item=requeued_process_news_item,
-        requeued_generate_agent_digest=requeued_generate_agent_digest,
         requeued_sync_integration=requeued_sync_integration,
     )
 
@@ -463,12 +442,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             _env_float("QUEUE_WATCHDOG_TRANSCRIBE_STALE_HOURS", 2.0),
         ),
         help="Requeue media processing tasks older than this many hours",
-    )
-    parser.add_argument(
-        "--generate-agent-digest-stale-hours",
-        type=float,
-        default=_env_float("QUEUE_WATCHDOG_GENERATE_AGENT_DIGEST_STALE_HOURS", 2.0),
-        help="Requeue generate_agent_digest tasks older than this many hours",
     )
     parser.add_argument(
         "--sync-integration-stale-hours",
@@ -534,10 +507,6 @@ def _print_result(result: WatchdogRunResult) -> None:
     print(f"  requeue_stale_media: {result.requeued_media.touched_count}")
     print(f"  requeue_stale_process_content: {result.requeued_process_content.touched_count}")
     print(f"  requeue_stale_process_news_item: {result.requeued_process_news_item.touched_count}")
-    print(
-        "  requeue_stale_generate_agent_digest: "
-        f"{result.requeued_generate_agent_digest.touched_count}"
-    )
     print(f"  requeue_stale_sync_integration: {result.requeued_sync_integration.touched_count}")
     print(f"  total_touched: {result.total_touched}")
 
@@ -574,9 +543,6 @@ def main(argv: list[str] | None = None) -> int:
                             result = run_watchdog_once(
                                 session=session,
                                 media_stale_hours=float(args.media_stale_hours),
-                                generate_agent_digest_stale_hours=float(
-                                    args.generate_agent_digest_stale_hours
-                                ),
                                 sync_integration_stale_hours=float(
                                     args.sync_integration_stale_hours
                                 ),

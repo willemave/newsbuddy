@@ -13,10 +13,6 @@ type ConvertNewsItemToArticleRes interface {
 	convertNewsItemToArticleRes()
 }
 
-type GenerateDigestRes interface {
-	generateDigestRes()
-}
-
 type GetAgentLibraryFileRes interface {
 	getAgentLibraryFileRes()
 }

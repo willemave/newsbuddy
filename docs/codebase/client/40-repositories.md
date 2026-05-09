@@ -3,11 +3,11 @@
 Source folder: `client/newsly/newsly/Repositories`
 
 ## Purpose
-Repository layer that wraps `APIClient` calls for content, read-state, and daily digest endpoints into higher-level async methods used by view models.
+Repository layer that wraps `APIClient` calls for content and read-state endpoints into higher-level async methods used by view models.
 
 ## Runtime behavior
 - Keeps transport details out of view models by exposing feature-shaped repository methods.
-- Encapsulates content feed pagination, read/unread updates, and daily digest retrieval behind stable interfaces.
+- Encapsulates content feed pagination and read/unread updates behind stable interfaces.
 
 ## Inventory scope
 - Direct file inventory for `client/newsly/newsly/Repositories`.

@@ -122,55 +122,6 @@
         "title": "AdminLoginResponse",
         "type": "object"
       },
-      "AgentDigestRequest": {
-        "description": "Agent digest generation request for arbitrary windows.",
-        "properties": {
-          "end_at": {
-            "format": "date-time",
-            "title": "End At",
-            "type": "string"
-          },
-          "form": {
-            "default": "short",
-            "enum": [
-              "short",
-              "long"
-            ],
-            "title": "Form",
-            "type": "string"
-          },
-          "start_at": {
-            "format": "date-time",
-            "title": "Start At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "start_at",
-          "end_at"
-        ],
-        "title": "AgentDigestRequest",
-        "type": "object"
-      },
-      "AgentDigestResponse": {
-        "description": "Async agent digest generation response.",
-        "properties": {
-          "job_id": {
-            "title": "Job Id",
-            "type": "integer"
-          },
-          "status": {
-            "default": "queued",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "job_id"
-        ],
-        "title": "AgentDigestResponse",
-        "type": "object"
-      },
       "AgentLibraryDocumentResponse": {
         "description": "One manifest entry for a personal markdown document.",
         "properties": {
@@ -672,6 +623,18 @@
       "AssistantScreenContextDto": {
         "description": "API schema wrapper for assistant screen context.",
         "properties": {
+          "assistant_action": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistant Action"
+          },
           "content_id": {
             "anyOf": [
               {
@@ -683,6 +646,18 @@
               }
             ],
             "title": "Content Id"
+          },
+          "news_item_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News Item Id"
           },
           "note": {
             "anyOf": [
@@ -744,6 +719,14 @@
             },
             "maxItems": 12,
             "title": "Visible Content Ids",
+            "type": "array"
+          },
+          "visible_news_item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 12,
+            "title": "Visible News Item Ids",
             "type": "array"
           }
         },
@@ -1282,6 +1265,17 @@
             "title": "Llm Provider",
             "type": "string"
           },
+          "news_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News Item Id"
+          },
           "session_type": {
             "anyOf": [
               {
@@ -1332,6 +1326,7 @@
           "id",
           "title",
           "content_id",
+          "news_item_id",
           "session_type",
           "topic",
           "llm_model",
@@ -2152,6 +2147,17 @@
       "ContentDiscussionResponse": {
         "description": "Discussion payload for a content item.",
         "properties": {
+          "comment_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Count"
+          },
           "comments": {
             "items": {
               "$ref": "#/components/schemas/DiscussionCommentResponse"
@@ -2250,6 +2256,18 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           }
         },
         "required": [
@@ -3065,6 +3083,18 @@
               }
             ],
             "description": "LLM provider (defaults to openai)"
+          },
+          "news_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "News item ID to chat about",
+            "title": "News Item Id"
           },
           "topic": {
             "anyOf": [
@@ -4027,6 +4057,7 @@
           "anthropic",
           "google",
           "cerebras",
+          "openrouter",
           "deep_research"
         ],
         "title": "LLMProvider",
@@ -5943,7 +5974,6 @@
           "long_bullets",
           "long_editorial_narrative",
           "short_news",
-          "daily_rollup",
           "longform_artifact",
           "insight_report"
         ],
@@ -6098,7 +6128,7 @@
         "example": {
           "content_id": 123,
           "creativity": 7,
-          "model": "google:gemini-3.1-flash-lite-preview",
+          "model": "openrouter:deepseek/deepseek-v4-flash",
           "suggestions": [
             {
               "id": 1,
@@ -6133,7 +6163,7 @@
             "description": "Length preference used for generation"
           },
           "model": {
-            "default": "google:gemini-3.1-flash-lite-preview",
+            "default": "openrouter:deepseek/deepseek-v4-flash",
             "description": "LLM model used for generation",
             "title": "Model",
             "type": "string"
@@ -7476,60 +7506,6 @@
         ]
       }
     },
-    "/api/agent/digests": {
-      "post": {
-        "description": "Queue arbitrary-window digest generation for agent clients.",
-        "operationId": "generateDigest",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/AgentDigestRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Payload"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentDigestResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Generate Digest",
-        "tags": [
-          "agent"
-        ]
-      }
-    },
     "/api/agent/library/file": {
       "get": {
         "description": "Return one rendered markdown document by relative manifest path.",
@@ -8208,6 +8184,24 @@
             }
           },
           {
+            "description": "Filter by news item ID",
+            "in": "query",
+            "name": "news_item_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by news item ID",
+              "title": "News Item Id"
+            }
+          },
+          {
             "description": "Maximum sessions to return",
             "in": "query",
             "name": "limit",
@@ -8333,6 +8327,24 @@
               ],
               "description": "Filter by content ID",
               "title": "Content Id"
+            }
+          },
+          {
+            "description": "Filter by news item ID",
+            "in": "query",
+            "name": "news_item_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by news item ID",
+              "title": "News Item Id"
             }
           },
           {
@@ -8766,7 +8778,7 @@
     },
     "/api/content/chat/sessions/{session_id}/initial-suggestions": {
       "post": {
-        "description": "Generate initial follow-up question suggestions for an article-based session. Only works for sessions with a content_id (article-based sessions).",
+        "description": "Generate initial follow-up question suggestions for an article-based session. Only works for sessions with content or news context.",
         "operationId": "getContentChatSessionsInitialSuggestions",
         "parameters": [
           {

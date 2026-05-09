@@ -559,15 +559,3 @@ def test_convert_news_item_to_article_reuses_existing_article_and_saves_to_knowl
         )
         is True
     )
-
-
-def test_removed_digest_routes_return_not_found(client) -> None:
-    for path in (
-        "/api/news/digests",
-        "/api/news/digests/1",
-        "/api/news/digests/1/mark-read",
-        "/api/news/digests/1/bullets/1/dig-deeper",
-        "/api/agent/digests",
-    ):
-        response = client.get(path) if path == "/api/news/digests" else client.post(path)
-        assert response.status_code == 404

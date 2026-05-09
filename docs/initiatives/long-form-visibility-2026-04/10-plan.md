@@ -24,7 +24,7 @@ This means long-form read paths must not inspect JSON metadata for visibility or
 
 Current production behavior drifted away from the intended contract:
 
-- long-form list reads still gate visibility on JSON metadata such as `digest_visibility`
+- long-form list reads still gate visibility on JSON metadata
 - long-form list rendering still drops rows when `image_generated_at` is missing
 - long-form stats still scan JSON metadata for `image_generated_at`
 - long-form UI polls several orthogonal endpoints together

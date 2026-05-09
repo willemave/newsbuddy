@@ -11,7 +11,6 @@ from typing import Any
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
-from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
 from app.core.logging import get_logger
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
 from app.models.metadata import ContentType
@@ -196,8 +195,6 @@ def _infer_visibility_scope(
     metadata: dict[str, Any], user_id: int | None
 ) -> NewsItemVisibilityScope:
     if user_id is not None:
-        return NewsItemVisibilityScope.USER
-    if metadata.get("digest_visibility") == CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY:
         return NewsItemVisibilityScope.USER
     if metadata.get("submitted_by_user_id") is not None:
         return NewsItemVisibilityScope.USER

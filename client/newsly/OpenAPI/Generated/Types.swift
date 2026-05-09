@@ -164,13 +164,6 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /api/agent/cli/link/{session_id}/approve`.
     /// - Remark: Generated from `#/paths//api/agent/cli/link/{session_id}/approve/post(approveCliLink)`.
     func approveCliLink(_ input: Operations.ApproveCliLink.Input) async throws -> Operations.ApproveCliLink.Output
-    /// Generate Digest
-    ///
-    /// Queue arbitrary-window digest generation for agent clients.
-    ///
-    /// - Remark: HTTP `POST /api/agent/digests`.
-    /// - Remark: Generated from `#/paths//api/agent/digests/post(generateDigest)`.
-    func generateDigest(_ input: Operations.GenerateDigest.Input) async throws -> Operations.GenerateDigest.Output
     /// Get Agent Library File
     ///
     /// Return one rendered markdown document by relative manifest path.
@@ -313,7 +306,7 @@ internal protocol APIProtocol: Sendable {
     func startContentChatSessionsCouncilMode(_ input: Operations.StartContentChatSessionsCouncilMode.Input) async throws -> Operations.StartContentChatSessionsCouncilMode.Output
     /// Get initial suggestions
     ///
-    /// Generate initial follow-up question suggestions for an article-based session. Only works for sessions with a content_id (article-based sessions).
+    /// Generate initial follow-up question suggestions for an article-based session. Only works for sessions with content or news context.
     ///
     /// - Remark: HTTP `POST /api/content/chat/sessions/{session_id}/initial-suggestions`.
     /// - Remark: Generated from `#/paths//api/content/chat/sessions/{session_id}/initial-suggestions/post(getContentChatSessionsInitialSuggestions)`.
@@ -1166,15 +1159,6 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// Generate Digest
-    ///
-    /// Queue arbitrary-window digest generation for agent clients.
-    ///
-    /// - Remark: HTTP `POST /api/agent/digests`.
-    /// - Remark: Generated from `#/paths//api/agent/digests/post(generateDigest)`.
-    internal func generateDigest(headers: Operations.GenerateDigest.Input.Headers = .init()) async throws -> Operations.GenerateDigest.Output {
-        try await generateDigest(Operations.GenerateDigest.Input(headers: headers))
-    }
     /// Get Agent Library File
     ///
     /// Return one rendered markdown document by relative manifest path.
@@ -1487,7 +1471,7 @@ extension APIProtocol {
     }
     /// Get initial suggestions
     ///
-    /// Generate initial follow-up question suggestions for an article-based session. Only works for sessions with a content_id (article-based sessions).
+    /// Generate initial follow-up question suggestions for an article-based session. Only works for sessions with content or news context.
     ///
     /// - Remark: HTTP `POST /api/content/chat/sessions/{session_id}/initial-suggestions`.
     /// - Remark: Generated from `#/paths//api/content/chat/sessions/{session_id}/initial-suggestions/post(getContentChatSessionsInitialSuggestions)`.
@@ -2749,67 +2733,6 @@ internal enum Components {
                 case message
             }
         }
-        /// Agent digest generation request for arbitrary windows.
-        ///
-        /// - Remark: Generated from `#/components/schemas/AgentDigestRequest`.
-        internal struct AgentDigestRequest: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/AgentDigestRequest/end_at`.
-            internal var endAt: Foundation.Date
-            /// - Remark: Generated from `#/components/schemas/AgentDigestRequest/form`.
-            internal enum FormPayload: String, Codable, Hashable, Sendable, CaseIterable {
-                case short = "short"
-                case long = "long"
-            }
-            /// - Remark: Generated from `#/components/schemas/AgentDigestRequest/form`.
-            internal var form: Components.Schemas.AgentDigestRequest.FormPayload?
-            /// - Remark: Generated from `#/components/schemas/AgentDigestRequest/start_at`.
-            internal var startAt: Foundation.Date
-            /// Creates a new `AgentDigestRequest`.
-            ///
-            /// - Parameters:
-            ///   - endAt:
-            ///   - form:
-            ///   - startAt:
-            internal init(
-                endAt: Foundation.Date,
-                form: Components.Schemas.AgentDigestRequest.FormPayload? = nil,
-                startAt: Foundation.Date
-            ) {
-                self.endAt = endAt
-                self.form = form
-                self.startAt = startAt
-            }
-            internal enum CodingKeys: String, CodingKey {
-                case endAt = "end_at"
-                case form
-                case startAt = "start_at"
-            }
-        }
-        /// Async agent digest generation response.
-        ///
-        /// - Remark: Generated from `#/components/schemas/AgentDigestResponse`.
-        internal struct AgentDigestResponse: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/AgentDigestResponse/job_id`.
-            internal var jobId: Swift.Int
-            /// - Remark: Generated from `#/components/schemas/AgentDigestResponse/status`.
-            internal var status: Swift.String?
-            /// Creates a new `AgentDigestResponse`.
-            ///
-            /// - Parameters:
-            ///   - jobId:
-            ///   - status:
-            internal init(
-                jobId: Swift.Int,
-                status: Swift.String? = nil
-            ) {
-                self.jobId = jobId
-                self.status = status
-            }
-            internal enum CodingKeys: String, CodingKey {
-                case jobId = "job_id"
-                case status
-            }
-        }
         /// One manifest entry for a personal markdown document.
         ///
         /// - Remark: Generated from `#/components/schemas/AgentLibraryDocumentResponse`.
@@ -3201,21 +3124,27 @@ internal enum Components {
             internal var screenType: Swift.String?
             /// - Remark: Generated from `#/components/schemas/AssistantScreenContextDto/visible_content_ids`.
             internal var visibleContentIds: [Swift.Int]?
+            /// - Remark: Generated from `#/components/schemas/AssistantScreenContextDto/visible_news_item_ids`.
+            internal var visibleNewsItemIds: [Swift.Int]?
             /// Creates a new `AssistantScreenContextDto`.
             ///
             /// - Parameters:
             ///   - screenType:
             ///   - visibleContentIds:
+            ///   - visibleNewsItemIds:
             internal init(
                 screenType: Swift.String? = nil,
-                visibleContentIds: [Swift.Int]? = nil
+                visibleContentIds: [Swift.Int]? = nil,
+                visibleNewsItemIds: [Swift.Int]? = nil
             ) {
                 self.screenType = screenType
                 self.visibleContentIds = visibleContentIds
+                self.visibleNewsItemIds = visibleNewsItemIds
             }
             internal enum CodingKeys: String, CodingKey {
                 case screenType = "screen_type"
                 case visibleContentIds = "visible_content_ids"
+                case visibleNewsItemIds = "visible_news_item_ids"
             }
         }
         /// Request to create or continue a screen-aware assistant conversation.
@@ -5365,6 +5294,7 @@ internal enum Components {
             case anthropic = "anthropic"
             case google = "google"
             case cerebras = "cerebras"
+            case openrouter = "openrouter"
             case deepResearch = "deep_research"
         }
         /// Response containing unread long-form count for a user.
@@ -6775,7 +6705,6 @@ internal enum Components {
             case longBullets = "long_bullets"
             case longEditorialNarrative = "long_editorial_narrative"
             case shortNews = "short_news"
-            case dailyRollup = "daily_rollup"
             case longformArtifact = "longform_artifact"
             case insightReport = "insight_report"
         }
@@ -10553,169 +10482,6 @@ internal enum Operations {
             /// - Throws: An error if `self` is not `.unprocessableContent`.
             /// - SeeAlso: `.unprocessableContent`.
             internal var unprocessableContent: Operations.ApproveCliLink.Output.UnprocessableContent {
-                get throws {
-                    switch self {
-                    case let .unprocessableContent(response):
-                        return response
-                    default:
-                        try throwUnexpectedResponseStatus(
-                            expectedStatus: "unprocessableContent",
-                            response: self
-                        )
-                    }
-                }
-            }
-            /// Undocumented response.
-            ///
-            /// A response with a code that is not documented in the OpenAPI document.
-            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
-        }
-        internal enum AcceptableContentType: AcceptableProtocol {
-            case json
-            case other(Swift.String)
-            internal init?(rawValue: Swift.String) {
-                switch rawValue.lowercased() {
-                case "application/json":
-                    self = .json
-                default:
-                    self = .other(rawValue)
-                }
-            }
-            internal var rawValue: Swift.String {
-                switch self {
-                case let .other(string):
-                    return string
-                case .json:
-                    return "application/json"
-                }
-            }
-            internal static var allCases: [Self] {
-                [
-                    .json
-                ]
-            }
-        }
-    }
-    /// Generate Digest
-    ///
-    /// Queue arbitrary-window digest generation for agent clients.
-    ///
-    /// - Remark: HTTP `POST /api/agent/digests`.
-    /// - Remark: Generated from `#/paths//api/agent/digests/post(generateDigest)`.
-    internal enum GenerateDigest {
-        internal static let id: Swift.String = "generateDigest"
-        internal struct Input: Sendable, Hashable {
-            /// - Remark: Generated from `#/paths/api/agent/digests/POST/header`.
-            internal struct Headers: Sendable, Hashable {
-                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GenerateDigest.AcceptableContentType>]
-                /// Creates a new `Headers`.
-                ///
-                /// - Parameters:
-                ///   - accept:
-                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GenerateDigest.AcceptableContentType>] = .defaultValues()) {
-                    self.accept = accept
-                }
-            }
-            internal var headers: Operations.GenerateDigest.Input.Headers
-            /// Creates a new `Input`.
-            ///
-            /// - Parameters:
-            ///   - headers:
-            internal init(headers: Operations.GenerateDigest.Input.Headers = .init()) {
-                self.headers = headers
-            }
-        }
-        internal enum Output: Sendable, Hashable {
-            internal struct Ok: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/agent/digests/POST/responses/200/content`.
-                internal enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/agent/digests/POST/responses/200/content/application\/json`.
-                    case json(Components.Schemas.AgentDigestResponse)
-                    /// The associated value of the enum case if `self` is `.json`.
-                    ///
-                    /// - Throws: An error if `self` is not `.json`.
-                    /// - SeeAlso: `.json`.
-                    internal var json: Components.Schemas.AgentDigestResponse {
-                        get throws {
-                            switch self {
-                            case let .json(body):
-                                return body
-                            }
-                        }
-                    }
-                }
-                /// Received HTTP response body
-                internal var body: Operations.GenerateDigest.Output.Ok.Body
-                /// Creates a new `Ok`.
-                ///
-                /// - Parameters:
-                ///   - body: Received HTTP response body
-                internal init(body: Operations.GenerateDigest.Output.Ok.Body) {
-                    self.body = body
-                }
-            }
-            /// Successful Response
-            ///
-            /// - Remark: Generated from `#/paths//api/agent/digests/post(generateDigest)/responses/200`.
-            ///
-            /// HTTP response code: `200 ok`.
-            case ok(Operations.GenerateDigest.Output.Ok)
-            /// The associated value of the enum case if `self` is `.ok`.
-            ///
-            /// - Throws: An error if `self` is not `.ok`.
-            /// - SeeAlso: `.ok`.
-            internal var ok: Operations.GenerateDigest.Output.Ok {
-                get throws {
-                    switch self {
-                    case let .ok(response):
-                        return response
-                    default:
-                        try throwUnexpectedResponseStatus(
-                            expectedStatus: "ok",
-                            response: self
-                        )
-                    }
-                }
-            }
-            internal struct UnprocessableContent: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/api/agent/digests/POST/responses/422/content`.
-                internal enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/api/agent/digests/POST/responses/422/content/application\/json`.
-                    case json(Components.Schemas.HTTPValidationError)
-                    /// The associated value of the enum case if `self` is `.json`.
-                    ///
-                    /// - Throws: An error if `self` is not `.json`.
-                    /// - SeeAlso: `.json`.
-                    internal var json: Components.Schemas.HTTPValidationError {
-                        get throws {
-                            switch self {
-                            case let .json(body):
-                                return body
-                            }
-                        }
-                    }
-                }
-                /// Received HTTP response body
-                internal var body: Operations.GenerateDigest.Output.UnprocessableContent.Body
-                /// Creates a new `UnprocessableContent`.
-                ///
-                /// - Parameters:
-                ///   - body: Received HTTP response body
-                internal init(body: Operations.GenerateDigest.Output.UnprocessableContent.Body) {
-                    self.body = body
-                }
-            }
-            /// Validation Error
-            ///
-            /// - Remark: Generated from `#/paths//api/agent/digests/post(generateDigest)/responses/422`.
-            ///
-            /// HTTP response code: `422 unprocessableContent`.
-            case unprocessableContent(Operations.GenerateDigest.Output.UnprocessableContent)
-            /// The associated value of the enum case if `self` is `.unprocessableContent`.
-            ///
-            /// - Throws: An error if `self` is not `.unprocessableContent`.
-            /// - SeeAlso: `.unprocessableContent`.
-            internal var unprocessableContent: Operations.GenerateDigest.Output.UnprocessableContent {
                 get throws {
                     switch self {
                     case let .unprocessableContent(response):
@@ -15035,7 +14801,7 @@ internal enum Operations {
     }
     /// Get initial suggestions
     ///
-    /// Generate initial follow-up question suggestions for an article-based session. Only works for sessions with a content_id (article-based sessions).
+    /// Generate initial follow-up question suggestions for an article-based session. Only works for sessions with content or news context.
     ///
     /// - Remark: HTTP `POST /api/content/chat/sessions/{session_id}/initial-suggestions`.
     /// - Remark: Generated from `#/paths//api/content/chat/sessions/{session_id}/initial-suggestions/post(getContentChatSessionsInitialSuggestions)`.

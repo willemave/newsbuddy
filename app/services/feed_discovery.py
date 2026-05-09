@@ -28,7 +28,7 @@ from app.models.feed_discovery import (
     DiscoveryLane,
     DiscoveryLanePlan,
     DiscoveryRunResult,
-    FavoriteDigest,
+    FavoriteSnapshot,
 )
 from app.models.schema import (
     Content,
@@ -398,7 +398,7 @@ def _apply_timing_to_run(
     run.timing_json = timing
 
 
-def _fetch_favorites(db: Session, user_id: int) -> list[FavoriteDigest]:
+def _fetch_favorites(db: Session, user_id: int) -> list[FavoriteSnapshot]:
     rows = (
         db.query(ContentKnowledgeSave, Content)
         .join(Content, Content.id == ContentKnowledgeSave.content_id)
@@ -407,10 +407,10 @@ def _fetch_favorites(db: Session, user_id: int) -> list[FavoriteDigest]:
         .all()
     )
 
-    favorites: list[FavoriteDigest] = []
+    favorites: list[FavoriteSnapshot] = []
     for _fav, content in rows:
         favorites.append(
-            FavoriteDigest(
+            FavoriteSnapshot(
                 id=content.id,
                 title=content.title,
                 source=content.source,
@@ -423,15 +423,15 @@ def _fetch_favorites(db: Session, user_id: int) -> list[FavoriteDigest]:
 
 
 def _select_seed_favorites(
-    favorites: list[FavoriteDigest],
+    favorites: list[FavoriteSnapshot],
     limit: int,
-) -> list[FavoriteDigest]:
+) -> list[FavoriteSnapshot]:
     if len(favorites) <= limit:
         return favorites
 
     candidates = favorites[: max(limit * 3, limit + 5)]
 
-    selected: list[FavoriteDigest] = []
+    selected: list[FavoriteSnapshot] = []
     seen_sources: set[str] = set()
     for favorite in candidates:
         source_key = (favorite.source or _domain_from_url(favorite.url) or "").lower()

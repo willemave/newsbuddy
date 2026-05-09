@@ -145,7 +145,7 @@ def test_run_admin_eval_uses_news_title_focus_and_cost(db_session, monkeypatch):
         content_type="news",
         created_at=now - timedelta(minutes=1),
         text_field="content",
-        text_value="News content body for digest testing.",
+        text_value="News content body for summary testing.",
     )
     db_session.commit()
 
@@ -160,7 +160,7 @@ def test_run_admin_eval_uses_news_title_focus_and_cost(db_session, monkeypatch):
 
     def fake_get_basic_agent(model_spec: str, output_type, _system_prompt: str):  # noqa: ANN001
         if output_type.__name__ == "GeneratedNewsSummary":
-            return _FakeAgent({"title": f"News from {model_spec}", "summary": "digest"})
+            return _FakeAgent({"title": f"News from {model_spec}", "summary": "summary"})
         return _FakeAgent(
             {
                 "title": f"Longform from {model_spec}",
@@ -190,7 +190,7 @@ def test_run_admin_eval_uses_news_title_focus_and_cost(db_session, monkeypatch):
     news_row = next(row for row in result["results"] if row["content_type"] == "news")
     news_cell = news_row["model_results"][0]
     assert news_cell["display_output"] == {"title": news_cell["generated_title"]}
-    assert news_cell["raw_output"]["summary"] == "digest"
+    assert news_cell["raw_output"]["summary"] == "summary"
     assert news_cell["estimated_cost_usd"] is not None
     assert news_cell["request_chars"] > 0
     assert news_cell["request_tokens_estimate"] > 0

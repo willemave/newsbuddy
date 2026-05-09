@@ -2,7 +2,6 @@
 
 from sqlalchemy.orm import Session
 
-from app.constants import CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY
 from app.models.metadata import ContentStatus, ContentType
 from app.models.schema import Content, ContentStatusEntry
 
@@ -76,7 +75,7 @@ def test_api_excludes_unprocessed_news(client, db_session: Session, test_user):
                 "name": "Techmeme",
             },
             "discussion_url": "https://www.techmeme.com/cluster/processed",
-            "summary": _news_summary_payload("Processed Digest"),
+            "summary": _news_summary_payload("Processed Summary"),
             "summary_kind": "short_news",
             "summary_version": 1,
         },
@@ -167,67 +166,3 @@ def test_api_excludes_inbox_content_not_completed(client, db_session: Session, t
 
     assert completed_article.id in ids
     assert processing_article.id not in ids
-
-
-def test_api_excludes_digest_only_news(client, db_session: Session, test_user):
-    """Digest-only X news should stay out of normal API feeds."""
-    hidden_digest_item = Content(
-        content_type="news",
-        url="https://x.com/test/status/1#newsly-digest-user-1",
-        source_url="https://x.com/test/status/1",
-        title="Hidden X item",
-        status="completed",
-        content_metadata={
-            "digest_visibility": CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
-            "summary": _news_summary_payload("Hidden X item"),
-            "summary_kind": "short_news",
-            "summary_version": 1,
-        },
-    )
-
-    db_session.add(hidden_digest_item)
-    db_session.commit()
-
-    response = client.get("/api/content/", params={"content_type": "news"})
-    assert response.status_code == 200
-    ids = {item["id"] for item in response.json()["contents"]}
-
-    assert hidden_digest_item.id not in ids
-
-
-def test_api_keeps_long_form_visible_even_with_digest_only_metadata(
-    client,
-    db_session: Session,
-    test_user,
-):
-    """Long-form visibility should ignore digest metadata once status is completed."""
-    article = Content(
-        content_type=ContentType.ARTICLE.value,
-        url="https://example.com/article-digest-visibility",
-        title="Visible article",
-        status=ContentStatus.COMPLETED.value,
-        content_metadata={
-            "digest_visibility": CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY,
-            "summary": _article_summary_payload("Visible article"),
-            "summary_kind": "long_structured",
-            "summary_version": 1,
-        },
-    )
-
-    db_session.add(article)
-    db_session.commit()
-    db_session.refresh(article)
-    db_session.add(
-        ContentStatusEntry(
-            user_id=test_user.id,
-            content_id=article.id,
-            status="inbox",
-        )
-    )
-    db_session.commit()
-
-    response = client.get("/api/content/", params={"content_type": "article"})
-    assert response.status_code == 200
-    ids = {item["id"] for item in response.json()["contents"]}
-
-    assert article.id in ids

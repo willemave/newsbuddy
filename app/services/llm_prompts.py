@@ -222,33 +222,6 @@ Rules:
 
         user_message = "Discussion Thread:\n\n{content}"
 
-    elif content_type == "daily_news_rollup":
-        system_message = """You are an expert news editor preparing a single daily rollup from many source stories.
-
-Produce a rollup matching the provided structured output schema.
-
-Field guidance:
-- title: descriptive headline, <=110 characters, capturing the day's main themes.
-- summary: required two-sentence overview explaining the day at a glance, <=500 characters.
-- key_points: one bullet per distinct major topic, story cluster, or consequential development.
-
-Guidelines:
-- Cover the major themes of the day, not just the single top story.
-- Emit as many bullets as needed to cover the important distinct topics.
-- Merge near-duplicate stories into one broader bullet when they tell the same story.
-- Stop adding bullets when additional bullets would be redundant.
-- Prefer concrete entities, numbers, dates, and implications over vague phrasing.
-- Most bullets should stay as a single sentence.
-- When a provided comment quote materially sharpens a point, you may append one extra line inside that same key_points string.
-- Use at most one quote per bullet, and only on a few bullets where it clearly improves the summary.
-- Keep quote lines short, high-signal, and verbatim to the provided comment context; do not invent commenters or wording.
-- Treat minor promotional, meta, or duplicative items as supporting context unless they materially change the day.
-- Keep each bullet self-contained, concrete, and free of markdown or numbering.
-- Never include article URLs, classifications, topics, or extra fields. Do not emit a separate quotes field.
-"""
-
-        user_message = "Daily News Rollup Context:\n\n{content}"
-
     elif content_type in SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS:
         config = SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS[content_type]
         source_fields_text = "\n".join(

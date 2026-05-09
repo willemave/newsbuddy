@@ -51,7 +51,6 @@ The remaining supported summary families after the change are:
 
 ```text
 short_news
-daily_rollup
 longform_artifact
 insight_report
 ```
@@ -115,7 +114,7 @@ takeaway: string
 | `mental_model` | `learn` | Explainers, frameworks, conceptual deep-dives | `what_it_explains`, `when_to_use_it` |
 | `playbook` | `copy` | Practitioner case studies, tactical interviews | `situation`, `outcome` |
 | `portrait` | `absorb` | Profiles, biographical interviews, person-centered Q&A | `background`, `current_focus` |
-| `briefing` | `track` | News events, announcements, digests, regulatory updates | `timeline[]`, `key_actors[]`, `what_to_watch` |
+| `briefing` | `track` | News events, announcements, regulatory updates | `timeline[]`, `key_actors[]`, `what_to_watch` |
 | `walkthrough` | `try` | Tutorials, recipes, GitHub READMEs, build guides | `what_youll_make`, `prereqs[]`, `time_or_cost` |
 | `findings` | `update` | Papers, benchmarks, data-driven reports | `question`, `method`, `limits` |
 
@@ -474,7 +473,7 @@ Fallback to existing `shortSummary`.
 - Substack analysis candidates include `argument` and `mental_model`
 - GitHub candidates include `walkthrough`
 - paper/PDF candidates include `findings`
-- Twitter/news/digest candidates include `briefing`
+- Twitter/news candidates include `briefing`
 - generation prompt includes only candidate types, not all seven when candidates are known
 
 ### Pipeline Tests
@@ -528,7 +527,6 @@ Fallback to existing `shortSummary`.
 - Whether all `news` content should become `briefing` artifacts, or only long-form/detail-oriented news while fast-read keeps `short_news`.
 - Whether `feed_preview` should live only inside the envelope or also be duplicated at metadata top level for faster projection. The preferred implementation is to keep it in the envelope and duplicate only if repository/query performance needs it.
 - Whether image prompts should use artifact-type-specific visual hints from `extras` in the first implementation or start with generic title/overview/key-point extraction.
-- Whether `daily_rollup` should be a separate summary kind immediately or introduced after the artifact path lands.
 
 ---
 

@@ -37,7 +37,6 @@ var operationRolesHTTPBearer = map[string][]string{
 	ApproveCliLinkOperation:                []string{},
 	CompleteOnboardingOperation:            []string{},
 	ConvertNewsItemToArticleOperation:      []string{},
-	GenerateDigestOperation:                []string{},
 	GetAgentLibraryFileOperation:           []string{},
 	GetAgentLibraryManifestOperation:       []string{},
 	GetContentDetailOperation:              []string{},

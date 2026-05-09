@@ -33,8 +33,6 @@ SELF_SUBMISSION_SOURCE = "self submission"
 
 # Per-user content visibility/status values
 CONTENT_STATUS_INBOX = "inbox"
-CONTENT_STATUS_DIGEST_SOURCE = "digest_source"
-CONTENT_DIGEST_VISIBILITY_DIGEST_ONLY = "digest_only"
 
 # Worker concurrency limits
 DEFAULT_DOWNLOADER_CONCURRENCY = 5
@@ -59,13 +57,10 @@ SUMMARY_KIND_LONG_STRUCTURED = "long_structured"
 SUMMARY_KIND_LONG_BULLETS = "long_bullets"
 SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE = "long_editorial_narrative"
 SUMMARY_KIND_SHORT_NEWS = "short_news"
-SUMMARY_KIND_DAILY_ROLLUP = "daily_rollup"
 SUMMARY_KIND_LONGFORM_ARTIFACT = "longform_artifact"
 SUMMARY_KIND_INSIGHT_REPORT = "insight_report"
 SUMMARY_VERSION_V1 = 1
 SUMMARY_VERSION_V2 = 2
-
-DEFAULT_DAILY_DIGEST_SCHEDULER_LOOKBACK_HOURS = 6
 
 
 # Worker ID format: {worker_type}_{instance_id}_{pid}

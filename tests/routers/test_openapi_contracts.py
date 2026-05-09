@@ -21,7 +21,6 @@ def test_openapi_operation_ids_are_unique() -> None:
 def test_openapi_emits_stable_operation_ids_for_selected_routes() -> None:
     schema = app.openapi()
 
-    assert schema["paths"]["/api/agent/digests"]["post"]["operationId"] == "generateDigest"
     assert (
         schema["paths"]["/api/agent/library/manifest"]["get"]["operationId"]
         == "getAgentLibraryManifest"
@@ -45,5 +44,4 @@ def test_agent_openapi_schema_includes_cli_auth_and_library_routes() -> None:
         schema["paths"]["/api/content/submissions/list"]["get"]["operationId"]
         == "listContentSubmissionStatuses"
     )
-    assert schema["paths"]["/api/agent/digests"]["post"]["tags"] == ["news"]
-    assert {tag["name"] for tag in schema["tags"]} >= {"auth", "content", "library", "news"}
+    assert {tag["name"] for tag in schema["tags"]} >= {"auth", "content", "library"}

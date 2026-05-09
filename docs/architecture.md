@@ -25,7 +25,7 @@
 Newsly is a content ingestion and reading system with four major surfaces:
 
 1. A FastAPI backend that owns auth, APIs, admin pages, chat, voice, discovery, integrations, and processing orchestration.
-2. A database-backed task queue that handles analysis, extraction, summarization, discussion fetching, image generation, onboarding discovery, digest generation, and external sync.
+2. A database-backed task queue that handles analysis, extraction, summarization, discussion fetching, image generation, onboarding discovery, and external sync.
 3. Scrapers and ingestion paths that create canonical `contents` records from feeds, user submissions, and synced external sources.
 4. A SwiftUI iOS client plus share extension that consume the backend as the source of truth.
 
@@ -98,7 +98,7 @@ The app currently mounts:
 - `/admin/logs` and `/admin/errors`
   - Log browser and error reset utilities.
 - `/api/content`
-  - Main content list/detail/actions/state/chat/digests/narration surface.
+  - Main content list/detail/actions/state/chat/narration surface.
 - `/api`
   - Discovery, onboarding, analytics interactions, X integrations, LLM integrations, agent APIs, OpenAI helper endpoints, voice APIs.
 
@@ -144,7 +144,7 @@ Commands in `app/commands/`:
 - start and complete agent onboarding
 - create and revoke API keys
 - upsert and delete user-managed LLM provider keys
-- queue agent digest generation
+- queue content and onboarding jobs
 
 Queries in `app/queries/`:
 
@@ -373,7 +373,6 @@ The shared visibility query in `app/repositories/content_feed_query.py` enforces
 
 - `Content.status == completed`
 - `classification != skip`
-- digest-only content excluded from the normal feed
 - inbox membership for articles and podcasts
 - favorites/recently-read derived from overlay tables
 
@@ -402,11 +401,10 @@ Alembic migration history in `migrations/alembic/versions/` shows the app’s ma
 - analytics interactions
 - content discussions
 - user integration tables
-- daily news digests
+- short-form news items
 - chat context snapshots
 - user API keys
-- digest checkpoint settings
-- daily digest bullet details
+- news feed ranking settings
 - user feedback submissions
 
 ## 8. API Surface
@@ -431,7 +429,7 @@ Key endpoints:
 Behavior:
 
 - Apple Sign In creates or reuses a user and returns JWT access + refresh tokens.
-- `/me` includes digest settings, onboarding flags, X sync state summary, and profile metadata.
+- `/me` includes onboarding flags, X sync state summary, and profile metadata.
 - Admin auth is cookie-based and separate from mobile JWT auth.
 - The shared bearer auth dependency also accepts Newsly API keys with the `newsly_ak_...` prefix on routes that use `get_current_user`.
 
@@ -445,14 +443,6 @@ Prefix: `/api/content`
 - `GET /api/content/search`
 - `GET /api/content/search/mixed`
 - `GET /api/content/search/podcasts`
-
-#### Daily digests
-
-- `GET /api/news/digests`
-- `POST /api/news/digests/{digest_id}/mark-read`
-- `DELETE /api/news/digests/{digest_id}/mark-unread`
-- `POST /api/news/digests/{digest_id}/bullets/{bullet_index}/dig-deeper`
-- `POST /api/news/digests/{digest_id}/dig-deeper`
 
 #### Detail and narration
 
@@ -561,7 +551,6 @@ Endpoints:
 - `POST /api/agent/onboarding`
 - `GET /api/agent/onboarding/{run_id}`
 - `POST /api/agent/onboarding/{run_id}/complete`
-- `POST /api/agent/digests`
 
 These are additive APIs for machine or agent flows, not a separate v2 backend.
 
@@ -622,7 +611,6 @@ Defined in `app/models/contracts.py`:
 - `onboarding_discover`
 - `dig_deeper`
 - `sync_integration`
-- `generate_agent_digest`
 
 ### 9.2 Queue partitions
 
@@ -649,7 +637,6 @@ Current task-to-queue mapping in `app/services/queue.py`:
 | `summarize` | `content` |
 | `fetch_discussion` | `content` |
 | `generate_image` | `image` |
-| `generate_agent_digest` | `content` |
 | `discover_feeds` | `content` |
 | `onboarding_discover` | `onboarding` |
 | `dig_deeper` | `chat` |
@@ -693,7 +680,7 @@ Registered handlers:
 - summarize
 - fetch discussion
 - generate image
-- generate daily news digest
+- process short-form news items
 - discover feeds
 - onboarding discover
 - dig deeper
@@ -804,7 +791,7 @@ Tweet video processing reuses the same audio primitives:
 
 Current defaults:
 
-- news, news digests, daily rollups
+- news
   - `google:gemini-3.1-flash-lite-preview`
 - articles
   - `openai:gpt-5.4-mini`
@@ -970,22 +957,12 @@ Characteristics:
 - response polling every 2 seconds
 - 10 minute default timeout window
 
-### 13.3 Daily digest chat
-
-Daily digest routes can start dig-deeper chats from:
-
-- the whole digest
-- a specific digest bullet
-
-This keeps digest exploration inside the same chat infrastructure instead of inventing a separate discussion stack.
-
-### 13.4 Agent-facing APIs
+### 13.3 Agent-facing APIs
 
 The `/api/agent/*` surface wraps existing features into machine-friendly flows:
 
 - external search
 - onboarding start/status/complete
-- digest generation
 - job polling
 
 These APIs are intended for assistant and CLI style clients that do not need the full mobile UI semantics.
@@ -1022,7 +999,7 @@ Capabilities:
 
 Explicit non-goals in the active runtime:
 
-- no reverse-chronological home timeline ingestion into digest/news rows
+- no reverse-chronological home timeline ingestion into news rows
 - no scheduled X list scraping in the default scraper runner
 
 Related storage:
@@ -1075,7 +1052,7 @@ Primary layers:
 - `Models/`
   - API-facing and UI-facing model types, including generated API contracts
 - `Repositories/`
-  - content/read-status/news-digest repository wrappers
+  - content and read-status repository wrappers
 - `Services/`
   - API client, auth, chat, discovery, narration, voice, X integration, image cache, notifications
 - `ViewModels/`
@@ -1095,7 +1072,7 @@ The client has dedicated flows for:
 
 - content lists and search
 - content detail
-- daily digests
+- short-form news
 - chat session history and message views
 - discovery and onboarding
 - live voice

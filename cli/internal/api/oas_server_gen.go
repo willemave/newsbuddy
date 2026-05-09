@@ -26,12 +26,6 @@ type Handler interface {
 	//
 	// POST /api/news/items/{news_item_id}/convert-to-article
 	ConvertNewsItemToArticle(ctx context.Context, params ConvertNewsItemToArticleParams) (ConvertNewsItemToArticleRes, error)
-	// GenerateDigest implements generateDigest operation.
-	//
-	// Queue arbitrary-window digest generation for agent clients.
-	//
-	// POST /api/agent/digests
-	GenerateDigest(ctx context.Context, req OptAgentDigestRequest) (GenerateDigestRes, error)
 	// GetAgentLibraryFile implements getAgentLibraryFile operation.
 	//
 	// Return one rendered markdown document by relative manifest path.

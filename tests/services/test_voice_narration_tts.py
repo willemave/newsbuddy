@@ -1,4 +1,4 @@
-"""Tests for one-shot digest narration TTS."""
+"""Tests for one-shot narration TTS."""
 
 from __future__ import annotations
 

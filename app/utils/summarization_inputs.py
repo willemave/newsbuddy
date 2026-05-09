@@ -125,5 +125,5 @@ def compute_summarization_input_fingerprint(
         content_type.value if isinstance(content_type, ContentType) else str(content_type)
     )
     normalized_payload = normalize_summarization_payload(payload)
-    digest_source = f"{resolved_type}\n{normalized_payload}"
-    return hashlib.sha256(digest_source.encode("utf-8")).hexdigest()
+    hash_source = f"{resolved_type}\n{normalized_payload}"
+    return hashlib.sha256(hash_source.encode("utf-8")).hexdigest()

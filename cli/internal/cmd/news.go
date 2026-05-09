@@ -9,11 +9,10 @@ import (
 	"github.com/willem/newsbuddy/cli/internal/runtime"
 )
 
-func (a *App) newDigestCommand() *cobra.Command {
+func (a *App) newNewsCommand() *cobra.Command {
 	newsCmd := &cobra.Command{
-		Use:     "news",
-		Aliases: []string{"digest", "digests"},
-		Short:   "List, inspect, and convert visible news items",
+		Use:   "news",
+		Short: "List, inspect, and convert visible news items",
 	}
 
 	var listArgs struct {

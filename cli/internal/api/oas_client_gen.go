@@ -46,12 +46,6 @@ type Invoker interface {
 	//
 	// POST /api/news/items/{news_item_id}/convert-to-article
 	ConvertNewsItemToArticle(ctx context.Context, params ConvertNewsItemToArticleParams) (ConvertNewsItemToArticleRes, error)
-	// GenerateDigest invokes generateDigest operation.
-	//
-	// Queue arbitrary-window digest generation for agent clients.
-	//
-	// POST /api/agent/digests
-	GenerateDigest(ctx context.Context, request OptAgentDigestRequest) (GenerateDigestRes, error)
 	// GetAgentLibraryFile invokes getAgentLibraryFile operation.
 	//
 	// Return one rendered markdown document by relative manifest path.
@@ -579,116 +573,6 @@ func (c *Client) sendConvertNewsItemToArticle(ctx context.Context, params Conver
 
 	stage = "DecodeResponse"
 	result, err := decodeConvertNewsItemToArticleResponse(resp)
-	if err != nil {
-		return res, errors.Wrap(err, "decode response")
-	}
-
-	return result, nil
-}
-
-// GenerateDigest invokes generateDigest operation.
-//
-// Queue arbitrary-window digest generation for agent clients.
-//
-// POST /api/agent/digests
-func (c *Client) GenerateDigest(ctx context.Context, request OptAgentDigestRequest) (GenerateDigestRes, error) {
-	res, err := c.sendGenerateDigest(ctx, request)
-	return res, err
-}
-
-func (c *Client) sendGenerateDigest(ctx context.Context, request OptAgentDigestRequest) (res GenerateDigestRes, err error) {
-	otelAttrs := []attribute.KeyValue{
-		otelogen.OperationID("generateDigest"),
-		semconv.HTTPRequestMethodKey.String("POST"),
-		semconv.URLTemplateKey.String("/api/agent/digests"),
-	}
-	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
-
-	// Run stopwatch.
-	startTime := time.Now()
-	defer func() {
-		// Use floating point division here for higher precision (instead of Millisecond method).
-		elapsedDuration := time.Since(startTime)
-		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
-	}()
-
-	// Increment request counter.
-	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
-
-	// Start a span for this request.
-	ctx, span := c.cfg.Tracer.Start(ctx, GenerateDigestOperation,
-		trace.WithAttributes(otelAttrs...),
-		clientSpanKind,
-	)
-	// Track stage for error reporting.
-	var stage string
-	defer func() {
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, stage)
-			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
-		}
-		span.End()
-	}()
-
-	stage = "BuildURL"
-	u := uri.Clone(c.requestURL(ctx))
-	var pathParts [1]string
-	pathParts[0] = "/api/agent/digests"
-	uri.AddPathParts(u, pathParts[:]...)
-
-	stage = "EncodeRequest"
-	r, err := ht.NewRequest(ctx, "POST", u)
-	if err != nil {
-		return res, errors.Wrap(err, "create request")
-	}
-	if err := encodeGenerateDigestRequest(request, r); err != nil {
-		return res, errors.Wrap(err, "encode request")
-	}
-
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			stage = "Security:HTTPBearer"
-			switch err := c.securityHTTPBearer(ctx, GenerateDigestOperation, r); {
-			case err == nil: // if NO error
-				satisfied[0] |= 1 << 0
-			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
-				// Skip this security.
-			default:
-				return res, errors.Wrap(err, "security \"HTTPBearer\"")
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
-		}
-	}
-
-	stage = "SendRequest"
-	resp, err := c.cfg.Client.Do(r)
-	if err != nil {
-		return res, errors.Wrap(err, "do request")
-	}
-	body := resp.Body
-	defer body.Close()
-
-	stage = "DecodeResponse"
-	result, err := decodeGenerateDigestResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

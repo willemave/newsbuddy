@@ -244,7 +244,7 @@ def test_process_news_item_uses_existing_discussion_snippets(db_session) -> None
     def _summarize(prompt: str, **_kwargs):
         captured["prompt"] = prompt
         return NewsSummary(
-            title="Fresh digest title",
+            title="Fresh news title",
             article_url=item.article_url,
             key_points=["Fresh point"],
             summary="Fresh summary text.",
@@ -422,7 +422,7 @@ def test_process_news_item_regenerates_legacy_prefilled_summary(db_session) -> N
     def _summarize(*_args, **kwargs):
         calls.append(kwargs)
         return NewsSummary(
-            title="Fresh digest title",
+            title="Fresh news title",
             article_url=item.article_url,
             key_points=["Fresh point"],
             summary="Fresh summary text.",
@@ -441,7 +441,7 @@ def test_process_news_item_regenerates_legacy_prefilled_summary(db_session) -> N
     assert result.used_existing_summary is False
     assert result.generated_summary is True
     assert len(calls) == 1
-    assert item.summary_title == "Fresh digest title"
+    assert item.summary_title == "Fresh news title"
     assert item.summary_key_points == ["Fresh point"]
     assert item.summary_text == "Fresh summary text."
     item_metadata = _metadata(item.raw_metadata)
@@ -449,7 +449,7 @@ def test_process_news_item_regenerates_legacy_prefilled_summary(db_session) -> N
     assert item_metadata["summary_version"] == 1
 
 
-def test_process_news_item_reuses_generated_short_digest(db_session) -> None:
+def test_process_news_item_reuses_generated_short_summary(db_session) -> None:
     item = NewsItem(
         ingest_key="news-item-generated-summary",
         visibility_scope="global",
@@ -461,12 +461,12 @@ def test_process_news_item_reuses_generated_short_digest(db_session) -> None:
         article_title="Example story 6",
         article_domain="example.com",
         discussion_url="https://news.ycombinator.com/item?id=126",
-        summary_title="Generated digest title",
+        summary_title="Generated news title",
         summary_key_points=["Generated point"],
         summary_text="Generated summary text.",
         raw_metadata={
             "summary": {
-                "title": "Generated digest title",
+                "title": "Generated news title",
                 "article_url": "https://example.com/story-6",
                 "key_points": ["Generated point"],
                 "summary": "Generated summary text.",
@@ -505,7 +505,7 @@ def test_process_news_item_reuses_generated_short_digest(db_session) -> None:
     assert result.used_existing_summary is True
     assert result.generated_summary is False
     assert calls == 0
-    assert item.summary_title == "Generated digest title"
+    assert item.summary_title == "Generated news title"
     assert item.summary_key_points == ["Generated point"]
     assert item.summary_text == "Generated summary text."
 
@@ -524,12 +524,12 @@ def test_process_news_item_fills_missing_summary_text_from_existing_key_point(
         article_title="Example story 6a",
         article_domain="example.com",
         discussion_url="https://news.ycombinator.com/item?id=1261",
-        summary_title="Generated digest title",
+        summary_title="Generated news title",
         summary_key_points=["Generated point"],
         summary_text=None,
         raw_metadata={
             "summary": {
-                "title": "Generated digest title",
+                "title": "Generated news title",
                 "article_url": "https://example.com/story-6a",
                 "key_points": ["Generated point"],
             },
@@ -600,7 +600,7 @@ def test_process_news_item_ignores_void_placeholder_titles(db_session) -> None:
         captured["args"] = args
         captured["kwargs"] = kwargs
         return NewsSummary(
-            title="Fresh digest title",
+            title="Fresh news title",
             article_url=item.article_url,
             key_points=["Fresh point"],
             summary="Fresh summary text.",
@@ -621,7 +621,7 @@ def test_process_news_item_ignores_void_placeholder_titles(db_session) -> None:
     captured_args = cast(tuple[Any, ...], captured["args"])
     assert captured_kwargs["title"] is None
     assert "Article title: VOID" not in captured_args[0]
-    assert item.summary_title == "Fresh digest title"
+    assert item.summary_title == "Fresh news title"
     assert item.status == "ready"
 
 
@@ -718,7 +718,7 @@ def test_process_news_item_accepts_long_generated_titles(db_session) -> None:
     assert item.status == "ready"
 
 
-def test_process_news_item_reuses_generated_digest_with_long_title(db_session) -> None:
+def test_process_news_item_reuses_generated_summary_with_long_title(db_session) -> None:
     long_title = ("Signal " * 60).strip()
     item = NewsItem(
         ingest_key="news-item-existing-long-title",
@@ -878,10 +878,10 @@ def test_enrich_news_item_article_uses_stored_tweet_metadata_without_x_refetch(
         canonical_story_url="https://x.com/i/status/123",
         canonical_item_url="https://x.com/i/status/123",
         discussion_url="https://x.com/i/status/123",
-        article_title="Native digest title",
+        article_title="Native news title",
         raw_metadata={
-            "tweet_article_title": "Native digest title",
-            "tweet_article_text": "Full native digest body.",
+            "tweet_article_title": "Native news title",
+            "tweet_article_text": "Full native news body.",
             "tweet_text": "Teaser text",
         },
         status="new",
@@ -908,7 +908,7 @@ def test_enrich_news_item_article_uses_stored_tweet_metadata_without_x_refetch(
     body_ref = _metadata(item_metadata[NEWS_ARTICLE_BODY_REF_KEY])
     extraction = _metadata(item_metadata["article_extraction"])
     assert body_ref["kind"] == "inline"
-    assert "Full native digest body." in body_ref["text"]
+    assert "Full native news body." in body_ref["text"]
     assert extraction["status"] == "completed"
     assert extraction["source"] == "metadata"
 

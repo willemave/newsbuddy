@@ -40,7 +40,7 @@ final class ChatMessageDisplayTests: XCTestCase {
               "session": {
                 "id": 42,
                 "content_id": null,
-                "title": "Daily AI Digest",
+                "title": "Daily AI Brief",
                 "session_type": "article_brain",
                 "topic": null,
                 "llm_provider": "anthropic",
@@ -64,7 +64,7 @@ final class ChatMessageDisplayTests: XCTestCase {
                   "id": 1,
                   "session_id": 42,
                   "role": "user",
-                  "content": "Dig deeper into these digest bullets.",
+                  "content": "Dig deeper into these news bullets.",
                   "timestamp": "2026-03-08T18:00:00Z",
                   "status": "completed",
                   "error": null

@@ -9,7 +9,6 @@ const (
 	ApproveCliLinkOperation                OperationName = "ApproveCliLink"
 	CompleteOnboardingOperation            OperationName = "CompleteOnboarding"
 	ConvertNewsItemToArticleOperation      OperationName = "ConvertNewsItemToArticle"
-	GenerateDigestOperation                OperationName = "GenerateDigest"
 	GetAgentLibraryFileOperation           OperationName = "GetAgentLibraryFile"
 	GetAgentLibraryManifestOperation       OperationName = "GetAgentLibraryManifest"
 	GetContentDetailOperation              OperationName = "GetContentDetail"

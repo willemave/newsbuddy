@@ -52,7 +52,6 @@ class TaskType(StrEnum):
     FETCH_DISCUSSION = "fetch_discussion"
     GENERATE_IMAGE = "generate_image"
     DISCOVER_FEEDS = "discover_feeds"
-    GENERATE_AGENT_DIGEST = "generate_agent_digest"
     ONBOARDING_DISCOVER = "onboarding_discover"
     DIG_DEEPER = "dig_deeper"
     SYNC_INTEGRATION = "sync_integration"
@@ -87,7 +86,6 @@ class SummaryKind(StrEnum):
     LONG_BULLETS = "long_bullets"
     LONG_EDITORIAL_NARRATIVE = "long_editorial_narrative"
     SHORT_NEWS = "short_news"
-    DAILY_ROLLUP = "daily_rollup"
     LONGFORM_ARTIFACT = "longform_artifact"
     INSIGHT_REPORT = "insight_report"
 

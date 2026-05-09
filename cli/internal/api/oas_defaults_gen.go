@@ -3,22 +3,6 @@
 package api
 
 // setDefaults set default value of fields.
-func (s *AgentDigestRequest) setDefaults() {
-	{
-		val := AgentDigestRequestForm("short")
-		s.Form.SetTo(val)
-	}
-}
-
-// setDefaults set default value of fields.
-func (s *AgentDigestResponse) setDefaults() {
-	{
-		val := string("queued")
-		s.Status.SetTo(val)
-	}
-}
-
-// setDefaults set default value of fields.
 func (s *AgentLibraryManifestResponse) setDefaults() {
 	{
 		val := bool(true)

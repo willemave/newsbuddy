@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class FavoriteDigest(BaseModel):
+class FavoriteSnapshot(BaseModel):
     """Compact representation of a favorited content item."""
 
     id: int

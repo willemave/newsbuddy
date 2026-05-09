@@ -141,9 +141,9 @@ def test_build_chat_deps_prefers_session_context_snapshot(db_session) -> None:
     session = ChatSession(
         user_id=123,
         content_id=content.id,
-        title="Digest chat",
+        title="News chat",
         session_type="article_brain",
-        context_snapshot="Digest bullets:\n- Bullet A\n- Bullet B",
+        context_snapshot="News bullets:\n- Bullet A\n- Bullet B",
         llm_provider="anthropic",
         llm_model="anthropic:claude-opus-4-6",
     )
@@ -153,7 +153,7 @@ def test_build_chat_deps_prefers_session_context_snapshot(db_session) -> None:
 
     deps = _build_chat_deps(db_session, session, include_full_text=True)
 
-    assert deps.article_context == "Digest bullets:\n- Bullet A\n- Bullet B"
+    assert deps.article_context == "News bullets:\n- Bullet A\n- Bullet B"
     assert deps.context_label == "Session Context"
     assert deps.content is None
     assert "Overview text" not in deps.article_context
@@ -163,9 +163,9 @@ def test_build_chat_deps_prefers_session_context_snapshot(db_session) -> None:
 def test_build_context_prompt_parts_marks_snapshot_as_reference_material() -> None:
     session = ChatSession(
         user_id=123,
-        title="Digest chat",
+        title="News chat",
         session_type="article_brain",
-        context_snapshot="Digest bullets:\n- Bullet A\n- Bullet B",
+        context_snapshot="News bullets:\n- Bullet A\n- Bullet B",
         llm_provider="anthropic",
         llm_model="anthropic:claude-opus-4-6",
     )
@@ -173,22 +173,22 @@ def test_build_context_prompt_parts_marks_snapshot_as_reference_material() -> No
     parts = _build_context_prompt_parts(
         None,
         session,
-        "Digest bullets:\n- Bullet A\n- Bullet B",
+        "News bullets:\n- Bullet A\n- Bullet B",
         "Session Context",
     )
 
     rendered = "\n".join(parts)
     assert "Provided reference context is available below." in rendered
     assert "do not ask the user to paste it again" in rendered
-    assert "Session Context:\nDigest bullets:\n- Bullet A\n- Bullet B" in rendered
+    assert "Session Context:\nNews bullets:\n- Bullet A\n- Bullet B" in rendered
 
 
 def test_build_run_user_prompt_includes_snapshot_context() -> None:
     session = ChatSession(
         user_id=123,
-        title="Digest chat",
+        title="News chat",
         session_type="article_brain",
-        context_snapshot="Digest bullets:\n- Bullet A\n- Bullet B",
+        context_snapshot="News bullets:\n- Bullet A\n- Bullet B",
         llm_provider="anthropic",
         llm_model="anthropic:claude-opus-4-6",
     )
@@ -196,21 +196,21 @@ def test_build_run_user_prompt_includes_snapshot_context() -> None:
     deps = ChatDeps(
         session=session,
         content=None,
-        article_context="Digest bullets:\n- Bullet A\n- Bullet B",
+        article_context="News bullets:\n- Bullet A\n- Bullet B",
         context_label="Session Context",
     )
 
-    prompt = _build_run_user_prompt("Dig deeper into these digest bullets.", deps)
+    prompt = _build_run_user_prompt("Dig deeper into these news bullets.", deps)
 
     assert "Use the provided session context below as the source material" in prompt
-    assert "Session Context:\nDigest bullets:\n- Bullet A\n- Bullet B" in prompt
-    assert prompt.endswith("User request:\nDig deeper into these digest bullets.")
+    assert "Session Context:\nNews bullets:\n- Bullet A\n- Bullet B" in prompt
+    assert prompt.endswith("User request:\nDig deeper into these news bullets.")
 
 
 def test_dump_messages_json_restores_user_visible_prompt(db_session) -> None:
     session = ChatSession(
         user_id=123,
-        title="Digest chat",
+        title="News chat",
         session_type="article_brain",
         llm_provider="anthropic",
         llm_model="anthropic:claude-opus-4-6",
@@ -232,11 +232,11 @@ def test_dump_messages_json_restores_user_visible_prompt(db_session) -> None:
 
     stored_json = _dump_messages_json(
         messages,
-        display_user_prompt="Dig deeper into these digest bullets.",
+        display_user_prompt="Dig deeper into these news bullets.",
     )
     payload = json.loads(stored_json)
 
-    assert payload[0]["parts"][0]["content"] == "Dig deeper into these digest bullets."
+    assert payload[0]["parts"][0]["content"] == "Dig deeper into these news bullets."
     assert "Session Context" not in payload[0]["parts"][0]["content"]
 
 

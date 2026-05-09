@@ -11,7 +11,7 @@ from app.models.metadata import GeneratedNewsSummary, NewsSummary
 def test_news_summary_ignores_legacy_fields(caplog) -> None:
     """Legacy fields are ignored for news summary payloads."""
     payload = {
-        "title": "Legacy Digest Title",
+        "title": "Legacy News Title",
         "overview": "Legacy overview text.",
         "bullet_points": ["Point one", "Point two"],
     }

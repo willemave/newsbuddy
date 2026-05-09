@@ -68,7 +68,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max-candidates",
         type=int,
         default=200,
-        help="Digest candidate cap override for the comparison runs",
+        help="News candidate cap override for the comparison runs",
     )
     parser.add_argument(
         "--artifacts-dir",

@@ -480,7 +480,7 @@ struct NewsGroupCard: View {
         VStack(alignment: .leading, spacing: 12) {
             // Group header with count
             HStack {
-                Text("News Digest")
+                Text("News Summary")
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundColor(.secondary)
@@ -1133,7 +1133,7 @@ Create `docs/library/features/news-grouped-view.md`:
 
 ## Overview
 
-The news tab displays news items in groups of 5, automatically marking entire groups as read when users scroll past them. This replaces the previous infinite scroll behavior with a more digestible, batch-oriented approach.
+The news tab displays news items in groups of 5, automatically marking entire groups as read when users scroll past them. This replaces the previous infinite scroll behavior with a more scannable, batch-oriented approach.
 
 ## User Experience
 

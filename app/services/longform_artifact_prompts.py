@@ -27,7 +27,7 @@ ARTIFACT_TYPE_GUIDANCE: dict[str, str] = {
         "person's worldview. extras has background and current_focus."
     ),
     "briefing": (
-        "Use for news events, announcements, digests, and regulatory updates. key_points "
+        "Use for news events, announcements, and regulatory updates. key_points "
         "are major beats of what happened. extras has timeline, key_actors, and what_to_watch."
     ),
     "walkthrough": (

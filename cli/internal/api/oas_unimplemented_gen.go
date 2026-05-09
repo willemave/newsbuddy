@@ -40,15 +40,6 @@ func (UnimplementedHandler) ConvertNewsItemToArticle(ctx context.Context, params
 	return r, ht.ErrNotImplemented
 }
 
-// GenerateDigest implements generateDigest operation.
-//
-// Queue arbitrary-window digest generation for agent clients.
-//
-// POST /api/agent/digests
-func (UnimplementedHandler) GenerateDigest(ctx context.Context, req OptAgentDigestRequest) (r GenerateDigestRes, _ error) {
-	return r, ht.ErrNotImplemented
-}
-
 // GetAgentLibraryFile implements getAgentLibraryFile operation.
 //
 // Return one rendered markdown document by relative manifest path.

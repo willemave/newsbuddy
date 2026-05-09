@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from app.models.api.common import (
@@ -120,28 +119,3 @@ def test_agent_onboarding_routes_delegate_to_wrappers(client, monkeypatch):
     assert status_response.json()["run_status"] == "completed"
     assert complete_response.status_code == 200
     assert complete_response.json()["status"] == "completed"
-
-
-def test_agent_digest_route_returns_async_job_handle(client, monkeypatch):
-    """Digest generation should stay async and return a job handle."""
-
-    class _FakeQueue:
-        def enqueue(self, *_args, **_kwargs) -> int:
-            return 314
-
-    monkeypatch.setattr(
-        "app.commands.generate_agent_digest.get_task_queue_gateway",
-        lambda: _FakeQueue(),
-    )
-
-    response = client.post(
-        "/api/agent/digests",
-        json={
-            "start_at": datetime(2026, 3, 7, tzinfo=UTC).isoformat(),
-            "end_at": datetime(2026, 3, 8, tzinfo=UTC).isoformat(),
-            "form": "short",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"job_id": 314, "status": "queued"}

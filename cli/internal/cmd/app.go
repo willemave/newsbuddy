@@ -82,7 +82,7 @@ func New(version string, stdout io.Writer, stderr io.Writer) *App {
 		app.newSearchCommand(),
 		app.newSourcesCommand(),
 		app.newOnboardingCommand(),
-		app.newDigestCommand(),
+		app.newNewsCommand(),
 		app.newCompletionCommand(rootCmd),
 		app.newVersionCommand(),
 	)

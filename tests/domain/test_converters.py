@@ -111,29 +111,6 @@ class TestContentToDomain:
 
         assert domain_content.metadata == {}
 
-    def test_convert_x_digest_news_preserves_user_scoped_url(self):
-        """X digest news should keep the per-user internal URL instead of the tweet URL."""
-        db_content = DBContent(
-            id=1001,
-            content_type=ContentType.NEWS.value,
-            url="https://x.com/i/status/123#newsly-digest-user-1",
-            source_url="https://x.com/i/status/123",
-            status=ContentStatus.NEW.value,
-            content_metadata={
-                "source_type": "x_timeline",
-                "tweet_id": "123",
-                "article": {
-                    "url": "https://x.com/i/status/123",
-                    "title": "Digest tweet",
-                    "source_domain": "x.com",
-                },
-            },
-        )
-
-        domain_content = content_to_domain(db_content)
-
-        assert str(domain_content.url) == "https://x.com/i/status/123#newsly-digest-user-1"
-
     def test_convert_news_backfills_missing_article_metadata(self):
         """Legacy news rows without article metadata should stay mappable."""
         db_content = DBContent(

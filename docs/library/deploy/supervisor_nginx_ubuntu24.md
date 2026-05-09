@@ -207,7 +207,7 @@ cd /opt/news_app
 Then verify:
 - `news_app_workers_image` is draining image tasks
 - content workers are no longer blocked behind image backlog
-- pending daily digest tasks on `content` begin completing
+- pending content processing tasks begin completing
 
 ## 8) Nginx reverse proxy
 

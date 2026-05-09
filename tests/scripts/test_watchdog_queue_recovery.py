@@ -16,40 +16,6 @@ from scripts.watchdog_queue_recovery import (
 )
 
 
-def test_run_watchdog_once_requeues_stale_agent_digest(db_session) -> None:
-    """Watchdog should requeue stale generate_agent_digest tasks."""
-    stale_task = ProcessingTask(
-        task_type=TaskType.GENERATE_AGENT_DIGEST.value,
-        status=TaskStatus.PROCESSING.value,
-        payload={"user_id": 1},
-        queue_name=TaskQueue.CONTENT.value,
-        retry_count=0,
-        started_at=datetime.now(UTC) - timedelta(hours=3),
-    )
-    db_session.add(stale_task)
-    db_session.commit()
-
-    result = run_watchdog_once(
-        session=db_session,
-        transcribe_stale_hours=2.0,
-        process_content_stale_hours=2.0,
-        process_news_item_stale_hours=2.0,
-        generate_agent_digest_stale_hours=2.0,
-        alert_threshold=99,
-        slack_webhook_url=None,
-        dry_run=False,
-        action_limit=None,
-    )
-    db_session.commit()
-    db_session.refresh(stale_task)
-
-    assert result.requeued_generate_agent_digest.touched_count == 1
-    assert stale_task.status == TaskStatus.PENDING.value
-    assert stale_task.started_at is None
-    assert stale_task.completed_at is None
-    assert stale_task.retry_count == 1
-
-
 def test_run_watchdog_once_requeues_stale_process_news_item(db_session) -> None:
     """Watchdog should requeue stale process_news_item tasks."""
     stale_task = ProcessingTask(
@@ -68,7 +34,6 @@ def test_run_watchdog_once_requeues_stale_process_news_item(db_session) -> None:
         transcribe_stale_hours=2.0,
         process_content_stale_hours=2.0,
         process_news_item_stale_hours=2.0,
-        generate_agent_digest_stale_hours=2.0,
         alert_threshold=99,
         slack_webhook_url=None,
         dry_run=False,
@@ -105,7 +70,6 @@ def test_run_watchdog_once_requeues_stale_sync_integration(db_session) -> None:
         transcribe_stale_hours=2.0,
         process_content_stale_hours=2.0,
         process_news_item_stale_hours=2.0,
-        generate_agent_digest_stale_hours=2.0,
         sync_integration_stale_hours=2.0,
         alert_threshold=99,
         slack_webhook_url=None,
@@ -121,12 +85,6 @@ def test_run_watchdog_once_requeues_stale_sync_integration(db_session) -> None:
     assert stale_task.completed_at is None
     assert stale_task.error_message is None
     assert stale_task.retry_count == 1
-
-
-def test_parse_args_supports_generate_agent_digest_stale_hours() -> None:
-    """CLI parsing should expose the agent-digest stale-hours option."""
-    args = _parse_args(["--generate-agent-digest-stale-hours", "4.5"])
-    assert args.generate_agent_digest_stale_hours == 4.5
 
 
 def test_parse_args_supports_process_news_item_stale_hours() -> None:
@@ -157,9 +115,6 @@ def test_main_retries_transient_operational_error() -> None:
         requeued_media=ActionResult("requeue_stale_media", 0, [], {}),
         requeued_process_content=ActionResult("requeue_stale_process_content", 0, [], {}),
         requeued_process_news_item=ActionResult("requeue_stale_process_news_item", 0, [], {}),
-        requeued_generate_agent_digest=ActionResult(
-            "requeue_stale_generate_agent_digest", 0, [], {}
-        ),
         requeued_sync_integration=ActionResult("requeue_stale_sync_integration", 0, [], {}),
     )
 

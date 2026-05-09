@@ -12,7 +12,7 @@ from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import CONTENT_STATUS_DIGEST_SOURCE, CONTENT_STATUS_INBOX
+from app.constants import CONTENT_STATUS_INBOX
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.internal.scraper_configs import (
@@ -488,9 +488,6 @@ def ensure_inbox_status(
         .first()
     )
     if existing:
-        if existing.status == CONTENT_STATUS_DIGEST_SOURCE:
-            existing.status = CONTENT_STATUS_INBOX
-            return True
         return False
 
     db.add(

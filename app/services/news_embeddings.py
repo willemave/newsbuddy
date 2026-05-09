@@ -1,4 +1,4 @@
-"""Embedding helpers for the news-native digest pipeline."""
+"""Embedding helpers for short-form news ranking."""
 
 from __future__ import annotations
 

@@ -9,47 +9,6 @@ import (
 	"github.com/ogen-go/ogen/validate"
 )
 
-func (s *AgentDigestRequest) Validate() error {
-	if s == nil {
-		return validate.ErrNilPointer
-	}
-
-	var failures []validate.FieldError
-	if err := func() error {
-		if value, ok := s.Form.Get(); ok {
-			if err := func() error {
-				if err := value.Validate(); err != nil {
-					return err
-				}
-				return nil
-			}(); err != nil {
-				return err
-			}
-		}
-		return nil
-	}(); err != nil {
-		failures = append(failures, validate.FieldError{
-			Name:  "form",
-			Error: err,
-		})
-	}
-	if len(failures) > 0 {
-		return &validate.Error{Fields: failures}
-	}
-	return nil
-}
-
-func (s AgentDigestRequestForm) Validate() error {
-	switch s {
-	case "short":
-		return nil
-	case "long":
-		return nil
-	default:
-		return errors.Errorf("invalid value: %v", s)
-	}
-}
-
 func (s *AgentLibraryDocumentResponse) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer
@@ -1528,8 +1487,6 @@ func (s SummaryKind) Validate() error {
 	case "long_editorial_narrative":
 		return nil
 	case "short_news":
-		return nil
-	case "daily_rollup":
 		return nil
 	case "longform_artifact":
 		return nil

@@ -19,7 +19,7 @@ Shared data model layer containing SQLAlchemy ORM tables, Pydantic request/respo
 | `app/models/__init__.py` | n/a | Database models. |
 | `app/models/content_submission.py` | `SubmitContentRequest`, `ContentSubmissionResponse` | Pydantic models for content submission workflows. |
 | `app/models/contracts.py` | `ContentType`, `ContentStatus`, `ContentClassification`, `TaskType`, `TaskQueue`, `TaskStatus`, `SummaryKind`, `SummaryVersion` | Canonical domain contracts and enums shared across backend surfaces. |
-| `app/models/feed_discovery.py` | `FavoriteDigest`, `DiscoveryDirection`, `DiscoveryDirectionPlan`, `DiscoveryQuery`, `DiscoveryLane`, `DiscoveryLanePlan`, `DiscoveryCandidate`, `DiscoveryCandidateBatch`, `DiscoveryRunResult` | Pydantic models for feed discovery workflow. |
+| `app/models/feed_discovery.py` | `FavoriteSnapshot`, `DiscoveryDirection`, `DiscoveryDirectionPlan`, `DiscoveryQuery`, `DiscoveryLane`, `DiscoveryLanePlan`, `DiscoveryCandidate`, `DiscoveryCandidateBatch`, `DiscoveryRunResult` | Pydantic models for feed discovery workflow. |
 | `app/models/metadata.py` | `SummaryBulletPoint`, `SummaryTextBullet`, `ContentQuote`, `InterleavedInsight`, `InterleavedSummary`, `InterleavedTopic`, `InterleavedSummaryV2`, `BulletSummaryPoint`, `BulletedSummary`, `EditorialQuote`, +15 more | Unified metadata models for content types |
 | `app/models/metadata_state.py` | `normalize_metadata_shape`, `merge_runtime_metadata`, `update_processing_state` | Helpers for transitioning metadata from flat blobs to structured state |
 | `app/models/pagination.py` | `PaginationCursorData`, `PaginationMetadata` | Pydantic models for pagination. |

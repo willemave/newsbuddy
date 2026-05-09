@@ -565,7 +565,7 @@ class StructuredSummary(BaseModel):
     )
 
 
-# News digest summary used for fast-scanning feeds
+# News summary used for fast-scanning feeds
 
 GeneratedNewsKeyPoint = Annotated[
     str,
@@ -603,12 +603,12 @@ class NewsSummary(BaseModel):
         },
     )
 
-    title: str | None = Field(None, description="Generated headline for the digest")
+    title: str | None = Field(None, description="Generated headline for the news item")
     article_url: str | None = Field(
         None,
         min_length=1,
         max_length=2083,
-        description="Canonical article URL referenced by the digest",
+        description="Canonical article URL referenced by the news item",
     )
     key_points: list[str] = Field(
         default_factory=list,
@@ -629,7 +629,7 @@ class NewsSummary(BaseModel):
     )
     summarization_date: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
-        description="Timestamp when the digest was generated",
+        description="Timestamp when the summary was generated",
     )
 
     @field_validator("article_url")
@@ -648,7 +648,7 @@ class GeneratedNewsSummary(NewsSummary):
         ...,
         min_length=5,
         max_length=95,
-        description="Generated factual headline for the digest, <=95 characters.",
+        description="Generated factual headline for the news item, <=95 characters.",
     )
     key_points: list[GeneratedNewsKeyPoint] = Field(
         ...,
@@ -748,79 +748,6 @@ class DiscussionSummary(BaseModel):
             return None
         adapter = TypeAdapter(HttpUrl)
         return str(adapter.validate_python(value))
-
-
-class DailyNewsRollupSummary(BaseModel):
-    """Multi-source daily rollup payload for one user's digest."""
-
-    model_config = ConfigDict(
-        extra="allow",
-        json_schema_extra={
-            "additionalProperties": False,
-            "example": {
-                "title": "AI tooling, privacy regulation, and fintech deals led the day",
-                "summary": (
-                    "The day was defined by a mix of AI product launches, growing "
-                    "regulatory pressure, and a steady stream of startup financings. "
-                    "Infrastructure, payments, and policy stories carried the most "
-                    "practical signal."
-                ),
-                "bullets": [
-                    {
-                        "text": (
-                            "AI developer tooling and automation launches dominated software news."
-                        ),
-                        "source_indexes": [1, 2],
-                    },
-                    {
-                        "text": (
-                            "Privacy and child-safety regulation advanced across "
-                            "multiple jurisdictions."
-                        ),
-                        "source_indexes": [3],
-                    },
-                ],
-                "key_points": [
-                    "AI developer tooling and automation launches dominated software news.",
-                    "Privacy and child-safety regulation advanced across multiple jurisdictions.",
-                    "Payments, commerce, and rural retail funding rounds remained active.",
-                ],
-            },
-        },
-    )
-
-    title: str | None = Field(
-        None,
-        min_length=5,
-        max_length=240,
-        description="Generated title capturing the day's main themes",
-    )
-    summary: str | None = Field(
-        None,
-        min_length=0,
-        max_length=1000,
-        description="Short overview paragraph summarizing the day as a whole",
-    )
-    bullets: list[DailyNewsRollupBullet] = Field(
-        default_factory=list,
-        description="Structured digest bullets with explicit source indexes from the prompt input",
-    )
-    key_points: list[str] = Field(
-        default_factory=list,
-        description="Variable-length list of distinct major themes or stories from the day",
-    )
-
-
-class DailyNewsRollupBullet(BaseModel):
-    """Structured daily rollup bullet returned by the summarizer."""
-
-    text: str = Field(..., min_length=1, max_length=500)
-    source_indexes: list[int] = Field(
-        default_factory=list,
-        description=(
-            "1-based indexes referencing the prompt source stories that support this bullet"
-        ),
-    )
 
 
 class NewsArticleMetadata(BaseModel):

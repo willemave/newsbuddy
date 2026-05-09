@@ -20,7 +20,6 @@ Top-level SwiftUI screens for tabs, feature entrypoints, and major routed surfac
 | `client/newsly/newsly/Views/ChatSessionView.swift` | `struct ShareContent`, `struct ShareSheet`, `struct SelectableText`, `class Coordinator`, `class DigDeeperTextView`, `struct SelectableAttributedText`, `class Coordinator`, `struct ChatSessionView`, `struct MessageBubble`, `struct ProcessSummaryRow`, +8 more | Custom UITextView that adds "Dig Deeper" to the edit menu |
 | `client/newsly/newsly/Views/ContentDetailView.swift` | `struct ContentDetailView`, `computeDescendantCount` | Build one reusable index for comment rendering. |
 | `client/newsly/newsly/Views/ContentListView.swift` | `struct ContentListView`, `struct ContentListView_Previews` | Types: `struct ContentListView`, `struct ContentListView_Previews` |
-| `client/newsly/newsly/Views/DailyDigestShortFormView.swift` | `struct DailyDigestShortFormView` | Types: `struct DailyDigestShortFormView` |
 | `client/newsly/newsly/Views/DebugMenuView.swift` | `struct DebugMenuView`, `struct TokenInputView` | Types: `struct DebugMenuView`, `struct TokenInputView` |
 | `client/newsly/newsly/Views/DiscoveryPersonalizeSheet.swift` | `struct DiscoveryPersonalizeSheet` | Types: `struct DiscoveryPersonalizeSheet` |
 | `client/newsly/newsly/Views/KnowledgeDiscoveryView.swift` | `struct KnowledgeDiscoveryView` | Types: `struct KnowledgeDiscoveryView` |

@@ -13,7 +13,7 @@ Newsly should treat X as a bookmark-first integration:
 
 - keep per-user X bookmark sync
 - keep tweet URL handling, thread lookup, linked tweet lookup, linked article resolution, and tweet snapshot reuse
-- stop ingesting reverse-chronological home timeline items into digest/news rows
+- stop ingesting reverse-chronological home timeline items into news rows
 - stop running scheduled X list scrapers as part of the active scraper runtime
 
 This means X remains useful for saved posts and shared posts, but no longer acts as a feed source.
@@ -25,7 +25,7 @@ This means X remains useful for saved posts and shared posts, but no longer acts
 Current X behavior mixes two different product shapes:
 
 - bookmark sync creates long-form content rows that users explicitly saved
-- timeline sync creates digest-only short-form news rows from followed accounts
+- timeline sync creates short-form news rows from followed accounts
 - scheduled X list scraping still exists in the active scraper runner
 
 That combination makes X behave like both a personal save surface and an ambient feed surface. The desired product direction is narrower:

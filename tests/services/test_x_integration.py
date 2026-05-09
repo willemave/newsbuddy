@@ -163,7 +163,7 @@ def test_sync_x_sources_syncs_bookmarks_only(
     test_user,
     monkeypatch,
 ) -> None:
-    """Bookmark sync should create bookmark-backed content rows without digest news ingestion."""
+    """Bookmark sync should create bookmark-backed content rows without legacy news ingestion."""
     connection = _build_connection(
         test_user,
         ["tweet.read", "users.read", "bookmark.read"],

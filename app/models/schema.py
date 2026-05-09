@@ -285,7 +285,7 @@ class ContentKnowledgeSave(Base):
 
 
 class NewsItem(Base):
-    """Short-form news evidence item used by the news-native digest pipeline."""
+    """Short-form news item used by the news feed pipeline."""
 
     __tablename__ = "news_items"
 

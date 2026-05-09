@@ -45,7 +45,6 @@ The app emits a valid full OpenAPI document, but it is not a clean CLI contract:
   - jobs
   - agent search
   - agent onboarding
-  - digest generation
   - content list/detail/submit
   - source list/subscribe
 - Rewrite operation identifiers to stable CLI-oriented names.
@@ -80,8 +79,6 @@ The new CLI is a clean break in ergonomics, but remains pipes-first and machine-
 - `onboarding start`
 - `onboarding status <run-id>`
 - `onboarding complete <run-id>`
-- `digest generate`
-- `digest list`
 - `completion <shell>`
 - `version`
 

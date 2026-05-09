@@ -42,7 +42,6 @@ enum APITaskType: String, Codable, CaseIterable {
     case fetch_discussion = "fetch_discussion"
     case generate_image = "generate_image"
     case discover_feeds = "discover_feeds"
-    case generate_agent_digest = "generate_agent_digest"
     case onboarding_discover = "onboarding_discover"
     case dig_deeper = "dig_deeper"
     case sync_integration = "sync_integration"
@@ -62,7 +61,6 @@ enum APISummaryKind: String, Codable, CaseIterable {
     case long_bullets = "long_bullets"
     case long_editorial_narrative = "long_editorial_narrative"
     case short_news = "short_news"
-    case daily_rollup = "daily_rollup"
     case longform_artifact = "longform_artifact"
     case insight_report = "insight_report"
 }

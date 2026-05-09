@@ -10,114 +10,6 @@ import (
 	"github.com/go-faster/jx"
 )
 
-// Agent digest generation request for arbitrary windows.
-// Ref: #/components/schemas/AgentDigestRequest
-type AgentDigestRequest struct {
-	EndAt   time.Time                 `json:"end_at"`
-	Form    OptAgentDigestRequestForm `json:"form"`
-	StartAt time.Time                 `json:"start_at"`
-}
-
-// GetEndAt returns the value of EndAt.
-func (s *AgentDigestRequest) GetEndAt() time.Time {
-	return s.EndAt
-}
-
-// GetForm returns the value of Form.
-func (s *AgentDigestRequest) GetForm() OptAgentDigestRequestForm {
-	return s.Form
-}
-
-// GetStartAt returns the value of StartAt.
-func (s *AgentDigestRequest) GetStartAt() time.Time {
-	return s.StartAt
-}
-
-// SetEndAt sets the value of EndAt.
-func (s *AgentDigestRequest) SetEndAt(val time.Time) {
-	s.EndAt = val
-}
-
-// SetForm sets the value of Form.
-func (s *AgentDigestRequest) SetForm(val OptAgentDigestRequestForm) {
-	s.Form = val
-}
-
-// SetStartAt sets the value of StartAt.
-func (s *AgentDigestRequest) SetStartAt(val time.Time) {
-	s.StartAt = val
-}
-
-type AgentDigestRequestForm string
-
-const (
-	AgentDigestRequestFormShort AgentDigestRequestForm = "short"
-	AgentDigestRequestFormLong  AgentDigestRequestForm = "long"
-)
-
-// AllValues returns all AgentDigestRequestForm values.
-func (AgentDigestRequestForm) AllValues() []AgentDigestRequestForm {
-	return []AgentDigestRequestForm{
-		AgentDigestRequestFormShort,
-		AgentDigestRequestFormLong,
-	}
-}
-
-// MarshalText implements encoding.TextMarshaler.
-func (s AgentDigestRequestForm) MarshalText() ([]byte, error) {
-	switch s {
-	case AgentDigestRequestFormShort:
-		return []byte(s), nil
-	case AgentDigestRequestFormLong:
-		return []byte(s), nil
-	default:
-		return nil, errors.Errorf("invalid value: %q", s)
-	}
-}
-
-// UnmarshalText implements encoding.TextUnmarshaler.
-func (s *AgentDigestRequestForm) UnmarshalText(data []byte) error {
-	switch AgentDigestRequestForm(data) {
-	case AgentDigestRequestFormShort:
-		*s = AgentDigestRequestFormShort
-		return nil
-	case AgentDigestRequestFormLong:
-		*s = AgentDigestRequestFormLong
-		return nil
-	default:
-		return errors.Errorf("invalid value: %q", data)
-	}
-}
-
-// Async agent digest generation response.
-// Ref: #/components/schemas/AgentDigestResponse
-type AgentDigestResponse struct {
-	JobID  int       `json:"job_id"`
-	Status OptString `json:"status"`
-}
-
-// GetJobID returns the value of JobID.
-func (s *AgentDigestResponse) GetJobID() int {
-	return s.JobID
-}
-
-// GetStatus returns the value of Status.
-func (s *AgentDigestResponse) GetStatus() OptString {
-	return s.Status
-}
-
-// SetJobID sets the value of JobID.
-func (s *AgentDigestResponse) SetJobID(val int) {
-	s.JobID = val
-}
-
-// SetStatus sets the value of Status.
-func (s *AgentDigestResponse) SetStatus(val OptString) {
-	s.Status = val
-}
-
-func (*AgentDigestResponse) generateDigestRes() {}
-
 // One manifest entry for a personal markdown document.
 // Ref: #/components/schemas/AgentLibraryDocumentResponse
 type AgentLibraryDocumentResponse struct {
@@ -2569,7 +2461,6 @@ func (s *HTTPValidationError) SetDetail(val []ValidationError) {
 func (*HTTPValidationError) approveCliLinkRes()                {}
 func (*HTTPValidationError) completeOnboardingRes()            {}
 func (*HTTPValidationError) convertNewsItemToArticleRes()      {}
-func (*HTTPValidationError) generateDigestRes()                {}
 func (*HTTPValidationError) getAgentLibraryFileRes()           {}
 func (*HTTPValidationError) getAgentLibraryManifestRes()       {}
 func (*HTTPValidationError) getContentDetailRes()              {}
@@ -3119,98 +3010,6 @@ func (s *OnboardingSuggestionSuggestionType) UnmarshalText(data []byte) error {
 	default:
 		return errors.Errorf("invalid value: %q", data)
 	}
-}
-
-// NewOptAgentDigestRequest returns new OptAgentDigestRequest with value set to v.
-func NewOptAgentDigestRequest(v AgentDigestRequest) OptAgentDigestRequest {
-	return OptAgentDigestRequest{
-		Value: v,
-		Set:   true,
-	}
-}
-
-// OptAgentDigestRequest is optional AgentDigestRequest.
-type OptAgentDigestRequest struct {
-	Value AgentDigestRequest
-	Set   bool
-}
-
-// IsSet returns true if OptAgentDigestRequest was set.
-func (o OptAgentDigestRequest) IsSet() bool { return o.Set }
-
-// Reset unsets value.
-func (o *OptAgentDigestRequest) Reset() {
-	var v AgentDigestRequest
-	o.Value = v
-	o.Set = false
-}
-
-// SetTo sets value to v.
-func (o *OptAgentDigestRequest) SetTo(v AgentDigestRequest) {
-	o.Set = true
-	o.Value = v
-}
-
-// Get returns value and boolean that denotes whether value was set.
-func (o OptAgentDigestRequest) Get() (v AgentDigestRequest, ok bool) {
-	if !o.Set {
-		return v, false
-	}
-	return o.Value, true
-}
-
-// Or returns value if set, or given parameter if does not.
-func (o OptAgentDigestRequest) Or(d AgentDigestRequest) AgentDigestRequest {
-	if v, ok := o.Get(); ok {
-		return v
-	}
-	return d
-}
-
-// NewOptAgentDigestRequestForm returns new OptAgentDigestRequestForm with value set to v.
-func NewOptAgentDigestRequestForm(v AgentDigestRequestForm) OptAgentDigestRequestForm {
-	return OptAgentDigestRequestForm{
-		Value: v,
-		Set:   true,
-	}
-}
-
-// OptAgentDigestRequestForm is optional AgentDigestRequestForm.
-type OptAgentDigestRequestForm struct {
-	Value AgentDigestRequestForm
-	Set   bool
-}
-
-// IsSet returns true if OptAgentDigestRequestForm was set.
-func (o OptAgentDigestRequestForm) IsSet() bool { return o.Set }
-
-// Reset unsets value.
-func (o *OptAgentDigestRequestForm) Reset() {
-	var v AgentDigestRequestForm
-	o.Value = v
-	o.Set = false
-}
-
-// SetTo sets value to v.
-func (o *OptAgentDigestRequestForm) SetTo(v AgentDigestRequestForm) {
-	o.Set = true
-	o.Value = v
-}
-
-// Get returns value and boolean that denotes whether value was set.
-func (o OptAgentDigestRequestForm) Get() (v AgentDigestRequestForm, ok bool) {
-	if !o.Set {
-		return v, false
-	}
-	return o.Value, true
-}
-
-// Or returns value if set, or given parameter if does not.
-func (o OptAgentDigestRequestForm) Or(d AgentDigestRequestForm) AgentDigestRequestForm {
-	if v, ok := o.Get(); ok {
-		return v
-	}
-	return d
 }
 
 // NewOptBool returns new OptBool with value set to v.
@@ -5089,7 +4888,6 @@ const (
 	SummaryKindLongBullets            SummaryKind = "long_bullets"
 	SummaryKindLongEditorialNarrative SummaryKind = "long_editorial_narrative"
 	SummaryKindShortNews              SummaryKind = "short_news"
-	SummaryKindDailyRollup            SummaryKind = "daily_rollup"
 	SummaryKindLongformArtifact       SummaryKind = "longform_artifact"
 	SummaryKindInsightReport          SummaryKind = "insight_report"
 )
@@ -5102,7 +4900,6 @@ func (SummaryKind) AllValues() []SummaryKind {
 		SummaryKindLongBullets,
 		SummaryKindLongEditorialNarrative,
 		SummaryKindShortNews,
-		SummaryKindDailyRollup,
 		SummaryKindLongformArtifact,
 		SummaryKindInsightReport,
 	}
@@ -5120,8 +4917,6 @@ func (s SummaryKind) MarshalText() ([]byte, error) {
 	case SummaryKindLongEditorialNarrative:
 		return []byte(s), nil
 	case SummaryKindShortNews:
-		return []byte(s), nil
-	case SummaryKindDailyRollup:
 		return []byte(s), nil
 	case SummaryKindLongformArtifact:
 		return []byte(s), nil
@@ -5149,9 +4944,6 @@ func (s *SummaryKind) UnmarshalText(data []byte) error {
 		return nil
 	case SummaryKindShortNews:
 		*s = SummaryKindShortNews
-		return nil
-	case SummaryKindDailyRollup:
-		*s = SummaryKindDailyRollup
 		return nil
 	case SummaryKindLongformArtifact:
 		*s = SummaryKindLongformArtifact

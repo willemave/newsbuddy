@@ -10,15 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.commands import (
     complete_agent_onboarding,
-    generate_agent_digest,
     start_agent_onboarding,
 )
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.core.settings import get_settings
 from app.models.api.common import (
-    AgentDigestRequest,
-    AgentDigestResponse,
     AgentLibraryDocumentResponse,
     AgentLibraryFileResponse,
     AgentLibraryManifestResponse,
@@ -125,22 +122,6 @@ def complete_onboarding(
         payload=payload,
     )
     return response.model_dump(mode="json")
-
-
-@router.post("/agent/digests", response_model=AgentDigestResponse)
-def generate_digest(
-    db: Annotated[Session, Depends(get_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    payload: AgentDigestRequest | None = Body(default=None),
-) -> AgentDigestResponse:
-    """Queue arbitrary-window digest generation for agent clients."""
-    if payload is None:
-        raise HTTPException(status_code=404, detail="Not Found")
-    return generate_agent_digest.execute(
-        db,
-        user_id=require_user_id(current_user),
-        payload=payload,
-    )
 
 
 @router.post("/agent/cli/link/start", response_model=CliLinkStartResponse)
