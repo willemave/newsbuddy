@@ -463,6 +463,55 @@ def test_convert_news_item_to_article_queues_processing(
     assert article.url == "https://example.com/convert-1"
 
 
+def test_convert_news_item_to_article_ignores_unrelated_content_id_collision(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    unrelated_content = Content(
+        url="https://example.com/unrelated-content",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Unrelated content",
+    )
+    db_session.add(unrelated_content)
+    db_session.flush()
+
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="collision-news",
+        summary_title="Collision news item",
+    )
+    assert news_item.id == unrelated_content.id
+    db_session.commit()
+
+    fake_queue = _FakeQueueService()
+    monkeypatch.setattr(
+        "app.commands.convert_news_to_article.get_queue_service",
+        lambda: fake_queue,
+    )
+
+    response = client.post(f"/api/news/items/{news_item.id}/convert-to-article")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["new_content_id"] != unrelated_content.id
+    assert payload["already_exists"] is False
+    assert fake_queue.calls == [("process_content", payload["new_content_id"])]
+
+    article = db_session.query(Content).filter(Content.id == payload["new_content_id"]).one()
+    assert article.url == "https://example.com/collision-news"
+    assert (
+        knowledge_repository.is_saved_to_knowledge(
+            db_session,
+            payload["new_content_id"],
+            test_user.id,
+        )
+        is True
+    )
+
+
 def test_convert_news_item_to_article_reuses_existing_article_and_saves_to_knowledge(
     client,
     db_session,

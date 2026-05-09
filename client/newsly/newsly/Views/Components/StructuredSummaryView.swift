@@ -19,6 +19,7 @@ private enum SummaryDesign {
 struct StructuredSummaryView: View {
     let summary: StructuredSummary
     var contentId: Int?
+    var startTopicSession: ((String) async throws -> ChatSessionSummary)?
     var onTopicDeepDive: ((String) -> Void)?
 
     @State private var isQuotesExpanded = true
@@ -269,37 +270,35 @@ struct StructuredSummaryView: View {
     }
 
     private func startTopicChat(topic: String) {
-        guard let contentId = contentId else { return }
         Task {
-            do {
-                let session = try await ChatService.shared.startTopicChat(
-                    contentId: contentId,
-                    topic: topic
-                )
+            if let session = await startChatSession(topic: topic) {
                 topicSession = session
-            } catch {
-                print("Failed to start topic chat: \(error)")
             }
         }
     }
 
     private func startKeyPointChat(keyPoint: String) {
-        guard let contentId = contentId else { return }
         Task {
-            do {
-                // Create a topic chat focused on this key point
-                let session = try await ChatService.shared.startTopicChat(
-                    contentId: contentId,
-                    topic: "Dig deeper: \(keyPoint)"
-                )
+            if let session = await startChatSession(topic: "Dig deeper: \(keyPoint)") {
                 topicSession = session
-            } catch {
-                print("Failed to start key point chat: \(error)")
             }
         }
     }
 
-    // Helper function for category colors
+    private func startChatSession(topic: String) async -> ChatSessionSummary? {
+        do {
+            if let startTopicSession {
+                return try await startTopicSession(topic)
+            }
+
+            guard let contentId else { return nil }
+            return try await ChatService.shared.startTopicChat(contentId: contentId, topic: topic)
+        } catch {
+            print("Failed to start topic chat: \(error)")
+            return nil
+        }
+    }
+
     private func categoryColor(for category: String) -> Color {
         switch category.lowercased() {
         case "key_finding":

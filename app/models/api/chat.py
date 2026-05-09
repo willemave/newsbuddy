@@ -42,6 +42,7 @@ class CreateChatSessionRequest(BaseModel):
     """Request to create a new chat session."""
 
     content_id: int | None = Field(None, description="Content ID to chat about")
+    news_item_id: int | None = Field(None, description="News item ID to chat about")
     topic: str | None = Field(None, max_length=500, description="Specific topic to discuss")
     llm_provider: ChatModelProvider | None = Field(
         None, description="LLM provider (defaults to openai)"
@@ -57,6 +58,7 @@ class CreateChatSessionRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "content_id": 123,
+                "news_item_id": None,
                 "topic": None,
                 "llm_provider": "openai",
                 "llm_model_hint": None,
@@ -185,6 +187,7 @@ class ChatSessionSummaryDto(BaseModel):
     id: int
     title: str | None
     content_id: int | None
+    news_item_id: int | None
     session_type: str | None
     topic: str | None
     llm_model: str

@@ -977,6 +977,44 @@ def _extract_transcript_excerpt(content: Content, max_length: int = 420) -> str 
     return None
 
 
+def _news_item_context_label(item: NewsItem) -> str:
+    """Return a compact display label for a news item context row."""
+    return resolve_news_display_title(
+        item.raw_metadata,
+        summary_text=item.summary_text,
+        fallback="Untitled News Item",
+    )
+
+
+def _news_item_source_label(item: NewsItem) -> str | None:
+    candidates = [item.source_label, item.article_domain, item.platform, item.source_type]
+    for candidate in candidates:
+        if candidate and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _visible_news_items_by_id(
+    db: Session,
+    *,
+    user_id: int,
+    news_item_ids: list[int],
+) -> dict[int, NewsItem]:
+    """Load visible news items in the same namespace as news_items.id."""
+    if not news_item_ids:
+        return {}
+
+    from app.services.news_feed import build_visible_news_item_filter
+
+    rows = (
+        db.query(NewsItem)
+        .filter(NewsItem.id.in_(news_item_ids))
+        .filter(build_visible_news_item_filter(db, user_id=user_id))
+        .all()
+    )
+    return {item.id: item for item in rows if item.id is not None}
+
+
 def build_screen_context_snapshot(
     db: Session,
     *,
@@ -1002,10 +1040,10 @@ def build_screen_context_snapshot(
             candidate_ids.append(content_id)
     if candidate_ids:
         rows = db.query(Content).filter(Content.id.in_(candidate_ids)).all()
-        by_id = {row.id: row for row in rows}
+        content_by_id = {row.id: row for row in rows}
         lines.append("Visible Content:")
         for content_id in candidate_ids:
-            content = by_id.get(content_id)
+            content = content_by_id.get(content_id)
             if content is None:
                 continue
             label = resolve_content_display_title(
@@ -1021,6 +1059,41 @@ def build_screen_context_snapshot(
             transcript_excerpt = _extract_transcript_excerpt(content)
             if transcript_excerpt:
                 lines.append(f"  Transcript Excerpt: {transcript_excerpt}")
+
+    news_item_ids: list[int] = []
+    if screen_context.news_item_id:
+        news_item_ids.append(screen_context.news_item_id)
+    for news_item_id in screen_context.visible_news_item_ids:
+        if news_item_id not in news_item_ids:
+            news_item_ids.append(news_item_id)
+    if news_item_ids:
+        news_items_by_id = _visible_news_items_by_id(
+            db,
+            user_id=user_id,
+            news_item_ids=news_item_ids,
+        )
+        lines.append("Visible News Items:")
+        for news_item_id in news_item_ids:
+            item = news_items_by_id.get(news_item_id)
+            if item is None:
+                continue
+
+            label = _news_item_context_label(item)
+            news_source = _news_item_source_label(item)
+            source_suffix = f" ({news_source})" if news_source else ""
+            lines.append(f"- [news:{news_item_id}] {label}{source_suffix}")
+            if item.article_url:
+                lines.append(f"  Article URL: {item.article_url}")
+            if item.canonical_story_url and item.canonical_story_url != item.article_url:
+                lines.append(f"  Story URL: {item.canonical_story_url}")
+            if item.discussion_url:
+                lines.append(f"  Discussion URL: {item.discussion_url}")
+            if item.summary_text:
+                lines.append(f"  Summary: {item.summary_text}")
+            key_points = item.summary_key_points or []
+            if key_points:
+                rendered_points = "; ".join(str(point) for point in key_points[:5])
+                lines.append(f"  Key Points: {rendered_points}")
 
     return "\n".join(lines)
 
@@ -1039,6 +1112,14 @@ def create_assistant_session(
         content = db.query(Content).filter(Content.id == screen_context.content_id).first()
         if content and content.title:
             title = content.title
+    elif screen_context.news_item_id:
+        news_item = _visible_news_items_by_id(
+            db,
+            user_id=user_id,
+            news_item_ids=[screen_context.news_item_id],
+        ).get(screen_context.news_item_id)
+        if news_item is not None:
+            title = _news_item_context_label(news_item)
     elif initial_message and initial_message.strip():
         title = initial_message.strip()[:80]
     elif screen_context.selected_topic:
@@ -1047,6 +1128,7 @@ def create_assistant_session(
     session = ChatSession(
         user_id=user_id,
         content_id=screen_context.content_id,
+        news_item_id=screen_context.news_item_id,
         title=title[:500],
         session_type=KNOWLEDGE_SESSION_TYPE,
         topic=screen_context.selected_topic,

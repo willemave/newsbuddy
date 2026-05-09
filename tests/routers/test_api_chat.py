@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import ChatMessage, ChatSession, Content, MessageProcessingStatus
+from app.models.schema import ChatMessage, ChatSession, Content, MessageProcessingStatus, NewsItem
 from app.services.chat_agent import ChatRunResult, create_processing_message, save_messages
 
 TEST_COUNCIL_EXPERTS = [
@@ -34,6 +34,43 @@ TEST_COUNCIL_EXPERTS = [
         "sort_order": 2,
     },
 ]
+
+
+def _create_news_item(
+    db_session: Session,
+    *,
+    item_id: int | None = None,
+    ingest_key: str = "news-chat",
+    summary_title: str = "Correct News Story",
+    article_url: str = "https://example.com/correct-news-article",
+) -> NewsItem:
+    news_item = NewsItem(
+        id=item_id,
+        ingest_key=ingest_key,
+        visibility_scope="global",
+        platform="techmeme",
+        source_type="techmeme",
+        source_label="Techmeme",
+        source_external_id=ingest_key,
+        canonical_item_url=f"https://techmeme.example.com/{ingest_key}",
+        canonical_story_url=article_url,
+        article_url=article_url,
+        article_title="Correct Linked Article",
+        article_domain="example.com",
+        discussion_url=f"https://techmeme.example.com/discuss/{ingest_key}",
+        summary_title=summary_title,
+        summary_key_points=["Correct key point", "Collision content must be ignored"],
+        summary_text="Correct news item summary for chat grounding.",
+        raw_metadata={},
+        cluster_size=1,
+        status="ready",
+        published_at=datetime.now(UTC).replace(tzinfo=None),
+        ingested_at=datetime.now(UTC).replace(tzinfo=None),
+        processed_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(news_item)
+    db_session.flush()
+    return news_item
 
 
 def test_create_chat_session_with_content(
@@ -96,6 +133,55 @@ def test_create_chat_session_with_content(
     assert db_session_record.user_id == test_user.id
     assert db_session_record.context_snapshot is not None
     assert "Short Summary:" in db_session_record.context_snapshot
+
+
+def test_create_chat_session_with_news_item_ignores_content_id_collision(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+) -> None:
+    unrelated_content = Content(
+        url="https://example.com/wrong-content",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Wrong colliding content",
+        source="Wrong Source",
+    )
+    db_session.add(unrelated_content)
+    db_session.flush()
+
+    news_item = _create_news_item(
+        db_session,
+        item_id=unrelated_content.id,
+        ingest_key="chat-collision",
+        summary_title="Correct News Story",
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/content/chat/sessions",
+        json={"news_item_id": news_item.id, "llm_provider": "openai"},
+    )
+    assert response.status_code == 200
+
+    payload = response.json()
+    session = payload["session"]
+    assert session["content_id"] is None
+    assert session["news_item_id"] == news_item.id
+    assert session["article_title"] == "Correct News Story"
+    assert session["article_url"] == "https://example.com/correct-news-article"
+    assert session["article_summary"] == "Correct news item summary for chat grounding."
+    assert session["article_source"] == "Techmeme"
+
+    db_session_record = db_session.query(ChatSession).filter(ChatSession.id == session["id"]).one()
+    assert db_session_record.user_id == test_user.id
+    assert db_session_record.content_id is None
+    assert db_session_record.news_item_id == news_item.id
+    assert db_session_record.context_snapshot is not None
+    assert "[news:" in db_session_record.context_snapshot
+    assert "Correct News Story" in db_session_record.context_snapshot
+    assert "Wrong colliding content" not in db_session_record.context_snapshot
+    assert "https://example.com/wrong-content" not in db_session_record.context_snapshot
 
 
 def test_create_chat_session_with_topic(client: TestClient, db_session: Session, test_user) -> None:
@@ -1394,6 +1480,93 @@ def test_create_assistant_turn_creates_session_with_screen_context(
         "Short Summary:" in session.context_snapshot
         or "Transcript Excerpt:" in session.context_snapshot
     )
+
+
+def test_create_assistant_turn_with_news_item_ignores_content_id_collision(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch,
+) -> None:
+    unrelated_content = Content(
+        url="https://example.com/wrong-assistant-content",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Wrong assistant content",
+    )
+    db_session.add(unrelated_content)
+    db_session.flush()
+
+    news_item = _create_news_item(
+        db_session,
+        item_id=unrelated_content.id,
+        ingest_key="assistant-collision",
+        summary_title="Assistant Correct News Story",
+    )
+    db_session.commit()
+
+    captured: list[tuple[int, int, str, int | None, int | None]] = []
+
+    async def _fake_process_assistant_turn_async(
+        session_id: int,
+        message_id: int,
+        prompt: str,
+        *,
+        screen_context,
+        source: str = "assistant",
+    ) -> None:
+        del source
+        captured.append(
+            (
+                session_id,
+                message_id,
+                prompt,
+                screen_context.content_id,
+                screen_context.news_item_id,
+            )
+        )
+
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+
+    response = client.post(
+        "/api/content/chat/assistant/turns",
+        json={
+            "message": "Dig deeper into this news story.",
+            "screen_context": {
+                "screen_type": "content_detail",
+                "screen_title": "Assistant Correct News Story",
+                "news_item_id": news_item.id,
+                "visible_news_item_ids": [news_item.id],
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    payload = response.json()
+    session = payload["session"]
+    assert session["content_id"] is None
+    assert session["news_item_id"] == news_item.id
+    assert session["article_title"] == "Assistant Correct News Story"
+    assert captured == [
+        (
+            session["id"],
+            payload["message_id"],
+            "Dig deeper into this news story.",
+            None,
+            news_item.id,
+        )
+    ]
+
+    db_session_record = db_session.query(ChatSession).filter(ChatSession.id == session["id"]).one()
+    assert db_session_record.content_id is None
+    assert db_session_record.news_item_id == news_item.id
+    assert db_session_record.context_snapshot is not None
+    assert "Assistant Correct News Story" in db_session_record.context_snapshot
+    assert "Wrong assistant content" not in db_session_record.context_snapshot
+    assert "https://example.com/wrong-assistant-content" not in db_session_record.context_snapshot
 
 
 def test_create_assistant_turn_titles_new_ad_hoc_session_from_message(

@@ -51,6 +51,7 @@ from app.models.schema import (
     Content,
     ContentKnowledgeSave,
     MessageProcessingStatus,
+    NewsItem,
 )
 from app.models.user import User
 from app.services.assistant_router import (
@@ -76,7 +77,9 @@ from app.services.llm_models import (
     is_deep_research_provider,
     resolve_model,
 )
+from app.services.news_feed import get_visible_news_item
 from app.services.personal_markdown_library import sync_personal_markdown_for_content
+from app.utils.news_titles import resolve_news_display_title
 from app.utils.pagination import PaginationCursor
 from app.utils.title_utils import resolve_content_display_title
 
@@ -201,6 +204,7 @@ def _session_to_summary(
     return ChatSessionSummaryDto(
         id=session_id,
         content_id=session.content_id,
+        news_item_id=session.news_item_id,
         title=session.title,
         session_type=session.session_type,
         topic=session.topic,
@@ -287,6 +291,7 @@ def _refresh_assistant_session_context(
         screen_context=screen_context,
     )
     session.content_id = screen_context.content_id
+    session.news_item_id = screen_context.news_item_id
     session.topic = screen_context.selected_topic
 
     title = screen_context.screen_title or session.title or "Knowledge Chat"
@@ -296,6 +301,14 @@ def _refresh_assistant_session_context(
             resolved_title = _resolve_article_title(content)
             if resolved_title:
                 title = resolved_title
+    elif screen_context.news_item_id is not None:
+        item = get_visible_news_item(
+            db,
+            user_id=user_id,
+            news_item_id=screen_context.news_item_id,
+        )
+        if item is not None:
+            title = _resolve_news_item_title(item)
     session.title = title[:500]
     session.updated_at = datetime.now(UTC)
     db.commit()
@@ -313,6 +326,34 @@ def _resolve_article_title(content: Content) -> str | None:
     except Exception as exc:  # pragma: no cover - defensive fallback
         logger.warning("Failed to resolve display title for content %s: %s", content.id, exc)
         return None
+
+
+def _resolve_news_item_title(item: NewsItem) -> str:
+    """Resolve a chat-friendly title from a news item."""
+    return resolve_news_display_title(
+        item.raw_metadata,
+        summary_text=item.summary_text,
+        fallback="Untitled News Item",
+    )
+
+
+def _resolve_news_item_source(item: NewsItem) -> str | None:
+    candidates = [item.source_label, item.article_domain, item.platform, item.source_type]
+    for candidate in candidates:
+        if candidate and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _news_item_article_metadata(
+    item: NewsItem,
+) -> tuple[str, str | None, str | None, str | None]:
+    return (
+        _resolve_news_item_title(item),
+        item.article_url or item.canonical_story_url,
+        item.summary_text,
+        _resolve_news_item_source(item),
+    )
 
 
 def _extract_short_summary(content: Content) -> str | None:
@@ -370,6 +411,7 @@ def _list_visible_chat_sessions(
     *,
     user_id: int,
     content_id: int | None,
+    news_item_id: int | None,
     limit: int,
     cursor: str | None = None,
     overfetch: bool = False,
@@ -382,6 +424,8 @@ def _list_visible_chat_sessions(
     )
     if content_id is not None:
         query = query.filter(ChatSession.content_id == content_id)
+    if news_item_id is not None:
+        query = query.filter(ChatSession.news_item_id == news_item_id)
 
     if cursor:
         try:
@@ -389,7 +433,10 @@ def _list_visible_chat_sessions(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        if not PaginationCursor.validate_cursor(cursor_data, {"content_id": content_id}):
+        if not PaginationCursor.validate_cursor(
+            cursor_data,
+            {"content_id": content_id, "news_item_id": news_item_id},
+        ):
             raise HTTPException(status_code=400, detail="Invalid pagination cursor for filters")
 
         last_id = cursor_data["last_id"]
@@ -440,6 +487,14 @@ def _build_session_summaries(
     if content_ids:
         content_rows = db.query(Content).filter(Content.id.in_(content_ids)).all()
         contents_by_id = {content.id: content for content in content_rows if content.id is not None}
+
+    news_item_ids = {
+        session.news_item_id for session in sessions if session.news_item_id is not None
+    }
+    news_items_by_id: dict[int, NewsItem] = {}
+    if news_item_ids:
+        news_item_rows = db.query(NewsItem).filter(NewsItem.id.in_(news_item_ids)).all()
+        news_items_by_id = {item.id: item for item in news_item_rows if item.id is not None}
 
     session_ids = {s.id for s in sessions if s.id is not None}
     preview_session_ids = session_ids | active_child_ids
@@ -514,6 +569,12 @@ def _build_session_summaries(
                 article_url = content.url
                 article_summary = _extract_short_summary(content)
                 article_source = content.source
+        elif session.news_item_id:
+            news_item = news_items_by_id.get(session.news_item_id)
+            if news_item:
+                article_title, article_url, article_summary, article_source = (
+                    _news_item_article_metadata(news_item)
+                )
 
         preview_session = session
         if session.council_mode and session.active_child_session_id is not None:
@@ -701,6 +762,7 @@ async def list_sessions(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     content_id: Annotated[int | None, Query(description="Filter by content ID")] = None,
+    news_item_id: Annotated[int | None, Query(description="Filter by news item ID")] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Maximum sessions to return")] = 50,
 ) -> list[ChatSessionSummaryDto]:
     """List chat sessions for the current user.
@@ -708,11 +770,14 @@ async def list_sessions(
     Returns sessions ordered by last_message_at (most recent first),
     falling back to created_at for sessions without messages.
     """
+    if content_id is not None and news_item_id is not None:
+        raise HTTPException(status_code=400, detail="Use either content_id or news_item_id")
     user_id = require_user_id(current_user)
     sessions = _list_visible_chat_sessions(
         db,
         user_id=user_id,
         content_id=content_id,
+        news_item_id=news_item_id,
         limit=limit,
     )
     return _build_session_summaries(db, user_id=user_id, sessions=sessions)
@@ -728,15 +793,19 @@ async def list_sessions_page(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     content_id: Annotated[int | None, Query(description="Filter by content ID")] = None,
+    news_item_id: Annotated[int | None, Query(description="Filter by news item ID")] = None,
     cursor: Annotated[str | None, Query(description="Pagination cursor for next page")] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Maximum sessions to return")] = 25,
 ) -> ChatSessionListResponse:
     """List one cursor-paginated page of chat sessions."""
+    if content_id is not None and news_item_id is not None:
+        raise HTTPException(status_code=400, detail="Use either content_id or news_item_id")
     user_id = require_user_id(current_user)
     rows = _list_visible_chat_sessions(
         db,
         user_id=user_id,
         content_id=content_id,
+        news_item_id=news_item_id,
         limit=limit,
         cursor=cursor,
         overfetch=True,
@@ -752,7 +821,7 @@ async def list_sessions_page(
                 last_session.last_message_at or last_session.created_at,
                 detail="Chat session missing activity timestamp",
             ),
-            filters={"content_id": content_id},
+            filters={"content_id": content_id, "news_item_id": news_item_id},
         )
     return ChatSessionListResponse(
         sessions=_build_session_summaries(db, user_id=user_id, sessions=sessions),
@@ -782,6 +851,9 @@ async def create_session(
     and the article's context will be available to the chat agent.
     """
     user_id = require_user_id(current_user)
+    if request.content_id is not None and request.news_item_id is not None:
+        raise HTTPException(status_code=400, detail="Use either content_id or news_item_id")
+
     # Resolve model
     provider, model_spec = resolve_model(request.llm_provider, request.llm_model_hint)
 
@@ -816,6 +888,28 @@ async def create_session(
                 note=request.initial_message[:500] if request.initial_message else None,
             ),
         )
+    elif request.news_item_id:
+        news_item = get_visible_news_item(
+            db,
+            user_id=user_id,
+            news_item_id=request.news_item_id,
+        )
+        if not news_item:
+            raise HTTPException(status_code=404, detail="News item not found")
+        article_title, article_url, article_summary, article_source = _news_item_article_metadata(
+            news_item
+        )
+        context_snapshot = build_screen_context_snapshot(
+            db,
+            user_id=user_id,
+            screen_context=AssistantScreenContext(
+                screen_type=KNOWLEDGE_SESSION_TYPE,
+                screen_title="Knowledge",
+                news_item_id=request.news_item_id,
+                selected_topic=request.topic,
+                note=request.initial_message[:500] if request.initial_message else None,
+            ),
+        )
     elif session_type == KNOWLEDGE_SESSION_TYPE:
         context_snapshot = build_screen_context_snapshot(
             db,
@@ -844,6 +938,7 @@ async def create_session(
     session = ChatSession(
         user_id=user_id,
         content_id=request.content_id,
+        news_item_id=request.news_item_id,
         title=title,
         session_type=session_type,
         topic=request.topic,
@@ -968,6 +1063,12 @@ async def update_session(
             article_url = content.url
             article_summary = _extract_short_summary(content)
             article_source = content.source
+    elif session.news_item_id:
+        news_item = db.query(NewsItem).filter(NewsItem.id == session.news_item_id).first()
+        if news_item:
+            article_title, article_url, article_summary, article_source = (
+                _news_item_article_metadata(news_item)
+            )
 
     return _session_to_summary(
         session,
@@ -1011,6 +1112,12 @@ async def get_session(
             article_url = content.url
             article_summary = _extract_short_summary(content)
             article_source = content.source
+    elif session.news_item_id:
+        news_item = db.query(NewsItem).filter(NewsItem.id == session.news_item_id).first()
+        if news_item:
+            article_title, article_url, article_summary, article_source = (
+                _news_item_article_metadata(news_item)
+            )
 
     # Load messages
     messages = _extract_messages_for_display(db, session_id)
@@ -1186,6 +1293,7 @@ async def send_message(
                 screen_type=effective_session.session_type,
                 screen_title=effective_session.title,
                 content_id=effective_session.content_id,
+                news_item_id=effective_session.news_item_id,
             ),
         )
     else:
@@ -1222,6 +1330,12 @@ async def create_assistant_turn(
     user_id = require_user_id(current_user)
     screen_context: AssistantScreenContext = request.screen_context
     session: ChatSession
+    if screen_context.news_item_id is not None and not get_visible_news_item(
+        db,
+        user_id=user_id,
+        news_item_id=screen_context.news_item_id,
+    ):
+        raise HTTPException(status_code=404, detail="News item not found")
 
     if request.session_id is not None:
         existing_session = (
@@ -1291,6 +1405,12 @@ async def create_assistant_turn(
             article_url = content.url
             article_summary = _extract_short_summary(content)
             article_source = content.source
+    elif session.news_item_id:
+        news_item = db.query(NewsItem).filter(NewsItem.id == session.news_item_id).first()
+        if news_item:
+            article_title, article_url, article_summary, article_source = (
+                _news_item_article_metadata(news_item)
+            )
 
     return AssistantTurnResponse(
         session=_session_to_summary(
@@ -1527,7 +1647,7 @@ async def retry_council_mode_branch(
     summary="Get initial suggestions",
     description=(
         "Generate initial follow-up question suggestions for an article-based session. "
-        "Only works for sessions with a content_id (article-based sessions)."
+        "Only works for sessions with content or news context."
     ),
 )
 async def get_initial_suggestions(
@@ -1545,10 +1665,10 @@ async def get_initial_suggestions(
     if session.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this session")
 
-    if not session.content_id:
+    if not session.content_id and not session.news_item_id:
         raise HTTPException(
             status_code=400,
-            detail="Initial suggestions only available for article-based sessions",
+            detail="Initial suggestions only available for contextual sessions",
         )
 
     logger.info(

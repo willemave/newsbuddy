@@ -499,6 +499,8 @@ async def process_deep_research_message(
                     "[DeepResearch:CONTEXT] Content not found content_id=%s",
                     session.content_id,
                 )
+        elif session.context_snapshot:
+            context = session.context_snapshot
 
         logger.info(
             "Deep research LLM call started",

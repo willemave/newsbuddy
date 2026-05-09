@@ -67,52 +67,65 @@ class ChatService {
 
     // MARK: - Session Management
 
-    /// List all chat sessions for the current user
-    func listSessions(
-        contentId: Int? = nil,
-        limit: Int = 50
-    ) async throws -> [ChatSessionSummary] {
+    private func sessionListQueryItems(
+        contentId: Int?,
+        newsItemId: Int?,
+        limit: Int,
+        cursor: String? = nil
+    ) -> [URLQueryItem] {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: String(limit))
         ]
-
-        if let contentId = contentId {
+        if let contentId {
             queryItems.append(URLQueryItem(name: "content_id", value: String(contentId)))
         }
+        if let newsItemId {
+            queryItems.append(URLQueryItem(name: "news_item_id", value: String(newsItemId)))
+        }
+        if let cursor {
+            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+        }
+        return queryItems
+    }
 
+    /// List all chat sessions for the current user
+    func listSessions(
+        contentId: Int? = nil,
+        newsItemId: Int? = nil,
+        limit: Int = 50
+    ) async throws -> [ChatSessionSummary] {
         return try await client.request(
             APIEndpoints.chatSessions,
-            queryItems: queryItems
+            queryItems: sessionListQueryItems(
+                contentId: contentId,
+                newsItemId: newsItemId,
+                limit: limit
+            )
         )
     }
 
     /// List one page of chat sessions for the current user
     func listSessionsPage(
         contentId: Int? = nil,
+        newsItemId: Int? = nil,
         limit: Int = 25,
         cursor: String? = nil
     ) async throws -> ChatSessionListResponse {
-        var queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "limit", value: String(limit))
-        ]
-
-        if let contentId = contentId {
-            queryItems.append(URLQueryItem(name: "content_id", value: String(contentId)))
-        }
-
-        if let cursor {
-            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
-        }
-
         return try await client.request(
             APIEndpoints.chatSessionsList,
-            queryItems: queryItems
+            queryItems: sessionListQueryItems(
+                contentId: contentId,
+                newsItemId: newsItemId,
+                limit: limit,
+                cursor: cursor
+            )
         )
     }
 
     /// Create a new chat session
     func createSession(
         contentId: Int? = nil,
+        newsItemId: Int? = nil,
         topic: String? = nil,
         provider: ChatModelProvider? = .openai,
         modelHint: String? = nil,
@@ -120,6 +133,7 @@ class ChatService {
     ) async throws -> ChatSessionSummary {
         let request = CreateChatSessionRequest(
             contentId: contentId,
+            newsItemId: newsItemId,
             topic: topic,
             llmProvider: provider?.rawValue,
             llmModelHint: modelHint,
@@ -148,6 +162,15 @@ class ChatService {
         let sessions = try await listSessions(contentId: contentId, limit: 20)
         return sessions.first(where: {
             $0.contentId == contentId &&
+            $0.isKnowledgeSession &&
+            !($0.councilMode ?? false)
+        })
+    }
+
+    func getSessionForNewsItem(newsItemId: Int) async throws -> ChatSessionSummary? {
+        let sessions = try await listSessions(newsItemId: newsItemId, limit: 20)
+        return sessions.first(where: {
+            $0.newsItemId == newsItemId &&
             $0.isKnowledgeSession &&
             !($0.councilMode ?? false)
         })
@@ -343,6 +366,16 @@ class ChatService {
         )
     }
 
+    func startNewsChat(
+        newsItemId: Int,
+        provider: ChatModelProvider = .openai
+    ) async throws -> ChatSessionSummary {
+        return try await createSession(
+            newsItemId: newsItemId,
+            provider: provider
+        )
+    }
+
     /// Start a topic-focused chat for an article
     func startTopicChat(
         contentId: Int,
@@ -351,6 +384,18 @@ class ChatService {
     ) async throws -> ChatSessionSummary {
         return try await createSession(
             contentId: contentId,
+            topic: topic,
+            provider: provider
+        )
+    }
+
+    func startNewsTopicChat(
+        newsItemId: Int,
+        topic: String,
+        provider: ChatModelProvider = .openai
+    ) async throws -> ChatSessionSummary {
+        return try await createSession(
+            newsItemId: newsItemId,
             topic: topic,
             provider: provider
         )
@@ -371,10 +416,12 @@ class ChatService {
     /// Deep research uses OpenAI's o4-mini-deep-research model for comprehensive research
     func startDeepResearch(
         contentId: Int? = nil,
+        newsItemId: Int? = nil,
         topic: String? = nil
     ) async throws -> ChatSessionSummary {
         return try await createSession(
             contentId: contentId,
+            newsItemId: newsItemId,
             topic: topic,
             provider: .deep_research
         )

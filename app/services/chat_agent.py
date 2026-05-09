@@ -1493,9 +1493,9 @@ async def generate_initial_suggestions(
         ),
     )
 
-    if not session.content_id:
+    if not session.content_id and not session.context_snapshot:
         logger.warning(
-            "Initial suggestions skipped because session has no content",
+            "Initial suggestions skipped because session has no context",
             extra=build_log_extra(
                 component="chat",
                 operation="generate_initial_suggestions",

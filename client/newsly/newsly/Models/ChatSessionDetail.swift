@@ -96,6 +96,7 @@ struct InitialSuggestionsResponse: Codable {
 /// Request to create a new chat session
 struct CreateChatSessionRequest: Codable {
     var contentId: Int?
+    var newsItemId: Int?
     var topic: String?
     var llmProvider: String?
     var llmModelHint: String?
@@ -103,6 +104,7 @@ struct CreateChatSessionRequest: Codable {
 
     enum CodingKeys: String, CodingKey {
         case contentId = "content_id"
+        case newsItemId = "news_item_id"
         case topic
         case llmProvider = "llm_provider"
         case llmModelHint = "llm_model_hint"
@@ -141,7 +143,9 @@ struct AssistantScreenContext: Codable, Equatable {
     let screenType: String
     let screenTitle: String?
     let contentId: Int?
+    let newsItemId: Int?
     let visibleContentIds: [Int]
+    let visibleNewsItemIds: [Int]
     let selectedTopic: String?
     let query: String?
     let note: String?
@@ -150,7 +154,9 @@ struct AssistantScreenContext: Codable, Equatable {
         screenType: String,
         screenTitle: String? = nil,
         contentId: Int? = nil,
+        newsItemId: Int? = nil,
         visibleContentIds: [Int] = [],
+        visibleNewsItemIds: [Int] = [],
         selectedTopic: String? = nil,
         query: String? = nil,
         note: String? = nil
@@ -158,7 +164,9 @@ struct AssistantScreenContext: Codable, Equatable {
         self.screenType = screenType
         self.screenTitle = screenTitle
         self.contentId = contentId
+        self.newsItemId = newsItemId
         self.visibleContentIds = Array(visibleContentIds.prefix(Self.maxVisibleContentIds))
+        self.visibleNewsItemIds = Array(visibleNewsItemIds.prefix(Self.maxVisibleContentIds))
         self.selectedTopic = selectedTopic
         self.query = query
         self.note = note
@@ -168,7 +176,9 @@ struct AssistantScreenContext: Codable, Equatable {
         case screenType = "screen_type"
         case screenTitle = "screen_title"
         case contentId = "content_id"
+        case newsItemId = "news_item_id"
         case visibleContentIds = "visible_content_ids"
+        case visibleNewsItemIds = "visible_news_item_ids"
         case selectedTopic = "selected_topic"
         case query
         case note

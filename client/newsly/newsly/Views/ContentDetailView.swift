@@ -133,11 +133,14 @@ struct ContentDetailView: View {
                             .padding(.horizontal, DetailDesign.horizontalPadding)
 
                         // Chat status banner (inline, under header)
-                        if let activeSession = chatSessionManager.getSession(forContentId: content.id) {
+                        if let activeSession = activeChatSession(for: content) {
                             ChatStatusBanner(
                                 session: activeSession,
                                 onTap: {
-                                    openChatSession(sessionId: activeSession.id, contentId: content.id)
+                                    openChatSession(
+                                        sessionId: activeSession.id,
+                                        content: content
+                                    )
                                 },
                                 onDismiss: {
                                     chatSessionManager.markAsViewed(sessionId: activeSession.id)
@@ -225,7 +228,22 @@ struct ContentDetailView: View {
                                     )
                                 }
                         } else if let structuredSummary = content.structuredSummary {
-                            StructuredSummaryView(summary: structuredSummary, contentId: content.id)
+                            StructuredSummaryView(
+                                summary: structuredSummary,
+                                contentId: content.id,
+                                startTopicSession: { topic in
+                                    if content.contentTypeEnum == .news {
+                                        return try await ChatService.shared.startNewsTopicChat(
+                                            newsItemId: content.id,
+                                            topic: topic
+                                        )
+                                    }
+                                    return try await ChatService.shared.startTopicChat(
+                                        contentId: content.id,
+                                        topic: topic
+                                    )
+                                }
+                            )
                                 .padding(.horizontal, DetailDesign.horizontalPadding)
                                 .padding(.top, DetailDesign.summaryTopPadding)
                                 .onAppear {
@@ -523,7 +541,7 @@ struct ContentDetailView: View {
     }
 
     private func startChat(
-        contentId: Int,
+        content: ContentDetail,
         provider: ChatModelProvider = .openai,
         prompt: String? = nil
     ) async {
@@ -533,24 +551,42 @@ struct ContentDetailView: View {
         chatError = nil
 
         do {
-            let session = try await ChatService.shared.startArticleChat(
-                contentId: contentId,
-                provider: provider
-            )
-            var pendingResponse: SendChatMessageResponse?
-            if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                pendingResponse = try await ChatService.shared.sendMessageAsync(
+            if content.contentTypeEnum == .news {
+                if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let response = try await ChatService.shared.createAssistantTurn(
+                        message: prompt,
+                        screenContext: newsScreenContext(for: content)
+                    )
+                    activeSheet = nil
+                    ChatNavigationCoordinator.shared.openAssistantTurn(response)
+                } else {
+                    let session = try await ChatService.shared.startNewsChat(
+                        newsItemId: content.id,
+                        provider: provider
+                    )
+                    activeSheet = nil
+                    openChatSession(sessionId: session.id, content: content)
+                }
+            } else {
+                let session = try await ChatService.shared.startArticleChat(
+                    contentId: content.id,
+                    provider: provider
+                )
+                var pendingResponse: SendChatMessageResponse?
+                if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    pendingResponse = try await ChatService.shared.sendMessageAsync(
+                        sessionId: session.id,
+                        message: prompt
+                    )
+                }
+                activeSheet = nil
+                openChatSession(
                     sessionId: session.id,
-                    message: prompt
+                    content: content,
+                    initialUserMessage: pendingResponse?.userMessage,
+                    pendingMessageId: pendingResponse?.messageId
                 )
             }
-            activeSheet = nil
-            openChatSession(
-                sessionId: session.id,
-                contentId: contentId,
-                initialUserMessage: pendingResponse?.userMessage,
-                pendingMessageId: pendingResponse?.messageId
-            )
         } catch {
             chatError = error.localizedDescription
         }
@@ -560,7 +596,7 @@ struct ContentDetailView: View {
 
     private func startCouncilWithPrompt(
         _ prompt: String,
-        contentId: Int,
+        content: ContentDetail,
         provider: ChatModelProvider = .openai
     ) async {
         guard !isStartingChat else { return }
@@ -570,20 +606,33 @@ struct ContentDetailView: View {
 
         do {
             let session: ChatSessionSummary
-            if let existingSession = try await ChatService.shared.getSessionForContent(
-                contentId: contentId
-            ) {
-                session = existingSession
+            if content.contentTypeEnum == .news {
+                if let existingSession = try await ChatService.shared.getSessionForNewsItem(
+                    newsItemId: content.id
+                ) {
+                    session = existingSession
+                } else {
+                    session = try await ChatService.shared.startNewsChat(
+                        newsItemId: content.id,
+                        provider: provider
+                    )
+                }
             } else {
-                session = try await ChatService.shared.startArticleChat(
-                    contentId: contentId,
-                    provider: provider
-                )
+                if let existingSession = try await ChatService.shared.getSessionForContent(
+                    contentId: content.id
+                ) {
+                    session = existingSession
+                } else {
+                    session = try await ChatService.shared.startArticleChat(
+                        contentId: content.id,
+                        provider: provider
+                    )
+                }
             }
             activeSheet = nil
             openChatSession(
                 sessionId: session.id,
-                contentId: contentId,
+                content: content,
                 pendingCouncilPrompt: session.isCouncilMode ? nil : prompt
             )
         } catch {
@@ -609,14 +658,18 @@ struct ContentDetailView: View {
         "Conduct comprehensive research on \(content.displayTitle). Find additional sources, verify claims, identify related developments, and provide a thorough analysis with citations."
     }
 
-    private func startDeepResearchWithPrompt(_ prompt: String, contentId: Int) async {
+    private func startDeepResearchWithPrompt(_ prompt: String, content: ContentDetail) async {
         guard !isStartingChat else { return }
 
         isStartingChat = true
         chatError = nil
 
         do {
-            let session = try await ChatService.shared.startDeepResearch(contentId: contentId)
+            let isNews = content.contentTypeEnum == .news
+            let session = try await ChatService.shared.startDeepResearch(
+                contentId: isNews ? nil : content.id,
+                newsItemId: isNews ? content.id : nil
+            )
             let pendingResponse = try await ChatService.shared.sendMessageAsync(
                 sessionId: session.id,
                 message: prompt
@@ -625,7 +678,7 @@ struct ContentDetailView: View {
             activeSheet = nil
             openChatSession(
                 sessionId: session.id,
-                contentId: contentId,
+                content: content,
                 initialUserMessage: pendingResponse.userMessage,
                 pendingMessageId: pendingResponse.messageId
             )
@@ -636,10 +689,48 @@ struct ContentDetailView: View {
         isStartingChat = false
     }
 
+    private func newsScreenContext(for content: ContentDetail) -> AssistantScreenContext {
+        AssistantScreenContext(
+            screenType: "content_detail",
+            screenTitle: content.displayTitle,
+            newsItemId: content.id,
+            visibleNewsItemIds: allContentIds,
+            selectedTopic: content.displayTitle,
+            note: "The user is viewing a news item detail. Use the news item snapshot; do not resolve same-numbered content IDs."
+        )
+    }
+
+    private func activeChatSession(for content: ContentDetail) -> ActiveChatSession? {
+        if content.contentTypeEnum == .news {
+            return chatSessionManager.getSession(forNewsItemId: content.id)
+        }
+        return chatSessionManager.getSession(forContentId: content.id)
+    }
+
     @MainActor
     private func openChatSession(
         sessionId: Int,
-        contentId: Int,
+        content: ContentDetail,
+        initialUserMessage: ChatMessage? = nil,
+        pendingMessageId: Int? = nil,
+        pendingCouncilPrompt: String? = nil
+    ) {
+        let isNews = content.contentTypeEnum == .news
+        openChatSession(
+            sessionId: sessionId,
+            contentId: isNews ? nil : content.id,
+            newsItemId: isNews ? content.id : nil,
+            initialUserMessage: initialUserMessage,
+            pendingMessageId: pendingMessageId,
+            pendingCouncilPrompt: pendingCouncilPrompt
+        )
+    }
+
+    @MainActor
+    private func openChatSession(
+        sessionId: Int,
+        contentId: Int? = nil,
+        newsItemId: Int? = nil,
         initialUserMessage: ChatMessage? = nil,
         pendingMessageId: Int? = nil,
         pendingCouncilPrompt: String? = nil
@@ -649,6 +740,7 @@ struct ContentDetailView: View {
             ChatSessionRoute(
                 sessionId: sessionId,
                 contentId: contentId,
+                newsItemId: newsItemId,
                 initialUserMessageText: initialUserMessage?.content,
                 initialUserMessageTimestamp: initialUserMessage?.timestamp,
                 pendingMessageId: pendingMessageId,
@@ -1098,8 +1190,11 @@ struct ContentDetailView: View {
             // Deep Dive chat
             Button(action: {
                 Task {
-                    if let activeSession = chatSessionManager.getSession(forContentId: content.id) {
-                        openChatSession(sessionId: activeSession.id, contentId: content.id)
+                    if let activeSession = activeChatSession(for: content) {
+                        openChatSession(
+                            sessionId: activeSession.id,
+                            content: content
+                        )
                         return
                     }
                     await handleChatButtonTapped()
@@ -1355,7 +1450,7 @@ struct ContentDetailView: View {
                     action: {
                         Task {
                             await startChat(
-                                contentId: content.id,
+                                content: content,
                                 provider: .openai
                             )
                         }
@@ -1370,7 +1465,7 @@ struct ContentDetailView: View {
                     action: {
                         Task {
                             await startChat(
-                                contentId: content.id,
+                                content: content,
                                 provider: .openai,
                                 prompt: deepDivePrompt(for: content)
                             )
@@ -1387,7 +1482,7 @@ struct ContentDetailView: View {
                         Task {
                             await startCouncilWithPrompt(
                                 councilPrompt(for: content),
-                                contentId: content.id,
+                                content: content,
                                 provider: .openai
                             )
                         }
@@ -1402,7 +1497,7 @@ struct ContentDetailView: View {
                     action: {
                         Task {
                             await startChat(
-                                contentId: content.id,
+                                content: content,
                                 provider: .openai,
                                 prompt: corroboratePrompt(for: content)
                             )
@@ -1417,7 +1512,7 @@ struct ContentDetailView: View {
                     badge: "~2-5 min",
                     disabled: isStartingChat,
                     action: {
-                        Task { await startDeepResearchWithPrompt(deepResearchPrompt(for: content), contentId: content.id) }
+                        Task { await startDeepResearchWithPrompt(deepResearchPrompt(for: content), content: content) }
                     }
                 )
             }

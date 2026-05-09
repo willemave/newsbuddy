@@ -10,6 +10,7 @@ import SwiftUI
 protocol KnowledgeHubChatServicing: AnyObject {
     func listSessionsPage(
         contentId: Int?,
+        newsItemId: Int?,
         limit: Int,
         cursor: String?
     ) async throws -> ChatSessionListResponse
@@ -22,6 +23,7 @@ protocol KnowledgeHubChatServicing: AnyObject {
 
     func createSession(
         contentId: Int?,
+        newsItemId: Int?,
         topic: String?,
         provider: ChatModelProvider?,
         modelHint: String?,
@@ -62,6 +64,7 @@ class KnowledgeHubViewModel: ObservableObject {
         do {
             let response = try await chatService.listSessionsPage(
                 contentId: nil,
+                newsItemId: nil,
                 limit: historyPageLimit,
                 cursor: nil
             )
@@ -90,6 +93,7 @@ class KnowledgeHubViewModel: ObservableObject {
         do {
             let response = try await chatService.listSessionsPage(
                 contentId: nil,
+                newsItemId: nil,
                 limit: historyPageLimit,
                 cursor: cursor
             )
@@ -109,8 +113,12 @@ class KnowledgeHubViewModel: ObservableObject {
 
         do {
             let session = try await chatService.createSession(
-                contentId: nil, topic: nil, provider: nil,
-                modelHint: nil, initialMessage: nil
+                contentId: nil,
+                newsItemId: nil,
+                topic: nil,
+                provider: nil,
+                modelHint: nil,
+                initialMessage: nil
             )
             prependSession(session)
             return ChatSessionRoute(sessionId: session.id)

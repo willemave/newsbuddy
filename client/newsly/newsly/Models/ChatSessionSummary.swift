@@ -18,6 +18,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     }
     let id: Int
     let contentId: Int?
+    let newsItemId: Int?
     let title: String?
     let sessionType: String?
     let topic: String?
@@ -42,6 +43,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id
         case contentId = "content_id"
+        case newsItemId = "news_item_id"
         case title
         case sessionType = "session_type"
         case topic
@@ -66,6 +68,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     init(
         id: Int,
         contentId: Int?,
+        newsItemId: Int? = nil,
         title: String?,
         sessionType: String?,
         topic: String?,
@@ -88,6 +91,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     ) {
         self.id = id
         self.contentId = contentId
+        self.newsItemId = newsItemId
         self.title = title
         self.sessionType = sessionType
         self.topic = topic
@@ -114,6 +118,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)
         contentId = try container.decodeIfPresent(Int.self, forKey: .contentId)
+        newsItemId = try container.decodeIfPresent(Int.self, forKey: .newsItemId)
         title = try container.decodeIfPresent(String.self, forKey: .title)
         sessionType = try container.decodeIfPresent(String.self, forKey: .sessionType)
         topic = try container.decodeIfPresent(String.self, forKey: .topic)

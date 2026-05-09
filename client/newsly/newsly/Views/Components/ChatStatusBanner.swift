@@ -167,6 +167,7 @@ private extension View {
             session: ActiveChatSession(
                 id: 1,
                 contentId: 1,
+                newsItemId: nil,
                 contentTitle: "Understanding Modern AI Systems",
                 messageId: 1,
                 status: .processing
@@ -179,6 +180,7 @@ private extension View {
             session: ActiveChatSession(
                 id: 2,
                 contentId: 2,
+                newsItemId: nil,
                 contentTitle: "The Future of Web Development",
                 messageId: 2,
                 status: .completed
@@ -191,6 +193,7 @@ private extension View {
             session: ActiveChatSession(
                 id: 3,
                 contentId: 3,
+                newsItemId: nil,
                 contentTitle: "Some Article",
                 messageId: 3,
                 status: .failed("Network error")

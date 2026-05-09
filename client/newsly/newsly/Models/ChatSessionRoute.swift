@@ -11,6 +11,7 @@ struct ChatSessionRoute: Hashable {
     let sessionId: Int
     let session: ChatSessionSummary?
     let contentId: Int?
+    let newsItemId: Int?
     let initialUserMessageText: String?
     let initialUserMessageTimestamp: String?
     let pendingMessageId: Int?
@@ -19,6 +20,7 @@ struct ChatSessionRoute: Hashable {
         [
             String(sessionId),
             String(contentId ?? -1),
+            String(newsItemId ?? -1),
             initialUserMessageText ?? "",
             initialUserMessageTimestamp ?? "",
             pendingMessageId.map(String.init) ?? "",
@@ -30,6 +32,7 @@ struct ChatSessionRoute: Hashable {
         sessionId: Int,
         session: ChatSessionSummary? = nil,
         contentId: Int? = nil,
+        newsItemId: Int? = nil,
         initialUserMessageText: String? = nil,
         initialUserMessageTimestamp: String? = nil,
         pendingMessageId: Int? = nil,
@@ -38,6 +41,7 @@ struct ChatSessionRoute: Hashable {
         self.sessionId = sessionId
         self.session = session
         self.contentId = contentId
+        self.newsItemId = newsItemId
         self.initialUserMessageText = initialUserMessageText
         self.initialUserMessageTimestamp = initialUserMessageTimestamp
         self.pendingMessageId = pendingMessageId
@@ -55,6 +59,7 @@ struct ChatSessionRoute: Hashable {
             sessionId: session.id,
             session: session,
             contentId: session.contentId,
+            newsItemId: session.newsItemId,
             initialUserMessageText: initialUserMessageText,
             initialUserMessageTimestamp: initialUserMessageTimestamp,
             pendingMessageId: pendingMessageId,

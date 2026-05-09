@@ -14,10 +14,21 @@ private let logger = Logger(subsystem: "com.newsly", category: "ActiveChatSessio
 /// Represents an active chat session being polled in the background
 struct ActiveChatSession: Identifiable, Equatable {
     let id: Int  // session ID
-    let contentId: Int
+    let contentId: Int?
+    let newsItemId: Int?
     let contentTitle: String
     let messageId: Int
     var status: ActiveChatStatus
+
+    var itemKey: String? {
+        if let contentId {
+            return "content:\(contentId)"
+        }
+        if let newsItemId {
+            return "news:\(newsItemId)"
+        }
+        return nil
+    }
 
     enum ActiveChatStatus: Equatable {
         case processing
@@ -47,7 +58,7 @@ class ActiveChatSessionManager: ObservableObject {
     private let maxPollingAttempts = 120
 
     private var pollingTasks: [Int: Task<Void, Never>] = [:]  // sessionId -> task
-    private var sessionIdsByContentId: [Int: [Int]] = [:]  // contentId -> newest-first session IDs
+    private var sessionIdsByItemKey: [String: [Int]] = [:]  // item key -> newest-first session IDs
     private var authDidLogOutObserver: NSObjectProtocol?
 
     private init() {
@@ -65,7 +76,8 @@ class ActiveChatSessionManager: ObservableObject {
     /// Start tracking a new chat session
     func startTracking(
         session: ChatSessionSummary,
-        contentId: Int,
+        contentId: Int? = nil,
+        newsItemId: Int? = nil,
         contentTitle: String,
         messageId: Int
     ) {
@@ -80,18 +92,19 @@ class ActiveChatSessionManager: ObservableObject {
         let activeSession = ActiveChatSession(
             id: session.id,
             contentId: contentId,
+            newsItemId: newsItemId,
             contentTitle: contentTitle,
             messageId: messageId,
             status: .processing
         )
 
         activeSessions[session.id] = activeSession
-        insertSessionReference(sessionId: session.id, contentId: contentId)
-        logger.info("Started tracking session \(session.id) for content \(contentId)")
+        insertSessionReference(sessionId: session.id, itemKey: activeSession.itemKey)
+        logger.info("Started tracking session \(session.id)")
 
         // Start background polling
         let task = Task {
-            await pollForCompletion(sessionId: session.id, contentId: contentId, messageId: messageId)
+            await pollForCompletion(sessionId: session.id, messageId: messageId)
         }
         pollingTasks[session.id] = task
     }
@@ -103,8 +116,8 @@ class ActiveChatSessionManager: ObservableObject {
 
         let session = activeSessions.removeValue(forKey: sessionId) ?? completedSessions.removeValue(forKey: sessionId)
         if let session {
-            removeSessionReference(sessionId: sessionId, contentId: session.contentId)
-            logger.info("Stopped tracking session \(sessionId) for content \(session.contentId)")
+            removeSessionReference(sessionId: sessionId, itemKey: session.itemKey)
+            logger.info("Stopped tracking session \(sessionId)")
         } else {
             logger.info("Stopped tracking session \(sessionId)")
         }
@@ -117,19 +130,27 @@ class ActiveChatSessionManager: ObservableObject {
         pollingTasks.removeAll()
         activeSessions.removeAll()
         completedSessions.removeAll()
-        sessionIdsByContentId.removeAll()
+        sessionIdsByItemKey.removeAll()
         logger.info("Reset all active chat tracking state")
     }
 
     /// Mark a completed session as viewed (dismisses banner)
     func markAsViewed(sessionId: Int) {
         guard let session = completedSessions.removeValue(forKey: sessionId) else { return }
-        removeSessionReference(sessionId: sessionId, contentId: session.contentId)
+        removeSessionReference(sessionId: sessionId, itemKey: session.itemKey)
     }
 
     /// Get active session for a content ID if any
     func getSession(forContentId contentId: Int) -> ActiveChatSession? {
-        let sessionIds = sessionIdsByContentId[contentId] ?? []
+        getSession(forItemKey: "content:\(contentId)")
+    }
+
+    func getSession(forNewsItemId newsItemId: Int) -> ActiveChatSession? {
+        getSession(forItemKey: "news:\(newsItemId)")
+    }
+
+    private func getSession(forItemKey itemKey: String) -> ActiveChatSession? {
+        let sessionIds = sessionIdsByItemKey[itemKey] ?? []
 
         for sessionId in sessionIds {
             if let session = activeSessions[sessionId] {
@@ -162,7 +183,7 @@ class ActiveChatSessionManager: ObservableObject {
     }
 
     /// Poll for message completion
-    private func pollForCompletion(sessionId: Int, contentId: Int, messageId: Int) async {
+    private func pollForCompletion(sessionId: Int, messageId: Int) async {
         var attempts = 0
 
         while attempts < maxPollingAttempts {
@@ -173,12 +194,12 @@ class ActiveChatSessionManager: ObservableObject {
 
                 switch status.status {
                 case .completed:
-                    await handleCompletion(sessionId: sessionId, contentId: contentId)
+                    await handleCompletion(sessionId: sessionId)
                     return
 
                 case .failed:
                     let errorMsg = status.error ?? "Unknown error"
-                    await handleFailure(sessionId: sessionId, contentId: contentId, error: errorMsg)
+                    await handleFailure(sessionId: sessionId, error: errorMsg)
                     return
 
                 case .processing:
@@ -186,20 +207,20 @@ class ActiveChatSessionManager: ObservableObject {
                     try await Task.sleep(nanoseconds: pollingInterval)
                 }
             } catch is CancellationError {
-                logger.info("Polling cancelled for content \(contentId)")
+                logger.info("Polling cancelled for session \(sessionId)")
                 return
             } catch {
-                logger.error("Polling error for content \(contentId): \(error.localizedDescription)")
-                await handleFailure(sessionId: sessionId, contentId: contentId, error: error.localizedDescription)
+                logger.error("Polling error for session \(sessionId): \(error.localizedDescription)")
+                await handleFailure(sessionId: sessionId, error: error.localizedDescription)
                 return
             }
         }
 
         // Timeout
-        await handleFailure(sessionId: sessionId, contentId: contentId, error: "Request timed out")
+        await handleFailure(sessionId: sessionId, error: "Request timed out")
     }
 
-    private func handleCompletion(sessionId: Int, contentId: Int) async {
+    private func handleCompletion(sessionId: Int) async {
         guard var session = activeSessions[sessionId] else { return }
 
         session.status = .completed
@@ -207,7 +228,7 @@ class ActiveChatSessionManager: ObservableObject {
         completedSessions[sessionId] = session
         pollingTasks.removeValue(forKey: sessionId)
 
-        logger.info("Chat completed for content \(contentId)")
+        logger.info("Chat completed for session \(sessionId)")
 
         // Show local notification
         notificationService.showChatCompletedNotification(
@@ -217,7 +238,7 @@ class ActiveChatSessionManager: ObservableObject {
         )
     }
 
-    private func handleFailure(sessionId: Int, contentId: Int, error: String) async {
+    private func handleFailure(sessionId: Int, error: String) async {
         guard var session = activeSessions[sessionId] else { return }
 
         session.status = .failed(error)
@@ -225,24 +246,25 @@ class ActiveChatSessionManager: ObservableObject {
         completedSessions[sessionId] = session
         pollingTasks.removeValue(forKey: sessionId)
 
-        logger.error("Chat failed for content \(contentId): \(error)")
+        logger.error("Chat failed for session \(sessionId): \(error)")
     }
 
-    private func insertSessionReference(sessionId: Int, contentId: Int) {
-        var sessionIds = sessionIdsByContentId[contentId] ?? []
+    private func insertSessionReference(sessionId: Int, itemKey: String?) {
+        guard let itemKey else { return }
+        var sessionIds = sessionIdsByItemKey[itemKey] ?? []
         sessionIds.removeAll { $0 == sessionId }
         sessionIds.insert(sessionId, at: 0)
-        sessionIdsByContentId[contentId] = sessionIds
+        sessionIdsByItemKey[itemKey] = sessionIds
     }
 
-    private func removeSessionReference(sessionId: Int, contentId: Int) {
-        guard var sessionIds = sessionIdsByContentId[contentId] else { return }
+    private func removeSessionReference(sessionId: Int, itemKey: String?) {
+        guard let itemKey, var sessionIds = sessionIdsByItemKey[itemKey] else { return }
         sessionIds.removeAll { $0 == sessionId }
 
         if sessionIds.isEmpty {
-            sessionIdsByContentId.removeValue(forKey: contentId)
+            sessionIdsByItemKey.removeValue(forKey: itemKey)
         } else {
-            sessionIdsByContentId[contentId] = sessionIds
+            sessionIdsByItemKey[itemKey] = sessionIds
         }
     }
 }

@@ -184,8 +184,8 @@ final class ChatSessionViewModel {
             else if let topic = detail.session.topic, !topic.isEmpty, detail.messages.isEmpty {
                 await sendMessage(text: topic)
             }
-            // If this is an article-based session with no messages, load initial suggestions
-            else if detail.session.contentId != nil && detail.messages.isEmpty {
+            // If this is a contextual session with no messages, load initial suggestions
+            else if (detail.session.contentId != nil || detail.session.newsItemId != nil) && detail.messages.isEmpty {
                 await loadInitialSuggestions()
             }
         } catch is CancellationError {
@@ -412,12 +412,13 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
 
     private func handOffBackgroundPollingIfNeeded() {
         guard let session else { return }
-        guard let contentId = session.contentId else { return }
+        guard session.contentId != nil || session.newsItemId != nil else { return }
         guard let processingMessageId = backgroundTrackingMessageId else { return }
 
         activeSessionManager.startTracking(
             session: session,
-            contentId: contentId,
+            contentId: session.contentId,
+            newsItemId: session.newsItemId,
             contentTitle: session.articleTitle ?? session.displayTitle,
             messageId: processingMessageId
         )
