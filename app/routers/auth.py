@@ -5,28 +5,23 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session
-from app.core.deps import ADMIN_SESSION_COOKIE, get_current_user, require_user_id
+from app.core.deps import get_current_user, require_user_id
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.core.security import (
     create_access_token,
-    create_admin_session_token,
     create_refresh_token,
-    verify_admin_password,
     verify_apple_token,
     verify_token,
 )
 from app.core.settings import get_settings
 from app.models.api.auth import (
     AccessTokenResponse,
-    AdminLoginRequest,
-    AdminLoginResponse,
     AppleSignInRequest,
     DebugUserSessionRequest,
     RefreshTokenRequest,
@@ -36,7 +31,6 @@ from app.models.api.users import UpdateUserProfileRequest, UserResponse
 from app.models.db.users import User
 from app.models.domain.user_profile import CouncilPersonaConfig, resolve_user_council_personas
 from app.services.x_integration import has_active_x_connection, normalize_twitter_username
-from app.templates import templates
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -403,70 +397,3 @@ def _repair_invalid_email(
         },
     )
     return current_user
-
-
-@router.get("/admin/login", response_class=HTMLResponse)
-def admin_login_page(request: Request) -> HTMLResponse:
-    """
-    Render admin login page.
-
-    Args:
-        request: FastAPI request object
-
-    Returns:
-        HTML login page
-    """
-    return templates.TemplateResponse(request, "admin_login.html", {"request": request})
-
-
-@router.post("/admin/login", response_model=AdminLoginResponse)
-def admin_login(request: AdminLoginRequest, response: Response) -> AdminLoginResponse:
-    """
-    Admin login with password.
-
-    Args:
-        request: Admin login request with password
-        response: FastAPI response to set cookie
-
-    Returns:
-        Success message
-
-    Raises:
-        HTTPException: 401 if password is incorrect
-    """
-    if not verify_admin_password(request.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin password"
-        )
-
-    session_token = create_admin_session_token()
-    is_production = settings.environment.lower() == "production"
-
-    # Set httpOnly cookie
-    response.set_cookie(
-        key=ADMIN_SESSION_COOKIE,
-        value=session_token,
-        httponly=True,
-        max_age=settings.admin_session_expire_minutes * 60,
-        samesite="lax",
-        secure=is_production,
-    )
-
-    return AdminLoginResponse(message="Logged in as admin")
-
-
-@router.post("/admin/logout")
-def admin_logout(response: Response) -> dict[str, str]:
-    """
-    Admin logout.
-
-    Args:
-        response: FastAPI response to delete cookie
-
-    Returns:
-        Success message
-    """
-    # Delete cookie
-    response.delete_cookie(key=ADMIN_SESSION_COOKIE)
-
-    return {"message": "Logged out"}

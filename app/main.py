@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from app.admin_web.auth import router as admin_auth_router
+from app.admin_web.router import router as admin_web_router
 from app.core.db import get_engine, init_db
 from app.core.deps import AdminAuthRequired
 from app.core.logging import setup_logging
@@ -22,7 +24,7 @@ from app.core.observability import (
 )
 from app.core.settings import get_settings
 from app.openapi import build_operation_id
-from app.routers import admin, api_content, auth, logs
+from app.routers import api_content, auth
 from app.routers.api import (
     agent,
     discovery,
@@ -43,17 +45,15 @@ from app.services.langfuse_tracing import (
 # Initialize
 settings = get_settings()
 logger = setup_logging()
+ADMIN_STATIC_DIR = Path(__file__).resolve().parent / "admin_web" / "static"
 
 
-def _ensure_static_mount_directories() -> tuple[Path, Path]:
-    """Create local static mount directories before Starlette validates them."""
-    images_dir = settings.storage.images_base_dir.resolve()
+def _resolve_static_mount_paths() -> tuple[Path, Path]:
+    """Create generated image storage and resolve packaged admin static assets."""
+    images_dir = settings.images_base_dir.resolve()
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    static_dir = Path("static").resolve()
-    static_dir.mkdir(parents=True, exist_ok=True)
-
-    return images_dir, static_dir
+    return images_dir, ADMIN_STATIC_DIR
 
 
 @asynccontextmanager
@@ -315,15 +315,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files (images first so they bypass repo static)
-images_static_dir, repo_static_dir = _ensure_static_mount_directories()
+# Mount generated content images and packaged admin web assets.
+images_static_dir, admin_static_dir = _resolve_static_mount_paths()
 app.mount("/static/images", StaticFiles(directory=images_static_dir), name="static-images")
-app.mount("/static", StaticFiles(directory=repo_static_dir), name="static")
+app.mount("/admin/static", StaticFiles(directory=admin_static_dir), name="admin-static")
 
 # Include routers
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
-app.include_router(admin.router)
-app.include_router(logs.router)
+app.include_router(admin_auth_router)
+app.include_router(admin_web_router)
 app.include_router(api_content.router, prefix="/api/content")
 app.include_router(news.router, prefix="/api/news")
 app.include_router(interactions.router, prefix="/api")

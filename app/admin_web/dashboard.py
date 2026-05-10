@@ -1,52 +1,29 @@
-"""Admin router for administrative functionality."""
+"""Admin dashboard route and dashboard-specific readout helpers."""
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import HTMLResponse
 from sqlalchemy import and_, case, desc, func
 from sqlalchemy.orm import Session
 
-from app.commands import create_api_key, revoke_api_key
-from app.core.db import get_db_session, get_readonly_db_session
+from app.admin_web.formatting import format_user_label
+from app.admin_web.templates import templates
+from app.core.db import get_readonly_db_session
 from app.core.deps import require_admin
-from app.models.api.onboarding import (
-    OnboardingAudioDiscoverRequest,
-    OnboardingAudioLanePreviewResponse,
-)
-from app.models.contracts import TaskStatus, TaskType
 from app.models.db import (
     Content,
     OnboardingDiscoveryRun,
     ProcessingTask,
-    UserFeedback,
     VendorUsageRecord,
 )
 from app.models.db.users import User
-from app.models.internal.admin_eval import (
-    EVAL_MODEL_LABELS,
-    EVAL_MODEL_SPECS,
-    LONGFORM_TEMPLATE_LABELS,
-    AdminEvalRunRequest,
-)
-from app.queries import list_api_keys
 from app.queries.queue_health import get_queue_health_snapshot
-from app.services.admin_eval import get_default_pricing, run_admin_eval
-from app.services.insight_report import (
-    DEFAULT_MIN_SAVES_FOR_TRIGGER,
-    SYNTHESIS_EFFORT,
-    SYNTHESIS_MODEL,
-    count_knowledge_saves_since,
-    last_insight_report_for_user,
-)
-from app.services.onboarding import preview_audio_lane_plan
-from app.services.queue import get_queue_service
-from app.templates import templates
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(tags=["admin"])
 TASK_STATUS_ORDER = ("pending", "processing", "failed", "completed")
 DASHBOARD_STATS_RANGE_OPTIONS = (
     ("24h", "24h", timedelta(hours=24)),
@@ -358,31 +335,6 @@ def _count_failed_tasks(db: Session, *, cutoff: datetime | None) -> int:
     return int(query.scalar() or 0)
 
 
-def _build_scraper_health(db: Session, recent_cutoff: datetime) -> dict[str, Any]:
-    """Return empty scraper event aggregates after EventLog removal."""
-    return {
-        "total_events_24h": 0,
-        "error_events_24h": 0,
-        "run_status_counts": {},
-        "latest_stats_rows": [],
-        "error_counts": [],
-    }
-
-
-def _build_queue_watchdog_health(db: Session, recent_cutoff: datetime) -> dict[str, Any]:
-    """Return empty queue watchdog event aggregates after EventLog removal."""
-    return {
-        "total_runs_24h": 0,
-        "total_touched_24h": 0,
-        "runs_touching_tasks_24h": 0,
-        "failed_runs_24h": 0,
-        "latest_run_at": None,
-        "action_stats": [],
-        "alert_counts": {},
-        "recent_actions": [],
-    }
-
-
 def _build_user_lifecycle(
     db: Session, recent_cutoff: datetime
 ) -> tuple[dict[str, int], dict[str, int]]:
@@ -447,19 +399,6 @@ def _build_user_lifecycle(
 def _cost_bucket_config(cost_bucket: str) -> dict[str, Any]:
     """Return dashboard cost window config for the requested bucket."""
     return COST_BUCKET_CONFIGS.get(cost_bucket, COST_BUCKET_CONFIGS[COST_DEFAULT_BUCKET])
-
-
-def _format_cost_user_label(user_id: int | None, email: str | None, full_name: str | None) -> str:
-    """Return a stable dashboard label for a user cost row."""
-    if full_name and email:
-        return f"{full_name} ({email})"
-    if email:
-        return email
-    if full_name:
-        return full_name
-    if user_id is not None:
-        return f"User {user_id}"
-    return "Unattributed"
 
 
 def _build_cost_bucket_label_expr(db: Session, cost_bucket: str) -> Any:
@@ -680,7 +619,7 @@ def _build_cost_analysis(
             user_id,
             {
                 "user_id": user_id,
-                "user_label": _format_cost_user_label(user_id, row.email, row.full_name),
+                "user_label": format_user_label(user_id, row.email, row.full_name),
                 "total_cost_usd": 0.0,
                 "row_count": 0,
                 "chat_cost_usd": 0.0,
@@ -782,12 +721,10 @@ def admin_dashboard(
     request: Request,
     db: Annotated[Session, Depends(get_readonly_db_session)],
     _: None = Depends(require_admin),
-    event_type: str | None = None,
-    limit: int = 50,
     stats_range: str = "24h",
     cost_bucket: str = "day",
 ):
-    """Admin dashboard with system statistics and event logs."""
+    """Admin dashboard with system statistics and operational readouts."""
     now = datetime.now(UTC)
     recent_cutoff = now - timedelta(hours=24)
     selected_stats_range = _normalize_dashboard_stats_range(stats_range)
@@ -842,8 +779,6 @@ def admin_dashboard(
     queue_health = _build_queue_health_dashboard(db)
     phase_status_rows = _build_phase_status_rows(db)
     recent_failure_rows, recent_failure_total = _build_recent_failure_rows(db, recent_cutoff)
-    scraper_health = _build_scraper_health(db, recent_cutoff)
-    watchdog_health = _build_queue_watchdog_health(db, recent_cutoff)
     user_stats, onboarding_latest_status_counts = _build_user_lifecycle(db, recent_cutoff)
     cost_analysis = _build_cost_analysis(
         db,
@@ -855,10 +790,6 @@ def admin_dashboard(
         cost_bucket=selected_cost_bucket,
         now=now,
     )
-
-    # EventLog has been removed; keep template context stable with empty values.
-    event_logs: list[Any] = []
-    event_types: list[str] = []
 
     # Content with missing summary and explicit errors
     content_without_summary = (
@@ -875,7 +806,7 @@ def admin_dashboard(
 
     return templates.TemplateResponse(
         request,
-        "admin_dashboard.html",
+        "dashboard.html",
         {
             "request": request,
             "content_stats": content_stats,
@@ -894,276 +825,8 @@ def admin_dashboard(
             "phase_status_rows": phase_status_rows,
             "recent_failure_rows": recent_failure_rows,
             "recent_failure_total": recent_failure_total,
-            "scraper_total_events_24h": scraper_health["total_events_24h"],
-            "scraper_error_events_24h": scraper_health["error_events_24h"],
-            "scraper_run_status_counts": scraper_health["run_status_counts"],
-            "scraper_latest_stats": scraper_health["latest_stats_rows"],
-            "scraper_error_counts": scraper_health["error_counts"],
-            "watchdog_total_runs_24h": watchdog_health["total_runs_24h"],
-            "watchdog_total_touched_24h": watchdog_health["total_touched_24h"],
-            "watchdog_runs_touching_tasks_24h": watchdog_health["runs_touching_tasks_24h"],
-            "watchdog_failed_runs_24h": watchdog_health["failed_runs_24h"],
-            "watchdog_latest_run_at": watchdog_health["latest_run_at"],
-            "watchdog_action_stats": watchdog_health["action_stats"],
-            "watchdog_alert_counts": watchdog_health["alert_counts"],
-            "watchdog_recent_actions": watchdog_health["recent_actions"],
             "user_stats": user_stats,
             "onboarding_latest_status_counts": onboarding_latest_status_counts,
-            "event_logs": event_logs,
-            "event_types": event_types,
-            "selected_event_type": event_type,
-            "limit": limit,
             "content_without_summary": content_without_summary,
         },
     )
-
-
-@router.get("/onboarding/lane-preview", response_class=HTMLResponse)
-def onboarding_lane_preview_page(
-    request: Request,
-    _: None = Depends(require_admin),
-) -> HTMLResponse:
-    """Render admin tool for onboarding lane preview."""
-    return templates.TemplateResponse(
-        request,
-        "admin_onboarding_lane_preview.html",
-        {
-            "request": request,
-        },
-    )
-
-
-@router.post(
-    "/onboarding/lane-preview",
-    response_model=OnboardingAudioLanePreviewResponse,
-)
-async def onboarding_lane_preview(
-    payload: OnboardingAudioDiscoverRequest,
-    _: None = Depends(require_admin),
-) -> OnboardingAudioLanePreviewResponse:
-    """Preview generated onboarding lanes from transcript input."""
-    try:
-        return await preview_audio_lane_plan(payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/evals/summaries", response_class=HTMLResponse)
-def admin_eval_summaries_page(
-    request: Request,
-    _: None = Depends(require_admin),
-) -> HTMLResponse:
-    """Render admin summary eval UI."""
-    return templates.TemplateResponse(
-        request,
-        "admin_eval_summaries.html",
-        {
-            "request": request,
-            "model_specs": EVAL_MODEL_SPECS,
-            "model_labels": EVAL_MODEL_LABELS,
-            "template_labels": LONGFORM_TEMPLATE_LABELS,
-            "default_pricing": get_default_pricing(),
-        },
-    )
-
-
-@router.post("/evals/summaries/run")
-def admin_eval_summaries_run(
-    payload: AdminEvalRunRequest,
-    db: Annotated[Session, Depends(get_readonly_db_session)],
-    _: None = Depends(require_admin),
-) -> dict[str, Any]:
-    """Run summary/title eval against selected models and content samples."""
-    return run_admin_eval(db, payload)
-
-
-@router.get("/api-keys", response_class=HTMLResponse)
-def admin_api_keys_page(
-    request: Request,
-    db: Annotated[Session, Depends(get_db_session)],
-    admin_user: Annotated[User, Depends(require_admin)],
-) -> HTMLResponse:
-    """Render admin API key management UI."""
-    users = db.query(User).order_by(User.email.asc()).all()
-    api_keys = list_api_keys.execute(db)
-    return templates.TemplateResponse(
-        request,
-        "admin_api_keys.html",
-        {
-            "request": request,
-            "admin_user": admin_user,
-            "users": users,
-            "api_keys": api_keys,
-            "created_key": None,
-        },
-    )
-
-
-@router.post("/api-keys/create", response_class=HTMLResponse)
-def admin_api_keys_create(
-    request: Request,
-    user_id: Annotated[int, Form(...)],
-    db: Annotated[Session, Depends(get_db_session)],
-    admin_user: Annotated[User, Depends(require_admin)],
-) -> HTMLResponse:
-    """Create an API key for a target user and reveal it once."""
-    users = db.query(User).order_by(User.email.asc()).all()
-    created = create_api_key.execute(
-        db,
-        user_id=user_id,
-        created_by_admin_user_id=admin_user.id,
-    )
-    api_keys = list_api_keys.execute(db)
-    return templates.TemplateResponse(
-        request,
-        "admin_api_keys.html",
-        {
-            "request": request,
-            "admin_user": admin_user,
-            "users": users,
-            "api_keys": api_keys,
-            "created_key": created,
-        },
-    )
-
-
-@router.post("/api-keys/{api_key_id}/revoke")
-def admin_api_keys_revoke(
-    api_key_id: int,
-    db: Annotated[Session, Depends(get_db_session)],
-    _: None = Depends(require_admin),
-) -> RedirectResponse:
-    """Revoke an API key and return to the admin list."""
-    revoke_api_key.execute(db, api_key_id=api_key_id)
-    return RedirectResponse(url="/admin/api-keys", status_code=303)
-
-
-def _build_feedback_rows(db: Session) -> list[dict[str, Any]]:
-    """Return recent user feedback rows for admin review."""
-    rows = (
-        db.query(
-            UserFeedback,
-            User.email.label("email"),
-            User.full_name.label("full_name"),
-        )
-        .outerjoin(User, User.id == UserFeedback.user_id)
-        .order_by(UserFeedback.created_at.desc())
-        .limit(200)
-        .all()
-    )
-    return [
-        {
-            "user_id": feedback.user_id,
-            "user_label": _format_cost_user_label(feedback.user_id, email, full_name),
-            "message": feedback.message,
-            "source": feedback.source,
-            "app_version": feedback.app_version,
-            "build_number": feedback.build_number,
-            "platform": feedback.platform,
-            "os_version": feedback.os_version,
-            "device_model": feedback.device_model,
-            "created_at": feedback.created_at,
-        }
-        for feedback, email, full_name in rows
-    ]
-
-
-@router.get("/feedback", response_class=HTMLResponse)
-def admin_feedback_page(
-    request: Request,
-    db: Annotated[Session, Depends(get_readonly_db_session)],
-    _: None = Depends(require_admin),
-) -> HTMLResponse:
-    """Render recent user feedback."""
-    return templates.TemplateResponse(
-        request,
-        "admin_feedback.html",
-        {
-            "request": request,
-            "feedback_rows": _build_feedback_rows(db),
-        },
-    )
-
-
-def _build_insight_report_rows(db: Session) -> list[dict[str, Any]]:
-    """Assemble per-user insight-report stats for the admin panel."""
-    rows: list[dict[str, Any]] = []
-    users = db.query(User).order_by(User.email.asc()).all()
-    for user in users:
-        if user.id is None:
-            continue
-        user_id = int(user.id)
-        last_report = last_insight_report_for_user(db, user_id=user_id)
-        last_report_content_id = last_report[0] if last_report else None
-        last_at = last_report[1] if last_report else None
-        new_saves = count_knowledge_saves_since(db, user_id=user_id, since=last_at)
-        total_saves = count_knowledge_saves_since(db, user_id=user_id, since=None)
-        pending_task = (
-            db.query(ProcessingTask.id)
-            .filter(ProcessingTask.task_type == TaskType.GENERATE_INSIGHT_REPORT.value)
-            .filter(
-                ProcessingTask.status.in_((TaskStatus.PENDING.value, TaskStatus.PROCESSING.value))
-            )
-            .filter(ProcessingTask.payload["user_id"].as_integer() == user_id)
-            .order_by(ProcessingTask.id.desc())
-            .first()
-        )
-        rows.append(
-            {
-                "user_id": user_id,
-                "email": user.email,
-                "is_active": user.is_active,
-                "total_saves": total_saves,
-                "new_saves": new_saves,
-                "last_report_at": last_at,
-                "last_report_content_id": last_report_content_id,
-                "pending_task_id": pending_task[0] if pending_task else None,
-                "eligible": (user.is_active and new_saves >= DEFAULT_MIN_SAVES_FOR_TRIGGER),
-            }
-        )
-    return rows
-
-
-@router.get("/insight-reports", response_class=HTMLResponse)
-def admin_insight_reports_page(
-    request: Request,
-    db: Annotated[Session, Depends(get_readonly_db_session)],
-    admin_user: Annotated[User, Depends(require_admin)],
-) -> HTMLResponse:
-    """Admin panel: per-user insight report eligibility + manual trigger."""
-    rows = _build_insight_report_rows(db)
-    return templates.TemplateResponse(
-        request,
-        "admin_insight_reports.html",
-        {
-            "request": request,
-            "admin_user": admin_user,
-            "rows": rows,
-            "min_saves_threshold": DEFAULT_MIN_SAVES_FOR_TRIGGER,
-            "synthesis_model": SYNTHESIS_MODEL,
-            "effort": SYNTHESIS_EFFORT,
-        },
-    )
-
-
-@router.post("/insight-reports/trigger")
-def admin_insight_reports_trigger(
-    user_id: Annotated[int, Form(...)],
-    _: None = Depends(require_admin),
-    synthesis_model: Annotated[str, Form()] = SYNTHESIS_MODEL,
-    effort: Annotated[str, Form()] = SYNTHESIS_EFFORT,
-) -> RedirectResponse:
-    """Manually enqueue a ``generate_insight_report`` task for a single user."""
-    queue_service = get_queue_service()
-    queue_service.enqueue(
-        TaskType.GENERATE_INSIGHT_REPORT,
-        payload={
-            "user_id": user_id,
-            "synthesis_model": synthesis_model,
-            "effort": effort,
-            "triggered_by": "admin",
-        },
-        dedupe=True,
-        dedupe_key=f"insight_report|user:{user_id}|manual",
-    )
-    return RedirectResponse(url="/admin/insight-reports", status_code=303)
