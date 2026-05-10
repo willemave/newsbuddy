@@ -19,9 +19,7 @@ logs_from_server/
 
 .tmp/*
 
-static/*
-!static/js/
-!static/js/admin_conversational.js
+static/
 
 *.out
 

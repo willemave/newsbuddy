@@ -37,9 +37,9 @@
 * **Environment management**: `.env.example` template; never commit `.env`. Use `app/core/settings.py` and Pydantic for settings.
 * **Database migrations**: Alembic with descriptive revision messages.
 * **Error responses**: Consistent format with error codes, messages, details.
-* **Tailwind CSS**: Write to `./static/css/styles.css`, build with:
+* **Tailwind CSS**: Write admin styles to `./app/admin_web/static/css/styles.css`, build with:
   ```bash
-  npx @tailwindcss/cli -i ./static/css/styles.css -o ./static/css/app.css
+  npm run build:css
   ```
 
 ---

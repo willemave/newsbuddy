@@ -90,7 +90,6 @@ def build_agent_openapi_schema() -> dict[str, Any]:
     """Build a filtered, CLI-focused OpenAPI schema."""
     settings = get_settings()
     settings.images_base_dir.resolve().mkdir(parents=True, exist_ok=True)
-    Path("static").resolve().mkdir(parents=True, exist_ok=True)
 
     from app.main import app
 

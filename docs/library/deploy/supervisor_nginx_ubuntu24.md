@@ -227,8 +227,8 @@ server {
         add_header Cache-Control "public, max-age=2592000";
     }
 
-    location /static/ {
-        alias /opt/news_app/static/;
+    location /admin/static/ {
+        alias /opt/news_app/app/admin_web/static/;
         expires 30d;
         access_log off;
         add_header Cache-Control "public, max-age=2592000";

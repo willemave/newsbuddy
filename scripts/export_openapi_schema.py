@@ -18,7 +18,6 @@ def _ensure_runtime_directories() -> None:
     """Create runtime directories needed by app imports in fresh checkouts."""
     settings = get_settings()
     settings.images_base_dir.resolve().mkdir(parents=True, exist_ok=True)
-    Path("static").resolve().mkdir(parents=True, exist_ok=True)
 
 
 def export_openapi_schema(output_path: Path) -> Path:

@@ -5,7 +5,8 @@
     "tailwindcss": "^4.2.2"
   },
   "scripts": {
-    "dev": "npx @tailwindcss/cli -i ./static/css/styles.css -o ./static/css/app.css --watch",
+    "dev": "npx @tailwindcss/cli -i ./app/admin_web/static/css/styles.css -o ./app/admin_web/static/css/app.css --watch",
+    "build:css": "npx @tailwindcss/cli -i ./app/admin_web/static/css/styles.css -o ./app/admin_web/static/css/app.css --minify",
     "hooks:install": "lefthook install"
   }
 }

@@ -49,7 +49,8 @@ flowchart LR
   Agent["Agent / CLI / machine clients"] -->|API key or JWT| API
 
   API --> DB[(PostgreSQL)]
-  API --> Static["/static and /static/images"]
+  API --> GeneratedImages["/static/images"]
+  API --> AdminAssets["/admin/static"]
   API --> Queue[(processing_tasks)]
 
   Scrapers["Scrapers"] -->|create contents + enqueue| Queue
@@ -80,7 +81,7 @@ Current bootstrap responsibilities:
 - initialize Langfuse tracing during lifespan startup
 - initialize the database during lifespan startup
 - mount `/static/images` from `settings.images_base_dir`
-- mount `/static` from the local `static/` directory
+- mount `/admin/static` from `app/admin_web/static`
 - register exception handlers for request validation and admin auth redirects
 - add request logging middleware
 - add permissive CORS middleware
@@ -313,7 +314,6 @@ The SQLAlchemy schema lives primarily in `app/models/schema.py` and `app/models/
 | `content_status` | Per-user inbox/feed membership | Used to decide whether long-form content is visible to a given user |
 | `content_discussions` | Persisted discussion payload | HN/Reddit/Techmeme/social discussion snapshots |
 | `user_scraper_configs` | User-managed feed subscriptions | Substack, Atom, podcast RSS, YouTube, Reddit |
-| `event_logs` | Flexible event telemetry | Scraper stats, errors, maintenance events |
 | `news_items` | Short-form news rows | Visible news feed items, summaries, source metadata, clustering relations |
 | `feed_discovery_runs` | Discovery run metadata | Seed favorites, token/timing usage, status |
 | `feed_discovery_suggestions` | Discovery recommendations | Feed/podcast/YouTube suggestions with score/rationale |
@@ -866,7 +866,7 @@ Scrapers generally:
 - create new `contents` rows with `status=new`
 - enqueue processing
 - ensure inbox visibility for relevant users when source ownership is user-specific
-- emit stats and errors into `event_logs`
+- emit structured log entries and in-process scraper metrics
 
 ### 11.3 User-managed source configs
 
@@ -1128,17 +1128,19 @@ The extension:
 
 The server-rendered admin UI is intentionally simple and lives alongside the API.
 
-Capabilities visible in `app/routers/admin.py`:
+Capabilities visible in `app/admin_web/`:
 
 - queue partition status
 - task phase status
 - recent failure rollups
-- scraper health metrics
 - onboarding lane preview
 - eval execution and summaries
 - API key creation/revocation
+- feedback and insight report review
+- log/error diagnostics
+- vendor and LLM usage dashboards
 
-This is not a separate frontend application. Templates are rendered via Jinja in `app/templates/`.
+This is not a separate frontend application. Controllers live under `app/admin_web/`, templates are rendered from `app/admin_web/templates/`, and admin static assets are served from `/admin/static`.
 
 ## 20. Observability and Logging
 
@@ -1151,14 +1153,9 @@ The codebase standard is direct `logger.error()` / `logger.exception()` calls wi
 - `item_id`
 - `context_data`
 
-### 20.2 Event logs
+### 20.2 Structured log files
 
-`event_logs` stores flexible JSON payloads for:
-
-- scraper stats
-- scraper failures
-- maintenance/cleanup events
-- other service-level telemetry
+Structured JSONL logs store operational payloads for scraper events, failures, maintenance work, and HTTP/request diagnostics. The admin log views read these files from the configured logs directory.
 
 ### 20.3 Langfuse
 

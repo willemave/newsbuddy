@@ -9,7 +9,7 @@ Folder-by-folder reference for the FastAPI backend, queue workers, scraper stack
 ## Documents
 | Doc | Source folder | Focus |
 |---|---|---|
-| `10-root.md` | `app` | Application root wiring for the FastAPI server, shared constants, and the Jinja environment bridge used by admin pages. |
+| `10-root.md` | `app` | Application root wiring for the FastAPI server, shared constants, static mounts, and router registration. |
 | `20-core.md` | `app/core` | Core runtime infrastructure: environment settings, database/session lifecycle, security primitives, FastAPI dependencies, and shared logging/timing helpers. |
 | `30-domain.md` | `app/models/content_mapper.py`, `app/models/content_form.py` | Content mapping helpers that translate SQLAlchemy ORM rows to the normalized `ContentData` model and derive canonical content-form labels. |
 | `40-http-client.md` | `app/http_client` | Resilient low-level HTTP access used by scrapers and URL processors when they need retries, headers, and failure classification outside of higher-level services. |
@@ -20,7 +20,8 @@ Folder-by-folder reference for the FastAPI backend, queue workers, scraper stack
 | `70-presenters.md` | `app/routers/api/content_responses.py`, `app/models/content_display.py` | Content response builders and display helpers that shape list/detail API responses, resolve image URLs, and define list-readiness rules. |
 | `80-processing-strategies.md` | `app/processing_strategies` | Ordered URL-specific extraction strategies used by the content worker to turn raw URLs into normalized article, podcast, PDF, or discussion payloads. |
 | `90-repositories.md` | `app/repositories` | Query composition helpers for content feeds and visibility rules used by list, search, stats, and recently-read endpoints. |
-| `100-routers.md` | `app/routers` | Top-level FastAPI routers for authentication, admin pages, admin diagnostics, and the compatibility bridge that mounts the API router under legacy imports. |
+| `95-admin-web.md` | `app/admin_web` | Server-rendered admin web controllers, templates, static assets, and admin session routes. |
+| `100-routers.md` | `app/routers` | Top-level FastAPI routers for client authentication and the compatibility bridge that mounts the API router under legacy imports. |
 | `101-routers-api.md` | `app/routers/api` | User-facing JSON API surface for content, chat, discovery, onboarding, voice, integrations, stats, submissions, and auxiliary OpenAI/realtime endpoints. |
 | `110-scraping.md` | `app/scraping` | Scheduled feed and site scrapers plus the orchestration runner that inserts new content rows and enqueues downstream processing. |
 | `120-services.md` | `app/services` | Business-logic layer for LLM access, content analysis and submission, chat, discovery, feeds, images, interactions, onboarding, event logging, and queue primitives. |
