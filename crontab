@@ -5,7 +5,7 @@ PATH=/opt/news_app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/
 0 2 * * * flock -n /tmp/news_app_backup.lock /bin/bash -lc '/opt/news_app/scripts/backup_database.sh' >> /var/log/news_app/backup.log 2>&1
 
 # Run scrapers every 15 minutes
-*/15 * * * * flock -n /tmp/news_app_scrapers.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_scrapers.py --show-stats --scrapers HackerNews Reddit Substack Techmeme Podcast Atom' >> /var/log/news_app/scrapers-cron.log 2>&1
+*/15 * * * * flock -n /tmp/news_app_scrapers.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_scrapers.py --show-stats --scrapers HackerNews Reddit Substack Techmeme Podcast Atom DiscussionComments' >> /var/log/news_app/scrapers-cron.log 2>&1
 
 # Run X bookmark sync fan-out every 15 minutes
 */15 * * * * flock -n /tmp/news_app_twitter.lock /bin/bash -lc 'cd /opt/news_app && /opt/news_app/.venv/bin/python scripts/run_twitter.py' >> /var/log/news_app/twitter.log 2>&1

@@ -128,8 +128,14 @@ class BaseScraper(ABC):
                         news_item, was_created = upsert_news_item(db, payload)
                         db.commit()
                         db.refresh(news_item)
-                        if sync_news_item_discussion_from_news_item(db, news_item) is not None:
+                        discussion_row = sync_news_item_discussion_from_news_item(db, news_item)
+                        if discussion_row is not None:
                             db.commit()
+                            if was_created and news_item.id is not None:
+                                self.queue_service.enqueue(
+                                    TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+                                    payload={"news_item_id": news_item.id},
+                                )
                         if should_enqueue_news_item_enrichment(
                             news_item=news_item,
                             was_created=was_created,
