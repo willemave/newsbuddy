@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
@@ -43,6 +43,10 @@ from app.utils.url_utils import normalize_http_url
 logger = get_logger(__name__)
 
 DISCUSSION_REFRESH_TTL = timedelta(hours=1)
+DISCUSSION_REFRESH_LEASE_TTL = timedelta(minutes=15)
+REFRESH_STATUS_PROCESSING = "processing"
+REFRESH_TTL_HOLD_STATUSES = frozenset({"completed", "failed", REFRESH_STATUS_PROCESSING})
+REFRESH_EMPTY_FETCH_BLOCK_STATUSES = ("failed", REFRESH_STATUS_PROCESSING)
 NEWS_DISCUSSION_SUMMARY_VERSION = 1
 MAX_STORED_COMMENTS = 1_000
 MAX_SUMMARY_COMMENTS = 200
@@ -229,7 +233,7 @@ def sync_news_item_discussion_from_news_item(
     """Create or update the latest discussion row with scrape-time count metadata.
 
     This is intentionally count-only. Full comments and summaries are fetched by
-    the scheduled discussion scraper when the TTL allows it.
+    queued refresh tasks, explicit refreshes, or the catch-up scraper when the TTL allows it.
     """
     raw_metadata = dict(news_item.raw_metadata or {})
     platform = _normalize_platform(news_item.platform or raw_metadata.get("platform"))
@@ -708,6 +712,74 @@ def _mark_refresh_failure(
     )
 
 
+def _skipped_refresh_result(row: NewsItemDiscussion) -> NewsItemDiscussionRefreshResult:
+    retryable = row.last_refresh_status != "failed"
+    return NewsItemDiscussionRefreshResult(
+        success=retryable,
+        status="skipped",
+        error_message=row.last_refresh_error,
+        refreshed=False,
+        summarized=False,
+        retryable=retryable,
+    )
+
+
+def _refresh_deferred_by_ttl(row: NewsItemDiscussion, *, now: datetime) -> bool:
+    """Return whether a recent result or active refresh should suppress a fetch."""
+    if row.next_refresh_after is None or row.next_refresh_after <= now:
+        return False
+    return bool(
+        row.raw_comments_ref is not None or row.last_refresh_status in REFRESH_TTL_HOLD_STATUSES
+    )
+
+
+def _claim_news_item_discussion_refresh(
+    db: Session,
+    *,
+    row: NewsItemDiscussion,
+    now: datetime,
+    force: bool,
+) -> bool:
+    """Atomically claim a discussion refresh before network or LLM work starts."""
+    db.flush()
+    if row.id is None:
+        raise ValueError("News item discussion row is missing an id")
+
+    lease_expires_at = now + DISCUSSION_REFRESH_LEASE_TTL
+    if force:
+        claim_filter = or_(
+            NewsItemDiscussion.last_refresh_status != REFRESH_STATUS_PROCESSING,
+            NewsItemDiscussion.next_refresh_after.is_(None),
+            NewsItemDiscussion.next_refresh_after <= now,
+        )
+    else:
+        claim_filter = or_(
+            NewsItemDiscussion.next_refresh_after.is_(None),
+            NewsItemDiscussion.next_refresh_after <= now,
+            and_(
+                NewsItemDiscussion.raw_comments_ref.is_(None),
+                NewsItemDiscussion.last_refresh_status.notin_(REFRESH_EMPTY_FETCH_BLOCK_STATUSES),
+            ),
+        )
+
+    claimed = (
+        db.query(NewsItemDiscussion)
+        .filter(NewsItemDiscussion.id == row.id)
+        .filter(claim_filter)
+        .update(
+            {
+                NewsItemDiscussion.last_refresh_status: REFRESH_STATUS_PROCESSING,
+                NewsItemDiscussion.last_refresh_error: None,
+                NewsItemDiscussion.next_refresh_after: lease_expires_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    return bool(claimed)
+
+
 def refresh_news_item_discussion(
     db: Session,
     *,
@@ -736,21 +808,12 @@ def refresh_news_item_discussion(
         )
 
     now = _utcnow_naive()
-    if (
-        not force
-        and row.next_refresh_after is not None
-        and row.next_refresh_after > now
-        and (row.raw_comments_ref is not None or row.last_refresh_status == "failed")
-    ):
+    if not force and _refresh_deferred_by_ttl(row, now=now):
         db.commit()
-        return NewsItemDiscussionRefreshResult(
-            success=row.last_refresh_status != "failed",
-            status="skipped",
-            error_message=row.last_refresh_error,
-            refreshed=False,
-            summarized=False,
-            retryable=row.last_refresh_status != "failed",
-        )
+        return _skipped_refresh_result(row)
+
+    if not _claim_news_item_discussion_refresh(db, row=row, now=now, force=force):
+        return _skipped_refresh_result(row)
 
     try:
         raw_payload = _fetch_discussion_comments(row)
