@@ -330,6 +330,9 @@ struct ContentDetailView: View {
                         Spacer()
                             .frame(height: 40)
                     }
+                } else {
+                    LoadingView()
+                        .frame(minHeight: 400)
                 }
             }
         }
@@ -1553,7 +1556,7 @@ struct ContentDetailView: View {
         defer { isLoadingDiscussion = false }
 
         do {
-            let discussion: ContentDiscussion
+            var discussion: ContentDiscussion
             if refresh {
                 discussion = try await ContentService.shared.refreshContentDiscussion(
                     id: content.id,
@@ -1564,6 +1567,12 @@ struct ContentDetailView: View {
                     id: content.id,
                     contentType: content.contentTypeEnum
                 )
+                if discussion.shouldAutoRefresh {
+                    discussion = try await ContentService.shared.refreshContentDiscussion(
+                        id: content.id,
+                        contentType: content.contentTypeEnum
+                    )
+                }
             }
             discussionPayload = discussion
             if discussion.hasRenderableContent {

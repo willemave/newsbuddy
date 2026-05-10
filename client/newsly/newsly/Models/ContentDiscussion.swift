@@ -82,6 +82,19 @@ struct ContentDiscussion: Codable {
         return false
     }
 
+    var shouldAutoRefresh: Bool {
+        if status == "not_ready" {
+            return true
+        }
+        if status == "failed" {
+            return false
+        }
+        if mode == "comments" {
+            return summary == nil && comments.isEmpty && links.isEmpty
+        }
+        return false
+    }
+
     var unavailableMessage: String {
         if let errorMessage = normalizedMessage(errorMessage) {
             return errorMessage

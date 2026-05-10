@@ -68,6 +68,8 @@ class ContentDetailViewModel: ObservableObject {
         // Clear previous content to show loading state
         self.content = nil
         self.contentBody = nil
+        self.errorMessage = nil
+        self.isLoading = true
         discussionLinkStates = [:]
     }
     

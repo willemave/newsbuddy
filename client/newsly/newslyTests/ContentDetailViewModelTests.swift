@@ -64,5 +64,7 @@ final class ContentDetailViewModelTests: XCTestCase {
         viewModel.updateContentId(99, contentType: .news)
 
         XCTAssertEqual(viewModel.discussionLinkAddState(for: link.id), .idle)
+        XCTAssertTrue(viewModel.isLoading)
+        XCTAssertNil(viewModel.errorMessage)
     }
 }

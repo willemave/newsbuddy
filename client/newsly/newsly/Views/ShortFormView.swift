@@ -72,17 +72,19 @@ struct ShortFormView: View {
                             }
                         )
                             .equatable()
+                            .contentShape(Rectangle())
                             .accessibilityIdentifier("short.row.\(item.id)")
                             .id(item.id)
-                            .onTapGesture {
-                                let ids = items.map(\.id)
-                                let route = ContentDetailRoute(
-                                    contentId: item.id,
-                                    contentType: item.contentTypeEnum ?? .news,
-                                    allContentIds: ids
-                                )
-                                onSelect(route)
-                            }
+                            .highPriorityGesture(
+                                TapGesture().onEnded {
+                                    let route = ContentDetailRoute(
+                                        contentId: item.id,
+                                        contentType: item.contentTypeEnum ?? .news,
+                                        allContentIds: items.map(\.id)
+                                    )
+                                    onSelect(route)
+                                }
+                            )
                             .onAppear {
                                 if item.id == items.last?.id {
                                     viewModel.loadMoreTrigger.send(())

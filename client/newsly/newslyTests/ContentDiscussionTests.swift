@@ -71,4 +71,53 @@ final class ContentDiscussionTests: XCTestCase {
 
         XCTAssertEqual(discussion.unavailableMessage, "Comments are still being prepared for this story.")
     }
+
+    func testNotReadyDiscussionShouldAutoRefresh() {
+        let discussion = ContentDiscussion(
+            contentId: 1,
+            status: "not_ready",
+            mode: "comments",
+            platform: "hackernews",
+            sourceURL: nil,
+            discussionURL: "https://news.ycombinator.com/item?id=1",
+            fetchedAt: nil,
+            errorMessage: nil,
+            comments: [],
+            discussionGroups: [],
+            links: [],
+            stats: [:]
+        )
+
+        XCTAssertTrue(discussion.shouldAutoRefresh)
+    }
+
+    func testRenderableDiscussionDoesNotAutoRefresh() {
+        let discussion = ContentDiscussion(
+            contentId: 1,
+            status: "completed",
+            mode: "comments",
+            platform: "hackernews",
+            sourceURL: nil,
+            discussionURL: "https://news.ycombinator.com/item?id=1",
+            fetchedAt: nil,
+            errorMessage: nil,
+            comments: [
+                DiscussionComment(
+                    commentID: "1",
+                    parentID: nil,
+                    author: "alice",
+                    text: "Useful comment.",
+                    compactText: "Useful comment.",
+                    depth: 0,
+                    createdAt: nil,
+                    sourceURL: nil
+                )
+            ],
+            discussionGroups: [],
+            links: [],
+            stats: [:]
+        )
+
+        XCTAssertFalse(discussion.shouldAutoRefresh)
+    }
 }
