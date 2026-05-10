@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from app.models.schema import Content, ContentDiscussion, NewsItem
+from app.models.db import Content, ContentDiscussion, NewsItem
 from app.services import discussion_fetcher
 from app.services.discussion_fetcher import (
     DiscussionFetchError,

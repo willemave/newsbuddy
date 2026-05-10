@@ -8,8 +8,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import ProcessingTask
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import ProcessingTask
 from app.pipeline.worker import ContentWorker
 from app.services.queue import QueueService, TaskType
 
@@ -35,9 +35,9 @@ class TestPipelineWithRealData:
             # Setup strategy mock
             mock_strategy = Mock()
             mock_strategy.preprocess_url.return_value = content.url
-            mock_strategy.download_content.return_value = (
-                sample_unprocessed_article["content_metadata"]["content"]
-            )
+            mock_strategy.download_content.return_value = sample_unprocessed_article[
+                "content_metadata"
+            ]["content"]
             mock_strategy.extract_data.return_value = {
                 "title": sample_unprocessed_article["title"],
                 "text_content": sample_unprocessed_article["content_metadata"]["content"],
@@ -195,8 +195,7 @@ class TestPipelineWithRealData:
         metadata = content.content_metadata
         assert metadata.get("source") == sample_article_long["content_metadata"]["source"]
         assert (
-            metadata.get("content_type")
-            == sample_article_long["content_metadata"]["content_type"]
+            metadata.get("content_type") == sample_article_long["content_metadata"]["content_type"]
         )
 
         # Verify HackerNews metadata

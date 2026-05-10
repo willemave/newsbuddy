@@ -16,8 +16,8 @@ from app.models.api.scraper_configs import (
     ScraperConfigStatsResponse,
     SubscribeToFeedRequest,
 )
+from app.models.db.users import User
 from app.models.internal.scraper_configs import CreateUserScraperConfig, UpdateUserScraperConfig
-from app.models.user import User
 from app.services.scraper_configs import (
     ALLOWED_SCRAPER_TYPES,
     create_user_scraper_config,

@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.model_defaults import SMART_ANTHROPIC_MODEL_SPEC, SMART_MODEL_SPEC
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
-from app.models.schema import Content, ContentKnowledgeSave, ContentStatusEntry
+from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry
 from app.services.exa_client import ExaSearchResult, exa_search, get_exa_client
 from app.services.llm_models import build_pydantic_model
 

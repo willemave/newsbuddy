@@ -5,14 +5,10 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.models.metadata import (
-    ArticleMetadata,
-    ContentQuote,
-    PodcastMetadata,
-    StructuredSummary,
-    SummaryBulletPoint,
-    validate_content_metadata,
-)
+from app.models.metadata.articles import ArticleMetadata
+from app.models.metadata.podcasts import PodcastMetadata
+from app.models.metadata.summaries import ContentQuote, StructuredSummary, SummaryBulletPoint
+from app.models.metadata.validation import validate_content_metadata
 
 
 class TestStructuredSummary:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models.api.feedback import SubmitFeedbackRequest, SubmitFeedbackResponse
-from app.models.schema import UserFeedback
+from app.models.db import UserFeedback
 
 
 def execute(

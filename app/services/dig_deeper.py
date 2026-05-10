@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.schema import ChatSession, Content, ContentDiscussion, ProcessingTask
+from app.models.db import ChatSession, Content, ContentDiscussion, ProcessingTask
 from app.services.chat_agent import create_processing_message, process_message_async
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
 from app.services.personal_markdown_library import sync_personal_markdown_for_content

@@ -9,11 +9,11 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.api.common import ContentListResponse
-from app.models.content_display import is_ready_for_long_form_summary, resolve_image_urls
-from app.models.content_mapper import content_to_domain
-from app.models.metadata import ContentType
-from app.models.pagination import PaginationMetadata
+from app.models.api.content import ContentListResponse
+from app.models.api.pagination import PaginationMetadata
+from app.models.contracts import ContentType
+from app.models.domain.content_display import is_ready_for_long_form_summary, resolve_image_urls
+from app.models.domain.content_mapper import content_to_domain
 from app.repositories.content_card_repository import list_content_types
 from app.repositories.search_repository import search_content_page
 from app.routers.api.content_responses import build_content_summary_response

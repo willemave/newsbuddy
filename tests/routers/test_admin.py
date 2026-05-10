@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.deps import require_admin
 from app.main import app
-from app.models.schema import Content, ProcessingTask, UserApiKey, UserFeedback
+from app.models.db import Content, ProcessingTask, UserApiKey, UserFeedback
 
 
 def _override_admin_dependency(test_user):

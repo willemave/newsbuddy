@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, require_user_id
 from app.core.security import create_access_token, create_refresh_token
-from app.models.user import User
+from app.models.db.users import User
 
 
 def test_require_user_id_returns_persisted_user_id(db: Session):

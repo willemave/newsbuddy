@@ -9,13 +9,10 @@ from app.commands import refresh_content_discussion as refresh_content_discussio
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.core.timing import timed
-from app.models.api.common import (
-    ChatGPTUrlResponse,
-    ContentBodyResponse,
-    ContentDetailResponse,
-    ContentDiscussionResponse,
-)
-from app.models.user import User
+from app.models.api.content import ContentBodyResponse, ContentDetailResponse
+from app.models.api.content_actions import ChatGPTUrlResponse
+from app.models.api.content_discussions import ContentDiscussionResponse
+from app.models.db.users import User
 from app.queries import get_content_body as get_content_body_query
 from app.queries import get_content_chat_url as get_content_chat_url_query
 from app.queries import get_content_detail as get_content_detail_query

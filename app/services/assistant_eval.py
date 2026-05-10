@@ -24,17 +24,17 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.model_defaults import SMART_MODEL_SPEC
 from app.core.settings import get_settings
-from app.models.chat_message_metadata import AssistantFeedOption
 from app.models.contracts import NewsItemVisibilityScope, TaskStatus, TaskType
-from app.models.internal.assistant import AssistantScreenContext
-from app.models.schema import (
+from app.models.db import (
     Content,
     ContentKnowledgeSave,
     NewsItem,
     ProcessingTask,
     UserScraperConfig,
 )
-from app.models.user import User
+from app.models.db.users import User
+from app.models.domain.chat_render import AssistantFeedOption
+from app.models.internal.assistant import AssistantScreenContext
 from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope

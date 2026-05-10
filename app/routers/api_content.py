@@ -2,19 +2,23 @@
 
 from fastapi import APIRouter
 
-from app.models.api.common import (
-    BulkMarkReadRequest,
-    ChatGPTUrlResponse,
-    ContentDetailResponse,
-    ContentDiscussionResponse,
-    ContentListResponse,
-    ContentSummaryResponse,
-    ConvertNewsResponse,
-    NarrationResponse,
+from app.models.api.analytics import (
     RecordContentInteractionRequest,
     RecordContentInteractionResponse,
+)
+from app.models.api.content import (
+    ContentDetailResponse,
+    ContentListResponse,
+    ContentSummaryResponse,
+    NarrationResponse,
+)
+from app.models.api.content_actions import (
+    BulkMarkReadRequest,
+    ChatGPTUrlResponse,
+    ConvertNewsResponse,
     UnreadCountsResponse,
 )
+from app.models.api.content_discussions import ContentDiscussionResponse
 from app.routers.api import (
     chat,
     content_actions,

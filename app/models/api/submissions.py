@@ -2,7 +2,7 @@
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl
 
-from app.models.metadata import ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType
 
 
 class SubmitContentRequest(BaseModel):

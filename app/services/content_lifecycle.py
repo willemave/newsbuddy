@@ -8,7 +8,7 @@ from typing import Any
 
 from app.core.observability import build_log_extra
 from app.models.contracts import ContentStatus, ContentType, TaskType
-from app.models.metadata import ContentData
+from app.models.domain.content import ContentData
 from app.services.content_status_state_machine import ContentStatusStateMachine
 from app.utils.summarization_inputs import (
     build_summarization_payload,

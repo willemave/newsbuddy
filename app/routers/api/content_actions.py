@@ -14,14 +14,14 @@ from app.commands import (
 )
 from app.core.db import get_db_session
 from app.core.deps import get_current_user, require_user_id
-from app.models.api.common import (
+from app.models.api.content_actions import (
     ConvertNewsResponse,
     DownloadMoreRequest,
     DownloadMoreResponse,
     TweetSuggestionsRequest,
     TweetSuggestionsResponse,
 )
-from app.models.user import User
+from app.models.db.users import User
 
 router = APIRouter()
 

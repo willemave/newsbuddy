@@ -10,8 +10,8 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserProm
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import ChatMessage, ChatSession, Content, MessageProcessingStatus, NewsItem
+from app.models.contracts import ContentStatus, ContentType, MessageProcessingStatus
+from app.models.db import ChatMessage, ChatSession, Content, NewsItem
 from app.services.chat_agent import ChatRunResult, create_processing_message, save_messages
 
 TEST_COUNCIL_EXPERTS = [

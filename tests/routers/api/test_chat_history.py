@@ -1,6 +1,6 @@
 import json
 
-from app.models.schema import ChatMessage, ChatSession
+from app.models.db import ChatMessage, ChatSession
 from app.routers.api.chat import (
     _extract_last_message_preview,
     _extract_messages_for_display,

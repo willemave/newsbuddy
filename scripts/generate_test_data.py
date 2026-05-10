@@ -68,13 +68,15 @@ from app.constants import (
     SUMMARY_VERSION_V2,
 )
 from app.core.db import get_db, init_db
-from app.models.metadata import (
-    ArticleMetadata,
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, ContentDiscussion, ContentReadStatus, ContentStatusEntry
+from app.models.db.users import User
+from app.models.metadata.articles import ArticleMetadata
+from app.models.metadata.podcasts import PodcastMetadata
+from app.models.metadata.summaries import (
     BulletedSummary,
     BulletSummaryPoint,
     ContentQuote,
-    ContentStatus,
-    ContentType,
     EditorialKeyPoint,
     EditorialNarrativeSummary,
     EditorialQuote,
@@ -83,14 +85,11 @@ from app.models.metadata import (
     InterleavedSummaryV2,
     InterleavedTopic,
     NewsSummary,
-    PodcastMetadata,
     StructuredSummary,
     SummaryBulletPoint,
     SummaryPayload,
     SummaryTextBullet,
 )
-from app.models.schema import Content, ContentDiscussion, ContentReadStatus, ContentStatusEntry
-from app.models.user import User
 from app.services.news_ingestion import backfill_news_items_from_contents
 
 # Sample data pools

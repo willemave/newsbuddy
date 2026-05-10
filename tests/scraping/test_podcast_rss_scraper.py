@@ -3,8 +3,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import NewsItem
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import NewsItem
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 
 

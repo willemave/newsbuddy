@@ -7,8 +7,8 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.common import ContentDiscussionResponse, DiscussionLinkResponse
-from app.models.schema import ContentDiscussion, NewsItem, NewsItemDiscussion
+from app.models.api.content_discussions import ContentDiscussionResponse, DiscussionLinkResponse
+from app.models.db import ContentDiscussion, NewsItem, NewsItemDiscussion
 from app.queries.get_content_discussion import build_discussion_response
 from app.services.news_feed import get_visible_news_item
 

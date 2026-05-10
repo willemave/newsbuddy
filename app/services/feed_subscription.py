@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import DEFAULT_NEW_FEED_LIMIT
 from app.core.logging import get_logger
-from app.models.schema import UserScraperConfig
+from app.models.db import UserScraperConfig
 from app.scraping.rss_helpers import resolve_feed_source
 from app.services.scraper_configs import (
     ALLOWED_SCRAPER_TYPES,

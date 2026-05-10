@@ -21,21 +21,20 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.feed_discovery import (
-    DiscoveryCandidate,
-    DiscoveryCandidateBatch,
-    DiscoveryDirectionPlan,
-    DiscoveryLane,
-    DiscoveryLanePlan,
-    DiscoveryRunResult,
-    FavoriteSnapshot,
-)
-from app.models.schema import (
+from app.models.db import (
     Content,
     ContentKnowledgeSave,
     FeedDiscoveryRun,
     FeedDiscoverySuggestion,
     UserScraperConfig,
+)
+from app.models.domain.discovery import DiscoveryRunResult, FavoriteSnapshot
+from app.models.llm.feed_discovery import (
+    DiscoveryCandidate,
+    DiscoveryCandidateBatch,
+    DiscoveryDirectionPlan,
+    DiscoveryLane,
+    DiscoveryLanePlan,
 )
 from app.services.content_submission import normalize_url
 from app.services.exa_client import ExaSearchResult, exa_search

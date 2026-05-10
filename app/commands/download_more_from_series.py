@@ -8,10 +8,10 @@ from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
-from app.models.api.common import DownloadMoreResponse
+from app.models.api.content_actions import DownloadMoreResponse
 from app.models.contracts import ContentType
+from app.models.db import Content
 from app.models.internal.feed_backfill import FeedBackfillRequest
-from app.models.schema import Content
 from app.repositories.content_repository import build_visibility_context
 from app.services.feed_backfill import (
     backfill_feed_for_config,

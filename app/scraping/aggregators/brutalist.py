@@ -24,7 +24,7 @@ import httpx
 from bs4 import BeautifulSoup, Tag
 
 from app.core.logging import get_logger
-from app.models.metadata import ContentType
+from app.models.contracts import ContentType
 from app.scraping.aggregators._html_grouped import USER_AGENT
 from app.scraping.aggregators.base import AggregatorScraper
 from app.scraping.aggregators.config import HtmlTopicAggregator

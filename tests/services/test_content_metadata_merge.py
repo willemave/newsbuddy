@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
 from app.services.content_metadata_merge import (
     ContentMetadataMergeError,
     compute_metadata_patch,

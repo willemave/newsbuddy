@@ -17,10 +17,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.core.db import get_db
-from app.models.content_submission import SubmitContentRequest
-from app.models.metadata import ContentType
-from app.models.schema import Content
-from app.models.user import User
+from app.models.api.submissions import SubmitContentRequest
+from app.models.contracts import ContentType
+from app.models.db import Content
+from app.models.db.users import User
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
 from app.services.content_submission import submit_user_content
 from app.services.queue import QueueService, TaskType
@@ -75,6 +75,7 @@ def main(urls: Iterable[str], instruction: str, email: str) -> None:
                 crawl_links=False,
                 subscribe_to_feed=False,
                 share_and_chat=False,
+                chat_initial_message=None,
                 save_to_knowledge_and_mark_read=False,
             )
             response = submit_user_content(db, payload, user)

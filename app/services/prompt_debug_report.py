@@ -15,7 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.settings import get_settings
-from app.models.schema import Content
+from app.models.db import Content
 from app.services.content_analyzer import CONTENT_ANALYSIS_MODEL, CONTENT_ANALYZER_SYSTEM_PROMPT
 from app.services.content_bodies import get_content_body_resolver
 from app.services.llm_prompts import generate_summary_prompt

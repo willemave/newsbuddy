@@ -15,20 +15,21 @@ from sqlalchemy.orm import Session
 from app.constants import CONTENT_STATUS_INBOX
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.internal.scraper_configs import (
-    ALLOWED_SCRAPER_TYPES,
-    CreateUserScraperConfig,
-    UpdateUserScraperConfig,
-)
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import (
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import (
     Content,
     ContentReadStatus,
     ContentStatusEntry,
     ProcessingTask,
     UserScraperConfig,
 )
-from app.models.user import User
+from app.models.db.users import User
+from app.models.internal.scraper_configs import (
+    ALLOWED_SCRAPER_TYPES,
+    CreateUserScraperConfig,
+    UpdateUserScraperConfig,
+)
+from app.services.scraper_config_validation import validate_and_normalize_scraper_config
 from app.utils.dates import parse_date_with_tz
 
 logger = get_logger(__name__)
@@ -341,11 +342,11 @@ def create_user_scraper_config(
     db: Session, user_id: int, data: CreateUserScraperConfig
 ) -> UserScraperConfig:
     """Create a new scraper config for a user."""
-    feed_url = _normalize_feed_url(data.config)
     if data.scraper_type not in ALLOWED_SCRAPER_TYPES:
         raise ValueError("Unsupported scraper_type")
 
-    normalized_config = {**data.config, "feed_url": feed_url}
+    normalized_config = validate_and_normalize_scraper_config(data.scraper_type, data.config)
+    feed_url = _normalize_feed_url(normalized_config)
 
     existing = (
         db.query(UserScraperConfig)
@@ -402,8 +403,11 @@ def update_user_scraper_config(
     if data.display_name is not None:
         record.display_name = data.display_name
     if data.config is not None:
-        normalized_feed_url = _normalize_feed_url(data.config)
-        normalized_config = {**data.config, "feed_url": normalized_feed_url}
+        scraper_type = record.scraper_type
+        if not isinstance(scraper_type, str) or not scraper_type:
+            raise ValueError("Scraper config type is missing")
+        normalized_config = validate_and_normalize_scraper_config(scraper_type, data.config)
+        normalized_feed_url = _normalize_feed_url(normalized_config)
         record.config = normalized_config
         record.feed_url = normalized_feed_url
     if data.is_active is not None:

@@ -9,11 +9,9 @@ from app.constants import (
     SUMMARY_KIND_LONGFORM_ARTIFACT,
     SUMMARY_VERSION_V1,
 )
-from app.models.longform_artifacts import LongformArtifactEnvelope
-from app.models.metadata import (
-    NewsSummary,
-)
-from app.models.schema import Content, ContentStatusEntry
+from app.models.db import Content, ContentStatusEntry
+from app.models.metadata.longform_artifacts import LongformArtifactEnvelope
+from app.models.metadata.summaries import NewsSummary
 from app.pipeline.handlers.summarize import SummarizeHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope

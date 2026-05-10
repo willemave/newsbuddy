@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from app.models.metadata import ContentType
+from app.models.contracts import ContentType
 from app.scraping.hackernews_unified import HackerNewsUnifiedScraper
 
 

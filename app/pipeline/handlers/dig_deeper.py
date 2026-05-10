@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.core.logging import get_logger
-from app.models.schema import Content
+from app.models.db import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.dig_deeper import (

@@ -3,7 +3,7 @@
 import pytest
 
 from app.constants import SELF_SUBMISSION_SOURCE
-from app.models.metadata import ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType
 from app.services.scraper_configs import CreateUserScraperConfig, create_user_scraper_config
 
 pytestmark = pytest.mark.usefixtures("stub_valid_feed_url")

@@ -2,7 +2,7 @@
 
 from sqlalchemy.orm import Session
 
-from app.models.schema import Content, User
+from app.models.db import Content, User
 from app.services import read_status
 
 

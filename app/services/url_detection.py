@@ -14,7 +14,7 @@ from urllib.parse import ParseResult, parse_qs, urlparse
 from app.services.twitter_share import is_tweet_url
 
 if TYPE_CHECKING:
-    from app.models.metadata import ContentType
+    from app.models.contracts import ContentType
 
 PODCAST_HOST_PLATFORMS: dict[str, str] = {
     "open.spotify.com": "spotify",
@@ -192,7 +192,7 @@ def infer_content_type_and_platform(
         Tuple of inferred content type and normalized platform (if any).
     """
     # Import here to avoid circular imports
-    from app.models.metadata import ContentType
+    from app.models.contracts import ContentType
 
     normalized_hint = _normalize_platform(platform_hint)
 

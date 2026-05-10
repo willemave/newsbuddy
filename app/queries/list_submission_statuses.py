@@ -6,11 +6,11 @@ from sqlalchemy import String, and_, cast, or_
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.api.common import SubmissionStatusListResponse, SubmissionStatusResponse
-from app.models.metadata import ContentStatus, ContentType
-from app.models.metadata_access import metadata_view
-from app.models.pagination import PaginationMetadata
-from app.models.schema import Content
+from app.models.api.content import SubmissionStatusListResponse, SubmissionStatusResponse
+from app.models.api.pagination import PaginationMetadata
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
+from app.models.metadata.access import metadata_view
 from app.utils.pagination import PaginationCursor
 
 logger = get_logger(__name__)

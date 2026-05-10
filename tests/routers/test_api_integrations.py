@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.core.settings import get_settings
-from app.models.schema import UserIntegrationConnection
+from app.models.db import UserIntegrationConnection
 from app.services.token_crypto import decrypt_token
 from app.services.x_integration import XConnectionView
 

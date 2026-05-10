@@ -7,8 +7,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.contracts import ContentType
-from app.models.internal.content_analyzer import ContentAnalysisOutput
-from app.models.metadata import SummaryPayload
+from app.models.llm.content_analysis import ContentAnalysisOutput
+from app.models.metadata.summaries import SummaryPayload
 from app.services.content_analyzer import AnalysisError, get_content_analyzer
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 

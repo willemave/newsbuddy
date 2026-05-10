@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.core.db import get_db  # noqa: E402
 from app.core.logging import setup_logging  # noqa: E402
 from app.models.contracts import TaskStatus, TaskType  # noqa: E402
-from app.models.schema import ProcessingTask  # noqa: E402
+from app.models.db import ProcessingTask  # noqa: E402
 from app.services.long_form_images import (  # noqa: E402
     CANCELLED_NOT_VISIBLE_UNDER_FEED_RULES,
     cancel_ineligible_pending_generate_image_tasks,

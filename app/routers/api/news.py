@@ -14,14 +14,11 @@ from app.commands.convert_news_to_article import (
 )
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
-from app.models.api.common import (
-    BulkMarkReadRequest,
-    ContentDetailResponse,
-    ContentDiscussionResponse,
-    ContentListResponse,
-)
+from app.models.api.content import ContentDetailResponse, ContentListResponse
+from app.models.api.content_actions import BulkMarkReadRequest
+from app.models.api.content_discussions import ContentDiscussionResponse
 from app.models.api.news import ConvertNewsItemResponse
-from app.models.user import User
+from app.models.db.users import User
 from app.queries import get_news_item_discussion as get_news_item_discussion_query
 from app.services.news_feed import (
     bulk_mark_news_items_read,

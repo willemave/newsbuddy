@@ -6,7 +6,7 @@ import pytest
 
 import app.services.x_integration as x_integration
 from app.core.settings import get_settings
-from app.models.schema import (
+from app.models.db import (
     Content,
     NewsItem,
     UserIntegrationConnection,

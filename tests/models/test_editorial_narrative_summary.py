@@ -1,10 +1,9 @@
 import pytest
 from pydantic import ValidationError
 
-from app.models.metadata import (
-    ContentData,
-    ContentStatus,
-    ContentType,
+from app.models.contracts import ContentStatus, ContentType
+from app.models.domain.content import ContentData
+from app.models.metadata.summaries import (
     EditorialNarrativeSummary,
     GeneratedEditorialNarrativeSummary,
 )

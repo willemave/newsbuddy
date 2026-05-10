@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.core.logging import get_logger, setup_logging  # noqa: E402
 from app.core.observability import bound_log_context, build_log_extra  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
-from app.models.schema import ProcessingTask  # noqa: E402
+from app.models.db import ProcessingTask  # noqa: E402
 from app.services.queue import TASK_QUEUE_BY_TYPE, TaskQueue, TaskStatus, TaskType  # noqa: E402
 
 logger = get_logger(__name__)

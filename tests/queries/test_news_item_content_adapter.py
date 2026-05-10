@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.models.contracts import ContentStatus, ContentType, NewsItemStatus, NewsItemVisibilityScope
-from app.models.schema import NewsItem
+from app.models.db import NewsItem
 from app.queries.news_item_content_adapter import (
     present_news_item_detail,
     present_news_item_summary,

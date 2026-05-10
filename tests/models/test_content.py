@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ProcessingTask
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, ProcessingTask
 
 
 class TestContentModel:

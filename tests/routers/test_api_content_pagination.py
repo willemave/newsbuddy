@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ContentStatusEntry
-from app.models.user import User
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, ContentStatusEntry
+from app.models.db.users import User
 from app.utils.image_paths import get_content_images_dir
 from app.utils.pagination import PaginationCursor
 

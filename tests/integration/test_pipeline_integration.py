@@ -6,8 +6,8 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.core.db import get_db
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ContentBody, ProcessingTask
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, ContentBody, ProcessingTask
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
 from app.pipeline.task_models import TaskEnvelope
 from app.services.queue import QueueService, TaskType
@@ -64,6 +64,7 @@ def setup_test_db(db_session):
         "article2_id": test_contents[1].id,
         "failing_article_id": test_contents[2].id,
     }
+
 
 class TestPipelineIntegration:
     """Integration tests for the complete pipeline."""
@@ -152,7 +153,7 @@ class TestPipelineIntegration:
                     )
                     .first()
                 )
-                assert content.status == ContentStatus.COMPLETED.value
+                assert content.status == ContentStatus.AWAITING_IMAGE.value
                 assert content.processed_at is not None
                 assert content.content_metadata.get("summary", {}).get("summary") == "Test summary"
                 assert content.content_metadata.get("content") is None

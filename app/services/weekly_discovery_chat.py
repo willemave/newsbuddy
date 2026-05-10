@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.schema import (
+from app.models.db import (
     ChatSession,
     Content,
     ContentReadStatus,
@@ -17,7 +17,7 @@ from app.models.schema import (
     FeedDiscoverySuggestion,
     OnboardingDiscoveryRun,
 )
-from app.models.user import User
+from app.models.db.users import User
 from app.services.assistant_router import seed_assistant_message
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
 from app.utils.title_utils import resolve_content_display_title

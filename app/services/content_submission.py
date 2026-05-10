@@ -8,16 +8,16 @@ from sqlalchemy.orm import Session
 
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.core.logging import get_logger
-from app.models.content_submission import ContentSubmissionResponse, SubmitContentRequest
-from app.models.metadata import ContentClassification, ContentStatus, ContentType
-from app.models.metadata_access import metadata_view
-from app.models.metadata_state import (
+from app.models.api.submissions import ContentSubmissionResponse, SubmitContentRequest
+from app.models.contracts import ContentClassification, ContentStatus, ContentType
+from app.models.db import Content, ProcessingTask
+from app.models.db.users import User
+from app.models.metadata.access import metadata_view
+from app.models.metadata.state import (
     append_share_and_chat_request,
     normalize_metadata_shape,
     update_processing_state,
 )
-from app.models.schema import Content, ProcessingTask
-from app.models.user import User
 from app.repositories import knowledge_repository
 from app.services import read_status
 from app.services.dig_deeper import enqueue_dig_deeper_task

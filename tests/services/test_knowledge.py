@@ -2,7 +2,7 @@
 
 from sqlalchemy.orm import Session
 
-from app.models.schema import ChatSession, Content, User
+from app.models.db import ChatSession, Content, User
 from app.services import knowledge
 
 

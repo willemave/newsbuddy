@@ -6,7 +6,7 @@ from typing import Literal, cast
 
 from sqlalchemy.orm import Session
 
-from app.models.api.common import UserLlmIntegrationResponse
+from app.models.api.integrations import UserLlmIntegrationResponse
 from app.repositories.user_integration_repository import list_user_llm_integrations
 
 

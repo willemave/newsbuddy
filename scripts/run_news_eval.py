@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.logging import get_logger, setup_logging
 from app.core.settings import get_settings
-from app.models.schema import NewsItem
+from app.models.db import NewsItem
 from app.services.news_embeddings import encode_news_texts
 from app.services.news_relations import exact_relation_key, match_tokens_for_text, matching_text
 

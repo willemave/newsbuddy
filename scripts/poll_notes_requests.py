@@ -378,9 +378,7 @@ def acquire_process_lock(lock_file: Path) -> Any:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as err:
         handle.close()
-        raise SystemExit(
-            f"Another notes request poller is already running: {lock_file}"
-        ) from err
+        raise SystemExit(f"Another notes request poller is already running: {lock_file}") from err
     handle.write(f"{os.getpid()}\n")
     handle.flush()
     return handle

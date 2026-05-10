@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from app.models.schema import AnalyticsInteraction
+from app.models.db import AnalyticsInteraction
 
 
 def test_record_content_interaction_success(client, content_factory, db_session) -> None:

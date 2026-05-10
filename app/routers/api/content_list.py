@@ -7,13 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
-from app.models.api.common import (
+from app.models.api.content import (
     ContentListResponse,
     MixedSearchResponse,
     PodcastEpisodeSearchResponse,
     PodcastEpisodeSearchResultResponse,
 )
-from app.models.user import User
+from app.models.db.users import User
 from app.queries import list_content_cards, search_content_cards, search_mixed
 from app.services.podcast_search import search_podcast_episodes
 

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.models.api.common import (
+from app.models.api.onboarding import (
     OnboardingCompleteResponse,
     OnboardingDiscoveryStatusResponse,
     OnboardingFastDiscoverResponse,
 )
-from app.models.schema import ProcessingTask
+from app.models.db import ProcessingTask
 
 
 def test_agent_job_status_returns_processing_task(client, db_session):

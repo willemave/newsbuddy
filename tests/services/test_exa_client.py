@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.schema import VendorUsageRecord
+from app.models.db import VendorUsageRecord
 from app.services import exa_client
 
 

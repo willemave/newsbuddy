@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.core.db import get_db
 from app.core.logging import get_logger, setup_logging
 from app.core.observability import bound_log_context, build_log_extra
-from app.models.schema import ContentReadStatus
-from app.models.user import User
+from app.models.db import ContentReadStatus
+from app.models.db.users import User
 from app.services.queue import QueueService, TaskType
 
 logger = get_logger(__name__)

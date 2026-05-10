@@ -5,8 +5,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
-from app.models.metadata import ContentType, NewsSummary
-from app.models.schema import Content, NewsItem
+from app.models.contracts import ContentType
+from app.models.db import Content, NewsItem
+from app.models.metadata.summaries import NewsSummary
 from app.services import news_article_enrichment as news_article_enrichment_module
 from app.services import news_processing as news_processing_module
 from app.services.news_article_bodies import NEWS_ARTICLE_BODY_REF_KEY

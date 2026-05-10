@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models.api.common import (
+from app.models.api.content_actions import (
     LongFormStatsResponse,
     ProcessingCountResponse,
     UnreadCountsResponse,

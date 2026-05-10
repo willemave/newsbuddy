@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from sqlalchemy import Text, cast, or_
 from sqlalchemy.orm import Session
 
-from app.models.schema import Content, ContentKnowledgeSave
+from app.models.db import Content, ContentKnowledgeSave
 from app.utils.summary_utils import extract_summary_text
 
 MAX_KNOWLEDGE_HITS = 5

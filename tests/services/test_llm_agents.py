@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic_ai import NativeOutput
 
-from app.models.metadata import GeneratedNewsSummary
+from app.models.metadata.summaries import GeneratedNewsSummary
 from app.services import llm_agents
 
 

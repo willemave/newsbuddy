@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.model_defaults import SMART_MODEL_SPEC, SMART_OPENAI_MODEL_NAME
 from app.core.settings import get_settings
-from app.models.internal.content_analyzer import (
+from app.models.llm.content_analysis import (
     ContentAnalysisOutput,
     ContentAnalysisResult,
     InstructionLink,

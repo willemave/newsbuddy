@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.core.db import get_db
-from app.models.schema import Content
+from app.models.db import Content
 from app.services.content_bodies import sync_content_body_storage
 
 
@@ -16,9 +16,7 @@ def main() -> None:
         contents = db.query(Content).order_by(Content.id.asc()).all()
         for content in contents:
             metadata = (
-                content.content_metadata
-                if isinstance(content.content_metadata, dict)
-                else {}
+                content.content_metadata if isinstance(content.content_metadata, dict) else {}
             )
             if not metadata:
                 skipped += 1

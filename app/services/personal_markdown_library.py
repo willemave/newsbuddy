@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.schema import ChatSession, Content, ContentKnowledgeSave
+from app.models.db import ChatSession, Content, ContentKnowledgeSave
 from app.services.content_bodies import ContentBodyVariant, get_content_body_resolver
 from app.utils.summary_utils import extract_short_summary, extract_summary_text
 

@@ -14,10 +14,10 @@ from app.core.model_defaults import (
     CHEAP_MODEL_SPEC,
     SMART_MODEL_SPEC,
 )
-from app.models.longform_artifacts import LongformArtifactEnvelope
-from app.models.metadata import (
+from app.models.contracts import ContentType
+from app.models.metadata.longform_artifacts import LongformArtifactEnvelope
+from app.models.metadata.summaries import (
     BulletedSummary,
-    ContentType,
     DiscussionSummary,
     EditorialNarrativeSummary,
     GeneratedEditorialNarrativeSummary,

@@ -9,7 +9,8 @@ from sqlalchemy import func
 from app.core.db import get_db
 from app.core.logging import get_logger, setup_logging
 from app.core.settings import get_settings
-from app.models.feed_discovery import (
+from app.models.db import ContentKnowledgeSave, FeedDiscoveryRun
+from app.models.llm.feed_discovery import (
     DiscoveryCandidate,
     DiscoveryCandidateBatch,
     DiscoveryDirection,
@@ -18,7 +19,6 @@ from app.models.feed_discovery import (
     DiscoveryLanePlan,
     DiscoveryQuery,
 )
-from app.models.schema import ContentKnowledgeSave, FeedDiscoveryRun
 from app.services.exa_client import ExaSearchResult
 from app.services.feed_discovery import FeedDiscoveryDeps, run_feed_discovery
 

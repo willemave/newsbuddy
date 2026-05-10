@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models.metadata import ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType
 from app.queries import list_submission_statuses
 
 

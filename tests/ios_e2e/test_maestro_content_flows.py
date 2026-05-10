@@ -8,7 +8,7 @@ import pytest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from app.models.contracts import TaskType
-from app.models.schema import (
+from app.models.db import (
     ChatMessage,
     ChatSession,
     ContentKnowledgeSave,
@@ -641,7 +641,7 @@ def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(
     db_session.commit()
 
     monkeypatch.setattr(
-        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
         lambda url: {"feed_url": url},
     )
     monkeypatch.setattr(

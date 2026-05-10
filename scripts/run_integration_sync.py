@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 from app.core.db import get_db
 from app.core.logging import get_logger, setup_logging
 from app.core.settings import get_settings
-from app.models.schema import UserIntegrationConnection
+from app.models.db import UserIntegrationConnection
 from app.services.queue import QueueService, TaskType
 from app.services.x_integration import X_PROVIDER
 

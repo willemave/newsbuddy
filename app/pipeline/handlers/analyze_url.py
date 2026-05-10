@@ -12,10 +12,10 @@ from app.constants import (
     SELF_SUBMISSION_SOURCE,
 )
 from app.core.logging import get_logger
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, ProcessingTask
 from app.models.internal.feed_backfill import FeedBackfillRequest
-from app.models.metadata import ContentStatus, ContentType
-from app.models.metadata_state import normalize_metadata_shape, update_processing_state
-from app.models.schema import Content, ProcessingTask
+from app.models.metadata.state import normalize_metadata_shape, update_processing_state
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.workflows.analyze_url_workflow import AnalyzeUrlWorkflow

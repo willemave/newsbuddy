@@ -26,7 +26,8 @@ from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
 
 from app.core.settings import get_settings
-from app.models.schema import Content, ContentStatus, ProcessingTask
+from app.models.contracts import ContentStatus
+from app.models.db import Content, ProcessingTask
 
 LOG_FILE_SUFFIXES = (".jsonl", ".log", ".txt")
 

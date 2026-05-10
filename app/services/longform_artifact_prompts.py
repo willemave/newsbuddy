@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from app.models.longform_artifacts import ArtifactType
+from app.models.metadata.longform_artifacts import ArtifactType
 from app.services.longform_artifact_routing import ArtifactSourceHint
 
 ARTIFACT_TYPE_GUIDANCE: dict[str, str] = {

@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import contextlib
 
 from app.core.db import get_db
-from app.models.user import User
+from app.models.db.users import User
 
 
 def check_schema(db) -> dict[str, bool]:

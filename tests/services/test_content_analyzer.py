@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models.metadata import ContentType
+from app.models.contracts import ContentType
 from app.services.content_analyzer import (
     ContentAnalysisOutput,
     ContentAnalysisResult,

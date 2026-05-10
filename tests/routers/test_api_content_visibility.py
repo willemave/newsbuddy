@@ -2,8 +2,8 @@
 
 from sqlalchemy.orm import Session
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ContentStatusEntry
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, ContentStatusEntry
 
 
 def _news_summary_payload(title: str) -> dict[str, object]:

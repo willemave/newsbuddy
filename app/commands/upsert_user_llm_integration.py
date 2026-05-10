@@ -7,7 +7,7 @@ from typing import Literal, cast
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.common import UserLlmIntegrationResponse
+from app.models.api.integrations import UserLlmIntegrationResponse
 from app.repositories.user_integration_repository import (
     SUPPORTED_LLM_PROVIDERS,
     upsert_user_llm_integration,

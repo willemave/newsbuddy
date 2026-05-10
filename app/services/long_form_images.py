@@ -7,11 +7,10 @@ from typing import Protocol
 
 from sqlalchemy.orm import Session
 
-from app.models.content_display import is_ready_for_long_form_summary
-from app.models.content_mapper import content_to_domain
-from app.models.contracts import TaskStatus
-from app.models.metadata import ContentType
-from app.models.schema import Content, ContentStatusEntry, ProcessingTask
+from app.models.contracts import ContentType, TaskStatus
+from app.models.db import Content, ContentStatusEntry, ProcessingTask
+from app.models.domain.content_display import is_ready_for_long_form_summary
+from app.models.domain.content_mapper import content_to_domain
 from app.services.content_status_state_machine import ContentStatusStateMachine
 from app.services.queue import QueueService, TaskType
 from app.utils.image_paths import get_content_images_dir

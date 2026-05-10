@@ -1,6 +1,6 @@
 from app.commands import download_more_from_series
+from app.models.db import UserScraperConfig
 from app.models.internal.feed_backfill import FeedBackfillResult
-from app.models.schema import UserScraperConfig
 
 
 def test_download_more_from_series_success(

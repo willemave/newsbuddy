@@ -22,8 +22,8 @@ from admin.remote_ops import (
     usage_by_user,
     usage_summary,
 )
-from app.models.schema import Content, ContentStatusEntry, ProcessingTask, VendorUsageRecord
-from app.models.user import User
+from app.models.db import Content, ContentStatusEntry, ProcessingTask, VendorUsageRecord
+from app.models.db.users import User
 from app.testing.postgres_harness import create_temporary_postgres_harness
 
 

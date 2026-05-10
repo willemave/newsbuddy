@@ -8,8 +8,8 @@ from typing import Any, cast
 
 from app.core.deps import require_admin
 from app.main import app
-from app.models.schema import Content, OnboardingDiscoveryRun, ProcessingTask, VendorUsageRecord
-from app.models.user import User
+from app.models.db import Content, OnboardingDiscoveryRun, ProcessingTask, VendorUsageRecord
+from app.models.db.users import User
 
 
 def test_admin_dashboard_shows_operational_readouts(client, db_session, test_user) -> None:

@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from app.models.api.common import ContentDetailResponse, ContentSummaryResponse
+from app.models.api.content import ContentDetailResponse, ContentSummaryResponse
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
-from app.models.schema import NewsItem
+from app.models.db import NewsItem
 from app.utils.news_titles import (
     get_news_article_title,
     resolve_news_display_title,

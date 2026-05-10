@@ -12,7 +12,7 @@ from app.core.api_keys import (
     hash_api_key,
     verify_api_key_hash,
 )
-from app.models.schema import UserApiKey
+from app.models.db import UserApiKey
 
 
 def create_api_key(

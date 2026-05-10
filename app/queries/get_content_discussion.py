@@ -7,14 +7,14 @@ from typing import Any, Literal
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.common import (
+from app.models.api.content_discussions import (
     ContentDiscussionResponse,
     DiscussionCommentResponse,
     DiscussionGroupResponse,
     DiscussionItemResponse,
     DiscussionLinkResponse,
 )
-from app.models.schema import Content, ContentDiscussion
+from app.models.db import Content, ContentDiscussion
 from app.repositories.content_detail_repository import (
     get_content_discussion as get_content_discussion_repository,
 )

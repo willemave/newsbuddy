@@ -2,8 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.metadata import (
-    ContentType,
+from app.models.contracts import ContentType
+from app.models.db import VendorUsageRecord
+from app.models.metadata.summaries import (
     EditorialNarrativeSummary,
     EditorialQuote,
     GeneratedEditorialKeyPoint,
@@ -11,7 +12,6 @@ from app.models.metadata import (
     GeneratedNewsSummary,
     NewsSummary,
 )
-from app.models.schema import VendorUsageRecord
 from app.services import llm_summarization
 
 

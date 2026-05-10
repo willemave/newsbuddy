@@ -173,14 +173,14 @@ def _build_user_prompt(*, batch_id: str, rows: list[dict[str, Any]]) -> str:
         "4. Do not emit singleton clusters. "
         "Any item not in a duplicate cluster belongs in singletons.\n\n"
         "Return JSON with this shape:\n"
-        '{'
+        "{"
         '"batch_id":"...",'
         '"clusters":['
         '{"cluster_id":"c1","label":"short label","confidence":"high|medium|low",'
         '"member_content_ids":[1,2,3],"reason":"one short sentence"}'
-        '],'
+        "],"
         '"singletons":[4,5,6]'
-        '}\n\n'
+        "}\n\n"
         "Row fields:\n"
         "- id: content_id\n"
         "- ts: created_at\n"
@@ -242,9 +242,7 @@ def _enrich_batch_result(
     ]
     if not singletons:
         singletons = [
-            row
-            for content_id, row in rows_by_id.items()
-            if content_id not in assigned_ids
+            row for content_id, row in rows_by_id.items() if content_id not in assigned_ids
         ]
 
     return {

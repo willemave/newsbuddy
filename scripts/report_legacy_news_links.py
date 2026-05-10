@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from app.core.db import get_db
 from app.models.contracts import ContentType
-from app.models.schema import Content, NewsItem
+from app.models.db import Content, NewsItem
 
 
 def build_report() -> dict[str, int]:
@@ -26,10 +26,8 @@ def build_report() -> dict[str, int]:
             .scalar()
             or 0
         )
-        linked_content_ids = (
-            db.query(NewsItem.legacy_content_id)
-            .filter(NewsItem.legacy_content_id.is_not(None))
-            .subquery()
+        linked_content_ids = select(NewsItem.legacy_content_id).where(
+            NewsItem.legacy_content_id.is_not(None)
         )
         unlinked_legacy = int(
             db.query(func.count(Content.id))

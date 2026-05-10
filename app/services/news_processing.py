@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from app.constants import SUMMARY_KIND_SHORT_NEWS, SUMMARY_VERSION_V1
 from app.core.logging import get_logger
 from app.models.contracts import NewsItemStatus
-from app.models.metadata import NewsSummary
-from app.models.schema import NewsItem
+from app.models.db import NewsItem
+from app.models.metadata.summaries import NewsSummary
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.news_article_bodies import get_news_item_article_body_resolver
 from app.services.news_relations import reconcile_news_item_relation

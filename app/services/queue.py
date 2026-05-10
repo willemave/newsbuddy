@@ -10,7 +10,7 @@ from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
-from app.models.schema import ProcessingTask
+from app.models.db import ProcessingTask
 from app.pipeline.task_specs import TASK_SPECS, get_task_spec
 
 logger = get_logger(__name__)

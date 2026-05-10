@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.models.metadata import ContentType
-from app.models.schema import Content, ProcessingTask
+from app.models.contracts import ContentType
+from app.models.db import Content, ProcessingTask
 from scripts import reset_content_processing
 
 

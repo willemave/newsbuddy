@@ -1,6 +1,6 @@
 """Tests for typed content metadata accessors."""
 
-from app.models.metadata_access import metadata_view
+from app.models.metadata.access import metadata_view
 
 
 def test_metadata_view_reads_legacy_flat_metadata() -> None:

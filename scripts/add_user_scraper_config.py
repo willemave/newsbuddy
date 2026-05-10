@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.db import get_db, init_db
 from app.core.logging import get_logger, setup_logging
-from app.models.schema import User
+from app.models.db import User
 from app.services.scraper_configs import (
     CreateUserScraperConfig,
     create_user_scraper_config,

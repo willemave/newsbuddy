@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse, urlunparse
 
-from app.models.chat_message_metadata import (
+from app.models.domain.chat_render import (
     AssistantFeedOption,
     AssistantFeedOptionsResult,
     build_assistant_feed_option_id,

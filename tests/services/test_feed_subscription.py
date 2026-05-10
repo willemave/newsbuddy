@@ -3,7 +3,7 @@
 import pytest
 
 from app.constants import DEFAULT_NEW_FEED_LIMIT
-from app.models.schema import UserScraperConfig
+from app.models.db import UserScraperConfig
 from app.services.feed_subscription import (
     subscribe_to_detected_feed,
     subscribe_to_detected_feed_result,
@@ -82,9 +82,7 @@ def test_subscribe_to_detected_feed_result_includes_created_config_id(
     assert isinstance(result.config_id, int)
 
     record = (
-        db_session.query(UserScraperConfig)
-        .filter(UserScraperConfig.id == result.config_id)
-        .first()
+        db_session.query(UserScraperConfig).filter(UserScraperConfig.id == result.config_id).first()
     )
     assert record is not None
     assert record.feed_url == "https://example.com/second-feed.xml"

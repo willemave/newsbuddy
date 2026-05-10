@@ -3,8 +3,9 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from app.models.metadata import ContentData, ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
+from app.models.domain.content import ContentData
 from app.pipeline.podcast_workers import PodcastTranscribeWorker
 from app.services.queue import TaskType
 

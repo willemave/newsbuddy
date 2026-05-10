@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.core.db import get_session_factory
 from app.core.logging import setup_logging
 from app.core.settings import get_settings
-from app.models.schema import NewsItem
+from app.models.db import NewsItem
 from app.services.news_relations import reconcile_news_item_relation
 from app.services.news_reranker import clear_news_reranker_cache
 from tests.services.news_relation_cluster_cases import (

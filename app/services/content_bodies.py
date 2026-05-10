@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.schema import Content, ContentBody
+from app.models.db import Content, ContentBody
 from app.services.gateways.object_storage_gateway import (
     ObjectStorageGateway,
     get_object_storage_gateway,

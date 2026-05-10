@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.models.api.common import OnboardingSuggestion
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import (
+from app.models.api.onboarding import OnboardingSuggestion
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import (
     Content,
     ContentStatusEntry,
     OnboardingDiscoveryLane,

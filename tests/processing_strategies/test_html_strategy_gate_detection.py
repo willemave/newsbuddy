@@ -27,8 +27,7 @@ def test_detect_access_gate_ignores_normal_article_content() -> None:
             "model training loops, and enterprise go-to-market dynamics."
         ),
         html_content=(
-            "<html><body><article>Long-form analysis about AI financing."
-            "</article></body></html>"
+            "<html><body><article>Long-form analysis about AI financing.</article></body></html>"
         ),
     )
 

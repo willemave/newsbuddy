@@ -6,7 +6,7 @@ from typing import Any
 
 from app.core.db import get_db
 from app.core.logging import get_logger
-from app.models.scraper_runs import ScraperStats
+from app.models.domain.scraper_runs import ScraperStats
 from app.scraping.base import BaseScraper
 from app.services.news_item_discussions import refresh_due_news_item_discussions
 

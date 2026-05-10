@@ -2,7 +2,7 @@
 
 from sqlalchemy import select
 
-from app.models.schema import ContentReadStatus
+from app.models.db import ContentReadStatus
 
 
 def test_bulk_mark_read_endpoint_success(client, content_factory, db_session) -> None:
@@ -26,9 +26,7 @@ def test_bulk_mark_read_endpoint_success(client, content_factory, db_session) ->
     assert payload["marked_count"] == len(content_ids)
     assert payload["failed_ids"] == []
 
-    stored_ids = db_session.execute(
-        select(ContentReadStatus.content_id)
-    ).scalars().all()
+    stored_ids = db_session.execute(select(ContentReadStatus.content_id)).scalars().all()
     assert sorted(stored_ids) == sorted(content_ids)
 
 

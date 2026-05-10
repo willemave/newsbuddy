@@ -11,7 +11,7 @@ import yaml
 from pydantic import BaseModel, Field, HttpUrl, ValidationError, ValidationInfo, field_validator
 
 from app.core.logging import get_logger
-from app.models.metadata import ContentType
+from app.models.contracts import ContentType
 from app.scraping.base import BaseScraper
 
 try:  # pragma: no cover - import guard for optional dependency in tests

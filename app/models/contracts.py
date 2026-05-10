@@ -111,3 +111,22 @@ class NewsItemStatus(StrEnum):
     PROCESSING = "processing"
     READY = "ready"
     FAILED = "failed"
+
+
+class MessageProcessingStatus(StrEnum):
+    """Processing status for async chat messages."""
+
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class LLMProvider(StrEnum):
+    """Supported LLM providers."""
+
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    GOOGLE = "google"
+    CEREBRAS = "cerebras"
+    OPENROUTER = "openrouter"
+    DEEP_RESEARCH = "deep_research"

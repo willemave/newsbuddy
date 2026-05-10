@@ -12,9 +12,8 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
-from app.models.metadata import ContentType
-from app.models.schema import Content, NewsItem
+from app.models.contracts import ContentType, NewsItemStatus, NewsItemVisibilityScope
+from app.models.db import Content, NewsItem
 from app.utils.news_titles import merge_news_metadata, normalize_news_metadata_titles
 from app.utils.title_utils import clean_title, resolve_title_candidate
 from app.utils.url_utils import normalize_http_url

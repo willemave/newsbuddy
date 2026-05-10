@@ -9,11 +9,9 @@ from sqlalchemy.orm import Session
 from app.commands import submit_content as submit_content_command
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
-from app.models.api.common import (
-    SubmissionStatusListResponse,
-)
-from app.models.content_submission import ContentSubmissionResponse, SubmitContentRequest
-from app.models.user import User
+from app.models.api.content import SubmissionStatusListResponse
+from app.models.api.submissions import ContentSubmissionResponse, SubmitContentRequest
+from app.models.db.users import User
 from app.queries import list_submission_statuses as list_submission_statuses_query
 
 router = APIRouter()

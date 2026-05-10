@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.db import get_db, init_db
 from app.core.logging import get_logger, setup_logging
-from app.models.schema import Content
+from app.models.db import Content
 from app.services.admin_eval import (
     MAX_EVAL_INPUT_CHARS,
     build_eval_source_payload,

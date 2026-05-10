@@ -1,0 +1,1 @@
+"""Persisted discussion metadata contracts."""

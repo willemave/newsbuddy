@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models.api.common import (
-    AgentOnboardingStartRequest,
-    AgentOnboardingStartResponse,
-    OnboardingAudioDiscoverRequest,
-)
+from app.models.api.agent import AgentOnboardingStartRequest, AgentOnboardingStartResponse
+from app.models.api.onboarding import OnboardingAudioDiscoverRequest
 from app.services.onboarding import start_audio_discovery
 
 

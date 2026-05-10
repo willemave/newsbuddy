@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.api.common import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
+from app.models.api.content import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
 from app.models.contracts import (
     ContentClassification,
     ContentStatus,

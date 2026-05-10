@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.settings import get_settings
-from app.models.schema import ChatSession, Content, ContentBody
+from app.models.db import ChatSession, Content, ContentBody
 from app.repositories import knowledge_repository
 from app.services import content_bodies
 from app.services.content_bodies import ContentBodyFormat, ContentBodyVariant

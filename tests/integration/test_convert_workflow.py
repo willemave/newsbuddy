@@ -3,9 +3,9 @@
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ContentStatusEntry
-from app.models.user import User
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, ContentStatusEntry
+from app.models.db.users import User
 from app.repositories import knowledge_repository
 
 

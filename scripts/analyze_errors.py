@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.settings import Settings
-from app.models.schema import Content
+from app.models.db import Content
 
 
 def parse_jsonl_logs(log_dir: Path) -> list[dict[str, Any]]:

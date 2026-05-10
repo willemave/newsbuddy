@@ -23,9 +23,9 @@ from admin.log_parsing import (
 from admin.sql_guard import validate_readonly_sql
 from app.core.redaction import redact_value
 from app.core.settings import get_settings
-from app.models.content_mapper import content_to_domain
-from app.models.schema import Content, ContentStatusEntry, ProcessingTask, VendorUsageRecord
-from app.models.user import User
+from app.models.db import Content, ContentStatusEntry, ProcessingTask, VendorUsageRecord
+from app.models.db.users import User
+from app.models.domain.content_mapper import content_to_domain
 from app.queries.queue_health import get_queue_health_snapshot
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.image_generation import ImageGenerationService, get_image_generation_service
@@ -55,7 +55,7 @@ class RemoteContext:
 @lru_cache(maxsize=1)
 def _load_schema_models() -> tuple[Any, Any, Any, Any]:
     """Load schema models lazily for DB-backed remote commands."""
-    from app.models.schema import Content, ProcessingTask, VendorUsageRecord
+    from app.models.db import Content, ProcessingTask, VendorUsageRecord
 
     return Content, VendorUsageRecord, ProcessingTask, None
 

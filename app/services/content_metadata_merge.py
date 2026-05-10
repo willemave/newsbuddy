@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.schema import Content
+from app.models.db import Content
 
 logger = get_logger(__name__)
 
@@ -36,9 +36,7 @@ def compute_metadata_patch(
     updated = _coerce_metadata(updated_metadata)
 
     updates = {
-        key: value
-        for key, value in updated.items()
-        if key not in base or base.get(key) != value
+        key: value for key, value in updated.items() if key not in base or base.get(key) != value
     }
     removed_keys = {key for key in base if key not in updated}
     return updates, removed_keys
@@ -102,11 +100,7 @@ def _load_latest_content_metadata(
     if not content_id:
         return _coerce_metadata(fallback)
 
-    row = (
-        db.query(Content.content_metadata)
-        .filter(Content.id == int(content_id))
-        .first()
-    )
+    row = db.query(Content.content_metadata).filter(Content.id == int(content_id)).first()
     if row is None:
         logger.error("Content metadata row missing for content %s", content_id)
         raise ContentMetadataMergeError(f"Missing content metadata row for content {content_id}")
@@ -132,8 +126,7 @@ def _coerce_persisted_metadata(raw_metadata: Any, *, content_id: int) -> dict[st
         type(raw_metadata).__name__,
     )
     raise ContentMetadataMergeError(
-        f"Invalid content metadata payload for content {content_id}: "
-        f"{type(raw_metadata).__name__}"
+        f"Invalid content metadata payload for content {content_id}: {type(raw_metadata).__name__}"
     )
 
 

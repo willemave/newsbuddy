@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.models.feed_discovery import DiscoveryCandidate
+from app.models.llm.feed_discovery import DiscoveryCandidate
 from app.services import feed_discovery
 
 

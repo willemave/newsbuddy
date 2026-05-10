@@ -16,8 +16,9 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.core.settings import get_settings
-from app.models.chat_message_metadata import ChatMessageRenderMetadata
-from app.models.schema import ChatMessage, ChatSession, Content, MessageProcessingStatus
+from app.models.contracts import MessageProcessingStatus
+from app.models.db import ChatMessage, ChatSession, Content
+from app.models.domain.chat_render import ChatMessageRenderMetadata
 from app.services.exa_client import exa_search, get_exa_client
 from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_models import (

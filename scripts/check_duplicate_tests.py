@@ -9,10 +9,7 @@ def collect_relative_modules(root: Path) -> set[str]:
     """Collect python module paths relative to a root directory."""
     if not root.exists():
         return set()
-    return {
-        str(path.relative_to(root))
-        for path in root.rglob("test_*.py")
-    }
+    return {str(path.relative_to(root)) for path in root.rglob("test_*.py")}
 
 
 def main() -> int:

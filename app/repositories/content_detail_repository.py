@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
-from app.models.schema import Content, ContentBody, ContentDiscussion
+from app.models.db import Content, ContentBody, ContentDiscussion
 from app.repositories.content_repository import build_visibility_context
 
 

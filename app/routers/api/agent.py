@@ -15,7 +15,7 @@ from app.commands import (
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.core.settings import get_settings
-from app.models.api.common import (
+from app.models.api.agent import (
     AgentLibraryDocumentResponse,
     AgentLibraryFileResponse,
     AgentLibraryManifestResponse,
@@ -24,15 +24,17 @@ from app.models.api.common import (
     AgentOnboardingStartResponse,
     AgentSearchRequest,
     AgentSearchResponse,
+)
+from app.models.api.cli import (
     CliLinkApproveRequest,
     CliLinkApproveResponse,
     CliLinkPollResponse,
     CliLinkStartRequest,
     CliLinkStartResponse,
-    JobStatusResponse,
-    OnboardingDiscoveryStatusResponse,
 )
-from app.models.user import User
+from app.models.api.jobs import JobStatusResponse
+from app.models.api.onboarding import OnboardingDiscoveryStatusResponse
+from app.models.db.users import User
 from app.queries import (
     get_agent_onboarding_status,
     get_job_status,

@@ -1,6 +1,6 @@
 """Tests for user submission status list endpoint."""
 
-from app.models.metadata import ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType
 
 
 def test_submission_status_list_filters_by_user_and_status(

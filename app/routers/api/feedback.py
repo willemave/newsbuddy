@@ -9,7 +9,7 @@ from app.commands import submit_feedback
 from app.core.db import get_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.models.api.feedback import SubmitFeedbackRequest, SubmitFeedbackResponse
-from app.models.user import User
+from app.models.db.users import User
 
 router = APIRouter(tags=["feedback"])
 

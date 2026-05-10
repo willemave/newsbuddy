@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
 
 
 class FakeResponse:

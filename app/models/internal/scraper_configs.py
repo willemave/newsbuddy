@@ -11,7 +11,6 @@ from app.constants import (
     AGGREGATOR_SCRAPER_TYPE,
     DEFAULT_NEW_FEED_LIMIT,
 )
-from app.services.feed_detection import FeedDetector
 
 ALLOWED_SCRAPER_TYPES = {
     "substack",
@@ -21,7 +20,6 @@ ALLOWED_SCRAPER_TYPES = {
     "reddit",
     AGGREGATOR_SCRAPER_TYPE,
 }
-FEED_VALIDATOR = FeedDetector(use_llm=False, use_exa_search=False)
 
 
 def _validate_limit(limit: object) -> None:
@@ -70,15 +68,12 @@ class UpdateUserScraperConfig(BaseModel):
 
 
 def normalize_feed_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Validate and normalize a feed-based scraper config."""
+    """Normalize the shape of a feed-based scraper config."""
 
     feed_url = config.get("feed_url")
     if not isinstance(feed_url, str) or not feed_url.strip():
         raise ValueError("config.feed_url is required")
-    validated_feed = FEED_VALIDATOR.validate_feed_url(feed_url.strip())
-    if not validated_feed:
-        raise ValueError("config.feed_url must be a valid RSS/Atom feed URL")
-    config["feed_url"] = validated_feed["feed_url"]
+    config["feed_url"] = feed_url.strip()
     _validate_limit(config.get("limit"))
     return config
 

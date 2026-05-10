@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import HttpUrl, TypeAdapter
 
 from app.models.contracts import ContentStatus, ContentType
-from app.models.metadata import ContentData
+from app.models.domain.content import ContentData
 from app.services import image_generation
 
 

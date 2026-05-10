@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.models.metadata import GeneratedNewsSummary, NewsSummary
+from app.models.metadata.summaries import GeneratedNewsSummary, NewsSummary
 
 
 def test_news_summary_ignores_legacy_fields(caplog) -> None:

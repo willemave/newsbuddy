@@ -16,8 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.metadata import DiscussionSummary
-from app.models.schema import NewsItem, NewsItemDiscussion
+from app.models.db import NewsItem, NewsItemDiscussion
+from app.models.metadata.summaries import DiscussionSummary
 from app.services.discussion_fetcher import (
     DiscussionFetchError,
     _clean_html_text,

@@ -12,7 +12,7 @@ import yaml
 
 from app.core.db import get_db
 from app.core.logging import get_logger
-from app.models.metadata import ContentType
+from app.models.contracts import ContentType
 from app.scraping.base import BaseScraper
 from app.scraping.rss_helpers import resolve_feed_source
 from app.services.scraper_configs import build_feed_payloads, list_active_configs_by_type

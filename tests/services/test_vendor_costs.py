@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import text
 
-from app.models.schema import VendorUsageRecord
+from app.models.db import VendorUsageRecord
 from app.services import vendor_costs
 
 

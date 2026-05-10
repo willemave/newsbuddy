@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, NewsItem, NewsItemReadStatus
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, NewsItem, NewsItemReadStatus
 from app.repositories import knowledge_repository
 
 

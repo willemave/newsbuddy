@@ -23,20 +23,18 @@ from app.core.security import (
     verify_token,
 )
 from app.core.settings import get_settings
-from app.models.user import (
+from app.models.api.auth import (
     AccessTokenResponse,
     AdminLoginRequest,
     AdminLoginResponse,
     AppleSignInRequest,
-    CouncilPersonaConfig,
     DebugUserSessionRequest,
     RefreshTokenRequest,
     TokenResponse,
-    UpdateUserProfileRequest,
-    User,
-    UserResponse,
-    resolve_user_council_personas,
 )
+from app.models.api.users import UpdateUserProfileRequest, UserResponse
+from app.models.db.users import User
+from app.models.domain.user_profile import CouncilPersonaConfig, resolve_user_council_personas
 from app.services.x_integration import has_active_x_connection, normalize_twitter_username
 from app.templates import templates
 

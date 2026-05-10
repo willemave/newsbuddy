@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from app.core.db import get_session_factory
-from app.models.schema import Content
+from app.models.db import Content
 from app.services.llm_models import resolve_model
 
 

@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 from pydantic_ai.models.test import TestModel
 
 from app.core.settings import get_settings
+from app.models.db import Content, ContentStatusEntry, NewsItemReadStatus, UserScraperConfig
 from app.models.internal.assistant import AssistantScreenContext
-from app.models.schema import Content, ContentStatusEntry, NewsItemReadStatus, UserScraperConfig
 from app.repositories.search_repository import (
     search_news,
     search_subscription_feeds,

@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.logging import get_logger
+from app.models.db import Content, UserScraperConfig
 from app.models.internal.feed_backfill import FeedBackfillRequest, FeedBackfillResult
-from app.models.schema import Content, UserScraperConfig
 from app.scraping.atom_unified import AtomScraper
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 from app.scraping.substack_unified import SubstackScraper

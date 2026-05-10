@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models.api.common import ApiKeyCreateResponse, ApiKeySummaryResponse
+from app.models.api.api_keys import ApiKeyCreateResponse, ApiKeySummaryResponse
 from app.repositories.api_key_repository import create_api_key
 
 

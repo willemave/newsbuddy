@@ -258,7 +258,7 @@ def check_server_health(
         raise SmokeTestError("health-retries must be greater than zero")
 
     last_error: Exception | None = None
-    for attempt in range(1, retries+1):
+    for attempt in range(1, retries + 1):
         try:
             with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                 if response.status != 200:
@@ -392,8 +392,7 @@ def run_subprocess(
             if completed.stderr.strip():
                 print(completed.stderr.strip(), file=sys.stderr)
         raise SmokeTestError(
-            "command failed with exit code "
-            f"{completed.returncode}: {' '.join(command)}"
+            f"command failed with exit code {completed.returncode}: {' '.join(command)}"
         )
     return completed
 

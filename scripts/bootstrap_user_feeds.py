@@ -29,8 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.core.db import get_db, init_db
 from app.core.logging import get_logger, setup_logging
 from app.core.observability import bound_log_context, build_log_extra
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ContentStatusEntry, User
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, ContentStatusEntry, User
 from app.services.scraper_configs import ensure_inbox_status
 
 logger = get_logger(__name__)

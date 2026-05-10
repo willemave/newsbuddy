@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from app.models.schema import Content
+from app.models.db import Content
 from app.services.admin_eval import (
     AdminEvalRunRequest,
     ModelPricing,

@@ -3,8 +3,8 @@ from unittest.mock import Mock, patch
 import feedparser
 import pytest
 
-from app.models.metadata import ContentType
-from app.models.schema import Content, ContentStatus
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 from app.services.queue import TaskType
 

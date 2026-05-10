@@ -7,8 +7,8 @@ from sqlalchemy import and_, exists, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.models.metadata import ContentStatus
-from app.models.schema import Content, ContentKnowledgeSave, ContentReadStatus, ContentStatusEntry
+from app.models.contracts import ContentStatus
+from app.models.db import Content, ContentKnowledgeSave, ContentReadStatus, ContentStatusEntry
 
 
 @dataclass(frozen=True)

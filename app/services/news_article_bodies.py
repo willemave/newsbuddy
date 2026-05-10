@@ -10,8 +10,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
-from app.models.metadata import ContentType
-from app.models.schema import Content, NewsItem
+from app.models.contracts import ContentType
+from app.models.db import Content, NewsItem
 from app.services.content_bodies import get_content_body_resolver
 from app.services.gateways.object_storage_gateway import (
     ObjectStorageGateway,

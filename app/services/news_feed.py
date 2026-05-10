@@ -13,17 +13,14 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.constants import AGGREGATOR_SCRAPER_TYPE
-from app.models.api.common import (
-    ContentDetailResponse,
-    ContentListResponse,
-)
+from app.models.api.content import ContentDetailResponse, ContentListResponse
+from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
     ContentType,
     NewsItemStatus,
     NewsItemVisibilityScope,
 )
-from app.models.pagination import PaginationMetadata
-from app.models.schema import NewsItem, NewsItemReadStatus, UserScraperConfig
+from app.models.db import NewsItem, NewsItemReadStatus, UserScraperConfig
 from app.queries.news_item_content_adapter import (
     present_news_item_detail,
     present_news_item_summary,

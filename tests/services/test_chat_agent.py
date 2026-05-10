@@ -12,8 +12,8 @@ from pydantic_ai.messages import (
 )
 
 from app.core.settings import get_settings
-from app.models.metadata import ContentType
-from app.models.schema import ChatSession, Content
+from app.models.contracts import ContentType
+from app.models.db import ChatSession, Content
 from app.routers.api.chat import _extract_messages_for_display
 from app.services import chat_agent
 from app.services.chat_agent import (

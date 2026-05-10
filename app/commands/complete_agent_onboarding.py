@@ -7,12 +7,9 @@ from typing import Literal, cast
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.common import (
-    AgentOnboardingCompleteRequest,
-    OnboardingCompleteRequest,
-    OnboardingSelectedSource,
-)
-from app.models.schema import OnboardingDiscoverySuggestion
+from app.models.api.agent import AgentOnboardingCompleteRequest
+from app.models.api.onboarding import OnboardingCompleteRequest, OnboardingSelectedSource
+from app.models.db import OnboardingDiscoverySuggestion
 from app.services.onboarding import complete_onboarding
 
 

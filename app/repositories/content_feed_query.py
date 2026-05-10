@@ -10,7 +10,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.contracts import ContentStatus, ContentType
-from app.models.schema import Content, ContentKnowledgeSave, ContentReadStatus, ContentStatusEntry
+from app.models.db import Content, ContentKnowledgeSave, ContentReadStatus, ContentStatusEntry
 
 
 @dataclass(frozen=True)

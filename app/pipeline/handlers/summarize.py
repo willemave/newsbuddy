@@ -16,21 +16,20 @@ from app.constants import (
     SUMMARY_VERSION_V2,
 )
 from app.core.logging import get_logger
-from app.models.longform_artifacts import LongformArtifactEnvelope
-from app.models.metadata import (
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
+from app.models.metadata.longform_artifacts import LongformArtifactEnvelope
+from app.models.metadata.state import (
+    extract_share_and_chat_requests,
+    remove_processing_fields,
+)
+from app.models.metadata.summaries import (
     BulletedSummary,
-    ContentStatus,
-    ContentType,
     EditorialNarrativeSummary,
     InterleavedSummary,
     InterleavedSummaryV2,
     NewsSummary,
 )
-from app.models.metadata_state import (
-    extract_share_and_chat_requests,
-    remove_processing_fields,
-)
-from app.models.schema import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.content_bodies import get_content_body_resolver, sync_content_body_storage

@@ -25,7 +25,7 @@ from sqlalchemy import select
 from app.core.db import get_db
 from app.core.logging import get_logger, setup_logging
 from app.core.observability import build_log_extra
-from app.models.user import User
+from app.models.db.users import User
 from app.services.insight_report import (
     DEFAULT_MIN_SAVES_FOR_TRIGGER,
     SYNTHESIS_EFFORT,

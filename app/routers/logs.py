@@ -12,8 +12,8 @@ from app.core.db import get_db
 from app.core.deps import require_admin
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.schema import VendorUsageRecord
-from app.models.user import User
+from app.models.db import VendorUsageRecord
+from app.models.db.users import User
 from app.templates import templates
 
 router = APIRouter(prefix="/admin")

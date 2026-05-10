@@ -20,7 +20,7 @@ from sqlalchemy import Row, func  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from app.core.db import get_session_factory  # noqa: E402
-from app.models.schema import (  # noqa: E402
+from app.models.db import (  # noqa: E402
     Content,
     ContentKnowledgeSave,
     ContentReadStatus,

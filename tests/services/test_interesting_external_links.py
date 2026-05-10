@@ -1,6 +1,6 @@
 """Tests for article interesting external link curation."""
 
-from app.models.metadata import InterestingExternalLink
+from app.models.metadata.summaries import InterestingExternalLink
 from app.services import interesting_external_links as links
 
 

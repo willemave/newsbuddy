@@ -5,18 +5,18 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from app.models.metadata import (
+from app.models.db import Content
+from app.models.metadata.state import (
+    extract_share_and_chat_requests,
+    remove_processing_fields,
+)
+from app.models.metadata.summaries import (
     ContentQuote,
     InterestingExternalLink,
     NewsSummary,
     StructuredSummary,
     SummaryBulletPoint,
 )
-from app.models.metadata_state import (
-    extract_share_and_chat_requests,
-    remove_processing_fields,
-)
-from app.models.schema import Content
 from app.pipeline.handlers.summarize import SummarizeHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope

@@ -7,10 +7,11 @@ from urllib.parse import urlparse
 from pydantic import HttpUrl, TypeAdapter
 
 from app.core.logging import get_logger
-from app.models.metadata import ContentData, ContentStatus, ContentType
-from app.models.metadata_access import metadata_view
-from app.models.metadata_state import merge_runtime_metadata, normalize_metadata_shape
-from app.models.schema import Content as DBContent
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content as DBContent
+from app.models.domain.content import ContentData
+from app.models.metadata.access import metadata_view
+from app.models.metadata.state import merge_runtime_metadata, normalize_metadata_shape
 from app.utils.summary_metadata import infer_summary_kind_version
 from app.utils.url_utils import is_http_url
 

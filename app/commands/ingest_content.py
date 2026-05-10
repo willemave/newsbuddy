@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.models.content_submission import ContentSubmissionResponse, SubmitContentRequest
-from app.models.user import User
+from app.models.api.submissions import ContentSubmissionResponse, SubmitContentRequest
+from app.models.db.users import User
 from app.services.content_submission import submit_user_content
 
 

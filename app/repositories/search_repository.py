@@ -10,7 +10,7 @@ from sqlalchemy import String, and_, cast, func, literal, literal_column, or_
 from sqlalchemy.orm import Session
 
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
-from app.models.schema import Content, NewsItem, NewsItemReadStatus, UserScraperConfig
+from app.models.db import Content, NewsItem, NewsItemReadStatus, UserScraperConfig
 from app.repositories.content_feed_query import apply_sort_timestamp_cursor, build_user_feed_query
 
 SUBSCRIPTION_QUERY_STOPWORDS = {

@@ -6,8 +6,8 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
 from app.pipeline.workflows.analyze_url_workflow import AnalyzeUrlWorkflow

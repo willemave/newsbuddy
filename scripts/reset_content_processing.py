@@ -20,8 +20,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.settings import get_settings  # noqa: E402
-from app.models.metadata import ContentType  # noqa: E402
-from app.models.schema import Content, ContentStatus, ProcessingTask  # noqa: E402
+from app.models.contracts import (
+    ContentStatus,  # noqa: E402
+    ContentType,  # noqa: E402
+)
+from app.models.db import Content, ProcessingTask
 
 PODCAST_RESET_METADATA_KEYS = frozenset(
     {

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.schema import Content, ContentDiscussion, NewsItem
+from app.models.db import Content, ContentDiscussion, NewsItem
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.utils.url_utils import normalize_http_url
 

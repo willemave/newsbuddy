@@ -5,8 +5,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
 from app.services.tweet_suggestions import (
     TWEET_MODEL,
     TweetSuggestionData,

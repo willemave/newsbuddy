@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 
 import app.services.x_api as x_api
-from app.models.schema import VendorUsageRecord
+from app.models.db import VendorUsageRecord
 from app.services import vendor_costs
 from app.services.x_api import (
     _extract_linked_tweet_ids,

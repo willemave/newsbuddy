@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.models.contracts import ContentStatus, TaskType
-from app.models.metadata import ContentData
+from app.models.domain.content import ContentData
 from app.services.content_lifecycle import (
     TERMINAL_STATUSES as CONTENT_TERMINAL_STATUSES,
 )

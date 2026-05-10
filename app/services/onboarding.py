@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.constants import DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT, DEFAULT_NEW_FEED_LIMIT
 from app.core.logging import get_logger
 from app.core.model_defaults import FAST_MODEL_SPEC
-from app.models.api.common import (
+from app.models.api.onboarding import (
     OnboardingAudioDiscoverRequest,
     OnboardingAudioDiscoverResponse,
     OnboardingAudioLanePreview,
@@ -35,10 +35,8 @@ from app.models.api.common import (
     OnboardingVoiceParseRequest,
     OnboardingVoiceParseResponse,
 )
-from app.models.internal.feed_backfill import FeedBatchBackfillRequest
-from app.models.internal.scraper_configs import CreateUserScraperConfig
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import (
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import (
     Content,
     ContentStatusEntry,
     FeedDiscoveryRun,
@@ -48,7 +46,9 @@ from app.models.schema import (
     OnboardingDiscoverySuggestion,
     UserScraperConfig,
 )
-from app.models.user import User
+from app.models.db.users import User
+from app.models.internal.feed_backfill import FeedBatchBackfillRequest
+from app.models.internal.scraper_configs import CreateUserScraperConfig
 from app.repositories.content_repository import apply_visibility_filters, build_visibility_context
 from app.scraping.atom_unified import load_atom_feeds
 from app.scraping.substack_unified import load_substack_feeds
@@ -887,7 +887,7 @@ def mark_tutorial_complete(db: Session, user_id: int) -> bool:
     Returns:
         Updated completion flag.
     """
-    from app.models.user import User
+    from app.models.db.users import User
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -2241,7 +2241,7 @@ def _seed_default_feed_content_for_user(
 
 
 def _get_tutorial_flag(db: Session, user_id: int) -> bool:
-    from app.models.user import User
+    from app.models.db.users import User
 
     user = db.query(User).filter(User.id == user_id).first()
     return bool(user and user.has_completed_new_user_tutorial)

@@ -2,7 +2,7 @@ import re
 
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
-from app.models.scraper_runs import ScraperStats
+from app.models.domain.scraper_runs import ScraperStats
 from app.scraping.aggregators import load_aggregator_scrapers
 from app.scraping.atom_unified import AtomScraper
 from app.scraping.base import BaseScraper

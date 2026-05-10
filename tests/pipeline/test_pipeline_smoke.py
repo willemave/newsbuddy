@@ -3,14 +3,9 @@
 from contextlib import contextmanager
 from unittest.mock import Mock, patch
 
-from app.models.metadata import (
-    BulletedSummary,
-    BulletSummaryPoint,
-    ContentQuote,
-    ContentStatus,
-    ContentType,
-)
-from app.models.schema import Content
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
+from app.models.metadata.summaries import BulletedSummary, BulletSummaryPoint, ContentQuote
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope

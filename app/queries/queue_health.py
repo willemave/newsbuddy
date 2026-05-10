@@ -9,7 +9,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.contracts import TaskStatus
-from app.models.schema import ProcessingTask
+from app.models.db import ProcessingTask
 
 
 class QueueTaskBacklog(BaseModel):

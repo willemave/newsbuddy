@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from sqlalchemy.exc import OperationalError
 
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
-from app.models.schema import ProcessingTask
+from app.models.db import ProcessingTask
 from scripts.watchdog_queue_recovery import (
     ActionResult,
     WatchdogRunResult,

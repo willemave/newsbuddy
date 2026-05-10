@@ -6,7 +6,8 @@ from unittest.mock import Mock, patch
 
 import feedparser
 
-from app.models.metadata import ContentData, ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType
+from app.models.domain.content import ContentData
 from app.pipeline.podcast_workers import PodcastDownloadWorker
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 

@@ -7,8 +7,8 @@ from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import (
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import (
     ChatSession,
     Content,
     ContentReadStatus,

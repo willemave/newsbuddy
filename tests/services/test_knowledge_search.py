@@ -1,6 +1,6 @@
 """Tests for saved-knowledge search helpers."""
 
-from app.models.schema import Content, ContentKnowledgeSave
+from app.models.db import Content, ContentKnowledgeSave
 from app.services.knowledge_search import search_knowledge
 
 

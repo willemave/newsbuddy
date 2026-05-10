@@ -21,16 +21,16 @@ from app.core.logging import get_logger
 from app.core.model_defaults import DEEP_RESEARCH_MODEL_SPEC
 from app.core.observability import build_log_extra
 from app.core.settings import get_settings
-from app.models.chat_message_metadata import (
+from app.models.api.submissions import SubmitContentRequest
+from app.models.contracts import ContentType
+from app.models.db import ChatSession, Content, NewsItem
+from app.models.db.users import User
+from app.models.domain.chat_render import (
     AssistantFeedOption,
     AssistantFeedOptionsResult,
     ChatMessageRenderMetadata,
 )
-from app.models.content_submission import SubmitContentRequest
 from app.models.internal.assistant import AssistantScreenContext
-from app.models.metadata import ContentType
-from app.models.schema import ChatSession, Content, NewsItem
-from app.models.user import User
 from app.repositories import knowledge_repository, read_status_repository
 from app.repositories.search_repository import (
     search_content,

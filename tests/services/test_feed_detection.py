@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from typing import Any, cast
 
-from app.models.schema import VendorUsageRecord
+from app.models.db import VendorUsageRecord
 from app.services import feed_detection
 
 

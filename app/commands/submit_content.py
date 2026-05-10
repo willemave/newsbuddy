@@ -5,8 +5,8 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.commands.ingest_content import execute as ingest_content
-from app.models.content_submission import SubmitContentRequest
-from app.models.user import User
+from app.models.api.submissions import SubmitContentRequest
+from app.models.db.users import User
 
 
 def execute(

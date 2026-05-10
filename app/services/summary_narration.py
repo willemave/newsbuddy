@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.models.schema import Content
+from app.models.db import Content
 
 MAX_NARRATION_POINT_CHARS = 280
 MAX_NARRATION_POINTS = 10

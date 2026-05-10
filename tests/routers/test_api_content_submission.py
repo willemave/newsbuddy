@@ -4,8 +4,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.constants import SELF_SUBMISSION_SOURCE
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import (
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import (
     Content,
     ContentKnowledgeSave,
     ContentReadStatus,

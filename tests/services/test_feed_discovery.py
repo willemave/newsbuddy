@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from app.models.feed_discovery import (
+from app.models.db import (
+    Content,
+    ContentKnowledgeSave,
+    FeedDiscoveryRun,
+    FeedDiscoverySuggestion,
+)
+from app.models.llm.feed_discovery import (
     DiscoveryCandidate,
     DiscoveryCandidateBatch,
     DiscoveryDirection,
@@ -10,12 +16,6 @@ from app.models.feed_discovery import (
     DiscoveryLane,
     DiscoveryLanePlan,
     DiscoveryQuery,
-)
-from app.models.schema import (
-    Content,
-    ContentKnowledgeSave,
-    FeedDiscoveryRun,
-    FeedDiscoverySuggestion,
 )
 from app.services.exa_client import ExaSearchResult
 from app.services.feed_discovery import FeedDiscoveryDeps, run_feed_discovery

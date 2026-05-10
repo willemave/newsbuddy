@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.models.schema import VendorUsageRecord
+from app.models.db import VendorUsageRecord
 from app.services.openai_llm import MAX_FILE_SIZE_BYTES, OpenAITranscriptionService
 
 

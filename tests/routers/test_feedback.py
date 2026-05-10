@@ -2,7 +2,7 @@
 
 from sqlalchemy import select
 
-from app.models.schema import UserFeedback
+from app.models.db import UserFeedback
 
 
 def test_submit_feedback_persists_row(client, db_session, test_user) -> None:

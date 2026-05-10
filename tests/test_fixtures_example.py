@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from app.models.schema import Content
+from app.models.db import Content
 
 
 def test_load_article_fixture(sample_article_long: dict[str, Any]) -> None:

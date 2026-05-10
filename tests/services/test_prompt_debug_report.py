@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
-from app.models.schema import Content
+from app.models.db import Content
 from app.services.prompt_debug_report import (
     FailureRecord,
     PromptDebugReport,

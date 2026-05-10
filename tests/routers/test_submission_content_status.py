@@ -1,4 +1,4 @@
-from app.models.schema import Content, ContentStatusEntry
+from app.models.db import Content, ContentStatusEntry
 
 
 def test_submission_creates_content_status(client, db_session, test_user) -> None:

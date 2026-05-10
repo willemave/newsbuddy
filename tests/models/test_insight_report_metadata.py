@@ -2,10 +2,8 @@ import pytest
 from pydantic import ValidationError
 
 from app.models.contracts import ContentType
-from app.models.metadata import (
-    InsightReportMetadata,
-    validate_content_metadata,
-)
+from app.models.metadata.insight_reports import InsightReportMetadata
+from app.models.metadata.validation import validate_content_metadata
 
 
 def _valid_metadata() -> dict:

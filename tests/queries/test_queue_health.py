@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
-from app.models.schema import ProcessingTask
+from app.models.db import ProcessingTask
 from app.queries.queue_health import get_queue_health_snapshot
 
 

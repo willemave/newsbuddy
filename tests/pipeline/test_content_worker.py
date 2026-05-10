@@ -6,11 +6,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.models.metadata import (
-    ContentData,
-    ContentStatus,
-    ContentType,
-)
+from app.models.contracts import ContentStatus, ContentType
+from app.models.domain.content import ContentData
 from app.pipeline.worker import ContentWorker
 from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
 from app.services.http import NonRetryableError

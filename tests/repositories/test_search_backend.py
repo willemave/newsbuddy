@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.models.contracts import ContentStatus, ContentType
-from app.models.schema import Content, ContentStatusEntry
+from app.models.db import Content, ContentStatusEntry
 from app.repositories.search_repository import (
     search_content_page,
 )

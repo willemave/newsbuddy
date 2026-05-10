@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.models.schema import VendorUsageRecord
+from app.models.db import VendorUsageRecord
 from app.services.voice import narration_tts
 
 

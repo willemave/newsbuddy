@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
-from app.models.schema import NewsItem
+from app.models.db import NewsItem
 from app.services.news_embeddings import encode_news_texts
 from app.services.news_reranker import rerank_news_documents
 from app.utils.news_titles import (

@@ -7,8 +7,8 @@ from sqlalchemy import and_, func
 from app.core.db import get_db
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
 
 logger = get_logger(__name__)
 settings = get_settings()

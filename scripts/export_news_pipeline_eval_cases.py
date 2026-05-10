@@ -18,8 +18,8 @@ from app.models.news_pipeline_eval_models import NewsPipelineEvalCase, NewsPipel
 
 from app.core.db import get_db
 from app.core.logging import get_logger, setup_logging
-from app.models.schema import NewsItem
-from app.models.user import User
+from app.models.db import NewsItem
+from app.models.db.users import User
 
 logger = get_logger(__name__)
 

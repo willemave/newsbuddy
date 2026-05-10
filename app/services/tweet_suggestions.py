@@ -14,9 +14,9 @@ from tenacity import RetryCallState, retry, stop_after_attempt, wait_exponential
 
 from app.constants import TWEET_MODELS, TWEET_SUGGESTION_MODEL
 from app.core.logging import get_logger
-from app.models.contracts import SummaryKind, SummaryVersion
-from app.models.metadata import ContentData, ContentType
-from app.models.summary_contracts import parse_summary_version, resolve_summary_kind
+from app.models.contracts import ContentType, SummaryKind, SummaryVersion
+from app.models.domain.content import ContentData
+from app.models.metadata.summary_contracts import parse_summary_version, resolve_summary_kind
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_models import resolve_model
 from app.services.llm_prompts import get_tweet_generation_prompt, length_to_char_range

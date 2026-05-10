@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
-from app.models.schema import Content, ContentReadStatus
+from app.models.db import Content, ContentReadStatus
 from app.repositories import read_status_repository
 
 

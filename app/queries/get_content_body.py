@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.common import ContentBodyResponse
+from app.models.api.content import ContentBodyResponse
 from app.repositories.content_detail_repository import get_visible_content
 from app.services.content_bodies import ContentBodyVariant, get_content_body_resolver
 

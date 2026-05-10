@@ -6,7 +6,8 @@ from pydantic import HttpUrl, TypeAdapter
 
 from app.constants import TWEET_MODELS
 from app.core.settings import get_settings
-from app.models.metadata import ContentData, ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType
+from app.models.domain.content import ContentData
 from app.services.tweet_suggestions import (
     TWEET_MODEL,
     TweetSuggestionLLM,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-from app.models.schema import ChatMessage, ChatSession
+from app.models.db import ChatMessage, ChatSession
 from app.services.chat_agent import ChatRunResult, save_messages
 
 pytestmark = [pytest.mark.integration, pytest.mark.ios_e2e]

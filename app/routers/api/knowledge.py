@@ -9,8 +9,8 @@ from app.commands import remove_from_knowledge as remove_from_knowledge_command
 from app.commands import save_to_knowledge as save_to_knowledge_command
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
-from app.models.api.common import ContentListResponse
-from app.models.user import User
+from app.models.api.content import ContentListResponse
+from app.models.db.users import User
 from app.queries import get_knowledge_library as get_knowledge_library_query
 
 router = APIRouter()

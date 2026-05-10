@@ -13,25 +13,25 @@ from sqlalchemy.orm import Session
 from app.commands import create_api_key, revoke_api_key
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import require_admin
-from app.models.api.common import (
+from app.models.api.onboarding import (
     OnboardingAudioDiscoverRequest,
     OnboardingAudioLanePreviewResponse,
 )
 from app.models.contracts import TaskStatus, TaskType
-from app.models.internal.admin_eval import (
-    EVAL_MODEL_LABELS,
-    EVAL_MODEL_SPECS,
-    LONGFORM_TEMPLATE_LABELS,
-    AdminEvalRunRequest,
-)
-from app.models.schema import (
+from app.models.db import (
     Content,
     OnboardingDiscoveryRun,
     ProcessingTask,
     UserFeedback,
     VendorUsageRecord,
 )
-from app.models.user import User
+from app.models.db.users import User
+from app.models.internal.admin_eval import (
+    EVAL_MODEL_LABELS,
+    EVAL_MODEL_SPECS,
+    LONGFORM_TEMPLATE_LABELS,
+    AdminEvalRunRequest,
+)
 from app.queries import list_api_keys
 from app.queries.queue_health import get_queue_health_snapshot
 from app.services.admin_eval import get_default_pricing, run_admin_eval

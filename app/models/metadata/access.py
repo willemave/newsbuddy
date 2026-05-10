@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.models.metadata_state import merge_runtime_metadata, normalize_metadata_shape
+from app.models.metadata.state import merge_runtime_metadata, normalize_metadata_shape
 
 
 @dataclass(frozen=True)

@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.common import ContentDiscussionResponse
-from app.models.schema import ContentDiscussion
+from app.models.api.content_discussions import ContentDiscussionResponse
+from app.models.db import ContentDiscussion
 from app.queries import get_content_discussion as get_content_discussion_query
 from app.queries import get_news_item_discussion as get_news_item_discussion_query
 from app.repositories.content_detail_repository import get_visible_content

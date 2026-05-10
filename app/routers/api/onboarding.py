@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session
 from app.core.deps import get_current_user, require_user_id
-from app.models.api.common import (
+from app.models.api.onboarding import (
     OnboardingAudioDiscoverRequest,
     OnboardingAudioDiscoverResponse,
     OnboardingCompleteRequest,
@@ -22,7 +22,7 @@ from app.models.api.common import (
     OnboardingVoiceParseRequest,
     OnboardingVoiceParseResponse,
 )
-from app.models.user import User
+from app.models.db.users import User
 from app.services.onboarding import (
     build_onboarding_profile,
     complete_onboarding,

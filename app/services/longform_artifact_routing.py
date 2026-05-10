@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from app.models.longform_artifacts import ArtifactType
+from app.models.metadata.longform_artifacts import ArtifactType
 
 
 @dataclass(frozen=True)

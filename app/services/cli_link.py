@@ -10,8 +10,8 @@ from typing import Literal
 from sqlalchemy.orm import Session
 
 from app.core.api_keys import hash_api_key, verify_api_key_hash
-from app.models.schema import CliLinkSession, UserApiKey
-from app.models.user import User
+from app.models.db import CliLinkSession, UserApiKey
+from app.models.db.users import User
 from app.repositories.api_key_repository import create_api_key
 
 CLI_LINK_SESSION_TTL_MINUTES = 10

@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import (
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import (
     Content,
     ContentReadStatus,
     ContentStatusEntry,
     NewsItem,
     ProcessingTask,
 )
-from app.models.user import User
+from app.models.db.users import User
 
 
 def _add_inbox_status(db_session, user_id: int | None, content_id: int | None) -> None:

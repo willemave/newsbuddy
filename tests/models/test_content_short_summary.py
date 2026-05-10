@@ -1,6 +1,6 @@
 import pytest
 
-from app.models.schema import Content
+from app.models.db import Content
 
 
 @pytest.mark.parametrize(

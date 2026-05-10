@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from pydantic import HttpUrl, TypeAdapter
+
 from app.models.contracts import ContentStatus, ContentType, TaskType
-from app.models.metadata import ContentData
+from app.models.domain.content import ContentData
 from app.services.content_lifecycle import (
     build_content_lifecycle_log_extra,
     complete_with_reused_summary,
@@ -23,7 +25,7 @@ def _content(
 ) -> ContentData:
     return ContentData(
         id=123,
-        url="https://example.com/item",
+        url=TypeAdapter(HttpUrl).validate_python("https://example.com/item"),
         content_type=content_type,
         status=status,
         metadata=metadata,
@@ -118,7 +120,7 @@ def test_reused_summary_completes_long_form_to_awaiting_image() -> None:
         status=ContentStatus.PROCESSING,
         metadata={"content_to_summarize": "Same article body"},
     )
-    starting_metadata = {
+    starting_metadata: dict[str, object] = {
         "content_to_summarize": "Same article body",
         "summary": {
             "title": "Existing Summary",

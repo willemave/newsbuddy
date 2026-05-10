@@ -2,12 +2,12 @@
 
 from typing import Any
 
-from app.models.api.common import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
-from app.models.content_display import resolve_image_urls
-from app.models.contracts import ContentClassification, ContentStatus
-from app.models.metadata import ContentData, ContentType
-from app.models.metadata_access import metadata_view
-from app.models.schema import Content
+from app.models.api.content import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
+from app.models.contracts import ContentClassification, ContentStatus, ContentType
+from app.models.db import Content
+from app.models.domain.content import ContentData
+from app.models.domain.content_display import resolve_image_urls
+from app.models.metadata.access import metadata_view
 from app.services.content_bodies import sanitize_metadata_for_api
 from app.utils.image_urls import build_content_image_url, build_thumbnail_url
 

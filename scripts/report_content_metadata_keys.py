@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.models.schema import Content
+from app.models.db import Content
 
 KNOWN_TOP_LEVEL_KEYS: set[str] = {
     "aggregator",

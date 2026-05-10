@@ -42,7 +42,7 @@ def import_feeds_for_user(user_id: int, clear_existing: bool = False) -> dict[st
         Dict with counts by scraper type
     """
     from app.core.db import get_db
-    from app.models.schema import UserScraperConfig
+    from app.models.db import UserScraperConfig
     from app.services.scraper_configs import CreateUserScraperConfig, create_user_scraper_config
 
     config_dir = project_root / "config"
@@ -204,7 +204,7 @@ def main():
 
     # Get user IDs to process
     with get_db() as db:
-        from app.models.user import User
+        from app.models.db.users import User
 
         if args.user_id:
             user_ids = [args.user_id]

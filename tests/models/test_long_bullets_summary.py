@@ -1,6 +1,7 @@
 from typing import cast
 
-from app.models.metadata import ContentData, ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType
+from app.models.domain.content import ContentData
 
 
 def _build_points(count: int) -> list[dict[str, object]]:

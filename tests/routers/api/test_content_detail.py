@@ -4,7 +4,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
-from app.models.schema import Content
+from app.models.db import Content
 from app.queries.get_content_body import MAX_CONTENT_BODY_RESPONSE_CHARS, TRUNCATED_BODY_NOTICE
 
 

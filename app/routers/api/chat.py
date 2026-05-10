@@ -42,18 +42,18 @@ from app.models.api.chat import (
 from app.models.api.chat import (
     MessageProcessingStatus as MessageProcessingStatusDto,
 )
-from app.models.chat_message_metadata import ChatMessageRenderMetadata
-from app.models.internal.assistant import AssistantScreenContext
-from app.models.pagination import PaginationMetadata
-from app.models.schema import (
+from app.models.api.pagination import PaginationMetadata
+from app.models.contracts import MessageProcessingStatus
+from app.models.db import (
     ChatMessage,
     ChatSession,
     Content,
     ContentKnowledgeSave,
-    MessageProcessingStatus,
     NewsItem,
 )
-from app.models.user import User
+from app.models.db.users import User
+from app.models.domain.chat_render import ChatMessageRenderMetadata
+from app.models.internal.assistant import AssistantScreenContext
 from app.services.assistant_router import (
     ASSISTANT_SESSION_TYPES,
     KNOWLEDGE_SESSION_TYPE,

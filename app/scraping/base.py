@@ -4,9 +4,9 @@ from typing import Any
 
 from app.core.db import get_db
 from app.core.logging import get_logger
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
-from app.models.scraper_runs import ScraperStats
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
+from app.models.domain.scraper_runs import ScraperStats
 from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.news_ingestion import (
     build_news_item_upsert_input_from_scraped_item,

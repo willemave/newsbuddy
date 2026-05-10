@@ -3,7 +3,7 @@
 import json
 from unittest.mock import MagicMock
 
-from app.models.metadata import ContentType
+from app.models.contracts import ContentType
 from app.services.tweet_suggestions import (
     _extract_content_context,
     _parse_suggestions_response,

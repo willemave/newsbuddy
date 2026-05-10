@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.content_display import can_subscribe_for_feed
-from app.models.content_mapper import content_to_domain
+from app.models.domain.content_display import can_subscribe_for_feed
+from app.models.domain.content_mapper import content_to_domain
 from app.repositories.content_detail_repository import get_content_detail
 from app.routers.api.content_responses import (
     build_content_detail_response,

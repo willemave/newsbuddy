@@ -17,7 +17,7 @@ import feedparser
 from bs4 import BeautifulSoup
 
 from app.core.logging import get_logger
-from app.models.metadata import ContentType
+from app.models.contracts import ContentType
 from app.scraping.aggregators.base import AggregatorScraper
 from app.scraping.aggregators.config import RssClusterAggregator
 

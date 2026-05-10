@@ -6,7 +6,7 @@ import hashlib
 import re
 from typing import Any
 
-from app.models.metadata import ContentType
+from app.models.contracts import ContentType
 from app.utils.title_utils import clean_title
 
 WHITESPACE_PATTERN = re.compile(r"\s+")

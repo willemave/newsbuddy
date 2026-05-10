@@ -34,8 +34,8 @@ load_dotenv()
 
 from app.core.db import get_db  # noqa: E402
 from app.core.logging import get_logger, setup_logging  # noqa: E402
-from app.models.metadata import ContentStatus  # noqa: E402
-from app.models.schema import Content  # noqa: E402
+from app.models.contracts import ContentStatus  # noqa: E402
+from app.models.db import Content  # noqa: E402
 from app.services.llm_models import build_pydantic_model  # noqa: E402
 
 setup_logging()

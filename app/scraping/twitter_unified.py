@@ -15,8 +15,8 @@ from playwright.sync_api import Response, sync_playwright
 
 from app.core.db import get_db
 from app.core.logging import get_logger
-from app.models.metadata import ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentType
+from app.models.db import Content
 from app.scraping.base import BaseScraper
 from app.services.x_api import fetch_list_tweets
 from app.utils.error_logger import log_scraper_event
@@ -221,7 +221,7 @@ class TwitterUnifiedScraper(BaseScraper):
         self._api_access_token_checked = True
 
         try:
-            from app.models.schema import UserIntegrationConnection
+            from app.models.db import UserIntegrationConnection
             from app.services.x_integration import _ensure_valid_access_token
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Unable to load X integration helpers: %s", exc)

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import cast
 
-from app.models.metadata import DiscussionSummary, DiscussionSummaryTopic
-from app.models.schema import NewsItemDiscussion
+from app.models.db import NewsItemDiscussion
+from app.models.metadata.summaries import DiscussionSummary, DiscussionSummaryTopic
 from app.services.gateways.object_storage_gateway import ObjectStorageGateway, StoredObjectMetadata
 from app.services.llm_summarization import ContentSummarizer
 from app.services.news_item_discussions import (

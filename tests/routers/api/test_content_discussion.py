@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.commands import refresh_content_discussion as refresh_discussion_command
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import ContentDiscussion, NewsItem, NewsItemDiscussion
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import ContentDiscussion, NewsItem, NewsItemDiscussion
 
 
 def test_get_content_discussion_returns_not_ready_when_missing(

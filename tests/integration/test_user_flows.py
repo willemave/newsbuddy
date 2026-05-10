@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 
-from app.models.schema import ChatMessage, ContentStatusEntry, UserScraperConfig
+from app.models.db import ChatMessage, ContentStatusEntry, UserScraperConfig
 
 
 def _build_completed_chat_payload(prompt: str, reply: str) -> str:
@@ -87,7 +87,7 @@ def test_onboarding_complete_seeds_configs_tasks_and_visible_content(
             return len(enqueued_tasks)
 
     monkeypatch.setattr(
-        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
         lambda url: {"feed_url": url},
     )
     monkeypatch.setattr(

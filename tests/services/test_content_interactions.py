@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.schema import AnalyticsInteraction, Content
-from app.models.user import User
+from app.models.db import AnalyticsInteraction, Content
+from app.models.db.users import User
 from app.services.content_interactions import (
     INTERACTION_TYPE_OPENED,
     ContentInteractionContentNotFoundError,

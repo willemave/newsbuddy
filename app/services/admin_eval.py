@@ -16,6 +16,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session, object_session
 
 from app.core.settings import get_settings
+from app.models.db import Content
 from app.models.internal.admin_eval import (
     EVAL_MODEL_LABELS,
     EVAL_MODEL_SPECS,
@@ -23,7 +24,6 @@ from app.models.internal.admin_eval import (
     EvalContentType,
     ModelPricing,
 )
-from app.models.schema import Content
 from app.services.content_bodies import get_content_body_resolver
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt

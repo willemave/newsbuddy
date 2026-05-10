@@ -13,7 +13,7 @@ import yaml
 from app.core.db import get_db
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.metadata import ContentType
+from app.models.contracts import ContentType
 from app.scraping.base import BaseScraper
 from app.services.scraper_configs import list_active_configs_by_type
 from app.utils.error_logger import log_scraper_event

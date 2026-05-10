@@ -12,7 +12,7 @@ from app.core.db import get_db
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.core.settings import get_settings
-from app.models.schema import VendorUsageRecord
+from app.models.db import VendorUsageRecord
 from app.services.llm_models import resolve_model_provider
 
 logger = get_logger("vendor.cost")

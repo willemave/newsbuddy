@@ -9,9 +9,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.settings import get_settings
-from app.models.contracts import TaskType
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import (
+from app.models.contracts import ContentStatus, ContentType, TaskType
+from app.models.db import (
     Content,
     ContentReadStatus,
     ContentStatusEntry,

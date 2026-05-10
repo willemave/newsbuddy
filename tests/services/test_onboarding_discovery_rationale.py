@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from app.models.api.common import OnboardingFastDiscoverRequest, OnboardingSuggestion
+from app.models.api.onboarding import OnboardingFastDiscoverRequest, OnboardingSuggestion
 from app.services.exa_client import ExaSearchResult
 from app.services.onboarding import (
     _build_discovery_response,

@@ -1,4 +1,7 @@
-from app.models.scraper_runs import ScraperStats
+from typing import cast
+
+from app.models.domain.scraper_runs import ScraperStats
+from app.scraping.base import BaseScraper
 from app.scraping.runner import ScraperRunner
 
 
@@ -18,7 +21,7 @@ class _DummyScraper:
 def test_run_scraper_accepts_legacy_name_without_space() -> None:
     scraper = _DummyScraper()
     runner = ScraperRunner.__new__(ScraperRunner)
-    runner.scrapers = [scraper]
+    runner.scrapers = [cast(BaseScraper, scraper)]
 
     stats = runner.run_scraper_with_stats("HackerNews")
 
@@ -30,7 +33,7 @@ def test_run_scraper_accepts_legacy_name_without_space() -> None:
 def test_run_scraper_accepts_canonical_aggregator_key() -> None:
     scraper = _DummyScraper()
     runner = ScraperRunner.__new__(ScraperRunner)
-    runner.scrapers = [scraper]
+    runner.scrapers = [cast(BaseScraper, scraper)]
 
     stats = runner.run_scraper_with_stats("hackernews")
 

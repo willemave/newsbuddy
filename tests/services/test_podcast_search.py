@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.models.schema import VendorUsageRecord
+from app.models.db import VendorUsageRecord
 from app.services.podcast_search import PodcastEpisodeSearchHit, search_podcast_episodes
 
 

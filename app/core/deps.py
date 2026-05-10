@@ -12,8 +12,8 @@ from app.core.api_keys import is_api_key_token
 from app.core.db import get_db_session as get_db
 from app.core.logging import bind_log_context
 from app.core.security import verify_admin_session_token, verify_token
-from app.models.schema import UserApiKey
-from app.models.user import User
+from app.models.db import UserApiKey
+from app.models.db.users import User
 from app.repositories.api_key_repository import (
     find_active_api_key_by_token,
     touch_last_used,

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.settings import get_settings  # noqa: E402
-from app.models.schema import Content, ProcessingTask  # noqa: E402
+from app.models.db import Content, ProcessingTask  # noqa: E402
 from app.services.queue import TASK_QUEUE_BY_TYPE, TaskQueue, TaskStatus, TaskType  # noqa: E402
 
 PROCESSING_TIMESTAMP_EXPR = func.coalesce(

@@ -1,6 +1,7 @@
 """
 Tests for the ImageProcessorStrategy.
 """
+
 from unittest.mock import Mock
 
 import httpx
@@ -34,9 +35,9 @@ class TestImageProcessorStrategy:
             "https://example.com/vector.svg",
             "https://example.com/bitmap.bmp",
             "https://example.com/icon.ico",
-            "https://example.com/high-res.tiff"
+            "https://example.com/high-res.tiff",
         ]
-        
+
         for url in image_urls:
             assert image_strategy.can_handle_url(url), f"Should handle {url}"
 
@@ -44,10 +45,10 @@ class TestImageProcessorStrategy:
         """Test that strategy can identify image URLs by Content-Type header."""
         headers = httpx.Headers({"content-type": "image/jpeg"})
         assert image_strategy.can_handle_url("https://example.com/photo", headers)
-        
+
         headers = httpx.Headers({"content-type": "image/png; charset=utf-8"})
         assert image_strategy.can_handle_url("https://example.com/image", headers)
-        
+
         headers = httpx.Headers({"content-type": "image/svg+xml"})
         assert image_strategy.can_handle_url("https://example.com/vector", headers)
 
@@ -56,9 +57,9 @@ class TestImageProcessorStrategy:
         urls_with_format = [
             "https://example.com/api/image?format=jpg",
             "https://example.com/resize?format=png&width=100",
-            "https://example.com/convert?format=webp"
+            "https://example.com/convert?format=webp",
         ]
-        
+
         for url in urls_with_format:
             assert image_strategy.can_handle_url(url), f"Should handle {url}"
 
@@ -70,9 +71,9 @@ class TestImageProcessorStrategy:
             "https://example.com/data.json",
             "https://example.com/script.js",
             "https://example.com/style.css",
-            "https://example.com/page"
+            "https://example.com/page",
         ]
-        
+
         for url in non_image_urls:
             assert not image_strategy.can_handle_url(url), f"Should not handle {url}"
 
@@ -80,7 +81,7 @@ class TestImageProcessorStrategy:
         """Test that strategy rejects non-image Content-Type headers."""
         headers = httpx.Headers({"content-type": "text/html"})
         assert not image_strategy.can_handle_url("https://example.com/page", headers)
-        
+
         headers = httpx.Headers({"content-type": "application/pdf"})
         assert not image_strategy.can_handle_url("https://example.com/doc", headers)
 
@@ -94,9 +95,9 @@ class TestImageProcessorStrategy:
         """Test that extract_data returns proper structure for skipping."""
         url = "https://example.com/photo.jpg"
         content = url  # From download_content
-        
+
         result = image_strategy.extract_data(content, url)
-        
+
         assert result["content_type"] == "image"
         assert result["skip_processing"] is True
         assert result["image_url"] == url
@@ -108,22 +109,18 @@ class TestImageProcessorStrategy:
         """Test that extract_data handles URLs with query parameters."""
         url = "https://example.com/images/photo.jpg?size=large&quality=high"
         content = url
-        
+
         result = image_strategy.extract_data(content, url)
-        
+
         assert result["title"] == "photo.jpg"
         assert result["image_url"] == url
 
     def test_prepare_for_llm_returns_empty_content(self, image_strategy):
         """Test that prepare_for_llm returns empty content for skipping."""
-        extracted_data = {
-            "title": "image.jpg",
-            "content_type": "image",
-            "skip_processing": True
-        }
-        
+        extracted_data = {"title": "image.jpg", "content_type": "image", "skip_processing": True}
+
         result = image_strategy.prepare_for_llm(extracted_data)
-        
+
         assert result["content_to_filter"] == ""
         assert result["content_to_summarize"] == ""
         assert result["is_pdf"] is False

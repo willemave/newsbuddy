@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.schema import ProcessingTask
+from app.models.db import ProcessingTask
 from app.services.queue import QueueService, TaskQueue, TaskStatus, TaskType
 
 

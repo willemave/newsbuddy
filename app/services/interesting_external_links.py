@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.core.model_defaults import CHEAP_MODEL_SPEC
-from app.models.metadata import InterestingExternalLink
+from app.models.metadata.summaries import InterestingExternalLink
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_models import resolve_model
 from app.services.vendor_usage import record_model_usage

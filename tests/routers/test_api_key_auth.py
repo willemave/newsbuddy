@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.models.schema import Content
+from app.models.db import Content
 from app.repositories.api_key_repository import create_api_key, revoke_api_key
 
 

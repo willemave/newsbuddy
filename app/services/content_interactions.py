@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.schema import AnalyticsInteraction, Content
+from app.models.db import AnalyticsInteraction, Content
 
 logger = get_logger(__name__)
 

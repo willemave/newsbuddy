@@ -3,9 +3,8 @@
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
-from app.models.metadata import ContentType
-from app.models.schema import Content, NewsItem
+from app.models.contracts import ContentType, NewsItemStatus, NewsItemVisibilityScope
+from app.models.db import Content, NewsItem
 from app.services.news_ingestion import (
     backfill_news_items_from_contents,
     build_news_item_upsert_input_from_content,

@@ -3,7 +3,8 @@
 from typing import Any
 
 from app.constants import SELF_SUBMISSION_SOURCE
-from app.models.metadata import ContentData, ContentType
+from app.models.contracts import ContentType
+from app.models.domain.content import ContentData
 from app.utils.image_urls import (
     build_content_image_url,
     build_news_thumbnail_url,

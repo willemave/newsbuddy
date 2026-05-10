@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.core.db as core_db
 from app.core.security import create_access_token
 from app.main import app
-from app.models.schema import (
+from app.models.db import (
     ChatSession,
     Content,
     ContentKnowledgeSave,
@@ -26,7 +26,7 @@ from app.models.schema import (
     ProcessingTask,
     UserIntegrationConnection,
 )
-from app.models.user import User
+from app.models.db.users import User
 from app.testing.postgres_harness import TemporaryPostgresHarness, create_temporary_postgres_harness
 from tests.support.fixture_files import load_json_fixture
 
@@ -551,7 +551,7 @@ def stub_valid_feed_url(monkeypatch):
     """Accept test feed URLs without making network calls."""
 
     monkeypatch.setattr(
-        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
         lambda url: {"feed_url": url.strip()},
     )
 

@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.core.logging import get_logger
-from app.models.internal.content_analyzer import InstructionLink
-from app.models.metadata import ContentClassification, ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentClassification, ContentStatus, ContentType
+from app.models.db import Content
+from app.models.llm.content_analysis import InstructionLink
 from app.services.content_submission import normalize_url
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids

@@ -1,7 +1,7 @@
 """Tests for queue_control maintenance commands."""
 
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
-from app.models.schema import ProcessingTask
+from app.models.db import ProcessingTask
 from scripts import queue_control
 
 
@@ -35,9 +35,7 @@ def test_move_tasks_between_queues_moves_only_matching_rows(db_session) -> None:
         status=TaskStatus.PENDING.value,
         queue_name=TaskQueue.IMAGE.value,
     )
-    db_session.add_all(
-        [matching_task, wrong_type_task, wrong_status_task, wrong_queue_task]
-    )
+    db_session.add_all([matching_task, wrong_type_task, wrong_status_task, wrong_queue_task])
     db_session.commit()
 
     queue_control.move_tasks_between_queues(

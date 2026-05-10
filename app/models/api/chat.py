@@ -8,10 +8,10 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.chat_message_metadata import AssistantFeedOption, CouncilCandidate
+from app.models.api.pagination import PaginationMetadata
+from app.models.contracts import LLMProvider, MessageProcessingStatus
+from app.models.domain.chat_render import AssistantFeedOption, CouncilCandidate
 from app.models.internal.assistant import AssistantScreenContext
-from app.models.pagination import PaginationMetadata
-from app.services.llm_models import LLMProvider as ChatModelProvider
 
 
 class ChatMessageRole(StrEnum):
@@ -30,23 +30,13 @@ class ChatMessageDisplayType(StrEnum):
     PROCESS_SUMMARY = "process_summary"
 
 
-class MessageProcessingStatus(StrEnum):
-    """Processing status for async chat messages."""
-
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
 class CreateChatSessionRequest(BaseModel):
     """Request to create a new chat session."""
 
     content_id: int | None = Field(None, description="Content ID to chat about")
     news_item_id: int | None = Field(None, description="News item ID to chat about")
     topic: str | None = Field(None, max_length=500, description="Specific topic to discuss")
-    llm_provider: ChatModelProvider | None = Field(
-        None, description="LLM provider (defaults to openai)"
-    )
+    llm_provider: LLMProvider | None = Field(None, description="LLM provider (defaults to openai)")
     llm_model_hint: str | None = Field(
         None, max_length=100, description="Optional specific model to use"
     )
@@ -71,7 +61,7 @@ class CreateChatSessionRequest(BaseModel):
 class UpdateChatSessionRequest(BaseModel):
     """Request to update a chat session."""
 
-    llm_provider: ChatModelProvider | None = Field(
+    llm_provider: LLMProvider | None = Field(
         None, description="New LLM provider to use for this session"
     )
     llm_model_hint: str | None = Field(

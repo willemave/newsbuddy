@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from app.constants import AGGREGATOR_FEED_URL_PREFIX, AGGREGATOR_SCRAPER_TYPE
-from app.models.api.common import OnboardingSelectedAggregator
-from app.models.schema import UserScraperConfig
+from app.models.api.onboarding import OnboardingSelectedAggregator
+from app.models.db import UserScraperConfig
 from app.services.onboarding import _create_aggregator_configs
 
 

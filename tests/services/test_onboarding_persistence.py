@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.models.api.common import OnboardingFastDiscoverResponse, OnboardingSuggestion
-from app.models.schema import FeedDiscoveryRun, FeedDiscoverySuggestion
+from app.models.api.onboarding import OnboardingFastDiscoverResponse, OnboardingSuggestion
+from app.models.db import FeedDiscoveryRun, FeedDiscoverySuggestion
 from app.services.onboarding import _persist_discovery_run
 
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.models.chat_message_metadata import AssistantFeedOption, AssistantFeedOptionsResult
+from app.models.domain.chat_render import AssistantFeedOption, AssistantFeedOptionsResult
 
 
 @pytest.fixture

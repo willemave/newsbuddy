@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.schema import Content
+from app.models.db import Content
 from app.services.queue import TaskType, get_queue_service
 
 logger = get_logger(__name__)

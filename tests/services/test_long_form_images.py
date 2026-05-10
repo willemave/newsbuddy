@@ -1,6 +1,5 @@
-from app.models.contracts import TaskStatus, TaskType
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ContentStatusEntry, ProcessingTask
+from app.models.contracts import ContentStatus, ContentType, TaskStatus, TaskType
+from app.models.db import Content, ContentStatusEntry, ProcessingTask
 from app.services.long_form_images import (
     CANCELLED_NOT_VISIBLE_UNDER_FEED_RULES,
     cancel_ineligible_pending_generate_image_tasks,
@@ -73,9 +72,7 @@ def test_visible_completed_article_is_eligible_for_generated_image(db_session, t
     )
     db_session.add(content)
     db_session.commit()
-    db_session.add(
-        ContentStatusEntry(user_id=test_user.id, content_id=content.id, status="inbox")
-    )
+    db_session.add(ContentStatusEntry(user_id=test_user.id, content_id=content.id, status="inbox"))
     db_session.commit()
 
     assert is_visible_long_form_image_candidate(db_session, content) is True
@@ -94,9 +91,7 @@ def test_article_missing_list_ready_summary_is_not_eligible(db_session, test_use
     )
     db_session.add(content)
     db_session.commit()
-    db_session.add(
-        ContentStatusEntry(user_id=test_user.id, content_id=content.id, status="inbox")
-    )
+    db_session.add(ContentStatusEntry(user_id=test_user.id, content_id=content.id, status="inbox"))
     db_session.commit()
 
     assert is_visible_long_form_image_candidate(db_session, content) is False
@@ -120,9 +115,7 @@ def test_visible_podcast_with_provider_thumbnail_is_eligible_and_enqueues(
     )
     db_session.add(content)
     db_session.commit()
-    db_session.add(
-        ContentStatusEntry(user_id=test_user.id, content_id=content.id, status="inbox")
-    )
+    db_session.add(ContentStatusEntry(user_id=test_user.id, content_id=content.id, status="inbox"))
     db_session.commit()
 
     queue = DummyQueue()

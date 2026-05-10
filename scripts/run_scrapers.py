@@ -20,8 +20,8 @@ from sqlalchemy import func
 from app.core.db import get_db, init_db
 from app.core.logging import get_logger, setup_logging
 from app.core.observability import bound_log_context, build_log_extra
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
 from app.scraping.runner import ScraperRunner
 from app.services.queue import get_queue_service
 

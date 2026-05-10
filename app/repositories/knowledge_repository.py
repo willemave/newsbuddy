@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.schema import ContentKnowledgeSave
+from app.models.db import ContentKnowledgeSave
 from app.services.personal_markdown_library import sync_personal_markdown_for_content
 
 logger = get_logger(__name__)

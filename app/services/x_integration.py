@@ -16,14 +16,14 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.content_submission import SubmitContentRequest
-from app.models.schema import (
+from app.models.api.submissions import SubmitContentRequest
+from app.models.db import (
     Content,
     UserIntegrationConnection,
     UserIntegrationSyncedItem,
     UserIntegrationSyncState,
 )
-from app.models.user import User
+from app.models.db.users import User
 from app.services.content_submission import submit_user_content
 from app.services.token_crypto import decrypt_token, encrypt_token
 from app.services.twitter_share import canonical_tweet_url

@@ -7,9 +7,9 @@ from typing import cast
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.common import ConvertNewsResponse
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.api.content_actions import ConvertNewsResponse
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
 from app.repositories import knowledge_repository
 from app.services.queue import TaskType, get_queue_service
 from app.utils.url_utils import is_http_url, normalize_http_url

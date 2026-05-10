@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.schema import Content
+from app.models.db import Content
 from app.repositories import knowledge_repository
 
 

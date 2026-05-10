@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from app.models.metadata import ContentType
-from app.models.schema import Content, ContentBody
+from app.models.contracts import ContentType
+from app.models.db import Content, ContentBody
 from app.pipeline.podcast_workers import PodcastDownloadWorker, PodcastMediaWorker
 from app.services.apple_podcasts import ApplePodcastResolution
 from app.services.queue import TaskType

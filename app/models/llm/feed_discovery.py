@@ -1,21 +1,8 @@
-"""Pydantic models for feed discovery workflow."""
-
 from __future__ import annotations
 
 from typing import Literal
 
 from pydantic import BaseModel, Field
-
-
-class FavoriteSnapshot(BaseModel):
-    """Compact representation of a favorited content item."""
-
-    id: int
-    title: str | None = None
-    source: str | None = None
-    url: str
-    content_type: str
-    summary: str | None = None
 
 
 class DiscoveryDirection(BaseModel):
@@ -76,13 +63,3 @@ class DiscoveryCandidateBatch(BaseModel):
     """Batch of candidates from a lane."""
 
     candidates: list[DiscoveryCandidate] = Field(min_length=1, max_length=20)
-
-
-class DiscoveryRunResult(BaseModel):
-    """Result summary for a feed discovery run."""
-
-    run_id: int
-    feeds: int
-    podcasts: int
-    youtube: int
-    status: str

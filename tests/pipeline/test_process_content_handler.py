@@ -5,8 +5,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from unittest.mock import Mock
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content
 from app.pipeline.handlers.process_content import ProcessContentHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope

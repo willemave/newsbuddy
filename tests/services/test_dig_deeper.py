@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import ChatMessage, Content, ContentDiscussion, ProcessingTask
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import ChatMessage, Content, ContentDiscussion, ProcessingTask
 from app.services.dig_deeper import (
     build_dig_deeper_prompt,
     create_dig_deeper_message,

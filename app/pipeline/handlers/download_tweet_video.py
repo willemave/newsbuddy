@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.core.logging import get_logger
-from app.models.metadata import ContentStatus
-from app.models.schema import Content
+from app.models.contracts import ContentStatus
+from app.models.db import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.audio_pipeline import download_audio_via_ytdlp

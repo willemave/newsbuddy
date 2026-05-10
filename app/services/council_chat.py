@@ -17,12 +17,13 @@ from pydantic_ai.messages import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models.chat_message_metadata import ChatMessageRenderMetadata, CouncilCandidate
-from app.models.schema import ChatMessage, ChatSession, Content, MessageProcessingStatus
-from app.models.user import (
+from app.models.contracts import MessageProcessingStatus
+from app.models.db import ChatMessage, ChatSession, Content
+from app.models.db.users import User
+from app.models.domain.chat_render import ChatMessageRenderMetadata, CouncilCandidate
+from app.models.domain.user_profile import (
     MIN_COUNCIL_EXPERTS,
     CouncilPersonaConfig,
-    User,
     resolve_user_council_personas,
 )
 from app.services.chat_agent import build_article_context, run_chat_turn, save_messages

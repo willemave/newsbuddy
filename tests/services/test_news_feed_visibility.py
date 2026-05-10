@@ -12,7 +12,7 @@ from app.constants import (
     AGGREGATOR_SCRAPER_TYPE,
 )
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
-from app.models.schema import NewsItem, NewsItemReadStatus, UserScraperConfig
+from app.models.db import NewsItem, NewsItemReadStatus, UserScraperConfig
 from app.services.news_feed import (
     count_unread_news_items,
     list_unread_visible_news_items,

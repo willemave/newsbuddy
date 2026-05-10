@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 import pytest
 
 from app.constants import DEFAULT_NEW_FEED_LIMIT
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import (
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import (
     Content,
     ContentReadStatus,
     ContentStatusEntry,
@@ -19,7 +19,7 @@ def _stub_feed_validation(monkeypatch):
         return {"feed_url": feed_url.strip()}
 
     monkeypatch.setattr(
-        "app.models.internal.scraper_configs.FEED_VALIDATOR.validate_feed_url",
+        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
         _validate,
     )
 

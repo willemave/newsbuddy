@@ -19,8 +19,8 @@ from rich.table import Table
 from rich.text import Text
 
 from app.core.db import get_db
-from app.models.metadata import ContentStatus, ContentType
-from app.models.schema import Content, ProcessingTask
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import Content, ProcessingTask
 
 
 def truncate_text(text: str, max_length: int = 50) -> str:

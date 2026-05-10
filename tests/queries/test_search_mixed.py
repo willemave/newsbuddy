@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
-from app.models.api.common import ContentSummaryResponse
+from sqlalchemy.orm import Session
+
+from app.models.api.content import ContentSummaryResponse
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
 from app.queries import search_mixed
 
 
 def test_search_mixed_combines_local_feed_and_podcast_results(monkeypatch) -> None:
     calls: dict[str, object] = {}
-    content_card = ContentSummaryResponse(
+    content_card = ContentSummaryResponse.model_construct(
         id=1,
         content_type=ContentType.ARTICLE,
         url="https://example.com/article",
@@ -68,7 +71,7 @@ def test_search_mixed_combines_local_feed_and_podcast_results(monkeypatch) -> No
     monkeypatch.setattr(search_mixed, "find_feed_options", fake_find_feed_options)
     monkeypatch.setattr(search_mixed, "search_podcast_episodes", fake_search_podcast_episodes)
 
-    db = object()
+    db = cast(Session, object())
     response = search_mixed.execute(db, user_id=7, query="ai", limit=9)
 
     assert response.query == "ai"

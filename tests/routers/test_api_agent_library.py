@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.core.settings import get_settings
-from app.models.schema import Content
+from app.models.db import Content
 from app.repositories import knowledge_repository
 
 

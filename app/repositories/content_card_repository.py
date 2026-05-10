@@ -7,9 +7,8 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.contracts import ContentStatus
-from app.models.metadata import ContentType
-from app.models.schema import (
+from app.models.contracts import ContentStatus, ContentType
+from app.models.db import (
     Content,
     ContentKnowledgeSave,
     ContentReadStatus,

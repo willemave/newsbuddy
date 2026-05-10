@@ -74,7 +74,6 @@ def test_get_http_gateway_returns_cached_instance(monkeypatch):
     assert len(created) == 1
 
 
-
 def test_llm_gateway_proxies_analyze_and_summarize(monkeypatch):
     """LlmGateway should delegate URL analysis and summarization to dependencies."""
     analyzer = Mock()

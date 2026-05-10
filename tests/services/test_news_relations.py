@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from app.core.settings import get_settings
-from app.models.schema import NewsItem, NewsItemReadStatus
+from app.models.db import NewsItem, NewsItemReadStatus
 from app.services.news_feed import count_unread_news_items
 from app.services.news_relations import (
     SEMANTIC_PREFILTER_MAX_CANDIDATES,

@@ -23,7 +23,8 @@ from PIL import Image
 from app.core.logging import get_logger
 from app.core.model_defaults import IMAGE_GENERATION_MODEL_NAME, RUNWARE_INFOGRAPHIC_MODEL_SPEC
 from app.core.settings import get_settings
-from app.models.metadata import ContentData, ContentType
+from app.models.contracts import ContentType
+from app.models.domain.content import ContentData
 from app.services.langfuse_tracing import (
     extract_google_usage_details,
     langfuse_generation_context,
