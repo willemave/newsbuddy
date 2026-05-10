@@ -50,6 +50,7 @@ class TaskType(StrEnum):
     TRANSCRIBE_TWEET_VIDEO = "transcribe_tweet_video"
     SUMMARIZE = "summarize"
     FETCH_DISCUSSION = "fetch_discussion"
+    FETCH_NEWS_ITEM_DISCUSSION = "fetch_news_item_discussion"
     GENERATE_IMAGE = "generate_image"
     DISCOVER_FEEDS = "discover_feeds"
     ONBOARDING_DISCOVER = "onboarding_discover"

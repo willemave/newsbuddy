@@ -9,6 +9,7 @@ from app.pipeline.task_specs import get_task_spec
 def test_task_spec_defines_queue_payload_and_dedupe_for_core_tasks() -> None:
     analyze = get_task_spec(TaskType.ANALYZE_URL)
     summarize = get_task_spec(TaskType.SUMMARIZE)
+    news_discussion = get_task_spec(TaskType.FETCH_NEWS_ITEM_DISCUSSION)
     image = get_task_spec(TaskType.GENERATE_IMAGE)
 
     assert analyze.queue == TaskQueue.CONTENT
@@ -19,6 +20,9 @@ def test_task_spec_defines_queue_payload_and_dedupe_for_core_tasks() -> None:
         "subscribe_to_feed": False,
     }
     assert summarize.dedupe_by_content is True
+    assert news_discussion.queue == TaskQueue.CONTENT
+    assert news_discussion.dedupe_by_content is True
+    assert news_discussion.normalize_payload({"news_item_id": 12}) == {"news_item_id": 12}
     assert image.queue == TaskQueue.IMAGE
 
 

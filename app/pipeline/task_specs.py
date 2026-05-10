@@ -37,6 +37,10 @@ class UserPayload(TaskPayload):
     user_id: int | None = None
 
 
+class NewsItemIdPayload(TaskPayload):
+    news_item_id: int
+
+
 @dataclass(frozen=True)
 class TaskSpec:
     task_type: TaskType
@@ -107,6 +111,13 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
     ),
     TaskType.FETCH_DISCUSSION: TaskSpec(
         TaskType.FETCH_DISCUSSION, TaskQueue.CONTENT, ContentIdPayload, "fetch_discussion", True
+    ),
+    TaskType.FETCH_NEWS_ITEM_DISCUSSION: TaskSpec(
+        TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+        TaskQueue.CONTENT,
+        NewsItemIdPayload,
+        "fetch_news_item_discussion",
+        True,
     ),
     TaskType.GENERATE_IMAGE: TaskSpec(
         TaskType.GENERATE_IMAGE, TaskQueue.IMAGE, GenerateImagePayload, "generate_image", True

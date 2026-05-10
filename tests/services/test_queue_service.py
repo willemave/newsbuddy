@@ -96,6 +96,10 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
     image_task_id = queue.enqueue(TaskType.GENERATE_IMAGE, content_id=9)
     transcribe_task_id = queue.enqueue(TaskType.TRANSCRIBE, content_id=2)
     tweet_video_task_id = queue.enqueue(TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO, content_id=4)
+    news_discussion_task_id = queue.enqueue(
+        TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+        payload={"news_item_id": 77},
+    )
     onboarding_task_id = queue.enqueue(TaskType.ONBOARDING_DISCOVER, payload={"user_id": 11})
     integration_task_id = queue.enqueue(
         TaskType.SYNC_INTEGRATION,
@@ -117,6 +121,7 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
                     image_task_id,
                     transcribe_task_id,
                     tweet_video_task_id,
+                    news_discussion_task_id,
                     onboarding_task_id,
                     integration_task_id,
                     chat_task_id,
@@ -130,6 +135,7 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
     assert tasks[image_task_id].queue_name == TaskQueue.IMAGE.value
     assert tasks[transcribe_task_id].queue_name == TaskQueue.MEDIA.value
     assert tasks[tweet_video_task_id].queue_name == TaskQueue.MEDIA.value
+    assert tasks[news_discussion_task_id].queue_name == TaskQueue.CONTENT.value
     assert tasks[onboarding_task_id].queue_name == TaskQueue.ONBOARDING.value
     assert tasks[integration_task_id].queue_name == TaskQueue.TWITTER.value
     assert tasks[chat_task_id].queue_name == TaskQueue.CHAT.value
@@ -147,6 +153,29 @@ def test_enqueue_dedupes_content_tasks_by_default(db_session, monkeypatch):
         db_session.query(ProcessingTask)
         .filter(ProcessingTask.task_type == TaskType.SUMMARIZE.value)
         .filter(ProcessingTask.content_id == 42)
+        .all()
+    )
+    assert len(queued_tasks) == 1
+
+
+def test_enqueue_dedupes_news_discussion_tasks_by_payload(db_session, monkeypatch):
+    """News-item discussion tasks are deduped even though they use payload IDs."""
+    queue = _patch_db(monkeypatch, db_session)
+
+    first_task_id = queue.enqueue(
+        TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+        payload={"news_item_id": 42},
+    )
+    second_task_id = queue.enqueue(
+        TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+        payload={"news_item_id": 42},
+    )
+
+    assert second_task_id == first_task_id
+
+    queued_tasks = (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == TaskType.FETCH_NEWS_ITEM_DISCUSSION.value)
         .all()
     )
     assert len(queued_tasks) == 1
