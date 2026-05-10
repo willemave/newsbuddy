@@ -54,10 +54,14 @@ struct LongFormCardStackView: View {
             }
             if oldCount == 0 && newCount > 0 {
                 cardStackLogger.info("[LongFormCardStackView] items loaded count=\(newCount)")
-                Task { await prefetchKeyPoints(reason: "items_loaded") }
+                Task {
+                    await prefetchImages(reason: "items_loaded")
+                    await prefetchKeyPoints(reason: "items_loaded")
+                }
             }
         }
         .task(id: currentIndex) {
+            await prefetchImages(reason: "index_change")
             await prefetchKeyPoints(reason: "index_change")
         }
     }
@@ -281,11 +285,24 @@ struct LongFormCardStackView: View {
     }
 
     private func navigateToDetail(_ content: ContentSummary) {
+        ContentImagePrefetcher.prefetch(content)
         let route = ContentDetailRoute(
             summary: content,
             allContentIds: items.map(\.id)
         )
         onSelect(route)
+    }
+
+    private func prefetchImages(reason: String) async {
+        let end = min(items.count, currentIndex + 3)
+        guard currentIndex < end else { return }
+
+        let prefetchItems = Array(items[currentIndex..<end])
+        cardStackLogger.info(
+            "[LongFormCardStackView] image prefetch (\(reason)) index=\(currentIndex) count=\(prefetchItems.count)"
+        )
+        let urls = prefetchItems.flatMap { ContentImagePrefetcher.urls(for: $0) }
+        await ImageCacheService.shared.prefetch(urls: urls)
     }
 
     private func prefetchKeyPoints(reason: String) async {

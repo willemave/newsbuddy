@@ -41,11 +41,13 @@ from app.services.langfuse_tracing import (
     initialize_langfuse_tracing,
     langfuse_trace_context,
 )
+from app.utils.image_urls import IMAGE_VERSION_QUERY_PARAM
 
 # Initialize
 settings = get_settings()
 logger = setup_logging()
 ADMIN_STATIC_DIR = Path(__file__).resolve().parent / "admin_web" / "static"
+VERSIONED_IMAGE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 def _resolve_static_mount_paths() -> tuple[Path, Path]:
@@ -184,6 +186,15 @@ def _should_skip_logging(path: str) -> bool:
     return any(path.startswith(skip_path) for skip_path in SKIP_LOG_PATHS)
 
 
+def _static_image_cache_control(path: str, query_param_keys: set[str]) -> str | None:
+    """Return cache-control for generated image responses."""
+    if not path.startswith("/static/images/"):
+        return None
+    if IMAGE_VERSION_QUERY_PARAM not in query_param_keys:
+        return None
+    return VERSIONED_IMAGE_CACHE_CONTROL
+
+
 # Request logging middleware with timing
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -272,6 +283,11 @@ async def log_requests(request: Request, call_next):
         duration_ms = (time.perf_counter() - start_time) * 1000
         response.headers["X-Response-Time"] = f"{duration_ms:.2f}ms"
         response.headers["X-Request-ID"] = request_id
+        if cache_control := _static_image_cache_control(
+            path,
+            set(request.query_params.keys()),
+        ):
+            response.headers["Cache-Control"] = cache_control
 
         if skip_logging:
             return response

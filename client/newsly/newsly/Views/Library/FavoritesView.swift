@@ -9,9 +9,48 @@ struct KnowledgeLibraryView: View {
     let showNavigationTitle: Bool
 
     @StateObject private var viewModel = ContentListViewModel(defaultReadFilter: "all")
+    @State private var selectedTypeFilter: LibraryTypeFilter = .all
+    @State private var selectedSort: LibrarySort = .newest
 
     init(showNavigationTitle: Bool = true) {
         self.showNavigationTitle = showNavigationTitle
+    }
+
+    private var visibleContents: [ContentSummary] {
+        let filtered = viewModel.contents.filter { content in
+            selectedTypeFilter.matches(content)
+        }
+
+        return filtered.sorted { lhs, rhs in
+            switch selectedSort {
+            case .newest:
+                if lhs.itemDate == rhs.itemDate {
+                    return lhs.id > rhs.id
+                }
+                return (lhs.itemDate ?? .distantPast) > (rhs.itemDate ?? .distantPast)
+            case .oldest:
+                if lhs.itemDate == rhs.itemDate {
+                    return lhs.id < rhs.id
+                }
+                return (lhs.itemDate ?? .distantPast) < (rhs.itemDate ?? .distantPast)
+            }
+        }
+    }
+
+    private var availableTypeFilters: [LibraryTypeFilter] {
+        var filters: [LibraryTypeFilter] = [.all]
+        for filter in LibraryTypeFilter.contentFilters
+            where viewModel.contents.contains(where: { filter.matches($0) }) {
+            filters.append(filter)
+        }
+        if !filters.contains(selectedTypeFilter) {
+            filters.append(selectedTypeFilter)
+        }
+        return filters
+    }
+
+    private var hasActiveFilters: Bool {
+        selectedTypeFilter != .all
     }
 
     var body: some View {
@@ -60,14 +99,24 @@ struct KnowledgeLibraryView: View {
     // MARK: - Content List
 
     private var contentList: some View {
-        List {
-            ForEach(viewModel.contents) { content in
+        let displayedContents = visibleContents
+        let displayedContentIds = displayedContents.map(\.id)
+
+        return List {
+            libraryControls(visibleCount: displayedContents.count)
+
+            if displayedContents.isEmpty {
+                filteredEmptyRow
+            }
+
+            ForEach(displayedContents) { content in
                 NavigationLink(destination: ContentDetailView(
                     contentId: content.id,
-                    allContentIds: viewModel.contents.map(\.id)
+                    allContentIds: displayedContentIds
                 )) {
                     KnowledgeLibraryRow(content: content)
                 }
+                .buttonStyle(.plain)
                 .appListRow()
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if !content.isRead {
@@ -93,7 +142,7 @@ struct KnowledgeLibraryView: View {
                     .tint(.red)
                 }
                 .onAppear {
-                    if content.id == viewModel.contents.last?.id {
+                    if content.id == displayedContents.last?.id {
                         Task { await viewModel.loadMoreContent() }
                     }
                 }
@@ -110,7 +159,106 @@ struct KnowledgeLibraryView: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .refreshable { await viewModel.loadKnowledgeLibrary() }
+    }
+
+    private func libraryControls(visibleCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                Text("\(visibleCount) loaded")
+                    .font(.terracottaBodySmall.weight(.semibold))
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .lineLimit(1)
+                    .monospacedDigit()
+
+                Spacer()
+
+                Menu {
+                    ForEach(LibrarySort.allCases) { sort in
+                        Button {
+                            selectedSort = sort
+                        } label: {
+                            if selectedSort == sort {
+                                Label(sort.title, systemImage: "checkmark")
+                            } else {
+                                Text(sort.title)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(selectedSort.shortTitle)
+                    }
+                    .font(.terracottaBodySmall.weight(.semibold))
+                    .foregroundStyle(Color.onSurface)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color.surfaceSecondary, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.outlineVariant.opacity(0.45), lineWidth: 1)
+                    )
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(availableTypeFilters) { filter in
+                        LibraryFilterPill(
+                            title: filter.title,
+                            isSelected: selectedTypeFilter == filter
+                        ) {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                selectedTypeFilter = filter
+                            }
+                        }
+                    }
+                }
+                .padding(.trailing, Spacing.screenHorizontal)
+            }
+            .scrollClipDisabled()
+
+            if hasActiveFilters {
+                Button("Clear filter") {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        selectedTypeFilter = .all
+                    }
+                }
+                .font(.terracottaBodySmall.weight(.semibold))
+                .foregroundStyle(Color.terracottaPrimary)
+                .padding(.horizontal, 2)
+            }
+        }
+        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .appListRow()
+    }
+
+    private var filteredEmptyRow: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Color.onSurfaceSecondary)
+
+            Text("No saved items match these filters")
+                .font(.terracottaHeadlineSmall)
+                .foregroundStyle(Color.onSurface)
+
+            Button("Clear filters") {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    selectedTypeFilter = .all
+                }
+            }
+            .font(.terracottaBodySmall.weight(.semibold))
+            .foregroundStyle(Color.terracottaPrimary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .appListRow()
     }
 }
 
@@ -119,92 +267,117 @@ struct KnowledgeLibraryView: View {
 private struct KnowledgeLibraryRow: View {
     let content: ContentSummary
 
-    private var textOpacity: Double {
-        content.isRead ? 0.6 : 1.0
+    private var dateText: String {
+        ContentTimestampFormatter.detailMetaText(from: content.primaryTimestamp)
+            ?? content.processedDateDisplay
+            ?? content.formattedDate
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            thumbnailView
+        HStack(alignment: .top, spacing: 12) {
+            Text(dateText)
+                .font(.terracottaBodySmall)
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .frame(width: 44, alignment: .leading)
+                .lineLimit(1)
+                .monospacedDigit()
+                .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(content.displayTitle)
-                    .font(.listTitle)
-                    .foregroundStyle(Color.onSurface.opacity(textOpacity))
-                    .lineLimit(2)
+            Text(content.displayTitle)
+                .font(.terracottaBodyLarge.weight(.semibold))
+                .foregroundStyle(Color.onSurface)
+                .lineLimit(2)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.vertical, 8)
+        .frame(minHeight: 52, alignment: .center)
+        .contentShape(Rectangle())
+    }
+}
 
-                HStack(spacing: 6) {
-                    if let source = content.source {
-                        Text(source)
-                            .font(.listCaption)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                            .lineLimit(1)
-                    }
+private struct LibraryFilterPill: View {
+    let title: String
+    var systemImage: String?
+    let isSelected: Bool
+    let action: () -> Void
 
-                    if let date = content.processedDateDisplay {
-                        Text("·")
-                            .font(.listCaption)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-
-                        Text(date)
-                            .font(.listCaption)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                    }
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 11, weight: .semibold))
                 }
+                Text(title)
             }
-
-            Spacer(minLength: 8)
-        }
-        .appRow(.regular)
-    }
-
-    // MARK: - Thumbnail
-
-    @ViewBuilder
-    private var thumbnailView: some View {
-        let displayUrl = content.thumbnailUrl ?? content.imageUrl
-        if let imageUrlString = displayUrl,
-           let imageUrl = buildImageURL(from: imageUrlString) {
-            CachedAsyncImage(url: imageUrl) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: RowMetrics.thumbnailSize, height: RowMetrics.thumbnailSize)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } placeholder: {
-                thumbnailPlaceholder
-            }
-        } else {
-            thumbnailPlaceholder
-        }
-    }
-
-    private var thumbnailPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(Color.surfaceSecondary)
-            .frame(width: RowMetrics.thumbnailSize, height: RowMetrics.thumbnailSize)
+            .font(.terracottaBodySmall.weight(.semibold))
+            .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurface)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(isSelected ? Color.onSurface : Color.surfaceSecondary, in: Capsule())
             .overlay(
-                Image(systemName: contentTypeIcon)
-                    .font(.system(size: 20))
-                    .foregroundStyle(Color.onSurfaceSecondary)
+                Capsule()
+                    .stroke(Color.outlineVariant.opacity(isSelected ? 0 : 0.45), lineWidth: 1)
             )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private enum LibraryTypeFilter: String, CaseIterable, Identifiable {
+    case all
+    case article
+    case podcast
+    case news
+
+    static var contentFilters: [LibraryTypeFilter] {
+        [.article, .podcast, .news]
     }
 
-    private var contentTypeIcon: String {
-        switch content.contentTypeEnum {
-        case .article: return "doc.text"
-        case .podcast: return "headphones"
-        case .news: return "newspaper"
-        default: return "doc"
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "All types"
+        case .article: return "Articles"
+        case .podcast: return "Podcasts"
+        case .news: return "News"
         }
     }
 
-    private func buildImageURL(from urlString: String) -> URL? {
-        if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") {
-            return URL(string: urlString)
+    func matches(_ content: ContentSummary) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .article:
+            return content.contentTypeEnum == .article
+        case .podcast:
+            return content.contentTypeEnum == .podcast
+        case .news:
+            return content.contentTypeEnum == .news
         }
-        let baseURL = AppSettings.shared.baseURL
-        let fullURL = urlString.hasPrefix("/") ? baseURL + urlString : baseURL + "/" + urlString
-        return URL(string: fullURL)
+    }
+}
+
+private enum LibrarySort: String, CaseIterable, Identifiable {
+    case newest
+    case oldest
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .newest: return "Newest first"
+        case .oldest: return "Oldest first"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .newest: return "Newest"
+        case .oldest: return "Oldest"
+        }
     }
 }

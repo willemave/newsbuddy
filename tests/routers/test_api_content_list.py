@@ -252,8 +252,12 @@ def test_podcast_prefers_generated_image_over_provider_thumbnail(
     payload = response.json()
 
     returned_item = next(item for item in payload["contents"] if item["id"] == podcast.id)
-    assert returned_item["image_url"] == f"/static/images/content/{podcast.id}.png"
-    assert returned_item["thumbnail_url"] == f"/static/images/thumbnails/{podcast.id}.png"
+    assert returned_item["image_url"] == (
+        f"/static/images/content/{podcast.id}.png?v=2026-01-01T00%3A00%3A00Z"
+    )
+    assert returned_item["thumbnail_url"] == (
+        f"/static/images/thumbnails/{podcast.id}.png?v=2026-01-01T00%3A00%3A00Z"
+    )
 
 
 def test_list_orders_news_by_publication_date_before_created_at(
@@ -355,9 +359,11 @@ def test_list_uses_fallback_summary_when_domain_content_build_fails(
     assert returned_item["short_summary"] == (
         "Fallback overview remains visible even when normalization fails."
     )
-    assert returned_item["image_url"] == f"/static/images/content/{fallback_article.id}.png"
+    assert returned_item["image_url"] == (
+        f"/static/images/content/{fallback_article.id}.png?v=2026-01-01T00%3A00%3A00Z"
+    )
     assert returned_item["thumbnail_url"] == (
-        f"/static/images/thumbnails/{fallback_article.id}.png"
+        f"/static/images/thumbnails/{fallback_article.id}.png?v=2026-01-01T00%3A00%3A00Z"
     )
 
 

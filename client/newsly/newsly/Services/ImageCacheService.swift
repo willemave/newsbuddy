@@ -23,6 +23,7 @@ actor ImageCacheService {
     private let memoryCache = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default
     private let cacheDirectory: URL
+    private var inFlightDownloads: [String: Task<UIImage?, Never>] = [:]
     // MARK: - Initialization
     
     private init() {
@@ -62,6 +63,28 @@ actor ImageCacheService {
         
         return nil
     }
+
+    /// Return an image from cache, optionally downloading it once for all concurrent callers.
+    func image(for url: URL, downloadIfMissing: Bool) async -> UIImage? {
+        if let cached = await image(for: url) {
+            return cached
+        }
+
+        guard downloadIfMissing else {
+            return nil
+        }
+
+        let key = cacheKey(for: url)
+        if let task = inFlightDownloads[key] {
+            return await task.value
+        }
+
+        let task = Task { await self.downloadAndCache(url: url) }
+        inFlightDownloads[key] = task
+        let image = await task.value
+        inFlightDownloads[key] = nil
+        return image
+    }
     
     /// Cache an image in both memory and disk.
     func cache(_ image: UIImage, for url: URL) async {
@@ -85,13 +108,11 @@ actor ImageCacheService {
     
     /// Prefetch multiple images in the background.
     func prefetch(urls: [URL]) async {
+        let urls = Array(Set(urls))
         await withTaskGroup(of: Void.self) { group in
             for url in urls {
                 group.addTask {
-                    // Only prefetch if not already cached
-                    if await self.image(for: url) == nil {
-                        await self.downloadAndCache(url: url)
-                    }
+                    _ = await self.image(for: url, downloadIfMissing: true)
                 }
             }
         }
@@ -169,12 +190,12 @@ actor ImageCacheService {
         } catch {}
     }
     
-    private func downloadAndCache(url: URL) async {
+    private func downloadAndCache(url: URL) async -> UIImage? {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            _ = await cacheImageData(data, for: url)
+            return await cacheImageData(data, for: url)
         } catch {
-            // Silently fail for prefetch operations
+            return nil
         }
     }
     

@@ -16,13 +16,14 @@ struct KnowledgeView: View {
     @State private var searchText = ""
     @FocusState private var isSearchFocused: Bool
 
-    private let quickActions: [HubAction] = [
-        HubAction(
-            icon: "doc.text.magnifyingglass",
-            title: "Today's Summary",
-            subtitle: "Recap of the last day's content",
-            run: { viewModel in await viewModel.startSummaryChat() }
-        ),
+    private let primaryAction = HubAction(
+        icon: "doc.text.magnifyingglass",
+        title: "Today's Summary",
+        subtitle: "Recap of the last day's content",
+        run: { viewModel in await viewModel.startSummaryChat() }
+    )
+
+    private let secondaryActions: [HubAction] = [
         HubAction(
             icon: "bubble.left.and.text.bubble.right",
             title: "Top Comments",
@@ -35,18 +36,15 @@ struct KnowledgeView: View {
             subtitle: "Most interesting fast-news stories",
             run: { viewModel in await viewModel.startInterestingUnreadNewsChat() }
         ),
-    ]
-
-    private let discoveryActions: [HubAction] = [
         HubAction(
             icon: "newspaper.fill",
-            title: "Find New Articles",
+            title: "Find Articles",
             subtitle: "Fresh reads based on your history",
             run: { viewModel in await viewModel.startFindArticlesChat() }
         ),
         HubAction(
             icon: "dot.radiowaves.left.and.right",
-            title: "Find New Feeds",
+            title: "Find Feeds",
             subtitle: "Sources and podcasts to add next",
             run: { viewModel in await viewModel.startFindFeedsChat() }
         ),
@@ -65,33 +63,31 @@ struct KnowledgeView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    headerSection
-                    searchFieldSection
-                    errorBannerSection
-                    quickActionsSection
-                    librarySection
-                    discoverySection
-                    chatHistorySection
-                }
-                .padding(.bottom, 148)
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                headerSection
+                searchFieldSection
+                errorBannerSection
+                librarySection
+                actionsSection
+                chatHistorySection
             }
-
+            .padding(.bottom, 32)
+        }
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
             newChatMicButton
                 .padding(.trailing, 20)
-                .padding(.bottom, 42)
+                .padding(.bottom, 12)
         }
-            .dynamicTypeSize(appTextSize)
-            .background(Color.surfacePrimary.ignoresSafeArea())
-            .navigationBarTitleDisplayMode(.inline)
-            .task {
-                await viewModel.loadHub()
-            }
-            .refreshable {
-                await viewModel.loadHub()
-            }
+        .dynamicTypeSize(appTextSize)
+        .background(Color.surfacePrimary.ignoresSafeArea())
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await viewModel.loadHub()
+        }
+        .refreshable {
+            await viewModel.loadHub()
+        }
     }
 
     // MARK: - Header
@@ -158,11 +154,7 @@ struct KnowledgeView: View {
         }
     }
 
-    // MARK: - Quick Actions
-
-    private var quickActionsSection: some View {
-        actionSection(title: "Quick Actions", actions: quickActions)
-    }
+    // MARK: - Library
 
     private var librarySection: some View {
         Group {
@@ -211,60 +203,122 @@ struct KnowledgeView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.bottom, 28)
+                .padding(.bottom, 24)
             }
         }
     }
 
-    private var discoverySection: some View {
-        actionSection(title: "Discover", actions: discoveryActions)
-    }
+    // MARK: - Actions
 
-    private func actionSection(title: String, actions: [HubAction]) -> some View {
+    private var actionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
+            Text("Actions")
                 .font(.terracottaHeadlineSmall)
                 .foregroundStyle(Color.onSurface)
                 .padding(.horizontal, Spacing.screenHorizontal)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(actions) { action in
-                        Button {
-                            startAction(action)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Image(systemName: action.icon)
-                                    .font(.system(size: 22))
-                                    .foregroundColor(.terracottaPrimary)
+            VStack(spacing: 12) {
+                primaryActionButton(primaryAction)
 
-                                Text(action.title)
-                                    .font(.terracottaHeadlineSmall)
-                                    .foregroundColor(.onSurface)
-                                    .lineLimit(2)
-
-                                Text(action.subtitle)
-                                    .font(.terracottaBodySmall)
-                                    .foregroundColor(.onSurfaceSecondary)
-                                    .lineLimit(2)
-                            }
-                            .frame(width: 184, alignment: .leading)
-                            .padding(14)
-                            .background(Color.surfaceSecondary)
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isCreatingSession)
+                LazyVGrid(columns: actionGridColumns, spacing: 12) {
+                    ForEach(secondaryActions) { action in
+                        compactActionButton(action)
                     }
                 }
-                .padding(.horizontal, Spacing.screenHorizontal)
             }
+            .padding(.horizontal, Spacing.screenHorizontal)
         }
         .padding(.bottom, 28)
+    }
+
+    private var actionGridColumns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12),
+        ]
+    }
+
+    private func primaryActionButton(_ action: HubAction) -> some View {
+        Button {
+            startAction(action)
+        } label: {
+            HStack(spacing: 14) {
+                actionIcon(action.icon, size: 44, iconSize: 20)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(action.title)
+                        .font(.terracottaHeadlineSmall)
+                        .foregroundColor(.onSurface)
+                        .lineLimit(1)
+
+                    Text(action.subtitle)
+                        .font(.terracottaBodySmall)
+                        .foregroundColor(.onSurfaceSecondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.onSurfaceSecondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+            .background(Color.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isCreatingSession)
+    }
+
+    private func compactActionButton(_ action: HubAction) -> some View {
+        Button {
+            startAction(action)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    actionIcon(action.icon, size: 30, iconSize: 14)
+
+                    Text(action.title)
+                        .font(.terracottaHeadlineSmall)
+                        .foregroundColor(.onSurface)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer()
+                }
+
+                Text(action.subtitle)
+                    .font(.terracottaBodySmall)
+                    .foregroundColor(.onSurfaceSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+            .background(Color.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isCreatingSession)
+    }
+
+    private func actionIcon(_ systemName: String, size: CGFloat, iconSize: CGFloat) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: iconSize, weight: .semibold))
+            .foregroundColor(.terracottaPrimary)
+            .frame(width: size, height: size)
+            .background(Color.terracottaPrimary.opacity(0.14))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func startAction(_ action: HubAction) {
@@ -279,7 +333,7 @@ struct KnowledgeView: View {
 
     private var chatHistorySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Chat History")
+            Text("Recent Chats")
                 .font(.terracottaHeadlineSmall)
                 .foregroundStyle(Color.onSurface)
                 .padding(.horizontal, Spacing.screenHorizontal)

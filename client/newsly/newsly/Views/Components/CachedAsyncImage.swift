@@ -86,24 +86,20 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         }
 
         if let thumbnailUrl = thumbnailUrl {
-            if let cachedThumb = await ImageCacheService.shared.image(for: thumbnailUrl) {
+            if let thumbImage = await ImageCacheService.shared.image(
+                for: thumbnailUrl,
+                downloadIfMissing: true
+            ) {
                 if Task.isCancelled { return }
                 await MainActor.run {
-                    thumbnailImage = cachedThumb
-                }
-            } else {
-                if let thumbImage = await loadRemoteImage(from: thumbnailUrl) {
-                    if Task.isCancelled { return }
-                    await MainActor.run {
-                        thumbnailImage = thumbImage
-                    }
+                    thumbnailImage = thumbImage
                 }
             }
         }
 
         if Task.isCancelled { return }
 
-        if let image = await loadRemoteImage(from: url) {
+        if let image = await ImageCacheService.shared.image(for: url, downloadIfMissing: true) {
             if Task.isCancelled { return }
             await MainActor.run {
                 withAnimation(.easeIn(duration: 0.2)) {
@@ -115,16 +111,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             await MainActor.run {
                 isLoading = false
             }
-        }
-    }
-
-    private func loadRemoteImage(from remoteURL: URL) async -> UIImage? {
-        do {
-            let (data, _) = try await URLSession.shared.data(from: remoteURL)
-            if Task.isCancelled { return nil }
-            return await ImageCacheService.shared.cacheImageData(data, for: remoteURL)
-        } catch {
-            return nil
         }
     }
 }

@@ -15,7 +15,7 @@ appId: "${APP_ID}"
 - tapOn:
     id: tab.knowledge
 - assertVisible:
-    text: Quick Actions
+    text: Actions
 - tapOn:
     id: knowledge.new_chat_mic
 - assertVisible:

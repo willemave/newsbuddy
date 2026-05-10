@@ -819,6 +819,17 @@ class ChatRunResult:
     tool_calls: list[object]
 
 
+def _agent_output_text(result: object) -> str:
+    """Return text output from the current pydantic-ai run result shape."""
+
+    output = getattr(result, "output", None)
+    if output is None:
+        return ""
+    if isinstance(output, str):
+        return output
+    return str(output)
+
+
 def _serialize_render_metadata(
     render_metadata: ChatMessageRenderMetadata | dict[str, object] | None,
 ) -> dict[str, object] | None:
@@ -1138,6 +1149,7 @@ async def run_chat_turn(
         )
         agent_ms = (perf_counter() - agent_start) * 1000
         _log_chat_usage(result, session, session_row_id, None, "sync")
+        output_text = _agent_output_text(result)
         new_messages = result.new_messages()
         save_messages(
             db,
@@ -1183,7 +1195,7 @@ async def run_chat_turn(
         )
 
         return ChatRunResult(
-            output_text=result.output,
+            output_text=output_text,
             new_messages=new_messages,
             all_messages=result.all_messages,
             tool_calls=getattr(result, "tool_calls", []),
@@ -1347,6 +1359,7 @@ async def process_message_async(
         )
         agent_ms = (perf_counter() - agent_start) * 1000
         _log_chat_usage(result, session, session_id, message_id, "async")
+        output_text = _agent_output_text(result)
 
         # Extract tool calls info
         tool_calls = getattr(result, "tool_calls", []) or []
@@ -1356,7 +1369,7 @@ async def process_message_async(
             or getattr(tc, "tool_name", None)
             for tc in tool_calls
         ]
-        output_len = len(result.output) if result.output else 0
+        output_len = len(output_text)
         logger.info(
             "Async chat LLM call completed",
             extra=build_log_extra(
@@ -1532,11 +1545,10 @@ async def generate_initial_suggestions(
         )
         agent_ms = (perf_counter() - agent_start) * 1000
         _log_chat_usage(result, session, session_row_id, None, "initial_suggestions")
+        output_text = _agent_output_text(result)
         from pydantic_ai.messages import ModelResponse, TextPart
 
-        new_messages: list[ModelMessage] = [
-            ModelResponse(parts=[TextPart(content=result.output_text)])
-        ]
+        new_messages: list[ModelMessage] = [ModelResponse(parts=[TextPart(content=output_text)])]
         save_start = perf_counter()
         save_messages(db, session_row_id, new_messages)
         save_ms = (perf_counter() - save_start) * 1000
@@ -1576,7 +1588,7 @@ async def generate_initial_suggestions(
         )
 
         return ChatRunResult(
-            output_text=result.output_text,
+            output_text=output_text,
             new_messages=new_messages,
             all_messages=result.all_messages,
             tool_calls=getattr(result, "tool_calls", []),

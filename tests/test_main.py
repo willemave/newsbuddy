@@ -30,6 +30,26 @@ def test_static_mount_paths_are_resolved(monkeypatch, tmp_path: Path) -> None:
     assert images_dir.is_dir()
 
 
+def test_versioned_static_images_are_marked_immutable() -> None:
+    assert (
+        main_module._static_image_cache_control(
+            "/static/images/content/123.png",
+            {"v"},
+        )
+        == "public, max-age=31536000, immutable"
+    )
+
+
+def test_unversioned_static_images_keep_default_cache_headers() -> None:
+    assert (
+        main_module._static_image_cache_control(
+            "/static/images/content/123.png",
+            set(),
+        )
+        is None
+    )
+
+
 def test_admin_static_css_is_served(client) -> None:
     response = client.get("/admin/static/css/app.css")
 

@@ -188,6 +188,7 @@ struct LongFormView: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: CardMetrics.cardCornerRadius, style: .continuous))
         .onTapGesture {
+            ContentImagePrefetcher.prefetch(content)
             onSelect(ContentDetailRoute(summary: content, allContentIds: allItems.map(\.id)))
         }
         .buttonStyle(.plain)

@@ -18,7 +18,6 @@ from app.routers.api.chat import _extract_messages_for_display
 from app.services import chat_agent
 from app.services.chat_agent import (
     ChatDeps,
-    ChatRunResult,
     _build_chat_deps,
     _build_context_prompt_parts,
     _build_run_user_prompt,
@@ -323,12 +322,8 @@ def test_generate_initial_suggestions_persists_assistant_only_transcript(
     db_session.refresh(session)
 
     async def _fake_run_in_threadpool(*_args, **_kwargs):
-        return ChatRunResult(
-            output_text="Here are a few useful directions.",
-            new_messages=[
-                ModelRequest(parts=[UserPromptPart(content=chat_agent.INITIAL_QUESTIONS_PROMPT)]),
-                ModelResponse(parts=[TextPart(content="Here are a few useful directions.")]),
-            ],
+        return SimpleNamespace(
+            output="Here are a few useful directions.",
             all_messages=[],
             tool_calls=[],
         )

@@ -158,9 +158,18 @@ struct LongFormCard: View {
 
     @ViewBuilder
     private var heroImage: some View {
-        let displayUrl = content.imageUrl ?? content.thumbnailUrl
-        if let urlString = displayUrl, let url = buildImageURL(from: urlString) {
-            CachedAsyncImage(url: url) { image in
+        let imageUrl = content.imageUrl.flatMap { buildImageURL(from: $0) }
+        let thumbnailUrl = content.thumbnailUrl.flatMap { buildImageURL(from: $0) }
+        if let imageUrl {
+            CachedAsyncImage(url: imageUrl, thumbnailUrl: thumbnailUrl) { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } placeholder: {
+                placeholderGradient
+            }
+        } else if let thumbnailUrl {
+            CachedAsyncImage(url: thumbnailUrl) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)

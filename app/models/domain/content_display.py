@@ -6,6 +6,7 @@ from app.constants import SELF_SUBMISSION_SOURCE
 from app.models.contracts import ContentType
 from app.models.domain.content import ContentData
 from app.utils.image_urls import (
+    append_image_version,
     build_content_image_url,
     build_news_thumbnail_url,
     build_thumbnail_url,
@@ -27,7 +28,8 @@ def resolve_image_urls(domain_content: ContentData) -> tuple[str | None, str | N
 
     image_url = metadata.get("image_url")
     thumbnail_url = metadata.get("thumbnail_url")
-    has_generated_image = bool(metadata.get("image_generated_at"))
+    image_version = metadata.get("image_generated_at")
+    has_generated_image = bool(image_version)
 
     if domain_content.content_type == ContentType.PODCAST and has_generated_image:
         if image_url == provider_thumbnail:
@@ -37,12 +39,18 @@ def resolve_image_urls(domain_content: ContentData) -> tuple[str | None, str | N
 
     if not image_url and has_generated_image and domain_content.id:
         if domain_content.content_type == ContentType.NEWS:
-            image_url = build_news_thumbnail_url(domain_content.id)
+            image_url = build_news_thumbnail_url(domain_content.id, version=image_version)
         else:
-            image_url = build_content_image_url(domain_content.id)
+            image_url = build_content_image_url(domain_content.id, version=image_version)
 
     if not thumbnail_url and has_generated_image and domain_content.id:
-        thumbnail_url = build_thumbnail_url(domain_content.id)
+        thumbnail_url = build_thumbnail_url(domain_content.id, version=image_version)
+
+    if has_generated_image:
+        if isinstance(image_url, str):
+            image_url = append_image_version(image_url, image_version)
+        if isinstance(thumbnail_url, str):
+            thumbnail_url = append_image_version(thumbnail_url, image_version)
 
     if domain_content.content_type == ContentType.PODCAST and not image_url:
         image_url = provider_thumbnail

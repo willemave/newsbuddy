@@ -222,12 +222,17 @@ def build_fallback_content_summary_response(
 
     image_url: str | None = None
     thumbnail_url: str | None = None
-    if content.content_type in {
-        ContentType.ARTICLE.value,
-        ContentType.PODCAST.value,
-    } and metadata.image_state().get("image_generated_at"):
-        image_url = build_content_image_url(content_id)
-        thumbnail_url = build_thumbnail_url(content_id)
+    image_version = metadata.image_state().get("image_generated_at")
+    if (
+        content.content_type
+        in {
+            ContentType.ARTICLE.value,
+            ContentType.PODCAST.value,
+        }
+        and image_version
+    ):
+        image_url = build_content_image_url(content_id, version=image_version)
+        thumbnail_url = build_thumbnail_url(content_id, version=image_version)
     elif content.content_type == ContentType.PODCAST.value:
         raw_thumbnail = metadata.image_state().get("thumbnail_url")
         if isinstance(raw_thumbnail, str) and raw_thumbnail.startswith("http"):
