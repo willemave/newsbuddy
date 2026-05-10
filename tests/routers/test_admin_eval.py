@@ -53,7 +53,7 @@ def test_admin_eval_run_returns_payload(client, test_user, monkeypatch):
         }
 
     app.dependency_overrides[require_admin] = override_require_admin
-    monkeypatch.setattr("app.routers.admin.run_admin_eval", fake_run_admin_eval)
+    monkeypatch.setattr("app.admin_web.evals.run_admin_eval", fake_run_admin_eval)
 
     response = client.post(
         "/admin/evals/summaries/run",

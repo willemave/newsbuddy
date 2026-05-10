@@ -50,7 +50,9 @@ def test_admin_onboarding_lane_preview_api_returns_plan(client, test_user, monke
         )
 
     app.dependency_overrides[require_admin] = override_require_admin
-    monkeypatch.setattr("app.routers.admin.preview_audio_lane_plan", fake_preview_audio_lane_plan)
+    monkeypatch.setattr(
+        "app.admin_web.onboarding.preview_audio_lane_plan", fake_preview_audio_lane_plan
+    )
 
     response = client.post(
         "/admin/onboarding/lane-preview",

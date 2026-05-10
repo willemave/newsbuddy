@@ -57,7 +57,7 @@ def test_admin_dashboard_renders_sections(client, db_session, test_user):
         assert response.status_code == 200
         assert "Queue Status" in response.text
         assert "Task Phases" in response.text
-        assert "Scraper Health (24h)" in response.text
+        assert "Recent Failures (24h)" in response.text
     finally:
         app.dependency_overrides.pop(require_admin, None)
 

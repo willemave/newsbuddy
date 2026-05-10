@@ -220,7 +220,7 @@ def test_admin_login_valid(
     def mock_verify_admin_password(password: str) -> bool:
         return password == "test_admin_pass"
 
-    monkeypatch.setattr("app.routers.auth.verify_admin_password", mock_verify_admin_password)
+    monkeypatch.setattr("app.admin_web.auth.verify_admin_password", mock_verify_admin_password)
 
     response = auth_client.post("/auth/admin/login", json={"password": "test_admin_pass"})
     assert response.status_code == 200
@@ -244,7 +244,7 @@ def test_admin_logout(
     def mock_verify_admin_password(password: str) -> bool:
         return password == "test_admin_pass"
 
-    monkeypatch.setattr("app.routers.auth.verify_admin_password", mock_verify_admin_password)
+    monkeypatch.setattr("app.admin_web.auth.verify_admin_password", mock_verify_admin_password)
 
     response = auth_client.post("/auth/admin/login", json={"password": "test_admin_pass"})
     auth_client.cookies.set("admin_session", response.cookies["admin_session"])

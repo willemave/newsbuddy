@@ -98,8 +98,6 @@ def test_admin_dashboard_shows_operational_readouts(client, db_session, test_use
         assert "Queue Status" in body
         assert "Task Phases" in body
         assert "Recent Failures (24h)" in body
-        assert "Scraper Health (24h)" in body
-        assert "Queue Watchdog (24h)" in body
         assert "User Lifecycle" in body
 
         assert "onboarding" in body

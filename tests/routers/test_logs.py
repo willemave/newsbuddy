@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from app.routers import logs as logs_router
+from app.admin_web import logs as logs_router
 
 
 def test_get_recent_structured_events_empty_dir(tmp_path, monkeypatch) -> None:

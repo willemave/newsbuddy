@@ -19,16 +19,22 @@ def test_request_id_is_propagated(client) -> None:
     assert response.headers["X-Request-ID"] == "req-123"
 
 
-def test_static_mount_directories_are_created(monkeypatch, tmp_path: Path) -> None:
+def test_static_mount_paths_are_resolved(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(main_module.settings, "images_base_dir", tmp_path / "data" / "images")
 
-    images_dir, static_dir = main_module._ensure_static_mount_directories()
+    images_dir, admin_static_dir = main_module._resolve_static_mount_paths()
 
     assert images_dir == (tmp_path / "data" / "images").resolve()
-    assert static_dir == (tmp_path / "static").resolve()
+    assert admin_static_dir == main_module.ADMIN_STATIC_DIR
     assert images_dir.is_dir()
-    assert static_dir.is_dir()
+
+
+def test_admin_static_css_is_served(client) -> None:
+    response = client.get("/admin/static/css/app.css")
+
+    assert response.status_code == 200
+    assert b".markdown-content" in response.content
 
 
 def test_health_check_includes_database_readiness(client) -> None:
