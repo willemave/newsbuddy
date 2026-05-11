@@ -34,6 +34,7 @@ REANALYZE_EXISTING_STATUSES: set[str] = {
     ContentStatus.FAILED.value,
     ContentStatus.SKIPPED.value,
 }
+X_BOOKMARK_SUBMISSION_CHANNEL = "x_bookmarks"
 
 
 def normalize_url(raw_url: str) -> str:
@@ -192,6 +193,12 @@ def _should_enqueue_analysis_for_existing_content(
     return existing_status in REANALYZE_EXISTING_STATUSES
 
 
+def _should_create_inbox_status(*, submitted_via: str, subscribe_to_feed: bool) -> bool:
+    if subscribe_to_feed:
+        return False
+    return submitted_via != X_BOOKMARK_SUBMISSION_CHANNEL
+
+
 def submit_user_content(
     db: Session,
     payload: SubmitContentRequest,
@@ -227,6 +234,10 @@ def submit_user_content(
     )
     save_to_knowledge_and_mark_read = (
         payload.save_to_knowledge_and_mark_read and not subscribe_to_feed
+    )
+    create_inbox_status = _should_create_inbox_status(
+        submitted_via=submission_channel,
+        subscribe_to_feed=subscribe_to_feed,
     )
     platform_hint = (payload.platform or "").strip().lower() or None
     current_user_id = _require_user_id(current_user)
@@ -277,9 +288,14 @@ def submit_user_content(
                     initial_message=chat_initial_message,
                 )
                 metadata_updated = True
-            status_created = ensure_inbox_status(
-                db, current_user_id, existing_content_id, content_type=existing_content_type
-            )
+            status_created = False
+            if create_inbox_status:
+                status_created = ensure_inbox_status(
+                    db,
+                    current_user_id,
+                    existing_content_id,
+                    content_type=existing_content_type,
+                )
             if status_created or source_url_updated or metadata_updated:
                 db.commit()
             if status_created:
@@ -396,9 +412,11 @@ def submit_user_content(
     new_content_type = _require_content_type(new_content)
     new_content_status = _require_content_status(new_content)
     if not subscribe_to_feed:
-        status_created = ensure_inbox_status(
-            db, current_user_id, new_content_id, content_type=new_content_type
-        )
+        status_created = False
+        if create_inbox_status:
+            status_created = ensure_inbox_status(
+                db, current_user_id, new_content_id, content_type=new_content_type
+            )
         if status_created:
             db.commit()
             enqueue_visible_long_form_image_if_needed(db, new_content)

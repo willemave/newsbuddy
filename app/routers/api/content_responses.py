@@ -1,6 +1,6 @@
 """API response builders for normalized content."""
 
-from typing import Any
+from typing import Any, Literal
 
 from app.models.api.content import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
@@ -70,6 +70,23 @@ def _extract_longform_artifact_fields(metadata: dict[str, Any]) -> dict[str, Any
         "preview_bullets": preview_bullets,
         "reason_to_read": reason_to_read,
     }
+
+
+def _resolve_saved_source(
+    *,
+    metadata: dict[str, Any],
+    is_saved_to_knowledge: bool,
+) -> Literal["knowledge", "x_bookmark"] | None:
+    if not is_saved_to_knowledge:
+        return None
+
+    view = metadata_view(metadata)
+    submitted_via = str(view.processing_flag("submitted_via") or "").strip().lower()
+    snapshot_source = str(view.get("tweet_snapshot_source") or "").strip().lower()
+    if submitted_via == "x_bookmarks" or snapshot_source == "x_bookmarks_sync":
+        return "x_bookmark"
+
+    return "knowledge"
 
 
 def _should_suppress_top_comment_preview(
@@ -191,6 +208,10 @@ def build_content_summary_response(
         artifact_type=artifact_fields["artifact_type"],
         preview_bullets=artifact_fields["preview_bullets"],
         reason_to_read=artifact_fields["reason_to_read"],
+        saved_source=_resolve_saved_source(
+            metadata=domain_content.metadata,
+            is_saved_to_knowledge=is_saved_to_knowledge,
+        ),
     )
 
 
@@ -275,6 +296,10 @@ def build_fallback_content_summary_response(
         artifact_type=None,
         preview_bullets=None,
         reason_to_read=None,
+        saved_source=_resolve_saved_source(
+            metadata=content.content_metadata if isinstance(content.content_metadata, dict) else {},
+            is_saved_to_knowledge=is_saved_to_knowledge,
+        ),
     )
 
 

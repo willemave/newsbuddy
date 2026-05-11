@@ -198,6 +198,57 @@ class TestTopComment:
 
         assert response.top_comment is None
 
+
+class TestSavedSource:
+    """Tests for saved-library source projection."""
+
+    def test_saved_source_is_x_bookmark_for_bookmark_submission(self):
+        """X bookmark-synced saved content is labeled for saved-library filters."""
+        domain = _make_domain_mock(
+            metadata={
+                "submitted_via": "x_bookmarks",
+                "tweet_snapshot_source": "x_bookmarks_sync",
+            },
+        )
+        row = _make_content_row()
+
+        response = build_content_summary_response(
+            content=row,
+            domain_content=domain,
+            is_read=False,
+            is_saved_to_knowledge=True,
+        )
+
+        assert response.saved_source == "x_bookmark"
+
+    def test_saved_source_is_knowledge_for_non_bookmark_saved_content(self):
+        """Normal saved content remains labeled as knowledge."""
+        domain = _make_domain_mock(metadata={"submitted_via": "share_sheet"})
+        row = _make_content_row()
+
+        response = build_content_summary_response(
+            content=row,
+            domain_content=domain,
+            is_read=False,
+            is_saved_to_knowledge=True,
+        )
+
+        assert response.saved_source == "knowledge"
+
+    def test_saved_source_is_none_when_content_is_not_saved(self):
+        """Unsaved content does not get a saved-library source."""
+        domain = _make_domain_mock(metadata={"submitted_via": "x_bookmarks"})
+        row = _make_content_row()
+
+        response = build_content_summary_response(
+            content=row,
+            domain_content=domain,
+            is_read=False,
+            is_saved_to_knowledge=False,
+        )
+
+        assert response.saved_source is None
+
     def test_top_comment_suppressed_for_techmeme_discussion_link_preview(self):
         """Techmeme discussion links should not render as feed comment snippets."""
         domain = _make_domain_mock(

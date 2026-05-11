@@ -8,6 +8,7 @@ import app.services.x_integration as x_integration
 from app.core.settings import get_settings
 from app.models.db import (
     Content,
+    ContentStatusEntry,
     NewsItem,
     UserIntegrationConnection,
     UserIntegrationSyncedItem,
@@ -199,6 +200,7 @@ def test_sync_x_sources_syncs_bookmarks_only(
     synced_item = db_session.query(UserIntegrationSyncedItem).one()
     assert content.url == "https://x.com/i/status/101"
     assert (content.content_metadata or {})["tweet_snapshot_source"] == "x_bookmarks_sync"
+    assert db_session.query(ContentStatusEntry).count() == 0
     assert synced_item.connection_id == connection.id
     assert synced_item.channel == "bookmarks"
     assert synced_item.external_item_id == "101"

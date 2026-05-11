@@ -94,6 +94,10 @@ class ContentSummaryResponse(BaseModel):
     reason_to_read: str | None = Field(
         None, description="Feed-preview reason explaining why the item is worth opening"
     )
+    saved_source: Literal["knowledge", "x_bookmark"] | None = Field(
+        None,
+        description="Saved-library source for this content when it appears in saved views",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -115,6 +119,7 @@ class ContentSummaryResponse(BaseModel):
                 "thumbnail_url": "/static/images/thumbnails/123.png",
                 "primary_topic": "AI",
                 "top_comment": {"author": "user123", "text": "Great article!"},
+                "saved_source": "knowledge",
             }
         }
     )

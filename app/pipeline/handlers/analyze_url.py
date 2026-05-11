@@ -30,9 +30,7 @@ from app.services.feed_subscription import subscribe_to_detected_feed_result
 from app.services.gateways.http_gateway import get_http_gateway
 from app.services.gateways.llm_gateway import get_llm_gateway
 from app.services.instruction_links import create_contents_from_instruction_links
-from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.queue import TaskType
-from app.services.scraper_configs import ensure_inbox_status
 from app.services.twitter_share import (
     canonical_tweet_url,
     extract_tweet_id,
@@ -390,22 +388,14 @@ class TweetResolutionFlow:
         content: Content,
         submitter_id: int | None,
     ) -> None:
-        """Ensure a bookmark target is visible and saved for the submitting user."""
+        """Save a bookmark target without adding it to the long-form inbox."""
         if not submitter_id:
             return
 
         content_id = content.id
         if content_id is None:
             return
-        status_created = ensure_inbox_status(
-            db,
-            submitter_id,
-            content_id,
-            content_type=content.content_type,
-        )
         knowledge_repository.save_to_knowledge(db, content_id, submitter_id)
-        if status_created:
-            enqueue_visible_long_form_image_if_needed(db, content)
 
     def _normalize_candidate_urls(self, urls: list[str], *, content_id: int) -> list[str]:
         normalized_urls: list[str] = []

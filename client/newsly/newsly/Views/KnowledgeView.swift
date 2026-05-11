@@ -177,11 +177,11 @@ struct KnowledgeView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Knowledge Library")
+                                Text("Saved")
                                     .font(.terracottaHeadlineSmall)
                                     .foregroundColor(.onSurface)
 
-                                Text("Saved articles and podcasts with markdown ready")
+                                Text("Bookmarks and saved knowledge with markdown ready")
                                     .font(.terracottaBodySmall)
                                     .foregroundColor(.onSurfaceSecondary)
                             }

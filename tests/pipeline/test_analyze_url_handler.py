@@ -574,11 +574,6 @@ def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
         "app.pipeline.handlers.analyze_url.get_x_user_access_token",
         lambda *_args, **_kwargs: None,
     )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.enqueue_visible_long_form_image_if_needed",
-        lambda *_args, **_kwargs: None,
-    )
-
     queue_gateway = Mock()
     context = _build_context(db_session, queue_gateway=queue_gateway)
     task = TaskEnvelope(
@@ -613,8 +608,7 @@ def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
     assert bookmark_shell.status == ContentStatus.SKIPPED.value
     assert bookmark_shell.error_message == "Canonical URL conflicts with existing content"
     assert _metadata(bookmark_shell.content_metadata)["canonical_content_id"] == existing_article.id
-    assert status_row is not None
-    assert status_row.status == "inbox"
+    assert status_row is None
     assert knowledge_row is not None
     assert db_session.query(Content).filter(Content.url == "https://example.com/story").count() == 1
     queue_gateway.enqueue.assert_not_called()
@@ -864,8 +858,7 @@ def test_tweet_bookmark_records_native_x_article_metadata(
         "Native X Article\n\nThis is the full native X article body."
     )
     assert "tweet_only" not in metadata
-    assert status_row is not None
-    assert status_row.status == "inbox"
+    assert status_row is None
     assert knowledge_row is not None
     queue_gateway.enqueue.assert_called_once_with(
         TaskType.PROCESS_CONTENT,
@@ -951,8 +944,7 @@ def test_tweet_bookmark_resolves_linked_podcast_as_long_form_podcast(
     assert bookmark_shell.platform == "apple_podcasts"
     assert bookmark_shell.url == "https://podcasts.apple.com/us/podcast/example-show/id123?i=456"
     assert metadata["tweet_resolution_source"] == "root_tweet"
-    assert status_row is not None
-    assert status_row.status == "inbox"
+    assert status_row is None
     assert knowledge_row is not None
     queue_gateway.enqueue.assert_called_once_with(
         TaskType.PROCESS_CONTENT,

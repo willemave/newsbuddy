@@ -41,6 +41,30 @@ final class ContentSummaryTests: XCTestCase {
         XCTAssertEqual(updated.relativeTimeDisplay, summary.relativeTimeDisplay)
     }
 
+    func testDecodesSavedSourceForBookmarkFilters() throws {
+        let data = """
+        {
+          "id": 7,
+          "content_type": "article",
+          "url": "https://example.com/story",
+          "title": "Example story",
+          "source": "Example",
+          "platform": "web",
+          "status": "completed",
+          "short_summary": "Summary",
+          "created_at": "2026-03-18T05:00:00Z",
+          "is_read": false,
+          "is_saved_to_knowledge": true,
+          "saved_source": "x_bookmark"
+        }
+        """.data(using: .utf8)!
+
+        let summary = try JSONDecoder().decode(ContentSummary.self, from: data)
+
+        XCTAssertEqual(summary.savedSource, "x_bookmark")
+        XCTAssertEqual(summary.updating(isRead: true).savedSource, "x_bookmark")
+    }
+
     private func makeSummary(
         createdAt: String,
         processedAt: String?,

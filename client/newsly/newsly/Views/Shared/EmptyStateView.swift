@@ -53,8 +53,8 @@ typealias SettingsEmptyStateView = EmptyStateView
 #Preview {
     EmptyStateView(
         icon: "books.vertical",
-        title: "No Saved Knowledge",
-        subtitle: "Save content to Knowledge and it will appear here",
+        title: "No Saved Items",
+        subtitle: "Bookmarks and saved knowledge will appear here",
         actionTitle: "Browse Content",
         action: {}
     )

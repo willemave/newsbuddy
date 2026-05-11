@@ -1,5 +1,5 @@
 //
-//  KnowledgeLibraryView.swift
+//  SavedLibraryView.swift
 //  newsly
 //
 
@@ -68,7 +68,7 @@ struct KnowledgeLibraryView: View {
             }
         }
         .background(Color.surfacePrimary)
-        .navigationTitle(showNavigationTitle ? "Knowledge Library" : "")
+        .navigationTitle(showNavigationTitle ? "Saved" : "")
         .task { await viewModel.loadKnowledgeLibrary() }
     }
 
@@ -81,11 +81,11 @@ struct KnowledgeLibraryView: View {
                 .foregroundStyle(Color.accentColor.opacity(0.7))
 
             VStack(spacing: 6) {
-                Text("No saved knowledge yet")
+                Text("No saved items yet")
                     .font(.listTitle.weight(.semibold))
                     .foregroundStyle(Color.onSurface)
 
-                Text("Save articles or podcasts to Knowledge and they’ll show up here.")
+                Text("Bookmarks and saved knowledge will show up here.")
                     .font(.listSubtitle)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
@@ -114,7 +114,7 @@ struct KnowledgeLibraryView: View {
                     contentId: content.id,
                     allContentIds: displayedContentIds
                 )) {
-                    KnowledgeLibraryRow(content: content)
+                    SavedLibraryRow(content: content)
                 }
                 .buttonStyle(.plain)
                 .appListRow()
@@ -166,7 +166,7 @@ struct KnowledgeLibraryView: View {
     private func libraryControls(visibleCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
-                Text("\(visibleCount) loaded")
+                Text("\(visibleCount) saved")
                     .font(.terracottaBodySmall.weight(.semibold))
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .lineLimit(1)
@@ -209,6 +209,7 @@ struct KnowledgeLibraryView: View {
                     ForEach(availableTypeFilters) { filter in
                         LibraryFilterPill(
                             title: filter.title,
+                            systemImage: filter.systemImage,
                             isSelected: selectedTypeFilter == filter
                         ) {
                             withAnimation(.easeOut(duration: 0.18)) {
@@ -262,9 +263,9 @@ struct KnowledgeLibraryView: View {
     }
 }
 
-// MARK: - Knowledge Library Row
+// MARK: - Saved Library Row
 
-private struct KnowledgeLibraryRow: View {
+private struct SavedLibraryRow: View {
     let content: ContentSummary
 
     private var dateText: String {
@@ -288,6 +289,14 @@ private struct KnowledgeLibraryRow: View {
                 .foregroundStyle(Color.onSurface)
                 .lineLimit(2)
                 .truncationMode(.tail)
+
+            if content.savedSource == "x_bookmark" {
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.terracottaPrimary)
+                    .padding(.top, 4)
+                    .accessibilityLabel("X bookmark")
+            }
         }
         .padding(.horizontal, Spacing.rowHorizontal)
         .padding(.vertical, 8)
@@ -328,22 +337,34 @@ private struct LibraryFilterPill: View {
 
 private enum LibraryTypeFilter: String, CaseIterable, Identifiable {
     case all
+    case bookmarks
     case article
     case podcast
     case news
 
     static var contentFilters: [LibraryTypeFilter] {
-        [.article, .podcast, .news]
+        [.bookmarks, .article, .podcast, .news]
     }
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .all: return "All types"
+        case .all: return "All saved"
+        case .bookmarks: return "Bookmarks"
         case .article: return "Articles"
         case .podcast: return "Podcasts"
         case .news: return "News"
+        }
+    }
+
+    var systemImage: String? {
+        switch self {
+        case .all: return nil
+        case .bookmarks: return "bookmark"
+        case .article: return "doc.text"
+        case .podcast: return "headphones"
+        case .news: return "newspaper"
         }
     }
 
@@ -351,6 +372,8 @@ private enum LibraryTypeFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all:
             return true
+        case .bookmarks:
+            return content.savedSource == "x_bookmark"
         case .article:
             return content.contentTypeEnum == .article
         case .podcast:
