@@ -217,7 +217,7 @@ struct ArticleCardView: View {
                 ForEach(points.prefix(4), id: \.self) { point in
                     keyPointRow(point)
                 }
-            } else if let summary = content.shortSummary, !summary.isEmpty {
+            } else if let summary = content.summaryDisplayText {
                 Text(summary)
                     .font(.subheadline)
                     .foregroundColor(.primary)

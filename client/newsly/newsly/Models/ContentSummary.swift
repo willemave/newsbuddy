@@ -239,11 +239,19 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         title ?? "Untitled"
     }
 
+    private static func normalizedText(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var summaryDisplayText: String? {
+        guard contentTypeEnum != .news else { return nil }
+        return Self.normalizedText(shortSummary)
+    }
+
     var secondaryLine: String? {
-        if let summary = shortSummary, !summary.isEmpty {
-            return summary
-        }
-        return nil
+        summaryDisplayText
     }
 
     /// Discussion snippet for feed card preview

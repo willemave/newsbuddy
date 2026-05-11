@@ -107,7 +107,7 @@ struct SearchView: View {
                                 Text(item.displayTitle)
                                     .font(.listTitle)
                                     .lineLimit(3)
-                                if let summary = item.shortSummary, !summary.isEmpty {
+                                if let summary = item.summaryDisplayText {
                                     Text(summary)
                                         .font(.listCaption)
                                         .foregroundStyle(Color.onSurfaceSecondary)

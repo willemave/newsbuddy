@@ -27,15 +27,6 @@ struct NewsGroupCard: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .multilineTextAlignment(.leading)
 
-                        // Short summary if available
-                        if let summary = item.shortSummary, !summary.isEmpty {
-                            Text(summary)
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
                         // Metadata row
                         HStack(spacing: 6) {
                             // Platform icon and source

@@ -14,18 +14,14 @@ struct NewsItemDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
-            if summaryText != nil || !keyPoints.isEmpty {
-                summarySection()
+            if !keyPoints.isEmpty {
+                keyPointsSection()
             }
 
             if hasArticleSection {
                 articleLink()
             }
         }
-    }
-
-    private var summaryText: String? {
-        content.resolvedNewsSummaryText
     }
 
     private var keyPoints: [String] {
@@ -40,7 +36,8 @@ struct NewsItemDetailView: View {
 
     private var articleTitle: String? {
         guard let title = normalizedText(metadata.article?.title) else { return nil }
-        if isDuplicate(title, comparedTo: content.displayTitle) || isDuplicate(title, comparedTo: summaryText) {
+        if isDuplicate(title, comparedTo: content.displayTitle)
+            || isDuplicate(title, comparedTo: content.resolvedNewsSummaryText) {
             return nil
         }
         return title
@@ -58,10 +55,10 @@ struct NewsItemDetailView: View {
 
 
     @ViewBuilder
-    private func summarySection() -> some View {
+    private func keyPointsSection() -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Summary")
+                Text("Key Points")
                     .font(.headline)
                     .fontWeight(.semibold)
 
@@ -85,30 +82,17 @@ struct NewsItemDetailView: View {
                 }
             }
 
-            if let overview = summaryText {
-                Text(overview)
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(keyPoints.enumerated()), id: \.offset) { _, point in
+                    HStack(alignment: .top, spacing: 12) {
+                        Circle()
+                            .fill(Color.accentColor.opacity(0.85))
+                            .frame(width: 6, height: 6)
+                            .padding(.top, 7)
 
-            if !keyPoints.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Key Points")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.secondary)
-
-                    ForEach(Array(keyPoints.enumerated()), id: \.offset) { _, point in
-                        HStack(alignment: .top, spacing: 12) {
-                            Circle()
-                                .fill(Color.accentColor.opacity(0.85))
-                                .frame(width: 6, height: 6)
-                                .padding(.top, 7)
-
-                            Text(point)
-                                .font(.callout)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        Text(point)
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }

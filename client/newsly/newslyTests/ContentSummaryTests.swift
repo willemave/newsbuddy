@@ -65,20 +65,65 @@ final class ContentSummaryTests: XCTestCase {
         XCTAssertEqual(summary.updating(isRead: true).savedSource, "x_bookmark")
     }
 
+    func testNewsSummaryPayloadStillDecodesButIsHiddenFromDisplaySummary() throws {
+        let data = """
+        {
+          "id": 7,
+          "content_type": "news",
+          "url": "https://example.com/story",
+          "title": "Example story",
+          "source": "Example",
+          "platform": "web",
+          "status": "completed",
+          "short_summary": "Hidden list summary",
+          "news_summary": "Hidden news summary",
+          "created_at": "2026-03-18T05:00:00Z",
+          "is_read": false,
+          "is_saved_to_knowledge": false
+        }
+        """.data(using: .utf8)!
+
+        let summary = try JSONDecoder().decode(ContentSummary.self, from: data)
+
+        XCTAssertEqual(summary.shortSummary, "Hidden list summary")
+        XCTAssertEqual(summary.newsSummary, "Hidden news summary")
+        XCTAssertNil(summary.summaryDisplayText)
+        XCTAssertNil(summary.secondaryLine)
+
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(summary)) as? [String: Any]
+        XCTAssertEqual(encoded?["short_summary"] as? String, "Hidden list summary")
+        XCTAssertEqual(encoded?["news_summary"] as? String, "Hidden news summary")
+    }
+
+    func testArticleSummaryStillDisplaysAsSecondaryLine() {
+        let summary = makeSummary(
+            contentType: "article",
+            createdAt: "2026-03-18T05:00:00Z",
+            processedAt: nil,
+            publicationDate: nil
+        )
+
+        XCTAssertEqual(summary.summaryDisplayText, "Summary")
+        XCTAssertEqual(summary.secondaryLine, "Summary")
+    }
+
     private func makeSummary(
+        contentType: String = "news",
         createdAt: String,
         processedAt: String?,
-        publicationDate: String?
+        publicationDate: String?,
+        shortSummary: String? = "Summary",
+        newsSummary: String? = nil
     ) -> ContentSummary {
         ContentSummary(
             id: 7,
-            contentType: "news",
+            contentType: contentType,
             url: "https://example.com/story",
             title: "Example story",
             source: "Example",
             platform: "Hacker News",
             status: "completed",
-            shortSummary: "Summary",
+            shortSummary: shortSummary,
             createdAt: createdAt,
             processedAt: processedAt,
             classification: nil,
@@ -90,7 +135,7 @@ final class ContentSummaryTests: XCTestCase {
             primaryTopic: nil,
             topComment: nil,
             commentCount: nil,
-            newsSummary: nil,
+            newsSummary: newsSummary,
             newsKeyPoints: nil
         )
     }

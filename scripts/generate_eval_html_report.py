@@ -8,11 +8,14 @@ import argparse
 import json
 import math
 import os
+import random
 import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, NamedTuple, cast
+
+from sqlalchemy import desc
 
 # Add project root to import path when running as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -20,17 +23,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.core.db import get_db, init_db
 from app.core.logging import get_logger, setup_logging
 from app.core.settings import get_settings
-from app.models.db import Content
+from app.models.contracts import NewsItemStatus
+from app.models.db import Content, NewsItem
 from app.services.admin_eval import (
     EVAL_MODEL_LABELS,
     EVAL_MODEL_SPECS,
     MAX_EVAL_INPUT_CHARS,
+    EvalSourcePayload,
     build_eval_source_payload,
     select_eval_samples,
 )
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt
 from app.services.llm_summarization import resolve_summarization_output_type
+from app.services.news_article_bodies import get_news_item_article_body_resolver
+from app.services.news_processing import _build_processing_prompt
 from app.services.summarization_templates import resolve_summarization_prompt_route
 
 logger = get_logger(__name__)
@@ -77,6 +84,92 @@ REPORT_MODEL_SETTINGS_BY_ALIAS: dict[str, dict[str, Any]] = {
     OPENROUTER_REASONING_ON_ALIAS: {
         "openrouter_reasoning": {"enabled": True, "exclude": True},
     },
+}
+NEWS_STATUS_ORDER = tuple(status.value for status in NewsItemStatus)
+
+
+class NewsPromptVariant(NamedTuple):
+    alias: str
+    label: str
+    description: str
+    system_prompt: str
+    user_template: str
+    output_type: PromptType
+
+
+NEWS_PROMPT_VARIANT_ORDER = (
+    "current",
+    "reader_impact",
+    "evidence_first",
+    "feed_scan",
+)
+NEWS_PROMPT_VARIANT_USER_TEMPLATE = "Article & Aggregator Context:\n\n{content}"
+CUSTOM_NEWS_PROMPT_VARIANTS: dict[str, tuple[str, str, str]] = {
+    "reader_impact": (
+        "Reader Impact",
+        "Prioritizes why a busy technical reader should care.",
+        """You are an expert news editor writing for a busy technical reader. Read the provided
+article content and aggregator context, then produce a concise, readable summary matching the
+provided structured output schema.
+
+Field guidance:
+- title: direct factual headline, <=95 characters; name the actor and concrete development.
+- article_url: canonical article URL when available.
+- key_points: include 2-4 complete, self-contained sentences, <=220 characters each.
+- summary: required 2-3 sentence overview paragraph, 180-500 characters when the source supports it.
+- classification: use "to_read" for concrete news, useful analysis, or practical signal; use "skip" for low-value or promotional content.
+
+Rules:
+- Lead with the most consequential thing that happened and why it matters.
+- Prefer specific companies, products, numbers, dates, constraints, and affected users over generic category labels.
+- Do not inflate weak evidence. If the source only states a claim, summarize it as a claim.
+- Avoid clipped headline fragments, markdown, numbering, topics, quotes, or extra fields.
+- If the item is a post rather than an article, summarize the post's substantive claim instead of inventing broader news.
+""",
+    ),
+    "evidence_first": (
+        "Evidence First",
+        "Forces source-grounded facts and downranks aggregator-only framing.",
+        """You are a careful news summarization editor. Read the article content and aggregator
+context as evidence, then produce a structured news summary that stays tightly grounded in what
+the evidence actually says.
+
+Field guidance:
+- title: factual headline, <=95 characters, based on the strongest source-backed fact.
+- article_url: canonical article URL when available.
+- key_points: include 2-4 source-grounded points, usually complete sentences, <=220 characters each.
+- summary: required 2-3 sentence overview paragraph, 180-500 characters when enough evidence exists.
+- classification: use "to_read" for substantial signal and "skip" when the evidence is thin, generic, promotional, or mostly metadata.
+
+Rules:
+- Prefer article body evidence over aggregator headlines; use aggregator context only when it adds source, author, discussion, or distribution signal.
+- Preserve exact names, technical terms, numbers, and dates.
+- Distinguish stated facts from speculation, reactions, or implications.
+- Do not add background, market framing, or causal claims unless present in the evidence.
+- Use natural prose. Never include markdown, topics, quotes, numbering, or fields outside the schema.
+""",
+    ),
+    "feed_scan": (
+        "Feed Scan",
+        "Optimizes for fast mobile feed scanning without losing substance.",
+        """You are the short-form news editor for a fast-scanning mobile feed. Read the provided
+article content and aggregator context, then produce a compact but complete structured summary.
+
+Field guidance:
+- title: clear feed headline, <=95 characters, rewritten when the source title is vague or truncated.
+- article_url: canonical article URL when available.
+- key_points: include 2-4 scannable complete sentences, <=220 characters each.
+- summary: required 2-3 sentence paragraph that reads naturally, usually 180-500 characters.
+- classification: use "to_read" when the item gives the reader a concrete update; use "skip" for duplicate, promotional, or low-signal content.
+
+Rules:
+- Make the title and first key point useful even when read alone.
+- Surface the practical consequence, product change, policy shift, funding move, benchmark, vulnerability, or disagreement when present.
+- Avoid vague phrasing such as "raises questions", "sparks debate", or "could have implications" unless the evidence explains the specifics.
+- Keep prose calm and factual, with no sensationalism.
+- Never include markdown, topics, quotes, numbering, or extra fields.
+""",
+    ),
 }
 
 
@@ -125,6 +218,26 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Optional explicit content IDs, comma-separated.",
+    )
+    parser.add_argument(
+        "--news-item-ids",
+        type=str,
+        default=None,
+        help="Optional explicit news_items IDs, comma-separated. Only valid with --content-types news.",
+    )
+    parser.add_argument(
+        "--news-statuses",
+        type=str,
+        default=NewsItemStatus.READY.value,
+        help=(
+            "Comma-separated news_items statuses to sample, or 'all'. "
+            f"Available: {', '.join(NEWS_STATUS_ORDER)}."
+        ),
+    )
+    parser.add_argument(
+        "--news-require-article-body",
+        action="store_true",
+        help="Skip news_items that cannot resolve full article body text.",
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -210,6 +323,16 @@ def parse_args() -> argparse.Namespace:
         default="news",
         help="Output schema type to use when custom news prompts are configured.",
     )
+    parser.add_argument(
+        "--news-prompt-variants",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated built-in news prompt variants to compare, or 'all'. "
+            f"Available: {', '.join(NEWS_PROMPT_VARIANT_ORDER)}. "
+            "Only supported with --content-types news."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -239,6 +362,46 @@ def parse_content_ids(raw_value: str | None) -> list[int]:
         return []
     values = parse_csv_list(raw_value)
     return [int(item) for item in values]
+
+
+def parse_news_statuses(raw_value: str | None) -> list[str]:
+    """Parse optional news item status filters."""
+    if not raw_value:
+        return [NewsItemStatus.READY.value]
+
+    statuses = [item.lower() for item in parse_csv_list(raw_value)]
+    if "all" in statuses:
+        return list(NEWS_STATUS_ORDER)
+
+    unknown = [status for status in statuses if status not in NEWS_STATUS_ORDER]
+    if unknown:
+        raise ValueError(
+            "Unknown news statuses: "
+            f"{', '.join(unknown)}. Available: {', '.join(NEWS_STATUS_ORDER)}"
+        )
+    if not statuses:
+        raise ValueError("At least one news status is required")
+    return statuses
+
+
+def parse_news_prompt_variants(raw_value: str | None) -> list[str]:
+    """Parse optional news prompt variant aliases."""
+    if not raw_value:
+        return []
+
+    aliases = [item.lower() for item in parse_csv_list(raw_value)]
+    if "all" in aliases:
+        return list(NEWS_PROMPT_VARIANT_ORDER)
+
+    unknown = [alias for alias in aliases if alias not in NEWS_PROMPT_VARIANT_ORDER]
+    if unknown:
+        raise ValueError(
+            "Unknown news prompt variants: "
+            f"{', '.join(unknown)}. Available: {', '.join(NEWS_PROMPT_VARIANT_ORDER)}"
+        )
+    if not aliases:
+        raise ValueError("At least one news prompt variant is required")
+    return aliases
 
 
 def validate_content_types(content_types: list[str]) -> list[EvalContentType]:
@@ -484,6 +647,38 @@ def resolve_builtin_prompt_settings(
     return "long_bullets", 30, 3
 
 
+def resolve_news_prompt_variant(alias: str) -> NewsPromptVariant:
+    """Resolve one built-in news prompt variant."""
+    if alias == "current":
+        system_prompt, user_template = generate_summary_prompt(
+            "news",
+            max_bullet_points=4,
+            max_quotes=0,
+        )
+        return NewsPromptVariant(
+            alias="current",
+            label="Current",
+            description="Current production news prompt.",
+            system_prompt=system_prompt,
+            user_template=user_template,
+            output_type="news",
+        )
+
+    variant = CUSTOM_NEWS_PROMPT_VARIANTS.get(alias)
+    if variant is None:
+        raise ValueError(f"Unknown news prompt variant: {alias}")
+
+    label, description, system_prompt = variant
+    return NewsPromptVariant(
+        alias=alias,
+        label=label,
+        description=description,
+        system_prompt=system_prompt,
+        user_template=NEWS_PROMPT_VARIANT_USER_TEMPLATE,
+        output_type="news",
+    )
+
+
 def resolve_prompt_for_source(
     *,
     content_type: EvalContentType,
@@ -495,6 +690,7 @@ def resolve_prompt_for_source(
     custom_news_system_prompt: str | None,
     custom_news_user_template: str | None,
     custom_news_output_type: PromptType,
+    news_prompt_variant: str | None = None,
 ) -> tuple[str, str, PromptType]:
     """Resolve system prompt, user template, and output schema prompt type.
 
@@ -511,6 +707,10 @@ def resolve_prompt_for_source(
     Returns:
         Tuple of system prompt, user template, and prompt type.
     """
+    if content_type == "news" and news_prompt_variant:
+        variant = resolve_news_prompt_variant(news_prompt_variant)
+        return variant.system_prompt, variant.user_template, variant.output_type
+
     if content_type == "news" and custom_news_system_prompt and custom_news_user_template:
         return custom_news_system_prompt, custom_news_user_template, custom_news_output_type
 
@@ -586,6 +786,7 @@ def build_prompt_definitions(
     custom_news_system_prompt: str | None,
     custom_news_user_template: str | None,
     custom_news_output_type: PromptType,
+    news_prompt_variants: list[str],
 ) -> list[dict[str, str]]:
     """Build prompt definitions so reports can show exact prompts used.
 
@@ -604,6 +805,23 @@ def build_prompt_definitions(
     """
     definitions: list[dict[str, str]] = []
     for content_type in content_types:
+        if content_type == "news" and news_prompt_variants:
+            for alias in news_prompt_variants:
+                variant = resolve_news_prompt_variant(alias)
+                definitions.append(
+                    {
+                        "content_type": content_type,
+                        "prompt_source": "builtin" if alias == "current" else "builtin_variant",
+                        "prompt_type": variant.output_type,
+                        "prompt_variant": variant.alias,
+                        "prompt_variant_label": variant.label,
+                        "prompt_variant_description": variant.description,
+                        "system_prompt": variant.system_prompt,
+                        "user_template": variant.user_template,
+                    }
+                )
+            continue
+
         system_prompt, user_template, prompt_type = resolve_prompt_for_source(
             content_type=content_type,
             source_url=None,
@@ -614,6 +832,7 @@ def build_prompt_definitions(
             custom_news_system_prompt=custom_news_system_prompt,
             custom_news_user_template=custom_news_user_template,
             custom_news_output_type=custom_news_output_type,
+            news_prompt_variant=None,
         )
 
         is_custom = (content_type == "news" and custom_news_system_prompt) or (
@@ -631,9 +850,134 @@ def build_prompt_definitions(
     return definitions
 
 
+def build_news_item_eval_source_payload(
+    db: Any,
+    item: NewsItem,
+    *,
+    require_article_body: bool = False,
+) -> EvalSourcePayload | None:
+    """Build a report source payload from the current short-form ``NewsItem`` path."""
+    news_item_id = item.id
+    if news_item_id is None:
+        return None
+
+    raw_metadata = dict(item.raw_metadata or {})
+    try:
+        article_body_text = get_news_item_article_body_resolver().resolve_text(db, news_item=item)
+    except FileNotFoundError:
+        logger.warning(
+            "News item article body missing from local storage; falling back to metadata",
+            extra={
+                "component": "eval_html_report",
+                "operation": "build_news_item_eval_source_payload",
+                "item_id": str(news_item_id),
+            },
+        )
+        article_body_text = None
+    if require_article_body and not article_body_text:
+        logger.warning(
+            "Skipping news item because no article body resolved",
+            extra={
+                "component": "eval_html_report",
+                "operation": "build_news_item_eval_source_payload",
+                "item_id": str(news_item_id),
+            },
+        )
+        return None
+    input_text = _build_processing_prompt(
+        item,
+        raw_metadata,
+        article_body_text=article_body_text,
+    )
+    if not input_text.strip():
+        return None
+
+    created_at = item.ingested_at or item.created_at or item.published_at
+    created_at_text = (
+        created_at.replace(tzinfo=UTC).isoformat() if created_at else datetime.now(UTC).isoformat()
+    )
+    source_url = (
+        item.article_url
+        or item.canonical_story_url
+        or item.canonical_item_url
+        or item.discussion_url
+        or "#"
+    )
+    source_title = item.article_title or item.summary_title
+
+    return EvalSourcePayload(
+        content_id=int(news_item_id),
+        content_type="news",
+        created_at=created_at_text,
+        url=str(source_url),
+        source_title=source_title,
+        existing_summary_title=item.summary_title,
+        input_text=input_text,
+        input_chars=len(input_text),
+    )
+
+
+def select_news_item_eval_sources(
+    *,
+    news_item_ids: list[int],
+    news_statuses: list[str],
+    require_article_body: bool,
+    recent_pool_size: int,
+    sample_size: int,
+    seed: int | None,
+) -> tuple[list[EvalSourcePayload], list[int]]:
+    """Select current short-form news items for news prompt comparison."""
+    rng = random.Random(seed)
+    with get_db() as db:
+        if news_item_ids:
+            rows = db.query(NewsItem).filter(NewsItem.id.in_(news_item_ids)).all()
+            row_by_id = {row.id: row for row in rows}
+            payloads: list[EvalSourcePayload] = []
+            missing_ids: list[int] = []
+            for news_item_id in news_item_ids:
+                row = row_by_id.get(news_item_id)
+                if row is None:
+                    missing_ids.append(news_item_id)
+                    continue
+                payload = build_news_item_eval_source_payload(
+                    db,
+                    row,
+                    require_article_body=require_article_body,
+                )
+                if payload is not None:
+                    payloads.append(payload)
+            return payloads, missing_ids
+
+        rows = (
+            db.query(NewsItem)
+            .filter(NewsItem.status.in_(news_statuses))
+            .order_by(desc(NewsItem.ingested_at))
+            .limit(recent_pool_size)
+            .all()
+        )
+        payloads = [
+            payload
+            for row in rows
+            if (
+                payload := build_news_item_eval_source_payload(
+                    db,
+                    row,
+                    require_article_body=require_article_body,
+                )
+            )
+            is not None
+        ]
+
+    rng.shuffle(payloads)
+    return payloads[: min(sample_size, len(payloads))], []
+
+
 def select_sources(
     *,
     content_ids: list[int],
+    news_item_ids: list[int],
+    news_statuses: list[str],
+    news_require_article_body: bool,
     content_types: list[EvalContentType],
     recent_pool_size: int,
     sample_size: int,
@@ -651,6 +995,19 @@ def select_sources(
     Returns:
         Tuple of selected source payloads and missing IDs.
     """
+    if not content_ids and content_types == ["news"]:
+        return select_news_item_eval_sources(
+            news_item_ids=news_item_ids,
+            news_statuses=news_statuses,
+            require_article_body=news_require_article_body,
+            recent_pool_size=recent_pool_size,
+            sample_size=sample_size,
+            seed=seed,
+        )
+
+    if news_item_ids:
+        raise ValueError("--news-item-ids is only supported with --content-types news")
+
     with get_db() as db:
         if content_ids:
             rows = db.query(Content).filter(Content.id.in_(content_ids)).all()
@@ -726,6 +1083,7 @@ def run_single_model_call(
     custom_news_system_prompt: str | None,
     custom_news_user_template: str | None,
     custom_news_output_type: PromptType,
+    news_prompt_variant: str | None,
 ) -> dict[str, Any]:
     """Run one model against one content item with retry support.
 
@@ -744,6 +1102,7 @@ def run_single_model_call(
         custom_news_system_prompt: Optional custom news system prompt.
         custom_news_user_template: Optional custom news user template.
         custom_news_output_type: Output schema for custom news prompts.
+        news_prompt_variant: Optional built-in news prompt variant alias.
 
     Returns:
         Model cell result for JSON + HTML rendering.
@@ -758,6 +1117,7 @@ def run_single_model_call(
         custom_news_system_prompt=custom_news_system_prompt,
         custom_news_user_template=custom_news_user_template,
         custom_news_output_type=custom_news_output_type,
+        news_prompt_variant=news_prompt_variant,
     )
     if "{content}" not in user_template:
         raise ValueError("User template must include a {content} placeholder")
@@ -765,6 +1125,13 @@ def run_single_model_call(
     clipped_input = clip_eval_input(source.input_text, max_input_chars)
     title_prefix = f"Title: {source.source_title}\n\n" if source.source_title else ""
     user_message = user_template.format(content=f"{title_prefix}{clipped_input}")
+
+    prompt_variant_label = None
+    prompt_variant_description = None
+    if news_prompt_variant:
+        variant = resolve_news_prompt_variant(news_prompt_variant)
+        prompt_variant_label = variant.label
+        prompt_variant_description = variant.description
 
     request_chars = len(system_prompt) + len(user_message)
     request_tokens_estimate = estimate_tokens_from_chars(request_chars)
@@ -785,20 +1152,27 @@ def run_single_model_call(
             output_chars = len(json.dumps(payload, ensure_ascii=False))
 
             logger.info(
-                "Eval success content_id=%s model=%s attempt=%s latency_ms=%s req_chars=%s",
+                "Eval success content_id=%s model=%s prompt_variant=%s attempt=%s latency_ms=%s req_chars=%s",
                 source.content_id,
                 model_alias,
+                news_prompt_variant or "default",
                 attempt,
                 latency_ms,
                 request_chars,
             )
+            model_label = REPORT_MODEL_LABELS.get(model_alias, model_alias)
+            if prompt_variant_label:
+                model_label = f"{prompt_variant_label} · {model_label}"
             return {
                 "model_alias": model_alias,
-                "model_label": REPORT_MODEL_LABELS.get(model_alias, model_alias),
+                "model_label": model_label,
                 "model_spec": model_spec,
                 "status": "ok",
                 "attempt": attempt,
                 "prompt_type": prompt_type,
+                "prompt_variant": news_prompt_variant,
+                "prompt_variant_label": prompt_variant_label,
+                "prompt_variant_description": prompt_variant_description,
                 "latency_ms": latency_ms,
                 "usage": usage,
                 "request_chars": request_chars,
@@ -811,9 +1185,10 @@ def run_single_model_call(
             latency_ms = int((time.perf_counter() - started) * 1000)
             last_error = exc
             logger.error(
-                "Eval failure content_id=%s model=%s attempt=%s/%s latency_ms=%s req_chars=%s error=%s",
+                "Eval failure content_id=%s model=%s prompt_variant=%s attempt=%s/%s latency_ms=%s req_chars=%s error=%s",
                 source.content_id,
                 model_alias,
+                news_prompt_variant or "default",
                 attempt,
                 attempts,
                 latency_ms,
@@ -824,13 +1199,19 @@ def run_single_model_call(
                 time.sleep(retry_backoff_seconds * attempt)
 
     assert last_error is not None
+    model_label = REPORT_MODEL_LABELS.get(model_alias, model_alias)
+    if prompt_variant_label:
+        model_label = f"{prompt_variant_label} · {model_label}"
     return {
         "model_alias": model_alias,
-        "model_label": REPORT_MODEL_LABELS.get(model_alias, model_alias),
+        "model_label": model_label,
         "model_spec": model_spec,
         "status": "error",
         "attempt": attempts,
         "prompt_type": prompt_type,
+        "prompt_variant": news_prompt_variant,
+        "prompt_variant_label": prompt_variant_label,
+        "prompt_variant_description": prompt_variant_description,
         "latency_ms": None,
         "usage": {"input_tokens": None, "output_tokens": None, "total_tokens": None},
         "request_chars": request_chars,
@@ -1262,6 +1643,14 @@ def render_html(report_payload: dict[str, Any]) -> str:
     prompt_definitions = report_payload.get("prompt_definitions", [])
     results = report_payload["results"]
 
+    def _prompt_title(prompt: dict[str, Any]) -> str:
+        content_type = str(prompt.get("content_type", "unknown"))
+        prompt_type = str(prompt.get("prompt_type", "unknown"))
+        variant_label = prompt.get("prompt_variant_label")
+        if variant_label:
+            return f"{content_type} · {variant_label} · {prompt_type}"
+        return f"{content_type} · {prompt_type}"
+
     model_names = ", ".join(f"{m['label']} ({m['alias']})" for m in models) or "None"
     skipped_text = (
         " | ".join(f"{item['alias']}: {item['reason']}" for item in skipped_models)
@@ -1271,8 +1660,9 @@ def render_html(report_payload: dict[str, Any]) -> str:
     prompt_cards = "".join(
         f"""
         <article class="prompt-card">
-          <h3>{html_escape(str(prompt.get("content_type", "unknown")))} · {html_escape(str(prompt.get("prompt_type", "unknown")))}</h3>
+          <h3>{html_escape(_prompt_title(prompt))}</h3>
           <p class="detail"><strong>Source:</strong> {html_escape(str(prompt.get("prompt_source", "unknown")))}</p>
+          <p class="detail">{html_escape(str(prompt.get("prompt_variant_description", "")))}</p>
           <details open>
             <summary>System Prompt</summary>
             <pre>{html_escape(str(prompt.get("system_prompt", "")))}</pre>
@@ -1307,6 +1697,7 @@ def render_html(report_payload: dict[str, Any]) -> str:
                   <dl class="metrics">
                     <div><dt>Attempt</dt><dd>{cell["attempt"]}</dd></div>
                     <div><dt>Prompt</dt><dd>{html_escape(str(cell.get("prompt_type", "unknown")))}</dd></div>
+                    <div><dt>Variant</dt><dd>{html_escape(str(cell.get("prompt_variant_label") or cell.get("prompt_variant") or "default"))}</dd></div>
                     <div><dt>Latency</dt><dd>{cell["latency_ms"] if cell["latency_ms"] is not None else "n/a"} ms</dd></div>
                     <div><dt>Input Tokens</dt><dd>{usage.get("input_tokens") if usage.get("input_tokens") is not None else "n/a"}</dd></div>
                     <div><dt>Output Tokens</dt><dd>{usage.get("output_tokens") if usage.get("output_tokens") is not None else "n/a"}</dd></div>
@@ -1663,7 +2054,7 @@ def render_html(report_payload: dict[str, Any]) -> str:
       <p class="detail"><strong>Generated:</strong> {html_escape(report_payload["run_completed_at"])}</p>
       <p class="detail"><strong>Models:</strong> {html_escape(model_names)}</p>
       <p class="detail"><strong>Skipped Models:</strong> {html_escape(skipped_text)}</p>
-      <p class="detail"><strong>Config:</strong> content_types={html_escape(",".join(config["content_types"]))}, sample_size={config["sample_size"]}, recent_pool_size={config["recent_pool_size"]}, longform_template={html_escape(config["longform_template"])}, seed={html_escape(str(config["seed"]))}</p>
+      <p class="detail"><strong>Config:</strong> content_types={html_escape(",".join(config["content_types"]))}, sample_size={config["sample_size"]}, recent_pool_size={config["recent_pool_size"]}, longform_template={html_escape(config["longform_template"])}, news_prompt_variants={html_escape(",".join(config.get("news_prompt_variants") or [])) or "default"}, news_statuses={html_escape(",".join(config.get("news_statuses") or [])) or "default"}, require_article_body={html_escape(str(config.get("news_require_article_body", False)))}, seed={html_escape(str(config["seed"]))}</p>
       <div class="grid">
         <div class="stat"><div class="label">Items</div><div class="value">{aggregate["items_total"]}</div></div>
         <div class="stat"><div class="label">Cells Total</div><div class="value">{aggregate["cells_total"]}</div></div>
@@ -1718,6 +2109,21 @@ def main() -> int:
         content_types = validate_content_types(parse_csv_list(args.content_types))
         models = validate_models(parse_csv_list(args.models))
         content_ids = parse_content_ids(args.content_ids)
+        news_item_ids = parse_content_ids(args.news_item_ids)
+        news_statuses = parse_news_statuses(args.news_statuses)
+        news_prompt_variants = parse_news_prompt_variants(args.news_prompt_variants)
+        if news_prompt_variants and content_types != ["news"]:
+            raise ValueError("--news-prompt-variants is only supported with --content-types news")
+        if news_item_ids and content_types != ["news"]:
+            raise ValueError("--news-item-ids is only supported with --content-types news")
+        if news_item_ids and content_ids:
+            raise ValueError("--news-item-ids cannot be combined with --content-ids")
+        if news_prompt_variants and (
+            args.custom_news_system_prompt_file or args.custom_news_user_template_file
+        ):
+            raise ValueError(
+                "--news-prompt-variants cannot be combined with custom news prompt files"
+            )
         ensure_prompt_override_pair(
             args.custom_longform_system_prompt_file,
             args.custom_longform_user_template_file,
@@ -1765,16 +2171,25 @@ def main() -> int:
         custom_news_system_prompt=custom_news_system_prompt,
         custom_news_user_template=custom_news_user_template,
         custom_news_output_type=args.custom_news_output_type,
+        news_prompt_variants=news_prompt_variants,
     )
     selected_sources, missing_ids = select_sources(
         content_ids=content_ids,
+        news_item_ids=news_item_ids,
+        news_statuses=news_statuses,
+        news_require_article_body=args.news_require_article_body,
         content_types=content_types,
         recent_pool_size=args.recent_pool_size,
         sample_size=args.sample_size,
         seed=args.seed,
     )
     if missing_ids:
-        logger.warning("Missing content IDs: %s", ",".join(str(item) for item in missing_ids))
+        missing_label = "news item" if news_item_ids else "content"
+        logger.warning(
+            "Missing %s IDs: %s",
+            missing_label,
+            ",".join(str(item) for item in missing_ids),
+        )
 
     logger.info(
         "Generating report for items=%s models=%s timeout=%ss retries=%s",
@@ -1790,24 +2205,33 @@ def main() -> int:
     model_pairs = [(alias, model_spec_map[alias]) for alias in ordered_aliases]
 
     for source in selected_sources:
-        model_results_by_alias: dict[str, dict[str, Any]] = {}
+        model_results: list[dict[str, Any]] = []
         for alias, model_spec in model_pairs:
-            model_results_by_alias[alias] = run_single_model_call(
-                source=source,
-                model_alias=alias,
-                model_spec=model_spec,
-                timeout_seconds=args.timeout_seconds,
-                max_retries=args.max_retries,
-                retry_backoff_seconds=args.retry_backoff_seconds,
-                max_input_chars=args.max_input_chars,
-                longform_template=args.longform_template,
-                custom_longform_system_prompt=custom_longform_system_prompt,
-                custom_longform_user_template=custom_longform_user_template,
-                custom_longform_output_type=args.custom_longform_output_type,
-                custom_news_system_prompt=custom_news_system_prompt,
-                custom_news_user_template=custom_news_user_template,
-                custom_news_output_type=args.custom_news_output_type,
+            source_news_variants: list[str | None] = (
+                list(news_prompt_variants)
+                if source.content_type == "news" and news_prompt_variants
+                else [None]
             )
+            for news_prompt_variant in source_news_variants:
+                model_results.append(
+                    run_single_model_call(
+                        source=source,
+                        model_alias=alias,
+                        model_spec=model_spec,
+                        timeout_seconds=args.timeout_seconds,
+                        max_retries=args.max_retries,
+                        retry_backoff_seconds=args.retry_backoff_seconds,
+                        max_input_chars=args.max_input_chars,
+                        longform_template=args.longform_template,
+                        custom_longform_system_prompt=custom_longform_system_prompt,
+                        custom_longform_user_template=custom_longform_user_template,
+                        custom_longform_output_type=args.custom_longform_output_type,
+                        custom_news_system_prompt=custom_news_system_prompt,
+                        custom_news_user_template=custom_news_user_template,
+                        custom_news_output_type=args.custom_news_output_type,
+                        news_prompt_variant=news_prompt_variant,
+                    )
+                )
 
         item_results.append(
             {
@@ -1818,7 +2242,7 @@ def main() -> int:
                 "source_title": source.source_title,
                 "existing_summary_title": source.existing_summary_title,
                 "input_chars": source.input_chars,
-                "model_results": [model_results_by_alias[alias] for alias in ordered_aliases],
+                "model_results": model_results,
             }
         )
 
@@ -1833,11 +2257,15 @@ def main() -> int:
             "sample_size": args.sample_size,
             "seed": args.seed,
             "content_ids": content_ids,
+            "news_item_ids": news_item_ids,
+            "news_statuses": news_statuses,
+            "news_require_article_body": args.news_require_article_body,
             "timeout_seconds": args.timeout_seconds,
             "max_retries": args.max_retries,
             "max_input_chars": args.max_input_chars,
             "custom_longform_prompt_enabled": bool(custom_longform_system_prompt),
             "custom_news_prompt_enabled": bool(custom_news_system_prompt),
+            "news_prompt_variants": news_prompt_variants,
         },
         "available_models": [
             {

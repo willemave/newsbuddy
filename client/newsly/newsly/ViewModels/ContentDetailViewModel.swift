@@ -364,6 +364,9 @@ class ContentDetailViewModel: ObservableObject {
            let narrative = normalizedText(firstParagraph) {
             return narrative
         }
+        if content.apiContentType == .news {
+            return nil
+        }
         if let newsSummary = content.resolvedNewsSummaryText {
             return newsSummary
         }
