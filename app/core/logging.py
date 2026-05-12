@@ -4,8 +4,6 @@ import os
 import re
 import sys
 import traceback
-from collections.abc import Iterator
-from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -148,26 +146,6 @@ def bind_log_context(**context: Any) -> Token[dict[str, Any] | None]:
 def reset_log_context(token: Token[dict[str, Any] | None]) -> None:
     """Restore the previous structured log context."""
     _LOG_CONTEXT.reset(token)
-
-
-def clear_log_context() -> None:
-    """Clear the current structured log context."""
-    _LOG_CONTEXT.set({})
-
-
-def get_log_context() -> dict[str, Any]:
-    """Return the current structured log context."""
-    return dict(_LOG_CONTEXT.get() or {})
-
-
-@contextmanager
-def scoped_log_context(**context: Any) -> Iterator[None]:
-    """Temporarily bind structured logging context for the current scope."""
-    token = bind_log_context(**context)
-    try:
-        yield
-    finally:
-        reset_log_context(token)
 
 
 def _build_error_json_payload(record: logging.LogRecord) -> dict[str, Any]:

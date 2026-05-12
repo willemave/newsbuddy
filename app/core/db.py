@@ -1,8 +1,5 @@
-import subprocess
-import sys
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
-from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine, make_url
@@ -17,8 +14,6 @@ Base = declarative_base()
 
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_ALEMBIC_CONFIG_PATH = _PROJECT_ROOT / "migrations" / "alembic.ini"
 
 
 def init_db() -> None:
@@ -115,31 +110,3 @@ def get_readonly_db_session() -> Generator[Session]:
         yield db
     finally:
         db.close()
-
-
-def run_migrations() -> None:
-    """Run Alembic migrations to ensure database schema is up to date."""
-    try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "alembic",
-                "-c",
-                str(_ALEMBIC_CONFIG_PATH),
-                "upgrade",
-                "head",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=_PROJECT_ROOT,
-        )
-        logger.info("Database migrations completed successfully")
-        if result.stdout:
-            logger.debug(f"Migration output: {result.stdout}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Database migration failed: {e}")
-        if e.stderr:
-            logger.error(f"Migration error output: {e.stderr}")
-        raise RuntimeError("Failed to run database migrations") from e

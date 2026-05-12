@@ -21,7 +21,6 @@ from app.repositories.api_key_repository import (
 
 # HTTP Bearer token scheme for JWT authentication
 security = HTTPBearer(auto_error=False)
-optional_security = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
@@ -102,30 +101,6 @@ def require_user_id(user: User) -> int:
     if user_id is None:
         raise ValueError("Authenticated user is missing an id")
     return int(user_id)
-
-
-def get_optional_user(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(optional_security)],
-) -> User | None:
-    """
-    Get current user if authenticated, None otherwise.
-
-    Args:
-        db: Database session
-        credentials: Optional HTTP Bearer credentials
-
-    Returns:
-        User if authenticated, None otherwise
-    """
-    if credentials is None:
-        return None
-
-    try:
-        return get_current_user(credentials, db, request)
-    except HTTPException:
-        return None
 
 
 ADMIN_SESSION_COOKIE = "admin_session"

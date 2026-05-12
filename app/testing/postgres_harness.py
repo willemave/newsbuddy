@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import uuid4
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine, make_url
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql.schema import Table
 
 
@@ -84,19 +83,3 @@ def create_temporary_postgres_harness(
         _admin_engine=admin_engine,
         _schema_name=schema_name,
     )
-
-
-@contextmanager
-def open_temporary_postgres_session() -> Iterator[Session]:
-    """Yield one session from a temporary PostgreSQL harness."""
-    harness = create_temporary_postgres_harness()
-    session = harness.session_factory()
-    try:
-        yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-        harness.close()

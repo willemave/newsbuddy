@@ -11,7 +11,6 @@ from urllib.parse import parse_qs, urlsplit
 
 from app.core.logging import (
     bind_log_context,
-    clear_log_context,
     reset_log_context,
 )
 
@@ -50,11 +49,6 @@ def bound_log_context(**context: Any) -> Iterator[None]:
         yield
     finally:
         reset_log_context(token)
-
-
-def clear_bound_log_context() -> None:
-    """Clear any bound structured logging context."""
-    clear_log_context()
 
 
 def build_log_extra(

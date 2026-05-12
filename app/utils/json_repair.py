@@ -9,21 +9,6 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def strip_json_wrappers(text: str) -> str:
-    """Remove common formatting wrappers (e.g., markdown code fences) from JSON strings."""
-
-    cleaned = text.strip()
-    if cleaned.startswith("```json"):
-        cleaned = cleaned[7:]
-    elif cleaned.startswith("```"):
-        cleaned = cleaned[3:]
-
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-
-    return cleaned.strip()
-
-
 def _balance_structures(payload: str) -> str:
     """Append closing delimiters to balance objects and arrays."""
 

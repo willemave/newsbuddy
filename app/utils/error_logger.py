@@ -59,17 +59,6 @@ def log_scraper_event(
         SCRAPER_METRICS[service][metric] += 1
 
 
-def increment_scraper_metric(service: str, metric: str, amount: int = 1) -> None:
-    """Increment a scraper metric counter.
-
-    Args:
-        service: Name of the scraper service.
-        metric: Metric name to increment.
-        amount: Amount to increment by (default 1).
-    """
-    SCRAPER_METRICS[service][metric] += amount
-
-
 def get_scraper_metrics() -> dict[str, dict[str, int]]:
     """Return current scraper metric counters (primarily for tests).
 
