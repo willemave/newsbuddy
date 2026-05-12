@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.models.api.onboarding import OnboardingSuggestion
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import (
@@ -15,9 +17,8 @@ from app.models.db import (
 from app.services.queue import TaskType
 
 
-def test_onboarding_complete_creates_configs(
-    client, db_session, monkeypatch, stub_valid_feed_url, test_user
-) -> None:
+@pytest.mark.usefixtures("stub_valid_feed_url")
+def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, test_user) -> None:
     calls: list[tuple[str, dict]] = []
 
     class FakeQueueGateway:
@@ -349,11 +350,11 @@ def test_onboarding_complete_seeds_news(client, db_session, monkeypatch, test_us
     assert {entry.content_id for entry in seeded} >= {item.id for item in news_items}
 
 
+@pytest.mark.usefixtures("stub_valid_feed_url")
 def test_onboarding_complete_seeds_selected_feed_content(
     client,
     db_session,
     monkeypatch,
-    stub_valid_feed_url,
     test_user,
 ):
     monkeypatch.setattr("app.services.onboarding._load_curated_defaults", lambda: {})

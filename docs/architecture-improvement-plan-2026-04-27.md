@@ -97,7 +97,6 @@ TaskSpec(
     task_type=TaskType.ANALYZE_URL,
     queue=TaskQueue.CONTENT,
     payload_model=AnalyzeUrlPayload,
-    handler_key="analyze_url",
     dedupe=Dedupe.by_content_id,
 )
 ```
