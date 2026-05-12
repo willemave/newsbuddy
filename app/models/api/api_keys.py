@@ -30,12 +30,6 @@ class ApiKeySummaryResponse(BaseModel):
     created_by_admin_user_id: int | None = None
 
 
-class ApiKeyCreateRequest(BaseModel):
-    """Admin request to create an API key for a user."""
-
-    user_id: int = Field(..., gt=0)
-
-
 class ApiKeyCreateResponse(BaseModel):
     """Admin response that reveals a newly created API key once."""
 

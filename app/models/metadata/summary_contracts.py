@@ -65,12 +65,3 @@ def resolve_summary_kind(
     if parsed is not None:
         return parsed
     return infer_summary_kind(summary)
-
-
-def is_structured_summary_payload(
-    summary: Mapping[str, Any] | None,
-    raw_kind: Any,
-) -> bool:
-    """Return True when metadata contains a structured summary payload."""
-    kind = resolve_summary_kind(summary, raw_kind)
-    return kind == SummaryKind.LONG_STRUCTURED

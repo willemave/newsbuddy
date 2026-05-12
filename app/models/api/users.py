@@ -19,12 +19,6 @@ class UserBase(BaseModel):
     full_name: str | None = None
 
 
-class UserCreate(UserBase):
-    """Schema for creating a user."""
-
-    apple_id: str
-
-
 class UserResponse(UserBase):
     """Schema for user API responses."""
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import (
@@ -77,15 +76,3 @@ class BaseContentMetadata(BaseModel):
             "BulletedSummary, EditorialNarrativeSummary, LongformArtifactEnvelope, "
             "NewsSummary, DiscussionSummary, or dict"
         )
-
-
-# Article metadata from app/schemas/metadata.py
-class ProcessingError(BaseModel):
-    """Error information for failed processing."""
-
-    error: str = Field(..., description="Error message")
-    error_type: str = Field(default="unknown", pattern="^(retryable|non_retryable|unknown)$")
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-
-# Unified content wrapper retained from the legacy content domain layer

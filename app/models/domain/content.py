@@ -3,14 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    HttpUrl,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from app.constants import (
     SUMMARY_KIND_LONG_BULLETS,
@@ -28,20 +21,6 @@ from app.utils.summary_utils import extract_short_summary, extract_summary_text
 from app.utils.title_utils import resolve_content_display_title
 
 
-class ProcessingResult(BaseModel):
-    """Result from content processing."""
-
-    success: bool
-    content_type: ContentType
-    title: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    error_message: str | None = None
-    internal_links: list[str] = Field(default_factory=list)
-
-    model_config = ConfigDict(frozen=True)
-
-
-# Processing error from app/schemas/metadata.py
 class ContentData(BaseModel):
     """
     Unified content data model for passing between layers.
@@ -104,24 +83,6 @@ class ContentData(BaseModel):
                 except Exception as e:
                     raise ValueError(f"Invalid news metadata: {e}") from e
         return v
-
-    def to_article_metadata(self) -> ArticleMetadata:
-        """Convert metadata to ArticleMetadata."""
-        if self.content_type != ContentType.ARTICLE:
-            raise ValueError("Not an article")
-        return ArticleMetadata(**self.metadata)
-
-    def to_podcast_metadata(self) -> PodcastMetadata:
-        """Convert metadata to PodcastMetadata."""
-        if self.content_type != ContentType.PODCAST:
-            raise ValueError("Not a podcast")
-        return PodcastMetadata(**self.metadata)
-
-    def to_news_metadata(self) -> NewsMetadata:
-        """Convert metadata to NewsMetadata."""
-        if self.content_type != ContentType.NEWS:
-            raise ValueError("Not news content")
-        return NewsMetadata(**self.metadata)
 
     @property
     def summary(self) -> str | None:

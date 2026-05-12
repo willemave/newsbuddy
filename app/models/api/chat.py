@@ -281,15 +281,3 @@ class CreateChatSessionResponse(BaseModel):
     """Response wrapper for session creation."""
 
     session: ChatSessionSummaryDto
-
-
-class StartDigDeeperChatResponse(BaseModel):
-    """Response returned after starting a dig-deeper chat."""
-
-    session: ChatSessionSummaryDto
-    user_message: ChatMessageDto = Field(..., description="Seeded processing user message")
-    message_id: int = Field(..., description="Pending message identifier")
-    status: MessageProcessingStatus = Field(
-        default=MessageProcessingStatus.PROCESSING,
-        description="Current processing status for the seeded message",
-    )

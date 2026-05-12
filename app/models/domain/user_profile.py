@@ -1,20 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MAX_COUNCIL_EXPERTS = 3
 MIN_COUNCIL_EXPERTS = 2
-
-
-def build_default_council_personas() -> list[dict[str, Any]]:
-    """Return the default council persona presets for new users.
-
-    Returns an empty list — experts are personal and must be chosen by the user.
-    """
-
-    return []
 
 
 class CouncilPersonaConfig(BaseModel):

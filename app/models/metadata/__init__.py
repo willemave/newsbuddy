@@ -1,13 +1,12 @@
 # ruff: noqa: F401,F403
 
 from app.models.metadata.articles import ArticleMetadata
-from app.models.metadata.base import BaseContentMetadata, ProcessingError
+from app.models.metadata.base import BaseContentMetadata
 from app.models.metadata.insight_reports import InsightReportDigDeeperArea, InsightReportMetadata
 from app.models.metadata.news import (
     NewsAggregatorMetadata,
     NewsArticleMetadata,
     NewsMetadata,
-    TweetMetadata,
 )
 from app.models.metadata.podcasts import PodcastMetadata
 from app.models.metadata.summaries import *

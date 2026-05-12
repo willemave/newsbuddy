@@ -385,18 +385,6 @@ class InterestingExternalLink(BaseModel):
         return value.strip() if isinstance(value, str) else value
 
 
-class EditorialArchetypeReaction(BaseModel):
-    """Persona-style reaction block for long-form summaries."""
-
-    archetype: str = Field(..., min_length=1, max_length=80)
-    paragraphs: list[str] = Field(
-        ...,
-        min_length=2,
-        max_length=2,
-        description="Exactly two compact paragraphs for the archetype reaction.",
-    )
-
-
 class EditorialNarrativeSummary(BaseModel):
     """Narrative-first summary format with explicit key points and quotes."""
 
