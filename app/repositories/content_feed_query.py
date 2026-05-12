@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
@@ -11,15 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, ContentKnowledgeSave, ContentReadStatus, ContentStatusEntry
-
-
-@dataclass(frozen=True)
-class FeedQueryRows:
-    """Common query tuples for feed endpoints."""
-
-    content: Content
-    is_read: bool
-    is_saved_to_knowledge: bool
 
 
 def content_sort_timestamp_expr():

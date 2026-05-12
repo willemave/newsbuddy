@@ -66,11 +66,6 @@ def _query_tokens(query_text: str, *, min_length: int) -> list[str]:
     ]
 
 
-def content_search_supports_full_text(db: Session) -> bool:
-    """Return whether the active content search path uses PostgreSQL FTS."""
-    return _uses_postgres(db)
-
-
 def _content_summary_title_expr():
     return func.coalesce(
         cast(Content.content_metadata["summary"]["title"].as_string(), String),

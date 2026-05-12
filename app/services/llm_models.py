@@ -338,21 +338,3 @@ def is_deep_research_provider(provider: LLMProvider | str | None) -> bool:
         return False
     raw = provider.value if isinstance(provider, Enum) else str(provider)
     return raw == LLMProvider.DEEP_RESEARCH.value
-
-
-def is_deep_research_model(model_spec: str | None) -> bool:
-    """Check if the given model spec is for deep research.
-
-    Args:
-        model_spec: Model specification string.
-
-    Returns:
-        True if this is a deep research model.
-    """
-    if not model_spec:
-        return False
-    return (
-        model_spec.startswith("deep_research:")
-        or "deep-research" in model_spec
-        or model_spec == DEEP_RESEARCH_MODEL
-    )

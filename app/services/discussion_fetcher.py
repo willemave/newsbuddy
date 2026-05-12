@@ -85,14 +85,6 @@ class DiscussionPayload:
     error_message: str | None = None
 
 
-@dataclass(frozen=True)
-class DiscussionTarget:
-    """A discussion URL target with source metadata."""
-
-    label: str
-    url: str
-
-
 def fetch_and_store_discussion(
     db: Session,
     content_id: int,

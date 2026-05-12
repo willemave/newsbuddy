@@ -390,28 +390,6 @@ def exa_get_contents(
         return []
 
 
-def format_exa_results_for_context(results: list[ExaSearchResult]) -> str:
-    """Format Exa search results as context string for LLM.
-
-    Args:
-        results: List of search results.
-
-    Returns:
-        Formatted string suitable for including in LLM context.
-    """
-    if not results:
-        return "No web search results found."
-
-    lines = ["Web search results:"]
-    for i, result in enumerate(results, 1):
-        lines.append(f"\n[{i}] {result.title}")
-        lines.append(f"    URL: {result.url}")
-        if result.snippet:
-            lines.append(f"    {result.snippet[:300]}...")
-
-    return "\n".join(lines)
-
-
 def _record_exa_usage(
     *,
     model: str,

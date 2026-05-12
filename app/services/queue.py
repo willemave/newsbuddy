@@ -16,17 +16,14 @@ from app.pipeline.task_specs import TASK_SPECS, get_task_spec
 logger = get_logger(__name__)
 
 
-TASK_QUEUE_BY_TYPE: dict[TaskType, TaskQueue] = {
-    task_type: spec.queue for task_type, spec in TASK_SPECS.items()
-}
-DEDUPABLE_CONTENT_TASK_TYPES: set[TaskType] = {
-    task_type for task_type, spec in TASK_SPECS.items() if spec.dedupe_by_content
-}
 ACTIVE_TASK_STATUSES: tuple[str, str] = (
     TaskStatus.PENDING.value,
     TaskStatus.PROCESSING.value,
 )
 ACTIVE_DEDUPE_INDEX_WHERE = text("dedupe_key IS NOT NULL AND status IN ('pending', 'processing')")
+TASK_QUEUE_BY_TYPE: dict[TaskType, TaskQueue] = {
+    task_type: task_spec.queue for task_type, task_spec in TASK_SPECS.items()
+}
 
 
 def _utc_now() -> datetime:
@@ -146,17 +143,6 @@ class QueueService:
         if isinstance(queue_name, TaskQueue):
             return queue_name.value
         return TaskQueue(queue_name).value
-
-    @staticmethod
-    def _resolve_task_queue(
-        task_type: TaskType,
-        queue_name: TaskQueue | str | None = None,
-    ) -> str:
-        """Resolve the target queue for a task enqueue."""
-        normalized = QueueService._normalize_queue_name(queue_name)
-        if normalized:
-            return normalized
-        return TASK_QUEUE_BY_TYPE[task_type].value
 
     def _ordered_retry_counts(
         self,
@@ -785,24 +771,6 @@ class QueueService:
                 ),
             },
         }
-
-    def cleanup_old_tasks(self, days: int = 7):
-        """Remove completed tasks older than specified days."""
-        with get_db() as db:
-            cutoff_date = _utc_now() - timedelta(days=days)
-
-            deleted = (
-                db.query(ProcessingTask)
-                .filter(
-                    and_(
-                        ProcessingTask.status == TaskStatus.COMPLETED.value,
-                        ProcessingTask.completed_at < cutoff_date,
-                    )
-                )
-                .delete()
-            )
-
-            logger.info(f"Cleaned up {deleted} old completed tasks")
 
 
 # Global instance

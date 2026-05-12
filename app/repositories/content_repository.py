@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import and_, exists, select
-from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.contracts import ContentStatus
@@ -56,25 +55,3 @@ def apply_visibility_filters(query: Any, context: VisibilityContext) -> Any:
             context.is_in_inbox,
         )
     ).filter((Content.classification != "skip") | (Content.classification.is_(None)))
-
-
-def apply_read_filter(query: Any, read_filter: str, context: VisibilityContext) -> Any:
-    """Apply read/unread filters using correlated subqueries."""
-    if read_filter == "unread":
-        return query.filter(~context.is_read)
-    if read_filter == "read":
-        return query.filter(context.is_read)
-    return query
-
-
-def get_visible_content_query(
-    db: Session, context: VisibilityContext, include_flags: bool = False
-) -> Any:
-    """Return a base query for visible content."""
-    if include_flags:
-        return db.query(
-            Content,
-            context.is_read.label("is_read"),
-            context.is_saved_to_knowledge.label("is_saved_to_knowledge"),
-        )
-    return apply_visibility_filters(db.query(Content), context)

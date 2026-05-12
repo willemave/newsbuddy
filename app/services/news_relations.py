@@ -157,22 +157,6 @@ def title_matching_text(item: NewsItem) -> str:
     return f"Title: {title}" if title else ""
 
 
-def candidate_title_matching_text(item: NewsItem) -> str:
-    """Return cluster-aware title text for representative candidate matching."""
-    titles = _cluster_related_titles(item)
-    if not titles:
-        return ""
-    if len(titles) == 1:
-        return f"Title: {titles[0]}"
-    return "\n".join(
-        (
-            f"Title: {titles[0]}",
-            "Related titles:",
-            *[f"- {title}" for title in titles[1:]],
-        )
-    )
-
-
 def _candidate_title_similarity_scores(
     item: NewsItem,
     candidates: list[NewsItem],

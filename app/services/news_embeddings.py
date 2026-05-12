@@ -69,7 +69,3 @@ def encode_news_texts(texts: list[str]) -> np.ndarray:
         show_progress_bar=False,
     )
     return np.asarray(vectors, dtype=np.float32)
-
-
-def clear_news_embedding_cache() -> None:
-    get_news_embedding_model.cache_clear()

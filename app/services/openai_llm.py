@@ -12,10 +12,8 @@ from typing import BinaryIO
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.logging import get_logger
-from app.core.model_defaults import ARTICLE_PODCAST_SUMMARY_MODEL_NAME
 from app.core.settings import get_settings
 from app.services.langfuse_tracing import langfuse_trace_context
-from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 try:
@@ -26,23 +24,10 @@ except Exception:  # noqa: BLE001
 logger = get_logger(__name__)
 settings = get_settings()
 
-# Summarization defaults
-SUMMARY_MODEL_SPEC = ARTICLE_PODCAST_SUMMARY_MODEL_NAME
-
 # Transcription constants
 MAX_FILE_SIZE_MB = 25
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 CHUNK_DURATION_SECONDS = 10 * 60  # 10 minutes in seconds
-
-
-class OpenAISummarizationService(ContentSummarizer):
-    """OpenAI summarization wrapper using the shared ContentSummarizer."""
-
-    def __init__(self) -> None:
-        if not getattr(settings, "openai_api_key", None):
-            raise ValueError("OpenAI API key is required for LLM service")
-        super().__init__(provider_hint="openai", model_hint=SUMMARY_MODEL_SPEC)
-        logger.info("Initialized OpenAI summarization service (pydantic-ai)")
 
 
 class OpenAITranscriptionService:
@@ -362,7 +347,6 @@ class OpenAITranscriptionService:
 
 
 _openai_transcription_service: OpenAITranscriptionService | None = None
-_openai_summarization_service: OpenAISummarizationService | None = None
 
 
 def get_openai_transcription_service() -> OpenAITranscriptionService:
@@ -371,12 +355,3 @@ def get_openai_transcription_service() -> OpenAITranscriptionService:
     if _openai_transcription_service is None:
         _openai_transcription_service = OpenAITranscriptionService()
     return _openai_transcription_service
-
-
-def get_openai_summarization_service() -> OpenAISummarizationService:
-    """Get the global OpenAI summarization service instance."""
-    global _openai_summarization_service
-    if _openai_summarization_service is None:
-        _openai_summarization_service = OpenAISummarizationService()
-        _openai_summarization_service.default_models = get_content_summarizer().default_models
-    return _openai_summarization_service

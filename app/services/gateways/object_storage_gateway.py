@@ -26,7 +26,6 @@ class StoredObjectMetadata:
     bucket: str | None
     key: str
     size_bytes: int | None = None
-    etag: str | None = None
 
 
 class ObjectStorageGateway(ABC):
@@ -232,7 +231,6 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
             bucket=self._bucket,
             key=key,
             size_bytes=response.get("ContentLength"),
-            etag=str(response.get("ETag") or "").strip('"') or None,
         )
 
     def copy(self, *, source_key: str, destination_key: str) -> StoredObjectMetadata:

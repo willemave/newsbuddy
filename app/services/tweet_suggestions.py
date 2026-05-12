@@ -27,8 +27,6 @@ logger = get_logger(__name__)
 
 # Model for tweet generation
 TWEET_MODEL = TWEET_SUGGESTION_MODEL
-# Allow tweet suggestions for every content type (article, news, podcast, etc.).
-SUPPORTED_CONTENT_TYPES = set(ContentType)
 
 
 class TweetSuggestionLLM(BaseModel):

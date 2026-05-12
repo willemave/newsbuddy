@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
-from app.models.metadata.longform_artifacts import ArtifactType
 from app.services.longform_artifact_routing import ArtifactSourceHint
 
 ARTIFACT_TYPE_GUIDANCE: dict[str, str] = {
@@ -201,30 +200,4 @@ Source content:
 
 {content_payload}"""
 
-    return system_prompt, user_message
-
-
-def build_longform_artifact_repair_prompt(
-    *,
-    invalid_payload: str,
-    validation_error: str,
-    candidates: Sequence[ArtifactType],
-) -> tuple[str, str]:
-    """Build a targeted repair prompt for invalid artifact JSON."""
-    candidate_list = ", ".join(candidates)
-    system_prompt = f"""Repair a Newsly long-form artifact JSON payload.
-
-Return ONLY corrected JSON. Do not add commentary.
-
-Constraints:
-- artifact.type must be one of: {candidate_list}
-- selection_trace.selected and feed_preview.artifact_type must match artifact.type
-- ask must match artifact.type
-- Do not add envelope-level summary, key_points, source_details, or classification
-- Preserve the original meaning; only repair schema and missing required fields."""
-    user_message = f"""Validation error:
-{validation_error}
-
-Invalid JSON:
-{invalid_payload}"""
     return system_prompt, user_message

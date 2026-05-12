@@ -98,30 +98,10 @@ class TwitterCredentials:
 
 
 @dataclass(frozen=True)
-class TwitterCredentialsParams:
-    """Optional overrides for credential resolution."""
-
-    auth_token: str | None = None
-    ct0: str | None = None
-    user_agent: str | None = None
-
-
-@dataclass(frozen=True)
-class TwitterCredentialsResult:
-    """Result of resolving Twitter credentials."""
-
-    success: bool
-    credentials: TwitterCredentials | None = None
-    error: str | None = None
-
-
-@dataclass(frozen=True)
 class TweetExternalUrl:
     """External URL extracted from tweet entities."""
 
     expanded_url: str
-    display_url: str | None = None
-    tco_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,7 +114,6 @@ class TweetInfo:
     author_name: str
     created_at: str | None = None
     conversation_id: str | None = None
-    in_reply_to_status_id: str | None = None
     like_count: int | None = None
     retweet_count: int | None = None
     reply_count: int | None = None
@@ -197,51 +176,6 @@ def canonicalize_tweet_url(url_or_id: str) -> str | None:
         return canonical_tweet_url(candidate)
     tweet_id = extract_tweet_id(candidate)
     return canonical_tweet_url(tweet_id) if tweet_id else None
-
-
-def resolve_twitter_credentials(
-    params: TwitterCredentialsParams | None = None,
-) -> TwitterCredentialsResult:
-    """Resolve Twitter credentials from overrides or environment variables."""
-    auth_token = params.auth_token if params else None
-    ct0 = params.ct0 if params else None
-    user_agent = params.user_agent if params else None
-
-    settings = get_settings()
-    auth_token = auth_token or settings.twitter_auth_token or os.getenv("TWITTER_AUTH_TOKEN")
-    ct0 = ct0 or settings.twitter_ct0 or os.getenv("TWITTER_CT0")
-    user_agent = (
-        user_agent
-        or settings.twitter_user_agent
-        or os.getenv("TWITTER_USER_AGENT")
-        or DEFAULT_TWITTER_USER_AGENT
-    )
-
-    missing = []
-    if not auth_token:
-        missing.append("TWITTER_AUTH_TOKEN")
-    if not ct0:
-        missing.append("TWITTER_CT0")
-    if missing:
-        return TwitterCredentialsResult(
-            success=False,
-            error=f"Missing required Twitter credentials: {', '.join(missing)}",
-        )
-
-    if auth_token is None or ct0 is None:
-        return TwitterCredentialsResult(
-            success=False,
-            error="Missing required Twitter credentials",
-        )
-
-    return TwitterCredentialsResult(
-        success=True,
-        credentials=TwitterCredentials(
-            auth_token=auth_token.strip(),
-            ct0=ct0.strip(),
-            user_agent=user_agent.strip(),
-        ),
-    )
 
 
 def _resolve_query_id_cache_path(override: Path | None = None) -> Path:
@@ -725,8 +659,6 @@ def _extract_external_urls(legacy: dict[str, Any]) -> list[TweetExternalUrl]:
         results.append(
             TweetExternalUrl(
                 expanded_url=normalized,
-                display_url=url_info.get("display_url"),
-                tco_url=url_info.get("url"),
             )
         )
     return results
@@ -758,8 +690,6 @@ def _map_tweet_result(result: dict[str, Any] | None) -> TweetInfo | None:
         author_name=str(name),
         created_at=legacy.get("created_at"),
         conversation_id=legacy.get("conversation_id_str"),
-        in_reply_to_status_id=legacy.get("in_reply_to_status_id_str")
-        or legacy.get("in_reply_to_status_id"),
         like_count=legacy.get("favorite_count"),
         retweet_count=legacy.get("retweet_count"),
         reply_count=legacy.get("reply_count"),

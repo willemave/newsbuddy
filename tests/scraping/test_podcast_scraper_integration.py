@@ -160,11 +160,6 @@ class TestPodcastScraperIntegration:
         existing_content = Content()
         existing_content.url = "https://example.com/episodes/1"
 
-        def mock_first(url=None):
-            if url == "https://example.com/episodes/1":
-                return existing_content
-            return None
-
         mock_db.query.return_value.filter.return_value.first.side_effect = [
             existing_content,  # First episode exists
             None,  # Second episode doesn't exist

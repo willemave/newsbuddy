@@ -414,17 +414,6 @@ def get_deep_research_client() -> DeepResearchClient:
     return _client
 
 
-async def close_deep_research_client() -> None:
-    """Close the global deep research client.
-
-    Call this during application shutdown to release HTTP connections.
-    """
-    global _client
-    if _client is not None:
-        await _client.close()
-        _client = None
-
-
 async def process_deep_research_message(
     session_id: int,
     message_id: int,

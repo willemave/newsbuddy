@@ -14,22 +14,9 @@ from app.models.contracts import ContentType
 from app.scraping.base import BaseScraper
 from app.services.scraper_configs import build_feed_payloads, list_active_configs_by_type
 from app.utils.error_logger import log_scraper_event
-from app.utils.paths import resolve_config_directory, resolve_config_path
 
 logger = get_logger(__name__)
 _MISSING_CONFIG_WARNINGS: set[str] = set()
-
-
-def _resolve_podcast_config_path(config_path: str | Path | None) -> Path:
-    if config_path is None:
-        return resolve_config_path("PODCAST_CONFIG_PATH", "podcasts.yml")
-
-    candidate = Path(config_path).expanduser()
-    if candidate.is_absolute():
-        return candidate.resolve(strict=False)
-
-    base_dir = resolve_config_directory()
-    return (base_dir / candidate).resolve(strict=False)
 
 
 def _emit_missing_config_warning(resolved_path: Path) -> None:

@@ -103,11 +103,6 @@ class BaseScraper(ABC):
 
         return stats
 
-    def _save_items(self, items: list[dict[str, Any]]) -> int:
-        """Save scraped items to database. Returns saved count for backward compatibility."""
-        stats = self._save_items_with_stats(items)
-        return stats["saved"]
-
     def _save_items_with_stats(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         """Save scraped items to database and return detailed statistics."""
         saved_count = 0

@@ -465,11 +465,6 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
         raise
 
 
-def sync_x_bookmarks_for_user(db: Session, *, user_id: int) -> XSyncSummary:
-    """Backward-compatible wrapper for bookmark-first X sync."""
-    return sync_x_sources_for_user(db, user_id=user_id)
-
-
 def _sync_bookmark_channel(
     db: Session,
     *,

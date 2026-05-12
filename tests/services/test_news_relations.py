@@ -67,17 +67,6 @@ def _high_similarity_encode(texts: list[str]) -> np.ndarray:
     return np.ones((len(texts), 1), dtype=float)
 
 
-def _similarity_matrix(score: float) -> np.ndarray:
-    companion = max(0.0, 1.0 - score**2) ** 0.5
-    return np.array(
-        [
-            [1.0, 0.0],
-            [score, companion],
-        ],
-        dtype=float,
-    )
-
-
 def _uniform_similarity_encode(score: float):
     def _encode(texts: list[str]) -> np.ndarray:
         companion = max(0.0, 1.0 - score**2) ** 0.5

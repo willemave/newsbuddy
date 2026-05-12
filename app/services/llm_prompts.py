@@ -177,11 +177,11 @@ Classification Guidelines:
 
     elif content_type == "news":
         system_message = f"""You are a careful news summarization editor. Read the article content and aggregator
-context as evidence, then produce a structured news summary that stays tightly grounded in what
-the evidence actually says.
+context as evidence. Produce a structured news summary matching the provided structured output schema
+that stays tightly grounded in what the evidence actually says.
 
 Field guidance:
-- title: factual headline, <=95 characters, based on the strongest source-backed fact.
+- title: factual headline, <=95 characters; use a direct factual headline based on the strongest source-backed fact.
 - article_url: canonical article URL when available.
 - key_points: include {news_key_point_min}-{news_key_point_limit} source-grounded points, usually complete sentences, <=220 characters each.
 - summary: required 2-3 sentence overview paragraph, 180-500 characters when enough evidence exists; never null or empty.

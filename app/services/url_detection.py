@@ -39,10 +39,6 @@ YOUTUBE_HOSTS = {"youtube.com", "m.youtube.com", "youtu.be"}
 APPLE_PODCAST_HOSTS = {"podcasts.apple.com", "music.apple.com"}
 PODCAST_SHARE_ARTICLE_HOSTS = set(PODCAST_HOST_PLATFORMS) - APPLE_PODCAST_HOSTS
 
-# Platforms where we skip LLM analysis and use pattern-based detection
-# These are well-known platforms with predictable URL structures
-PLATFORMS_SKIP_LLM_ANALYSIS = set(PODCAST_HOST_PLATFORMS) | YOUTUBE_HOSTS
-
 HandlerContentType = Literal["article", "podcast"]
 
 
@@ -169,13 +165,6 @@ def _match_url_handler(parsed: ParseResult) -> UrlHandlerMatch | None:
             skip_llm_analysis=handler.skip_llm_analysis,
         )
     return None
-
-
-def get_url_handler_name(url: str) -> str | None:
-    """Return the matching handler name for a URL, if any."""
-    parsed = urlparse(url)
-    match = _match_url_handler(parsed)
-    return match.name if match else None
 
 
 def infer_content_type_and_platform(

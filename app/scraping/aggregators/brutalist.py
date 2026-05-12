@@ -18,7 +18,7 @@ selected topics.
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -168,12 +168,3 @@ class BrutalistReportAggregatorScraper(AggregatorScraper):
                 "discovery_time": self.now_iso(),
             },
         }
-
-    @staticmethod
-    def _normalize_topic(value: str) -> str:
-        # Tolerate spaces / capitalization in user-provided topic values.
-        return value.strip().lower().replace(" ", "-")
-
-    @staticmethod
-    def is_topic_url(url: str) -> bool:  # pragma: no cover - unused helper
-        return "/topic/" in urlparse(url).path
