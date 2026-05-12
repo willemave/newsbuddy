@@ -14,6 +14,7 @@ struct LongFormCard: View {
     var onMarkRead: (() -> Void)?
     var onToggleKnowledgeSave: (() -> Void)?
     var onDigDeeper: ((String) -> Void)?
+    var onOpen: (() -> Void)?
 
     enum Variant {
         case hero
@@ -43,6 +44,10 @@ struct LongFormCard: View {
                         endPoint: .bottom
                     )
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpen?()
+                }
 
             VStack(alignment: .leading, spacing: 0) {
                 // Badge + metadata
@@ -54,6 +59,10 @@ struct LongFormCard: View {
                             .font(.terracottaBodySmall)
                             .foregroundStyle(Color.onSurfaceSecondary)
                     }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onOpen?()
                 }
                 .padding(.bottom, 8)
 
@@ -68,6 +77,12 @@ struct LongFormCard: View {
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
+                .contentShape(Rectangle())
+                .highPriorityGesture(
+                    TapGesture().onEnded {
+                        onOpen?()
+                    }
+                )
                 .padding(.bottom, 8)
 
                 // Description (hero only gets more lines)
@@ -81,6 +96,12 @@ struct LongFormCard: View {
                         onDigDeeper: onDigDeeper
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        TapGesture().onEnded {
+                            onOpen?()
+                        }
+                    )
                     .padding(.bottom, 12)
                 }
 
@@ -92,6 +113,10 @@ struct LongFormCard: View {
                             .tracking(0.5)
                             .foregroundStyle(Color.onSurfaceSecondary)
                             .lineLimit(1)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                onOpen?()
+                            }
 
                         Spacer()
 

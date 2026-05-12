@@ -19,6 +19,7 @@ struct LongFormView: View {
     @State private var showMarkAllConfirmation = false
     @State private var isProcessingBulk = false
     @State private var hasLoadedBootstrapSources = false
+    @State private var pendingOpenContentId: Int?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -184,18 +185,34 @@ struct LongFormView: View {
                     visibleContentIds: allItems.prefix(15).map(\.id),
                     surface: .longForm
                 )
+            },
+            onOpen: {
+                openContent(content, allItems: allItems)
             }
         )
         .contentShape(RoundedRectangle(cornerRadius: CardMetrics.cardCornerRadius, style: .continuous))
         .onTapGesture {
-            ContentImagePrefetcher.prefetch(content)
-            onSelect(ContentDetailRoute(summary: content, allContentIds: allItems.map(\.id)))
+            openContent(content, allItems: allItems)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("long.row.\(content.id)")
         .onAppear {
             if content.id == allItems.last?.id {
                 viewModel.loadMoreTrigger.send(())
+            }
+        }
+    }
+
+    private func openContent(_ content: ContentSummary, allItems: [ContentSummary]) {
+        guard pendingOpenContentId != content.id else { return }
+        pendingOpenContentId = content.id
+        ContentImagePrefetcher.prefetch(content)
+        onSelect(ContentDetailRoute(summary: content, allContentIds: allItems.map(\.id)))
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if pendingOpenContentId == content.id {
+                pendingOpenContentId = nil
             }
         }
     }
