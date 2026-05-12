@@ -73,16 +73,11 @@ struct LongFormCard: View {
                     font: headlineUIFont,
                     lineLimit: variant == .hero ? 3 : 2,
                     lineBreakMode: .byTruncatingTail,
-                    onDigDeeper: onDigDeeper
+                    onDigDeeper: onDigDeeper,
+                    onTap: onOpen
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .contentShape(Rectangle())
-                .highPriorityGesture(
-                    TapGesture().onEnded {
-                        onOpen?()
-                    }
-                )
                 .padding(.bottom, 8)
 
                 // Description (hero only gets more lines)
@@ -93,15 +88,10 @@ struct LongFormCard: View {
                         font: summaryUIFont,
                         lineLimit: variant == .hero ? 3 : 2,
                         lineBreakMode: .byTruncatingTail,
-                        onDigDeeper: onDigDeeper
+                        onDigDeeper: onDigDeeper,
+                        onTap: onOpen
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(
-                        TapGesture().onEnded {
-                            onOpen?()
-                        }
-                    )
                     .padding(.bottom, 12)
                 }
 
@@ -134,9 +124,10 @@ struct LongFormCard: View {
                             Button {
                                 onToggleKnowledgeSave?()
                             } label: {
-                                Image(systemName: content.isSavedToKnowledge ? "books.vertical.fill" : "books.vertical")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(content.isSavedToKnowledge ? Color.terracottaPrimary : Color.onSurfaceSecondary)
+                                KnowledgeSaveIcon(
+                                    isSaved: content.isSavedToKnowledge,
+                                    unsavedColor: Color.onSurfaceSecondary
+                                )
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("long.action.knowledge.\(content.id)")

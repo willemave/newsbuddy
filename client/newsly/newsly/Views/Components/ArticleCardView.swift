@@ -288,9 +288,7 @@ struct ArticleCardView: View {
 
             // Save to Knowledge
             Button(action: onSaveToKnowledge) {
-                Image(systemName: content.isSavedToKnowledge ? "books.vertical.fill" : "books.vertical")
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundColor(content.isSavedToKnowledge ? .terracottaPrimary : .secondary)
+                KnowledgeSaveIcon(isSaved: content.isSavedToKnowledge)
             }
             .frame(width: 44, height: 44)
         }

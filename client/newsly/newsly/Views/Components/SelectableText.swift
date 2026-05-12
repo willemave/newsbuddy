@@ -13,6 +13,7 @@ struct SelectableText: UIViewRepresentable {
     let lineLimit: Int?
     let lineBreakMode: NSLineBreakMode
     var onDigDeeper: ((String) -> Void)?
+    var onTap: (() -> Void)?
 
     init(
         _ text: String,
@@ -20,7 +21,8 @@ struct SelectableText: UIViewRepresentable {
         font: UIFont = .preferredFont(forTextStyle: .callout),
         lineLimit: Int? = nil,
         lineBreakMode: NSLineBreakMode = .byWordWrapping,
-        onDigDeeper: ((String) -> Void)? = nil
+        onDigDeeper: ((String) -> Void)? = nil,
+        onTap: (() -> Void)? = nil
     ) {
         self.text = text
         self.textColor = textColor
@@ -28,6 +30,7 @@ struct SelectableText: UIViewRepresentable {
         self.lineLimit = lineLimit
         self.lineBreakMode = lineBreakMode
         self.onDigDeeper = onDigDeeper
+        self.onTap = onTap
     }
 
     func makeUIView(context: Context) -> DigDeeperTextView {
@@ -44,6 +47,12 @@ struct SelectableText: UIViewRepresentable {
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textView.dataDetectorTypes = [.link]
         textView.onDigDeeper = onDigDeeper
+        let tapRecognizer = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTap)
+        )
+        tapRecognizer.cancelsTouchesInView = false
+        textView.addGestureRecognizer(tapRecognizer)
         return textView
     }
 
@@ -54,6 +63,11 @@ struct SelectableText: UIViewRepresentable {
         uiView.textContainer.maximumNumberOfLines = lineLimit ?? 0
         uiView.textContainer.lineBreakMode = lineBreakMode
         uiView.onDigDeeper = onDigDeeper
+        context.coordinator.onTap = onTap
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTap: onTap)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: DigDeeperTextView, context: Context) -> CGSize? {
@@ -67,5 +81,17 @@ struct SelectableText: UIViewRepresentable {
         guard let lineLimit, let font else { return height }
         let maxHeight = ceil(font.lineHeight * CGFloat(lineLimit))
         return min(height, maxHeight)
+    }
+
+    final class Coordinator: NSObject {
+        var onTap: (() -> Void)?
+
+        init(onTap: (() -> Void)?) {
+            self.onTap = onTap
+        }
+
+        @objc func handleTap() {
+            onTap?()
+        }
     }
 }

@@ -31,6 +31,18 @@ def _clean_spoken_text(value: object, limit: int = MAX_NARRATION_POINT_CHARS) ->
     return f"{cleaned[:limit].rstrip()}..."
 
 
+def _extract_artifact_payload(summary_payload: object) -> dict[str, object] | None:
+    if not isinstance(summary_payload, dict):
+        return None
+    artifact = summary_payload.get("artifact")
+    if not isinstance(artifact, dict):
+        return None
+    payload = artifact.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
 def _extract_spoken_points(summary_payload: object, metadata: dict[str, object]) -> list[str]:
     points: list[str] = []
 
@@ -46,9 +58,15 @@ def _extract_spoken_points(summary_payload: object, metadata: dict[str, object])
             or _clean_spoken_text(candidate.get("text"))
             or _clean_spoken_text(candidate.get("insight"))
         )
+        heading = _clean_spoken_text(candidate.get("heading"), limit=100)
+        content = _clean_spoken_text(candidate.get("content"), limit=MAX_NARRATION_POINT_CHARS + 80)
         detail = _clean_spoken_text(candidate.get("detail"), limit=MAX_NARRATION_POINT_CHARS + 80)
         topic = _clean_spoken_text(candidate.get("topic"), limit=80)
 
+        if not text and heading and content:
+            text = f"{heading}: {content}"
+        elif not text:
+            text = heading or content
         if text and detail and detail not in text:
             text = f"{text} {detail}"
         if topic and text and topic.lower() not in text.lower():
@@ -113,13 +131,19 @@ def build_summary_narration(content: Content, *, title: str) -> str:
     if isinstance(summary_payload, str):
         narrative = _clean_spoken_text(summary_payload, limit=3_600)
     elif isinstance(summary_payload, dict):
-        narrative = (
-            _clean_spoken_text(summary_payload.get("editorial_narrative"), limit=3_600)
-            or _clean_spoken_text(summary_payload.get("overview"), limit=2_400)
-            or _clean_spoken_text(summary_payload.get("summary"), limit=2_400)
-            or _clean_spoken_text(summary_payload.get("hook"), limit=2_400)
-        )
-        takeaway = _clean_spoken_text(summary_payload.get("takeaway"), limit=700)
+        artifact_payload = _extract_artifact_payload(summary_payload)
+        if artifact_payload:
+            narrative = _clean_spoken_text(artifact_payload.get("overview"), limit=3_600)
+            takeaway = _clean_spoken_text(artifact_payload.get("takeaway"), limit=700)
+            summary_payload = artifact_payload
+        else:
+            narrative = (
+                _clean_spoken_text(summary_payload.get("editorial_narrative"), limit=3_600)
+                or _clean_spoken_text(summary_payload.get("overview"), limit=2_400)
+                or _clean_spoken_text(summary_payload.get("summary"), limit=2_400)
+                or _clean_spoken_text(summary_payload.get("hook"), limit=2_400)
+            )
+            takeaway = _clean_spoken_text(summary_payload.get("takeaway"), limit=700)
 
     if not narrative:
         narrative = _truncate(content.short_summary, 2_400)

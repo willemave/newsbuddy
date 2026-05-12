@@ -79,7 +79,8 @@ final class TabCoordinatorViewModel: ObservableObject {
                 rootTabFlowLogger.info("tab content load requested | tab=fast_news")
                 shortNewsVM.refreshTrigger.send(())
             } else {
-                rootTabFlowLogger.info("tab content already available | tab=fast_news")
+                rootTabFlowLogger.info("tab content refresh requested | tab=fast_news")
+                shortNewsVM.refreshInBackground()
             }
         case .longContent:
             if longContentVM.currentItems().isEmpty {

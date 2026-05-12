@@ -1141,7 +1141,7 @@ struct ContentDetailView: View {
                             .scaleEffect(0.8)
                             .frame(width: 44, height: 44)
                     } else {
-                        minimalActionIcon("books.vertical", overlaid: overlaid)
+                        knowledgeActionIcon(isSaved: false, overlaid: overlaid)
                     }
                 }
                 .disabled(isConverting)
@@ -1155,12 +1155,7 @@ struct ContentDetailView: View {
                 Button(action: {
                     Task { await viewModel.toggleKnowledgeSave() }
                 }) {
-                    let knowledgeColor: Color = content.isSavedToKnowledge ? .terracottaPrimary : (overlaid ? .white : .secondary)
-                    minimalActionIcon(
-                        content.isSavedToKnowledge ? "books.vertical.fill" : "books.vertical",
-                        color: knowledgeColor,
-                        overlaid: overlaid
-                    )
+                    knowledgeActionIcon(isSaved: content.isSavedToKnowledge, overlaid: overlaid)
                 }
                 .accessibilityIdentifier("content.action.knowledge")
             }
@@ -1228,6 +1223,18 @@ struct ContentDetailView: View {
             .shadow(color: overlaid ? .black.opacity(0.4) : .clear, radius: 3, x: 0, y: 1)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func knowledgeActionIcon(isSaved: Bool, overlaid: Bool) -> some View {
+        KnowledgeSaveIcon(
+            isSaved: isSaved,
+            savedColor: .terracottaPrimary,
+            unsavedColor: overlaid ? .white : .secondary
+        )
+        .shadow(color: overlaid ? .black.opacity(0.4) : .clear, radius: 3, x: 0, y: 1)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
     }
 
     // MARK: - Mini Sheet Components
