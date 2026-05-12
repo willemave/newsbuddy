@@ -50,9 +50,9 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     private let contentStack = UIStackView()
     private let titleLabel = UILabel()
     private let optionsStack = UIStackView()
-    private let knowledgeSaveToggleView = ToggleRowView(
-        title: "Save to knowledge",
-        description: "Download and summarize this item, then mark it read and save it to your knowledge library."
+    private let bookmarkOnlyToggleView = ToggleRowView(
+        title: "Bookmark only",
+        description: "Process and save this item to Knowledge, but mark it read so it skips Long Reads."
     )
     private let chatPromptStack = UIStackView()
     private let chatPromptLabel = UILabel()
@@ -121,7 +121,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
         contentStack.addArrangedSubview(titleLabel)
         contentStack.addArrangedSubview(optionsStack)
-        contentStack.addArrangedSubview(knowledgeSaveToggleView)
+        contentStack.addArrangedSubview(bookmarkOnlyToggleView)
         contentStack.addArrangedSubview(chatPromptStack)
         contentStack.addArrangedSubview(submitButton)
 
@@ -181,7 +181,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         }
         chatPromptStack.isHidden = linkHandlingMode != .chat
         updateSubmitButtonTitle()
-        updateKnowledgeSaveToggleAvailability()
+        updateBookmarkOnlyToggleAvailability()
         updateSubmitState()
     }
 
@@ -280,18 +280,18 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         }
     }
 
-    private func updateKnowledgeSaveToggleAvailability() {
+    private func updateBookmarkOnlyToggleAvailability() {
         if linkHandlingMode == .chat {
-            knowledgeSaveToggleView.isOn = true
-            knowledgeSaveToggleView.isEnabled = false
+            bookmarkOnlyToggleView.isOn = true
+            bookmarkOnlyToggleView.isEnabled = false
             return
         }
 
         let isAvailable = linkHandlingMode != .addFeed
-        if !isAvailable && knowledgeSaveToggleView.isOn {
-            knowledgeSaveToggleView.isOn = false
+        if !isAvailable && bookmarkOnlyToggleView.isOn {
+            bookmarkOnlyToggleView.isOn = false
         }
-        knowledgeSaveToggleView.isEnabled = isAvailable
+        bookmarkOnlyToggleView.isEnabled = isAvailable
     }
 
     private func updateSubmitButtonTitle() {
@@ -309,7 +309,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             "url": url.absoluteString,
             "crawl_links": linkHandlingMode == .addLinks && !shouldStartChat,
             "share_and_chat": shouldStartChat,
-            "save_to_knowledge_and_mark_read": shouldStartChat || knowledgeSaveToggleView.isOn,
+            "save_to_knowledge_and_mark_read": shouldStartChat || bookmarkOnlyToggleView.isOn,
             "subscribe_to_feed": linkHandlingMode == .addFeed && !shouldStartChat,
         ]
         if shouldStartChat {
