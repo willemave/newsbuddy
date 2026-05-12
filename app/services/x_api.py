@@ -103,14 +103,6 @@ class XList:
     name: str
 
 
-@dataclass(frozen=True)
-class XListsPage:
-    """Page of X lists returned from the API."""
-
-    lists: list[XList]
-    next_token: str | None = None
-
-
 def is_tweet_url(url: str) -> bool:
     """Return True when a URL is an X/Twitter status URL."""
     return extract_tweet_id(url) is not None
@@ -176,40 +168,6 @@ def get_authenticated_user(*, access_token: str, telemetry: dict[str, Any] | Non
     user_id = str(data.get("id") or "").strip()
     if not user_id:
         raise RuntimeError("X /users/me response missing user id")
-    _record_x_usage(
-        model="users.read", usage={"request_count": 1, "resource_count": 1}, telemetry=telemetry
-    )
-    return XUser(
-        id=user_id,
-        username=_optional_string(data.get("username")),
-        name=_optional_string(data.get("name")),
-    )
-
-
-def get_user_by_username(
-    *,
-    username: str,
-    access_token: str | None = None,
-    telemetry: dict[str, Any] | None = None,
-) -> XUser | None:
-    """Resolve a public X profile by username."""
-    cleaned = username.strip().lstrip("@")
-    if not cleaned:
-        raise ValueError("Username is required")
-
-    payload = _request_json(
-        "GET",
-        f"{X_API_BASE}/users/by/username/{cleaned}",
-        access_token=access_token,
-        allow_app_bearer=True,
-        params={"user.fields": X_USER_FIELDS},
-    )
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        return None
-    user_id = str(data.get("id") or "").strip()
-    if not user_id:
-        return None
     _record_x_usage(
         model="users.read", usage={"request_count": 1, "resource_count": 1}, telemetry=telemetry
     )
@@ -387,74 +345,6 @@ def fetch_bookmarks(
     )
 
 
-def fetch_reverse_chronological_timeline(
-    *,
-    access_token: str,
-    user_id: str,
-    pagination_token: str | None = None,
-    since_id: str | None = None,
-    max_results: int = 100,
-    exclude: list[str] | None = None,
-    telemetry: dict[str, Any] | None = None,
-) -> XTweetsPage:
-    """Fetch one page of the authenticated user's home timeline."""
-    if not user_id.strip():
-        raise ValueError("X user id is required for timeline sync")
-    clamped = max(5, min(max_results, 100))
-    params: dict[str, Any] = {
-        "max_results": clamped,
-        "expansions": X_TWEET_EXPANSIONS,
-        "tweet.fields": X_TWEET_FIELDS,
-        "user.fields": X_USER_FIELDS,
-        "media.fields": X_MEDIA_FIELDS,
-    }
-    if pagination_token:
-        params["pagination_token"] = pagination_token
-    if since_id:
-        params["since_id"] = since_id
-    if exclude:
-        params["exclude"] = ",".join(value for value in exclude if value)
-
-    return _fetch_tweets_page(
-        url=f"{X_API_BASE}/users/{user_id}/timelines/reverse_chronological",
-        access_token=access_token,
-        params=params,
-        telemetry=telemetry,
-    )
-
-
-def fetch_list_tweets(
-    *,
-    list_id: str,
-    access_token: str | None = None,
-    pagination_token: str | None = None,
-    max_results: int = 100,
-    telemetry: dict[str, Any] | None = None,
-) -> XTweetsPage:
-    """Fetch one page of tweets for a list."""
-    cleaned = list_id.strip()
-    if not cleaned:
-        raise ValueError("List id is required")
-    clamped = max(5, min(max_results, 100))
-    params: dict[str, Any] = {
-        "max_results": clamped,
-        "expansions": X_TWEET_EXPANSIONS,
-        "tweet.fields": X_TWEET_FIELDS,
-        "user.fields": X_USER_FIELDS,
-        "media.fields": X_MEDIA_FIELDS,
-    }
-    if pagination_token:
-        params["pagination_token"] = pagination_token
-
-    return _fetch_tweets_page(
-        url=f"{X_API_BASE}/lists/{cleaned}/tweets",
-        access_token=access_token,
-        allow_app_bearer=True,
-        params=params,
-        telemetry=telemetry,
-    )
-
-
 def fetch_user_tweets(
     *,
     user_id: str,
@@ -523,38 +413,6 @@ def search_recent_tweets(
     )
 
 
-def fetch_owned_lists(
-    *,
-    access_token: str,
-    user_id: str,
-    pagination_token: str | None = None,
-    max_results: int = 100,
-) -> XListsPage:
-    """Fetch one page of lists owned by a user."""
-    return _fetch_lists_page(
-        url=f"{X_API_BASE}/users/{user_id}/owned_lists",
-        access_token=access_token,
-        pagination_token=pagination_token,
-        max_results=max_results,
-    )
-
-
-def fetch_followed_lists(
-    *,
-    access_token: str,
-    user_id: str,
-    pagination_token: str | None = None,
-    max_results: int = 100,
-) -> XListsPage:
-    """Fetch one page of lists followed by a user."""
-    return _fetch_lists_page(
-        url=f"{X_API_BASE}/users/{user_id}/followed_lists",
-        access_token=access_token,
-        pagination_token=pagination_token,
-        max_results=max_results,
-    )
-
-
 def _fetch_tweets_page(
     *,
     url: str,
@@ -608,38 +466,6 @@ def _fetch_tweets_page(
         telemetry=telemetry,
     )
     return page
-
-
-def _fetch_lists_page(
-    *,
-    url: str,
-    access_token: str,
-    pagination_token: str | None,
-    max_results: int,
-) -> XListsPage:
-    clamped = max(5, min(max_results, 100))
-    params: dict[str, Any] = {"max_results": clamped}
-    if pagination_token:
-        params["pagination_token"] = pagination_token
-
-    payload = _request_json(
-        "GET",
-        url,
-        access_token=access_token,
-        params=params,
-    )
-    data = payload.get("data")
-    lists: list[XList] = []
-    if isinstance(data, list):
-        for item in data:
-            mapped = _map_list(item)
-            if mapped:
-                lists.append(mapped)
-
-    return XListsPage(
-        lists=lists,
-        next_token=_extract_next_token(payload.get("meta")),
-    )
 
 
 def _oauth_token_request(*, grant_type: str, extra: dict[str, str]) -> dict[str, Any]:
