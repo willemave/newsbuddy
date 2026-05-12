@@ -3,124 +3,135 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import (
-    Content,
-    ContentReadStatus,
-    ContentStatusEntry,
-    NewsItem,
-    ProcessingTask,
-)
-from app.models.db.users import User
 
 
-def _add_inbox_status(db_session, user_id: int | None, content_id: int | None) -> None:
-    assert user_id is not None
-    assert content_id is not None
-    db_session.add(
-        ContentStatusEntry(
-            user_id=user_id,
-            content_id=content_id,
-            status="inbox",
-        )
+def _now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _content(
+    content_factory,
+    *,
+    url: str,
+    content_type: ContentType = ContentType.ARTICLE,
+    status: ContentStatus = ContentStatus.COMPLETED,
+    content_metadata: dict[str, Any] | None = None,
+    **overrides: Any,
+):
+    return content_factory(
+        url=url,
+        content_type=content_type,
+        status=status,
+        content_metadata=content_metadata or {},
+        **overrides,
     )
+
+
+def _add_inbox_status(status_entry_factory, *, user, content) -> None:
+    status_entry_factory(user=user, content=content, status="inbox")
 
 
 def _add_active_task(
-    db_session,
+    processing_task_factory,
     *,
-    content_id: int | None,
+    content,
     task_type: str = "process_content",
     status: str = "pending",
 ) -> None:
-    assert content_id is not None
-    db_session.add(
-        ProcessingTask(
-            task_type=task_type,
-            content_id=content_id,
-            status=status,
-            queue_name="content",
-            payload={},
-        )
-    )
+    processing_task_factory(content=content, task_type=task_type, status=status)
 
 
-def test_processing_count_includes_news_and_new_status(client, db_session, test_user) -> None:
-    other_user = User(
+def _long_form_metadata(*, with_artwork: bool) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "summary": {
+            "title": "Visible Art",
+            "overview": (
+                "This overview is long enough to satisfy the minimum length requirement "
+                "for structured summaries."
+            ),
+            "bullet_points": [
+                {"text": "Key point one", "category": "key_finding"},
+                {"text": "Key point two", "category": "methodology"},
+                {"text": "Key point three", "category": "conclusion"},
+            ],
+            "quotes": [],
+            "topics": ["Testing"],
+        },
+        "summary_kind": "long_structured",
+        "summary_version": 1,
+    }
+    if with_artwork:
+        metadata["image_generated_at"] = "2026-01-01T00:00:00Z"
+    return metadata
+
+
+def test_processing_count_includes_news_and_new_status(
+    client,
+    db_session,
+    test_user,
+    user_factory,
+    content_factory,
+    status_entry_factory,
+    processing_task_factory,
+    news_item_factory,
+) -> None:
+    other_user = user_factory(
         apple_id="other_apple_id",
         email="other@example.com",
         full_name="Other User",
-        is_active=True,
     )
-    db_session.add(other_user)
-    db_session.commit()
-    db_session.refresh(other_user)
 
-    pending_article = Content(
+    pending_article = _content(
+        content_factory,
         url="https://example.com/article-1",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.PENDING.value,
-        content_metadata={},
+        content_type=ContentType.ARTICLE,
+        status=ContentStatus.PENDING,
     )
-    processing_podcast = Content(
+    processing_podcast = _content(
+        content_factory,
         url="https://example.com/podcast-1",
-        content_type=ContentType.PODCAST.value,
-        status=ContentStatus.PROCESSING.value,
-        content_metadata={},
+        content_type=ContentType.PODCAST,
+        status=ContentStatus.PROCESSING,
     )
-    pending_youtube = Content(
+    pending_youtube = _content(
+        content_factory,
         url="https://youtube.com/watch?v=abc123",
-        content_type=ContentType.UNKNOWN.value,
+        content_type=ContentType.UNKNOWN,
         platform="youtube",
-        status=ContentStatus.PENDING.value,
-        content_metadata={},
+        status=ContentStatus.PENDING,
     )
-    pending_news = Content(
+    pending_news = _content(
+        content_factory,
         url="https://example.com/news-1",
-        content_type=ContentType.NEWS.value,
-        status=ContentStatus.PENDING.value,
-        content_metadata={},
+        content_type=ContentType.NEWS,
+        status=ContentStatus.PENDING,
     )
-    pending_youtube_news = Content(
+    pending_youtube_news = _content(
+        content_factory,
         url="https://example.com/news-youtube",
-        content_type=ContentType.NEWS.value,
+        content_type=ContentType.NEWS,
         platform="youtube",
-        status=ContentStatus.PENDING.value,
-        content_metadata={},
+        status=ContentStatus.PENDING,
     )
-    completed_article = Content(
+    completed_article = _content(
+        content_factory,
         url="https://example.com/article-2",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.COMPLETED.value,
-        content_metadata={},
     )
-    pending_article_no_inbox = Content(
+    pending_article_no_inbox = _content(
+        content_factory,
         url="https://example.com/article-3",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.PENDING.value,
-        content_metadata={},
+        status=ContentStatus.PENDING,
     )
-    queued_news = Content(
+    queued_news = _content(
+        content_factory,
         url="https://example.com/news-queued",
-        content_type=ContentType.NEWS.value,
-        status=ContentStatus.NEW.value,
-        content_metadata={},
+        content_type=ContentType.NEWS,
+        status=ContentStatus.NEW,
     )
 
-    db_session.add_all(
-        [
-            pending_article,
-            processing_podcast,
-            pending_youtube,
-            pending_news,
-            pending_youtube_news,
-            completed_article,
-            pending_article_no_inbox,
-            queued_news,
-        ]
-    )
-    db_session.commit()
     for content in (
         pending_article,
         processing_podcast,
@@ -128,53 +139,43 @@ def test_processing_count_includes_news_and_new_status(client, db_session, test_
         pending_news,
         pending_youtube_news,
         completed_article,
-        pending_article_no_inbox,
         queued_news,
     ):
-        db_session.refresh(content)
+        _add_inbox_status(status_entry_factory, user=test_user, content=content)
+    _add_inbox_status(status_entry_factory, user=other_user, content=pending_article_no_inbox)
 
-    _add_inbox_status(db_session, test_user.id, pending_article.id)
-    _add_inbox_status(db_session, test_user.id, processing_podcast.id)
-    _add_inbox_status(db_session, test_user.id, pending_youtube.id)
-    _add_inbox_status(db_session, test_user.id, pending_news.id)
-    _add_inbox_status(db_session, test_user.id, pending_youtube_news.id)
-    _add_inbox_status(db_session, test_user.id, completed_article.id)
-    _add_inbox_status(db_session, test_user.id, queued_news.id)
-    _add_inbox_status(db_session, other_user.id, pending_article_no_inbox.id)
-    _add_active_task(db_session, content_id=pending_article.id)
-    _add_active_task(db_session, content_id=pending_youtube.id)
-    _add_active_task(db_session, content_id=pending_news.id)
-    _add_active_task(db_session, content_id=pending_youtube_news.id)
-    _add_active_task(db_session, content_id=queued_news.id)
-    _add_active_task(db_session, content_id=pending_article_no_inbox.id)
+    for content in (
+        pending_article,
+        pending_youtube,
+        pending_news,
+        pending_youtube_news,
+        queued_news,
+        pending_article_no_inbox,
+    ):
+        _add_active_task(processing_task_factory, content=content)
+
     processing_podcast.checked_out_by = "content-processor-1"
-    processing_podcast.checked_out_at = datetime.now(UTC).replace(tzinfo=None)
-    db_session.add_all(
-        [
-            NewsItem(
-                ingest_key="processing-news-1",
-                visibility_scope="global",
-                source_type="hackernews",
-                status="new",
-                ingested_at=datetime.now(UTC).replace(tzinfo=None),
-            ),
-            NewsItem(
-                ingest_key="processing-news-2",
-                visibility_scope="user",
-                owner_user_id=test_user.id,
-                user_scraper_config_id=10,
-                source_type="reddit",
-                status="processing",
-                ingested_at=datetime.now(UTC).replace(tzinfo=None),
-            ),
-            NewsItem(
-                ingest_key="processing-news-3",
-                visibility_scope="global",
-                source_type="reddit",
-                status="new",
-                ingested_at=datetime.now(UTC).replace(tzinfo=None),
-            ),
-        ]
+    processing_podcast.checked_out_at = _now()
+
+    news_item_factory(
+        ingest_key="processing-news-1",
+        status="new",
+        ingested_at=_now(),
+    )
+    news_item_factory(
+        ingest_key="processing-news-2",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        user_scraper_config_id=10,
+        source_type="reddit",
+        status="processing",
+        ingested_at=_now(),
+    )
+    news_item_factory(
+        ingest_key="processing-news-3",
+        source_type="reddit",
+        status="new",
+        ingested_at=_now(),
     )
     db_session.commit()
 
@@ -187,29 +188,28 @@ def test_processing_count_includes_news_and_new_status(client, db_session, test_
     assert payload["processing_count"] == 4
 
 
-def test_processing_count_excludes_orphaned_stale_rows(client, db_session, test_user) -> None:
-    stale_processing = Content(
+def test_processing_count_excludes_orphaned_stale_rows(
+    client,
+    test_user,
+    content_factory,
+    status_entry_factory,
+) -> None:
+    stale_processing = _content(
+        content_factory,
         url="https://example.com/stale-processing",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.PROCESSING.value,
-        created_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=5),
-        content_metadata={},
+        status=ContentStatus.PROCESSING,
+        created_at=_now() - timedelta(days=5),
     )
-    stale_pending = Content(
+    stale_pending = _content(
+        content_factory,
         url="https://example.com/stale-pending",
-        content_type=ContentType.PODCAST.value,
-        status=ContentStatus.PENDING.value,
-        created_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=3),
-        content_metadata={},
+        content_type=ContentType.PODCAST,
+        status=ContentStatus.PENDING,
+        created_at=_now() - timedelta(days=3),
     )
-    db_session.add_all([stale_processing, stale_pending])
-    db_session.commit()
-    db_session.refresh(stale_processing)
-    db_session.refresh(stale_pending)
 
-    _add_inbox_status(db_session, test_user.id, stale_processing.id)
-    _add_inbox_status(db_session, test_user.id, stale_pending.id)
-    db_session.commit()
+    _add_inbox_status(status_entry_factory, user=test_user, content=stale_processing)
+    _add_inbox_status(status_entry_factory, user=test_user, content=stale_pending)
 
     response = client.get("/api/content/stats/processing-count")
     assert response.status_code == 200
@@ -220,80 +220,66 @@ def test_processing_count_excludes_orphaned_stale_rows(client, db_session, test_
     assert payload["processing_count"] == 0
 
 
-def test_long_form_stats_counts(client, db_session, test_user) -> None:
-    other_user = User(
+def test_long_form_stats_counts(
+    client,
+    db_session,
+    test_user,
+    user_factory,
+    content_factory,
+    status_entry_factory,
+    processing_task_factory,
+    read_status_factory,
+) -> None:
+    other_user = user_factory(
         apple_id="other_user_apple_id",
         email="other@example.com",
         full_name="Other User",
-        is_active=True,
     )
-    db_session.add(other_user)
-    db_session.commit()
-    db_session.refresh(other_user)
 
-    completed_article_unread = Content(
+    completed_article_unread = _content(
+        content_factory,
         url="https://example.com/article-unread",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.COMPLETED.value,
         content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
     )
-    completed_podcast_read = Content(
+    completed_podcast_read = _content(
+        content_factory,
         url="https://example.com/podcast-read",
-        content_type=ContentType.PODCAST.value,
-        status=ContentStatus.COMPLETED.value,
+        content_type=ContentType.PODCAST,
         content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
     )
-    completed_article_extra = Content(
+    completed_article_extra = _content(
+        content_factory,
         url="https://example.com/article-extra",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.COMPLETED.value,
         content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
     )
-    completed_youtube = Content(
+    completed_youtube = _content(
+        content_factory,
         url="https://youtube.com/watch?v=xyz",
-        content_type=ContentType.UNKNOWN.value,
+        content_type=ContentType.UNKNOWN,
         platform="youtube",
-        status=ContentStatus.COMPLETED.value,
         content_metadata={"image_generated_at": "2026-01-01T00:00:00Z"},
     )
-    completed_news = Content(
+    completed_news = _content(
+        content_factory,
         url="https://example.com/news",
-        content_type=ContentType.NEWS.value,
-        status=ContentStatus.COMPLETED.value,
-        content_metadata={},
+        content_type=ContentType.NEWS,
     )
-    processing_article = Content(
+    processing_article = _content(
+        content_factory,
         url="https://example.com/article-processing",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.PROCESSING.value,
-        content_metadata={},
+        status=ContentStatus.PROCESSING,
     )
-    pending_podcast = Content(
+    pending_podcast = _content(
+        content_factory,
         url="https://example.com/podcast-pending",
-        content_type=ContentType.PODCAST.value,
-        status=ContentStatus.PENDING.value,
-        content_metadata={},
+        content_type=ContentType.PODCAST,
+        status=ContentStatus.PENDING,
     )
-    completed_other_user = Content(
+    completed_other_user = _content(
+        content_factory,
         url="https://example.com/article-other",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.COMPLETED.value,
-        content_metadata={},
     )
 
-    db_session.add_all(
-        [
-            completed_article_unread,
-            completed_podcast_read,
-            completed_article_extra,
-            completed_youtube,
-            completed_news,
-            processing_article,
-            pending_podcast,
-            completed_other_user,
-        ]
-    )
-    db_session.commit()
     for content in (
         completed_article_unread,
         completed_podcast_read,
@@ -302,29 +288,14 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
         completed_news,
         processing_article,
         pending_podcast,
-        completed_other_user,
     ):
-        db_session.refresh(content)
+        _add_inbox_status(status_entry_factory, user=test_user, content=content)
+    _add_inbox_status(status_entry_factory, user=other_user, content=completed_other_user)
 
-    _add_inbox_status(db_session, test_user.id, completed_article_unread.id)
-    _add_inbox_status(db_session, test_user.id, completed_podcast_read.id)
-    _add_inbox_status(db_session, test_user.id, completed_article_extra.id)
-    _add_inbox_status(db_session, test_user.id, completed_youtube.id)
-    _add_inbox_status(db_session, test_user.id, completed_news.id)
-    _add_inbox_status(db_session, test_user.id, processing_article.id)
-    _add_inbox_status(db_session, test_user.id, pending_podcast.id)
-    _add_inbox_status(db_session, other_user.id, completed_other_user.id)
-    _add_active_task(db_session, content_id=pending_podcast.id)
+    _add_active_task(processing_task_factory, content=pending_podcast)
     processing_article.checked_out_by = "content-processor-2"
-    processing_article.checked_out_at = datetime.now(UTC).replace(tzinfo=None)
-    db_session.commit()
-
-    db_session.add(
-        ContentReadStatus(
-            user_id=test_user.id,
-            content_id=completed_podcast_read.id,
-        )
-    )
+    processing_article.checked_out_at = _now()
+    read_status_factory(user=test_user, content=completed_podcast_read)
     db_session.commit()
 
     response = client.get("/api/content/stats/long-form")
@@ -336,65 +307,23 @@ def test_long_form_stats_counts(client, db_session, test_user) -> None:
 
 def test_long_form_stats_count_completed_long_form_without_generated_artwork_metadata(
     client,
-    db_session,
     test_user,
+    content_factory,
+    status_entry_factory,
 ) -> None:
-    metadata_free_article = Content(
+    metadata_free_article = _content(
+        content_factory,
         url="https://example.com/article-awaiting-art",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.COMPLETED.value,
-        content_metadata={
-            "summary": {
-                "title": "Awaiting Art",
-                "overview": (
-                    "This overview is long enough to satisfy the minimum length requirement "
-                    "for structured summaries."
-                ),
-                "bullet_points": [
-                    {"text": "Key point one", "category": "key_finding"},
-                    {"text": "Key point two", "category": "methodology"},
-                    {"text": "Key point three", "category": "conclusion"},
-                ],
-                "quotes": [],
-                "topics": ["Testing"],
-            },
-            "summary_kind": "long_structured",
-            "summary_version": 1,
-        },
+        content_metadata=_long_form_metadata(with_artwork=False),
     )
-    visible_article = Content(
+    visible_article = _content(
+        content_factory,
         url="https://example.com/article-visible-art",
-        content_type=ContentType.ARTICLE.value,
-        status=ContentStatus.COMPLETED.value,
-        content_metadata={
-            "summary": {
-                "title": "Visible Art",
-                "overview": (
-                    "This overview is long enough to satisfy the minimum length requirement "
-                    "for structured summaries."
-                ),
-                "bullet_points": [
-                    {"text": "Key point one", "category": "key_finding"},
-                    {"text": "Key point two", "category": "methodology"},
-                    {"text": "Key point three", "category": "conclusion"},
-                ],
-                "quotes": [],
-                "topics": ["Testing"],
-            },
-            "summary_kind": "long_structured",
-            "summary_version": 1,
-            "image_generated_at": "2026-01-01T00:00:00Z",
-        },
+        content_metadata=_long_form_metadata(with_artwork=True),
     )
 
-    db_session.add_all([metadata_free_article, visible_article])
-    db_session.commit()
-    db_session.refresh(metadata_free_article)
-    db_session.refresh(visible_article)
-
-    _add_inbox_status(db_session, test_user.id, metadata_free_article.id)
-    _add_inbox_status(db_session, test_user.id, visible_article.id)
-    db_session.commit()
+    _add_inbox_status(status_entry_factory, user=test_user, content=metadata_free_article)
+    _add_inbox_status(status_entry_factory, user=test_user, content=visible_article)
 
     response = client.get("/api/content/stats/long-form")
     assert response.status_code == 200
@@ -403,20 +332,15 @@ def test_long_form_stats_count_completed_long_form_without_generated_artwork_met
     assert payload["unread_count"] == 2
 
 
-def test_unread_counts_use_visible_news_items(client, db_session, test_user) -> None:
-    news_item = NewsItem(
+def test_unread_counts_use_visible_news_items(client, news_item_factory) -> None:
+    news_item_factory(
         ingest_key="news-unread",
-        visibility_scope="global",
-        source_type="hackernews",
         status="ready",
         article_title="News unread",
         summary_title="News unread",
         summary_text="Summary",
-        ingested_at=datetime.now(UTC).replace(tzinfo=None),
+        ingested_at=_now(),
     )
-    db_session.add(news_item)
-    db_session.commit()
-    db_session.refresh(news_item)
 
     response = client.get("/api/content/stats/unread-counts")
     assert response.status_code == 200
@@ -426,37 +350,30 @@ def test_unread_counts_use_visible_news_items(client, db_session, test_user) -> 
 
 def test_unread_counts_prefer_user_scoped_scraper_news_when_available(
     client,
-    db_session,
     test_user,
+    news_item_factory,
 ) -> None:
-    db_session.add(
-        NewsItem(
-            ingest_key="global-news-unread",
-            visibility_scope="global",
-            source_type="hackernews",
-            status="ready",
-            article_title="Global unread",
-            summary_title="Global unread",
-            summary_text="Summary",
-            ingested_at=datetime.now(UTC).replace(tzinfo=None),
-        )
+    news_item_factory(
+        ingest_key="global-news-unread",
+        status="ready",
+        article_title="Global unread",
+        summary_title="Global unread",
+        summary_text="Summary",
+        ingested_at=_now(),
     )
-    db_session.add(
-        NewsItem(
-            ingest_key="user-news-unread",
-            visibility_scope="user",
-            owner_user_id=test_user.id,
-            user_scraper_config_id=10,
-            source_type="reddit",
-            source_label="creativecoding",
-            status="ready",
-            article_title="User unread",
-            summary_title="User unread",
-            summary_text="Summary",
-            ingested_at=datetime.now(UTC).replace(tzinfo=None),
-        )
+    news_item_factory(
+        ingest_key="user-news-unread",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        user_scraper_config_id=10,
+        source_type="reddit",
+        source_label="creativecoding",
+        status="ready",
+        article_title="User unread",
+        summary_title="User unread",
+        summary_text="Summary",
+        ingested_at=_now(),
     )
-    db_session.commit()
 
     response = client.get("/api/content/stats/unread-counts")
     assert response.status_code == 200

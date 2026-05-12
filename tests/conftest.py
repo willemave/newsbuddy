@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import datetime
 from itertools import count
 from typing import Any
 
@@ -16,18 +16,21 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.core.db as core_db
 from app.core.security import create_access_token
 from app.main import app
-from app.models.db import (
-    ChatSession,
-    Content,
-    ContentKnowledgeSave,
-    ContentReadStatus,
-    ContentStatusEntry,
-    NewsItem,
-    ProcessingTask,
-    UserIntegrationConnection,
-)
+from app.models.db import Content
 from app.models.db.users import User
 from app.testing.postgres_harness import TemporaryPostgresHarness, create_temporary_postgres_harness
+from tests.support.builders import (
+    build_content_row,
+    create_chat_session_row,
+    create_content_knowledge_save_row,
+    create_content_read_status_row,
+    create_content_row,
+    create_content_status_entry_row,
+    create_integration_connection_row,
+    create_news_item_row,
+    create_processing_task_row,
+    create_user_row,
+)
 from tests.support.fixture_files import load_json_fixture
 
 
@@ -106,19 +109,7 @@ def user_factory(db_session: Session):
     sequence = count(1)
 
     def _create(**overrides: Any) -> User:
-        index = next(sequence)
-        user = User(
-            apple_id=f"test.apple.{index}",
-            email=f"user{index}@example.com",
-            full_name=f"Test User {index}",
-            is_active=True,
-        )
-        for key, value in overrides.items():
-            setattr(user, key, value)
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
-        return user
+        return create_user_row(db_session, index=next(sequence), **overrides)
 
     return _create
 
@@ -133,42 +124,13 @@ def test_user(user_factory):
     )
 
 
-def _default_content_metadata(*, title: str, content_type: str) -> dict[str, Any]:
-    """Build list/detail-friendly default metadata for common content types."""
-    del title, content_type
-    return {}
-
-
 @pytest.fixture
 def content_factory(db_session: Session):
     """Create persisted content rows with list/detail-friendly defaults."""
     sequence = count(1)
 
     def _create(**overrides: Any) -> Content:
-        index = next(sequence)
-        content_type = overrides.pop("content_type", "article")
-        title = overrides.pop("title", f"Test Content {index}")
-        content = Content(
-            content_type=content_type,
-            url=overrides.pop("url", f"https://example.com/content/{index}"),
-            source_url=overrides.pop("source_url", None),
-            title=title,
-            source=overrides.pop("source", "example.com"),
-            status=overrides.pop("status", "completed"),
-            platform=overrides.pop("platform", None),
-            classification=overrides.pop("classification", None),
-            publication_date=overrides.pop("publication_date", None),
-            content_metadata=overrides.pop(
-                "content_metadata",
-                _default_content_metadata(title=title, content_type=content_type),
-            ),
-        )
-        for key, value in overrides.items():
-            setattr(content, key, value)
-        db_session.add(content)
-        db_session.commit()
-        db_session.refresh(content)
-        return content
+        return create_content_row(db_session, index=next(sequence), **overrides)
 
     return _create
 
@@ -212,17 +174,16 @@ def status_entry_factory(db_session: Session):
         content_id: int | None = None,
         status: str = "inbox",
         **overrides: Any,
-    ) -> ContentStatusEntry:
-        entry = ContentStatusEntry(
-            user_id=user_id or (user.id if user is not None else None),
-            content_id=content_id or (content.id if content is not None else None),
+    ):
+        return create_content_status_entry_row(
+            db_session,
+            user=user,
+            user_id=user_id,
+            content=content,
+            content_id=content_id,
             status=status,
             **overrides,
         )
-        db_session.add(entry)
-        db_session.commit()
-        db_session.refresh(entry)
-        return entry
 
     return _create
 
@@ -238,16 +199,15 @@ def knowledge_save_factory(db_session: Session):
         content: Content | None = None,
         content_id: int | None = None,
         **overrides: Any,
-    ) -> ContentKnowledgeSave:
-        knowledge_save = ContentKnowledgeSave(
-            user_id=user_id or (user.id if user is not None else None),
-            content_id=content_id or (content.id if content is not None else None),
+    ):
+        return create_content_knowledge_save_row(
+            db_session,
+            user=user,
+            user_id=user_id,
+            content=content,
+            content_id=content_id,
             **overrides,
         )
-        db_session.add(knowledge_save)
-        db_session.commit()
-        db_session.refresh(knowledge_save)
-        return knowledge_save
 
     return _create
 
@@ -263,16 +223,15 @@ def read_status_factory(db_session: Session):
         content: Content | None = None,
         content_id: int | None = None,
         **overrides: Any,
-    ) -> ContentReadStatus:
-        entry = ContentReadStatus(
-            user_id=user_id or (user.id if user is not None else None),
-            content_id=content_id or (content.id if content is not None else None),
+    ):
+        return create_content_read_status_row(
+            db_session,
+            user=user,
+            user_id=user_id,
+            content=content,
+            content_id=content_id,
             **overrides,
         )
-        db_session.add(entry)
-        db_session.commit()
-        db_session.refresh(entry)
-        return entry
 
     return _create
 
@@ -289,24 +248,16 @@ def chat_session_factory(db_session: Session):
         content: Content | None = None,
         content_id: int | None = None,
         **overrides: Any,
-    ) -> ChatSession:
-        index = next(sequence)
-        session = ChatSession(
-            user_id=user_id or (user.id if user is not None else None),
-            content_id=content_id or (content.id if content is not None else None),
-            title=overrides.pop("title", f"Chat Session {index}"),
-            session_type=overrides.pop("session_type", "knowledge_chat"),
-            llm_model=overrides.pop("llm_model", "openai:gpt-5.5"),
-            llm_provider=overrides.pop("llm_provider", "openai"),
-            topic=overrides.pop("topic", None),
-            context_snapshot=overrides.pop("context_snapshot", None),
+    ):
+        return create_chat_session_row(
+            db_session,
+            index=next(sequence),
+            user=user,
+            user_id=user_id,
+            content=content,
+            content_id=content_id,
+            **overrides,
         )
-        for key, value in overrides.items():
-            setattr(session, key, value)
-        db_session.add(session)
-        db_session.commit()
-        db_session.refresh(session)
-        return session
 
     return _create
 
@@ -324,35 +275,19 @@ def processing_task_factory(db_session: Session):
         status: str = "pending",
         queue_name: str = "content",
         **overrides: Any,
-    ) -> ProcessingTask:
-        task = ProcessingTask(
+    ):
+        return create_processing_task_row(
+            db_session,
+            content=content,
+            content_id=content_id,
             task_type=task_type,
-            content_id=content_id or (content.id if content is not None else None),
-            payload=payload or {},
+            payload=payload,
             status=status,
             queue_name=queue_name,
             **overrides,
         )
-        db_session.add(task)
-        db_session.commit()
-        db_session.refresh(task)
-        return task
 
     return _create
-
-
-def _default_news_item_metadata(*, title: str, ingest_key: str) -> dict[str, Any]:
-    """Build router-visible default metadata for one news item."""
-    return {
-        "cluster": {
-            "member_ids": [ingest_key],
-            "source_labels": ["Hacker News"],
-            "domains": ["example.com"],
-            "discussion_snippets": ["Useful comment"],
-            "related_titles": [title],
-            "latest_member_ingested_at": datetime.now(UTC).isoformat(),
-        }
-    }
 
 
 @pytest.fixture
@@ -443,56 +378,8 @@ def news_item_factory(db_session: Session):
     """Create persisted news items with defaults that are visible in feed/detail APIs."""
     sequence = count(1)
 
-    def _create(**overrides: Any) -> NewsItem:
-        index = next(sequence)
-        ingest_key = overrides.pop("ingest_key", f"news-item-{index}")
-        title = overrides.pop("article_title", f"News Story {index}")
-        summary_title = overrides.pop("summary_title", title)
-        canonical_story_url = overrides.pop(
-            "canonical_story_url",
-            f"https://example.com/story-{index}",
-        )
-        article_url = overrides.pop("article_url", canonical_story_url)
-        discussion_url = overrides.pop(
-            "discussion_url",
-            f"https://news.ycombinator.com/item?id={1000 + index}",
-        )
-        source_external_id = overrides.pop("source_external_id", ingest_key)
-        ingested_at = overrides.pop("ingested_at", datetime.now(UTC).replace(tzinfo=None))
-        raw_metadata = _default_news_item_metadata(title=summary_title, ingest_key=ingest_key)
-        raw_metadata.update(overrides.pop("raw_metadata", {}))
-
-        item = NewsItem(
-            ingest_key=ingest_key,
-            visibility_scope=overrides.pop("visibility_scope", "global"),
-            owner_user_id=overrides.pop("owner_user_id", None),
-            platform=overrides.pop("platform", "hackernews"),
-            source_type=overrides.pop("source_type", "hackernews"),
-            source_label=overrides.pop("source_label", "Hacker News"),
-            source_external_id=source_external_id,
-            canonical_item_url=overrides.pop("canonical_item_url", discussion_url),
-            canonical_story_url=canonical_story_url,
-            article_url=article_url,
-            article_title=title,
-            article_domain=overrides.pop("article_domain", "example.com"),
-            discussion_url=discussion_url,
-            summary_title=summary_title,
-            summary_key_points=overrides.pop("summary_key_points", ["Point one"]),
-            summary_text=overrides.pop("summary_text", f"{summary_title} summary"),
-            raw_metadata=raw_metadata,
-            status=overrides.pop("status", "ready"),
-            representative_news_item_id=overrides.pop("representative_news_item_id", None),
-            cluster_size=overrides.pop("cluster_size", 1),
-            published_at=overrides.pop("published_at", None),
-            ingested_at=ingested_at,
-            processed_at=overrides.pop("processed_at", ingested_at),
-        )
-        for key, value in overrides.items():
-            setattr(item, key, value)
-        db_session.add(item)
-        db_session.commit()
-        db_session.refresh(item)
-        return item
+    def _create(**overrides: Any):
+        return create_news_item_row(db_session, index=next(sequence), **overrides)
 
     return _create
 
@@ -514,23 +401,15 @@ def integration_connection_factory(db_session: Session):
         user_id: int | None = None,
         provider: str = "x",
         **overrides: Any,
-    ) -> UserIntegrationConnection:
-        index = next(sequence)
-        connection = UserIntegrationConnection(
-            user_id=user_id or (user.id if user is not None else None),
+    ):
+        return create_integration_connection_row(
+            db_session,
+            index=next(sequence),
+            user=user,
+            user_id=user_id,
             provider=provider,
-            provider_user_id=overrides.pop("provider_user_id", f"{provider}-user-{index}"),
-            provider_username=overrides.pop("provider_username", f"{provider}_user_{index}"),
-            scopes=overrides.pop("scopes", []),
-            connection_metadata=overrides.pop("connection_metadata", {}),
-            is_active=overrides.pop("is_active", True),
+            **overrides,
         )
-        for key, value in overrides.items():
-            setattr(connection, key, value)
-        db_session.add(connection)
-        db_session.commit()
-        db_session.refresh(connection)
-        return connection
 
     return _create
 
@@ -709,7 +588,7 @@ def create_content_from_fixture(fixture_data: dict[str, Any]) -> Content:
     Returns:
         Content model instance ready to be added to database
     """
-    return Content(
+    return build_content_row(
         id=fixture_data.get("id"),
         content_type=fixture_data["content_type"],
         url=fixture_data["url"],
