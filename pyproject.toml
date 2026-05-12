@@ -67,6 +67,7 @@ dev = [
     "pytest-cov>=6.1.1",
     "pytest-mock>=3.14.1",
     "ruff>=0.11.12",
+    "vulture>=2.16",
 ]
 
 [tool.pytest.ini_options]
@@ -115,3 +116,35 @@ ignore = ["B008"]  # Depends() in function arguments is standard FastAPI pattern
 "migrations/alembic/versions/*" = ["E501"]
 "app/services/openai_llm.py" = ["E501", "SIM116"]
 "app/services/google_flash.py" = ["E501", "SIM116"]
+
+[tool.vulture]
+paths = [
+    "app",
+    "admin",
+    "scripts",
+    "tests/admin",
+    "tests/scripts",
+    "tests/services",
+    "tests/pipeline",
+    "tests/processing_strategies",
+    "tests/scraping",
+    "tests/queries",
+    "tests/models",
+    "tests/routers",
+    "tests/utils",
+    "vulture_whitelist.py",
+]
+ignore_decorators = [
+    "@app.*",
+    "@router.*",
+    "@llm_router.*",
+    "@agent.tool",
+    "@agent.system_prompt",
+    "@field_validator",
+    "@model_validator",
+    "@field_serializer",
+    "@computed_field",
+    "@pytest.fixture",
+]
+min_confidence = 60
+sort_by_size = true

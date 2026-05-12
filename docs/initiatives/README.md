@@ -28,8 +28,10 @@ Change-oriented docs that used to live under `docs/plans/`, `docs/specs/`, and `
 - `settings-ui-modernization/`
 - `share-sheet-instruction-processing/`
 - `swiftui-list-views-refactor/`
+- `test-simplification-2026-05/`
 - `test-refactor/`
 - `twitter-share-scraper/`
+- `vulture-dead-code-2026-05/`
 
 ## Concat command
 

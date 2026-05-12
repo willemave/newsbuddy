@@ -18,3 +18,8 @@ pre-commit:
     - name: mypy
       glob: "**/*.py"
       run: uv run --with mypy mypy {staged_files}
+
+post-commit:
+  jobs:
+    - name: vulture
+      run: uv run vulture
