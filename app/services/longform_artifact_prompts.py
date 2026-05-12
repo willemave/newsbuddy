@@ -40,17 +40,39 @@ ARTIFACT_TYPE_GUIDANCE: dict[str, str] = {
     ),
 }
 
+SHARED_EXTRAS_SCHEMA_HINT = (
+    '"evidence": ["..."], "mental_model": ["..."], '
+    '"counter_arguments": ["..."], "supporting_arguments": ["..."]'
+)
+
+
+def _extras_schema_hint(*fields: str) -> str:
+    return "{" + ", ".join((*fields, SHARED_EXTRAS_SCHEMA_HINT)) + "}"
+
+
 EXTRAS_SCHEMA_HINTS: dict[str, str] = {
-    "argument": '{"thesis": "...", "counterpoint": "..."}',
-    "mental_model": '{"what_it_explains": "...", "when_to_use_it": "..."}',
-    "playbook": '{"situation": "...", "outcome": "..."}',
-    "portrait": '{"background": "...", "current_focus": "..."}',
-    "briefing": (
-        '{"timeline": [{"when": "...", "what": "..."}], '
-        '"key_actors": [{"name": "...", "stake": "..."}], "what_to_watch": "..."}'
+    "argument": _extras_schema_hint('"thesis": "..."', '"counterpoint": "..."'),
+    "mental_model": _extras_schema_hint(
+        '"what_it_explains": "..."',
+        '"when_to_use_it": "..."',
     ),
-    "walkthrough": '{"what_youll_make": "...", "prereqs": ["..."], "time_or_cost": "..."}',
-    "findings": '{"question": "...", "method": "...", "limits": "..."}',
+    "playbook": _extras_schema_hint('"situation": "..."', '"outcome": "..."'),
+    "portrait": _extras_schema_hint('"background": "..."', '"current_focus": "..."'),
+    "briefing": _extras_schema_hint(
+        '"timeline": [{"when": "...", "what": "..."}]',
+        '"key_actors": [{"name": "...", "stake": "..."}]',
+        '"what_to_watch": "..."',
+    ),
+    "walkthrough": _extras_schema_hint(
+        '"what_youll_make": "..."',
+        '"prereqs": ["..."]',
+        '"time_or_cost": "..."',
+    ),
+    "findings": _extras_schema_hint(
+        '"question": "..."',
+        '"method": "..."',
+        '"limits": "..."',
+    ),
 }
 
 
@@ -112,6 +134,13 @@ Every payload must use this five-block shape:
 - extras: type-specific source facts, not commentary.
 - key_points: 4-8 items, each with heading and 1-2 sentences of real content.
 - takeaway: one sentence stating what the reader should leave with.
+
+Every extras object should include these shared reader-facing fields when the source supports them:
+- evidence: concrete facts, numbers, examples, or references.
+- mental_model: reusable model, frame, or mechanism the reader can apply.
+- counter_arguments: caveats, objections, limits, or competing interpretations.
+- supporting_arguments: claims or reasons that support the main takeaway.
+Use an empty array for shared fields with no grounded source material.
 
 Allowed extras shapes for the candidate types:
 {extras_guidance}

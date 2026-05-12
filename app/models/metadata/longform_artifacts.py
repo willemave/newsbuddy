@@ -50,22 +50,31 @@ class ArtifactKeyPoint(StrictArtifactModel):
     content: str = Field(..., min_length=20, max_length=900)
 
 
-class ArgumentExtras(StrictArtifactModel):
+class SharedArtifactExtras(StrictArtifactModel):
+    """Optional analysis fields shared across artifact-specific extras."""
+
+    evidence: list[str] = Field(default_factory=list, max_length=6)
+    mental_model: list[str] = Field(default_factory=list, max_length=6)
+    counter_arguments: list[str] = Field(default_factory=list, max_length=6)
+    supporting_arguments: list[str] = Field(default_factory=list, max_length=6)
+
+
+class ArgumentExtras(SharedArtifactExtras):
     thesis: str = Field(..., min_length=20, max_length=700)
     counterpoint: str = Field(..., min_length=20, max_length=700)
 
 
-class MentalModelExtras(StrictArtifactModel):
+class MentalModelExtras(SharedArtifactExtras):
     what_it_explains: str = Field(..., min_length=20, max_length=700)
     when_to_use_it: str = Field(..., min_length=20, max_length=700)
 
 
-class PlaybookExtras(StrictArtifactModel):
+class PlaybookExtras(SharedArtifactExtras):
     situation: str = Field(..., min_length=20, max_length=700)
     outcome: str = Field(..., min_length=20, max_length=700)
 
 
-class PortraitExtras(StrictArtifactModel):
+class PortraitExtras(SharedArtifactExtras):
     background: str = Field(..., min_length=20, max_length=700)
     current_focus: str = Field(..., min_length=20, max_length=700)
 
@@ -80,19 +89,19 @@ class BriefingKeyActor(StrictArtifactModel):
     stake: str = Field(..., min_length=5, max_length=500)
 
 
-class BriefingExtras(StrictArtifactModel):
+class BriefingExtras(SharedArtifactExtras):
     timeline: list[BriefingTimelineItem] = Field(..., min_length=1, max_length=12)
     key_actors: list[BriefingKeyActor] = Field(..., min_length=1, max_length=12)
     what_to_watch: str = Field(..., min_length=20, max_length=700)
 
 
-class WalkthroughExtras(StrictArtifactModel):
+class WalkthroughExtras(SharedArtifactExtras):
     what_youll_make: str = Field(..., min_length=20, max_length=700)
     prereqs: list[str] = Field(..., min_length=1, max_length=12)
     time_or_cost: str = Field(..., min_length=1, max_length=300)
 
 
-class FindingsExtras(StrictArtifactModel):
+class FindingsExtras(SharedArtifactExtras):
     question: str = Field(..., min_length=20, max_length=700)
     method: str = Field(..., min_length=20, max_length=700)
     limits: str = Field(..., min_length=20, max_length=700)
