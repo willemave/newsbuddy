@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from app.models.contracts import ContentStatus, ContentType
-from app.routers.api.content_responses import build_content_summary_response
+from app.routers.api.content_responses import (
+    build_content_detail_response,
+    build_content_summary_response,
+)
 
 
 def _make_content_row(**overrides) -> MagicMock:
@@ -197,6 +200,34 @@ class TestTopComment:
         )
 
         assert response.top_comment is None
+
+
+class TestContentDetailResponse:
+    """Tests for detail response normalization."""
+
+    def test_nullable_quote_context_does_not_fail_response_validation(self):
+        """Nullable quote attribution from longform artifacts is omitted from top-level quotes."""
+        domain = _make_domain_mock()
+        domain.quotes = [
+            {
+                "text": "The source of the data matters a lot while the teacher matters less.",
+                "context": None,
+            }
+        ]
+        row = _make_content_row()
+
+        response = build_content_detail_response(
+            content=row,
+            domain_content=domain,
+            is_read=False,
+            is_saved_to_knowledge=False,
+            detected_feed_data=None,
+            can_subscribe=False,
+        )
+
+        assert response.quotes == [
+            {"text": "The source of the data matters a lot while the teacher matters less."}
+        ]
 
 
 class TestSavedSource:

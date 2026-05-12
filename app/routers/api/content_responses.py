@@ -18,6 +18,29 @@ def _require_content_id(content_id: int | None) -> int:
     return content_id
 
 
+def _string_map_list(
+    items: list[dict[str, Any]],
+    *,
+    required_key: str,
+) -> list[dict[str, str]]:
+    """Normalize API string-map fields so nullable metadata does not 500 responses."""
+    normalized: list[dict[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        mapped: dict[str, str] = {}
+        for key, value in item.items():
+            if value is None:
+                continue
+            string_value = str(value).strip()
+            if not string_value:
+                continue
+            mapped[str(key)] = string_value
+        if required_key in mapped:
+            normalized.append(mapped)
+    return normalized
+
+
 def _extract_news_summary(domain_content: ContentData) -> dict[str, Any]:
     view = metadata_view(domain_content.metadata)
     fields = view.news_fields()
@@ -321,8 +344,8 @@ def build_content_detail_response(
 
     structured_summary = domain_content.structured_summary
     artifact_fields = _extract_longform_artifact_fields(domain_content.metadata)
-    bullet_points = domain_content.bullet_points
-    quotes = domain_content.quotes
+    bullet_points = _string_map_list(domain_content.bullet_points, required_key="text")
+    quotes = _string_map_list(domain_content.quotes, required_key="text")
     topics = domain_content.topics
     full_markdown = None
     metadata = metadata_view(domain_content.metadata)
