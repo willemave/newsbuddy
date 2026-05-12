@@ -9,17 +9,17 @@ struct UserMessageBubble: View {
     let message: ChatMessage
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Spacer(minLength: 40)
+        HStack(alignment: .top, spacing: 6) {
+            Spacer(minLength: 24)
 
             VStack(alignment: .trailing, spacing: 4) {
                 Text(message.content)
                     .font(.callout)
                     .foregroundStyle(.white)
                     .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.chatUserBubble)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.chatUserBubble.opacity(0.92))
                     .clipShape(bubbleShape)
 
                 if !message.formattedTime.isEmpty {
@@ -37,14 +37,15 @@ struct UserMessageBubble: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private var bubbleShape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(
-            topLeadingRadius: 16,
-            bottomLeadingRadius: 16,
-            bottomTrailingRadius: 16,
-            topTrailingRadius: 4
+            topLeadingRadius: 14,
+            bottomLeadingRadius: 14,
+            bottomTrailingRadius: 14,
+            topTrailingRadius: 3
         )
     }
 }

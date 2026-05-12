@@ -13,6 +13,7 @@ from app.services import news_processing as news_processing_module
 from app.services.news_article_bodies import NEWS_ARTICLE_BODY_REF_KEY
 from app.services.news_article_enrichment import enrich_news_item_article
 from app.services.news_processing import process_news_item
+from app.services.news_relevant_links import NEWS_ARTICLE_RELEVANT_LINKS_KEY
 
 
 def _require_id(value: int | None) -> int:
@@ -27,6 +28,47 @@ def _metadata(value: object | None) -> dict[str, Any]:
 
 def _summarizer(fn: object) -> Any:
     return cast(Any, SimpleNamespace(summarize=fn))
+
+
+def _relevant_links_news_item(
+    *,
+    ingest_key: str,
+    source_external_id: str,
+    article_url: str,
+    article_title: str,
+    discussion_url: str,
+) -> NewsItem:
+    return NewsItem(
+        ingest_key=ingest_key,
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id=source_external_id,
+        article_url=article_url,
+        article_title=article_title,
+        article_domain="example.com",
+        discussion_url=discussion_url,
+        raw_metadata={"excerpt": "Example excerpt"},
+        status="new",
+    )
+
+
+def _article_body_resolver(text: str) -> object:
+    class ArticleBodyResolver:
+        def resolve_text(self, *_args, **_kwargs):
+            return text
+
+    return ArticleBodyResolver()
+
+
+def _short_news_summary(item: NewsItem) -> NewsSummary:
+    return NewsSummary(
+        title=item.article_title or "Example story",
+        article_url=item.article_url,
+        key_points=["Point one"],
+        summary="Short summary.",
+    )
 
 
 def test_process_news_item_fails_on_invalid_summarizer_output(db_session) -> None:
@@ -509,6 +551,99 @@ def test_process_news_item_reuses_generated_short_summary(db_session) -> None:
     assert item.summary_title == "Generated news title"
     assert item.summary_key_points == ["Generated point"]
     assert item.summary_text == "Generated summary text."
+
+
+def test_process_news_item_persists_article_relevant_links(db_session, monkeypatch) -> None:
+    item = _relevant_links_news_item(
+        ingest_key="news-item-relevant-links",
+        source_external_id="relevant-links-1",
+        article_url="https://example.com/story-links",
+        article_title="Example story with links",
+        discussion_url="https://news.ycombinator.com/item?id=127",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    observed: dict[str, object] = {}
+
+    def _select_links(content_text, *, source_url, title, usage_persist):
+        observed["content_text"] = content_text
+        observed["source_url"] = source_url
+        observed["title"] = title
+        observed["usage_persist"] = usage_persist
+        return [
+            {
+                "url": "https://docs.example.com/api",
+                "title": "API docs",
+                "reason": "Explains the API surface.",
+                "source": "article",
+            }
+        ]
+
+    monkeypatch.setattr(
+        news_processing_module,
+        "get_news_item_article_body_resolver",
+        lambda: _article_body_resolver("Read the [API docs](https://docs.example.com/api)."),
+    )
+    monkeypatch.setattr(news_processing_module, "select_news_article_relevant_links", _select_links)
+
+    result = process_news_item(
+        db_session,
+        news_item_id=_require_id(item.id),
+        summarizer=_summarizer(lambda *_args, **_kwargs: _short_news_summary(item)),
+    )
+
+    db_session.refresh(item)
+    assert result.success is True
+    assert observed["content_text"] == "Read the [API docs](https://docs.example.com/api)."
+    assert observed["source_url"] == "https://example.com/story-links"
+    assert observed["title"] == "Example story with links"
+    assert _metadata(item.raw_metadata)[NEWS_ARTICLE_RELEVANT_LINKS_KEY] == [
+        {
+            "url": "https://docs.example.com/api",
+            "title": "API docs",
+            "reason": "Explains the API surface.",
+            "source": "article",
+        }
+    ]
+
+
+def test_process_news_item_does_not_persist_empty_article_relevant_links(
+    db_session,
+    monkeypatch,
+) -> None:
+    item = _relevant_links_news_item(
+        ingest_key="news-item-no-relevant-links",
+        source_external_id="relevant-links-2",
+        article_url="https://example.com/story-no-links",
+        article_title="Example story without selected links",
+        discussion_url="https://news.ycombinator.com/item?id=128",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    monkeypatch.setattr(
+        news_processing_module,
+        "get_news_item_article_body_resolver",
+        lambda: _article_body_resolver("Read the [API docs](https://docs.example.com/api)."),
+    )
+    monkeypatch.setattr(
+        news_processing_module,
+        "select_news_article_relevant_links",
+        lambda *_args, **_kwargs: [],
+    )
+
+    result = process_news_item(
+        db_session,
+        news_item_id=_require_id(item.id),
+        summarizer=_summarizer(lambda *_args, **_kwargs: _short_news_summary(item)),
+    )
+
+    db_session.refresh(item)
+    assert result.success is True
+    assert NEWS_ARTICLE_RELEVANT_LINKS_KEY not in _metadata(item.raw_metadata)
 
 
 def test_process_news_item_fills_missing_summary_text_from_existing_key_point(

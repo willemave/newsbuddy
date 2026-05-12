@@ -18,11 +18,14 @@ enum ShareContentOption {
     case full
 }
 
-enum DiscussionLinkAddState: Equatable {
+enum LinkReadLaterState: Equatable {
     case idle
     case adding
     case added
+    case failed
 }
+
+typealias DiscussionLinkAddState = LinkReadLaterState
 
 @MainActor
 class ContentDetailViewModel: ObservableObject {
@@ -37,7 +40,7 @@ class ContentDetailViewModel: ObservableObject {
     @Published var isSubscribingToFeed = false
     @Published var feedSubscriptionSuccess = false
     @Published var feedSubscriptionError: String?
-    @Published private var discussionLinkStates: [String: DiscussionLinkAddState] = [:]
+    @Published private var readLaterLinkStates: [String: LinkReadLaterState] = [:]
 
     private let contentService = ContentService.shared
     private let unreadCountService = UnreadCountService.shared
@@ -70,7 +73,7 @@ class ContentDetailViewModel: ObservableObject {
         self.contentBody = nil
         self.errorMessage = nil
         self.isLoading = true
-        discussionLinkStates = [:]
+        readLaterLinkStates = [:]
     }
     
     func loadContent() async {
@@ -245,7 +248,27 @@ class ContentDetailViewModel: ObservableObject {
     }
 
     func discussionLinkAddState(for linkID: String) -> DiscussionLinkAddState {
-        discussionLinkStates[linkID] ?? .idle
+        readLaterLinkStates[linkID] ?? .idle
+    }
+
+    func relevantLinkReadLaterState(for linkID: String) -> LinkReadLaterState {
+        readLaterLinkStates[linkID] ?? .idle
+    }
+
+    func addRelevantLinkToReadLater(_ link: RelevantLink) async {
+        guard let url = URL(string: link.url) else {
+            ToastService.shared.showError("Invalid link URL")
+            return
+        }
+
+        await addLinkToReadLater(
+            id: link.id,
+            url: url,
+            title: link.title,
+            alreadyExistsMessage: "Already in Read Later",
+            successMessage: "Added to Read Later",
+            errorPrefix: "Failed to add to Read Later"
+        )
     }
 
     func addDiscussionLinkToLongForm(_ link: DiscussionLink) async {
@@ -254,24 +277,42 @@ class ContentDetailViewModel: ObservableObject {
             return
         }
 
-        let linkID = link.id
-        guard discussionLinkAddState(for: linkID) == .idle else {
+        await addLinkToReadLater(
+            id: link.id,
+            url: url,
+            title: link.title,
+            alreadyExistsMessage: "Already in Long Form",
+            successMessage: "Added to Long Form",
+            errorPrefix: "Failed to add to Long Form"
+        )
+    }
+
+    private func addLinkToReadLater(
+        id linkID: String,
+        url: URL,
+        title: String?,
+        alreadyExistsMessage: String,
+        successMessage: String,
+        errorPrefix: String
+    ) async {
+        let state = readLaterLinkStates[linkID] ?? .idle
+        guard state != .adding && state != .added else {
             return
         }
 
-        discussionLinkStates[linkID] = .adding
+        readLaterLinkStates[linkID] = .adding
 
         do {
-            let response = try await submitLinkToLongFormHandler(url, link.title)
-            discussionLinkStates[linkID] = .added
+            let response = try await submitLinkToLongFormHandler(url, title)
+            readLaterLinkStates[linkID] = .added
             if response.alreadyExists {
-                ToastService.shared.show("Already in Long Form", type: .info)
+                ToastService.shared.show(alreadyExistsMessage, type: .info)
             } else {
-                ToastService.shared.showSuccess("Added to Long Form")
+                ToastService.shared.showSuccess(successMessage)
             }
         } catch {
-            discussionLinkStates.removeValue(forKey: linkID)
-            ToastService.shared.showError("Failed to add to Long Form: \(error.localizedDescription)")
+            readLaterLinkStates[linkID] = .failed
+            ToastService.shared.showError("\(errorPrefix): \(error.localizedDescription)")
         }
     }
 

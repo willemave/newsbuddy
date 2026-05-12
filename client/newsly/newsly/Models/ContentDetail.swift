@@ -14,12 +14,20 @@ private extension String {
     }
 }
 
-struct InterestingExternalLink: Identifiable, Hashable {
+struct RelevantLink: Identifiable, Hashable {
     let url: String
     let title: String?
     let reason: String
+    let source: String?
 
     var id: String { url }
+
+    init(url: String, title: String?, reason: String, source: String? = nil) {
+        self.url = url
+        self.title = title?.nonEmptyTrimmed
+        self.reason = reason
+        self.source = source?.nonEmptyTrimmed
+    }
 
     init?(metadata: [String: Any]) {
         guard let url = metadata["url"] as? String,
@@ -31,8 +39,11 @@ struct InterestingExternalLink: Identifiable, Hashable {
         self.title = (metadata["title"] as? String)?.nonEmptyTrimmed
         self.reason = (metadata["reason"] as? String)?.nonEmptyTrimmed
             ?? "Useful supporting context from the article."
+        self.source = (metadata["source"] as? String)?.nonEmptyTrimmed
     }
 }
+
+typealias InterestingExternalLink = RelevantLink
 
 struct ContentDetail: Codable, Identifiable {
     let id: Int
@@ -257,6 +268,10 @@ struct ContentDetail: Codable, Identifiable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private func normalizedURLKey(_ value: String?) -> String? {
+        normalizedText(value)?.lowercased()
+    }
+
     var resolvedNewsSummaryText: String? {
         normalizedText(newsMetadata?.summary?.summary)
             ?? normalizedText(newsSummary)
@@ -287,7 +302,7 @@ struct ContentDetail: Codable, Identifiable {
         return result
     }
 
-    var interestingExternalLinks: [InterestingExternalLink] {
+    var interestingExternalLinks: [RelevantLink] {
         guard let rawLinks = metadata["interesting_external_links"]?.value as? [[String: Any]] else {
             return []
         }
@@ -300,6 +315,40 @@ struct ContentDetail: Codable, Identifiable {
             }
             return link
         }
+    }
+
+    var newsRelevantLinks: [RelevantLink] {
+        guard contentTypeEnum == .news,
+              let rawLinks = metadata["relevant_links"]?.value as? [[String: Any]] else {
+            return []
+        }
+
+        var excluded = Set([
+            normalizedURLKey(url),
+            normalizedURLKey(newsArticleURL),
+            normalizedURLKey(newsDiscussionURL),
+            normalizedURLKey(newsMetadata?.discussionURL),
+            normalizedURLKey(newsMetadata?.article?.url)
+        ].compactMap { $0 })
+        var result: [RelevantLink] = []
+
+        for rawLink in rawLinks {
+            guard let link = RelevantLink(metadata: rawLink),
+                  let key = normalizedURLKey(link.url),
+                  !excluded.contains(key) else {
+                continue
+            }
+            excluded.insert(key)
+            result.append(link)
+        }
+        return result
+    }
+
+    var relevantLinks: [RelevantLink] {
+        if contentTypeEnum == .news {
+            return newsRelevantLinks
+        }
+        return interestingExternalLinks
     }
 
     // MARK: - Summary Type Detection

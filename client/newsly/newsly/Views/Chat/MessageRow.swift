@@ -38,6 +38,7 @@ struct MessageRow: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
+        .frame(maxWidth: .infinity, alignment: item.message.isUser ? .trailing : .leading)
     }
 
     private func retrySendButton(text: String) -> some View {

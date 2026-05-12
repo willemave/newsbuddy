@@ -231,6 +231,92 @@ final class ContentDetailTests: XCTestCase {
             detail.interestingExternalLinks[0].reason,
             "Primary source for the methodology."
         )
+        XCTAssertEqual(detail.relevantLinks.map(\.url), ["https://papers.example.org/model"])
+    }
+
+    func testNewsRelevantLinksDecodeAndExcludePrimaryURLs() throws {
+        let detail = try decodeDetail(
+            from: """
+            {
+              "id": 11,
+              "content_type": "news",
+              "url": "https://example.com/story-5",
+              "source_url": "https://news.ycombinator.com/item?id=11",
+              "discussion_url": "https://news.ycombinator.com/item?id=11",
+              "title": "Story title",
+              "display_title": "Display title",
+              "source": "Hacker News",
+              "status": "completed",
+              "error_message": null,
+              "retry_count": 0,
+              "metadata": {
+                "article": {
+                  "url": "https://example.com/story-5",
+                  "title": "Article title"
+                },
+                "discussion_url": "https://news.ycombinator.com/item?id=11",
+                "relevant_links": [
+                  {
+                    "url": "https://example.com/story-5",
+                    "title": "Primary article",
+                    "reason": "Should be excluded.",
+                    "source": "article"
+                  },
+                  {
+                    "url": "https://docs.example.com/api",
+                    "title": "API docs",
+                    "reason": "Explains the API surface.",
+                    "source": "article"
+                  },
+                  {
+                    "url": "https://github.com/example/project",
+                    "title": "Project repo",
+                    "reason": "Commenters pointed to the implementation.",
+                    "source": "community"
+                  }
+                ]
+              },
+              "created_at": "2026-04-02T10:00:00Z",
+              "updated_at": null,
+              "processed_at": "2026-04-02T10:05:00Z",
+              "checked_out_by": null,
+              "checked_out_at": null,
+              "publication_date": null,
+              "is_read": false,
+              "is_saved_to_knowledge": false,
+              "summary": null,
+              "short_summary": null,
+              "summary_kind": null,
+              "summary_version": null,
+              "structured_summary": null,
+              "bullet_points": [],
+              "quotes": [],
+              "topics": [],
+              "full_markdown": null,
+              "body_available": false,
+              "body_kind": null,
+              "body_format": null,
+              "news_article_url": "https://example.com/story-5",
+              "news_discussion_url": "https://news.ycombinator.com/item?id=11",
+              "news_key_points": [],
+              "news_summary": null,
+              "image_url": null,
+              "thumbnail_url": null,
+              "detected_feed": null,
+              "can_subscribe": false
+            }
+            """
+        )
+
+        XCTAssertEqual(
+            detail.relevantLinks.map(\.url),
+            [
+                "https://docs.example.com/api",
+                "https://github.com/example/project"
+            ]
+        )
+        XCTAssertEqual(detail.relevantLinks[0].source, "article")
+        XCTAssertEqual(detail.relevantLinks[1].source, "community")
     }
 
     func testLongformArtifactDetailSectionsUseReaderOrderAndPreferredExtras() throws {
@@ -243,7 +329,6 @@ final class ContentDetailTests: XCTestCase {
               "artifact": {
                 "type": "argument",
                 "payload": {
-                  "overview": "This overview stays in the raw payload but is not the lead detail section.",
                   "quotes": [
                     {
                       "text": "The first source quote gives the reader concrete evidence.",
@@ -270,6 +355,7 @@ final class ContentDetailTests: XCTestCase {
             """
         )
 
+        XCTAssertNil(artifact.artifact.payload.overview)
         XCTAssertEqual(
             artifact.detailSections.map(\.kind),
             [.takeaway, .keyPoints, .sourceQuotes, .extra]

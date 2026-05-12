@@ -108,9 +108,9 @@ class FindingsExtras(SharedArtifactExtras):
 
 
 class ArtifactPayloadBase(StrictArtifactModel):
-    """Universal five-block artifact payload."""
+    """Universal long-form artifact payload."""
 
-    overview: str = Field(..., min_length=60, max_length=1600)
+    overview: str | None = Field(None, min_length=60, max_length=1600)
     quotes: list[ArtifactQuote] = Field(..., min_length=2, max_length=5)
     key_points: list[ArtifactKeyPoint] = Field(..., min_length=4, max_length=8)
     takeaway: str = Field(..., min_length=20, max_length=300)

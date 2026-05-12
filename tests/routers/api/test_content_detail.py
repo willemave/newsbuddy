@@ -4,7 +4,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
-from app.models.db import Content
+from app.models.db import Content, NewsItemDiscussion
 from app.queries.get_content_body import MAX_CONTENT_BODY_RESPONSE_CHARS, TRUNCATED_BODY_NOTICE
 
 
@@ -322,3 +322,82 @@ def test_content_detail_rewrites_placeholder_news_metadata_titles(
     assert payload["display_title"] == "A concrete summary of the actual story."
     assert payload["metadata"]["article"]["title"] == "A concrete summary of the actual story."
     assert payload["metadata"]["summary"]["title"] == "A concrete summary of the actual story."
+
+
+def test_content_detail_includes_news_relevant_links(
+    client,
+    db_session,
+    news_item_factory,
+) -> None:
+    news_item = news_item_factory(
+        id=7441,
+        ingest_key="news-item-7441",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="7441",
+        canonical_item_url="https://news.ycombinator.com/item?id=7441",
+        canonical_story_url="https://example.com/story-7441",
+        article_url="https://example.com/story-7441",
+        article_title="Visible news story",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=7441",
+        summary_title="Visible news summary",
+        summary_key_points=["Point one"],
+        summary_text="Visible short-form summary",
+        raw_metadata={
+            "article_relevant_links": [
+                {
+                    "url": "https://docs.example.com/api",
+                    "title": "API docs",
+                    "reason": "Explains the API surface.",
+                }
+            ]
+        },
+        status="ready",
+        ingested_at=datetime(2026, 4, 2, 14, 58, tzinfo=UTC).replace(tzinfo=None),
+        processed_at=datetime(2026, 4, 2, 14, 58, tzinfo=UTC).replace(tzinfo=None),
+    )
+    db_session.add(
+        NewsItemDiscussion(
+            news_item_id=news_item.id,
+            platform="hackernews",
+            summary={
+                "overview": "Commenters focused on implementation details.",
+                "topics": [
+                    {
+                        "title": "Implementation",
+                        "summary": "Several comments compared implementation choices.",
+                    }
+                ],
+                "notable_links": [
+                    {
+                        "url": "https://github.com/example/project",
+                        "title": "Project repo",
+                        "reason": "Commenters pointed to the implementation.",
+                    }
+                ],
+                "representative_comments": [],
+            },
+        )
+    )
+    db_session.commit()
+
+    response = client.get(f"/api/content/{news_item.id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metadata"]["relevant_links"] == [
+        {
+            "url": "https://docs.example.com/api",
+            "title": "API docs",
+            "reason": "Explains the API surface.",
+            "source": "article",
+        },
+        {
+            "url": "https://github.com/example/project",
+            "title": "Project repo",
+            "reason": "Commenters pointed to the implementation.",
+            "source": "community",
+        },
+    ]

@@ -17,6 +17,10 @@ from app.models.metadata.summaries import NewsSummary
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.news_article_bodies import get_news_item_article_body_resolver
 from app.services.news_relations import reconcile_news_item_relation
+from app.services.news_relevant_links import (
+    NEWS_ARTICLE_RELEVANT_LINKS_KEY,
+    select_news_article_relevant_links,
+)
 from app.utils.news_titles import get_news_article_title, get_news_summary_title
 from app.utils.title_utils import clean_title, resolve_title_candidate
 from app.utils.url_utils import normalize_http_url
@@ -346,6 +350,27 @@ def process_news_item(
     try:
         article_body_resolver = get_news_item_article_body_resolver()
         article_body_text = article_body_resolver.resolve_text(db, news_item=item)
+        if article_body_text and not isinstance(
+            raw_metadata.get(NEWS_ARTICLE_RELEVANT_LINKS_KEY),
+            list,
+        ):
+            article_relevant_links = select_news_article_relevant_links(
+                article_body_text,
+                source_url=item.article_url or item.canonical_story_url,
+                title=get_news_article_title(raw_metadata) or clean_title(item.article_title),
+                usage_persist={
+                    "feature": "news_relevant_links",
+                    "operation": "news_processing.select_article_links",
+                    "source": "queue",
+                    "user_id": item.owner_user_id,
+                    "metadata": {
+                        "news_item_id": item.id,
+                        "source_type": item.source_type,
+                    },
+                },
+            )
+            if article_relevant_links:
+                raw_metadata[NEWS_ARTICLE_RELEVANT_LINKS_KEY] = article_relevant_links
 
         summary_to_persist = _extract_existing_summary(item)
         used_existing_summary = bool(

@@ -10,6 +10,7 @@ from app.queries.news_item_content_adapter import (
     present_news_item_detail,
     present_news_item_summary,
 )
+from app.services.news_relevant_links import NEWS_ARTICLE_RELEVANT_LINKS_KEY
 
 
 def _news_item() -> NewsItem:
@@ -87,3 +88,54 @@ def test_present_news_item_detail_builds_content_detail_without_content_metadata
     assert response.metadata["article"]["title"] == "Article title"
     assert response.metadata["summary"]["article_url"] == "https://example.com/story"
     assert response.is_read is False
+
+
+def test_present_news_item_detail_projects_relevant_links_without_related_links() -> None:
+    item = _news_item()
+    item.raw_metadata = {
+        "article": {"title": "Article title"},
+        "summary": {"classification": "to_read", "title": "Summary title"},
+        NEWS_ARTICLE_RELEVANT_LINKS_KEY: [
+            {
+                "url": "https://docs.example.com/api",
+                "title": "API docs",
+                "reason": "Explains the API surface.",
+            }
+        ],
+        "aggregator": {
+            "metadata": {
+                "related_links": [
+                    {"url": "https://related.example.com/story", "title": "Related story"}
+                ]
+            }
+        },
+    }
+
+    response = present_news_item_detail(
+        item,
+        is_read=False,
+        discussion_summary={
+            "notable_links": [
+                {
+                    "url": "https://github.com/example/project",
+                    "title": "Project repo",
+                    "reason": "Commenters pointed to the implementation.",
+                }
+            ]
+        },
+    )
+
+    assert response.metadata["relevant_links"] == [
+        {
+            "url": "https://docs.example.com/api",
+            "title": "API docs",
+            "reason": "Explains the API surface.",
+            "source": "article",
+        },
+        {
+            "url": "https://github.com/example/project",
+            "title": "Project repo",
+            "reason": "Commenters pointed to the implementation.",
+            "source": "community",
+        },
+    ]

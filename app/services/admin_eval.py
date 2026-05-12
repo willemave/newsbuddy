@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session, object_session
 
@@ -65,6 +65,8 @@ class EvalSourcePayload(BaseModel):
     url: str
     source_title: str | None
     existing_summary_title: str | None
+    existing_summary_key_points: list[str] = Field(default_factory=list)
+    existing_summary_text: str | None = None
     input_text: str
     input_chars: int
 

@@ -54,8 +54,6 @@ private struct ArtifactScaffold: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: ArtifactDesign.sectionSpacing) {
-            ArtifactHeader(artifact: artifact, accent: accent)
-
             ForEach(artifact.detailSections) { section in
                 ArtifactDetailSectionView(section: section, tint: accent)
             }
@@ -77,26 +75,6 @@ private struct ArtifactDetailSectionView: View {
             SourceQuotesSection(quotes: quotes, tint: tint)
         case .extra(let sections):
             ExtraSection(sections: sections, tint: tint)
-        }
-    }
-}
-
-private struct ArtifactHeader: View {
-    let artifact: LongformArtifactEnvelope
-    let accent: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(artifact.displayType.uppercased())
-                .font(.caption)
-                .fontWeight(.semibold)
-                .tracking(0.6)
-                .foregroundStyle(accent)
-
-            Text(artifact.oneLine)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

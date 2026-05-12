@@ -13,6 +13,7 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal, NamedTuple, cast
 
 from sqlalchemy import desc
@@ -102,6 +103,10 @@ NEWS_PROMPT_VARIANT_ORDER = (
     "reader_impact",
     "evidence_first",
     "feed_scan",
+    "key_point_depth",
+    "source_backed_four",
+    "decision_brief",
+    "fact_dense",
 )
 NEWS_PROMPT_VARIANT_USER_TEMPLATE = "Article & Aggregator Context:\n\n{content}"
 CUSTOM_NEWS_PROMPT_VARIANTS: dict[str, tuple[str, str, str]] = {
@@ -170,6 +175,91 @@ Rules:
 - Never include markdown, topics, quotes, numbering, or extra fields.
 """,
     ),
+    "key_point_depth": (
+        "Key Point Depth",
+        "Pushes each key point to carry a distinct role and avoid thin repeats.",
+        """You are a careful news editor optimizing short-form summaries for richer key points.
+Read the article content and aggregator context as evidence, then produce a structured summary
+matching the provided schema.
+
+Field guidance:
+- title: factual headline, <=95 characters, naming the actor and concrete development.
+- article_url: canonical article URL when available.
+- key_points: include 3-4 complete, source-grounded sentences, <=220 characters each; use 2 only when the evidence is genuinely too thin.
+- summary: required 2-3 sentence overview paragraph, 180-500 characters when enough evidence exists.
+- classification: use "to_read" for substantial signal and "skip" for thin, generic, duplicate, or promotional items.
+
+Rules:
+- Make each key point do different work: what changed, the evidence/details, why it matters, and any caveat or next step present in the source.
+- Prefer exact names, products, numbers, dates, locations, technical terms, and quoted claims over vague categories.
+- Do not repeat the title in the key points unless it adds a new fact.
+- Distinguish facts from claims, reactions, and speculation.
+- Never include markdown, numbering, topics, quotes, or fields outside the schema.
+""",
+    ),
+    "source_backed_four": (
+        "Source-Backed 4",
+        "Prefers four source-backed points with no invented filler.",
+        """You are a source-grounded news summarization editor. Use the article body first and
+aggregator context second. Produce a structured news summary that is useful in a compact feed.
+
+Field guidance:
+- title: direct factual headline, <=95 characters.
+- article_url: canonical article URL when available.
+- key_points: prefer 4 source-backed key points, each a complete sentence <=220 characters; fall back to 3 or 2 only when evidence is limited.
+- summary: required 2-3 sentence overview paragraph, 180-500 characters when the source supports it.
+- classification: use "to_read" for concrete, useful signal and "skip" for low-signal items.
+
+Rules:
+- Every key point must be traceable to a specific detail in the provided evidence.
+- Cover separate facts rather than rephrasing one claim.
+- Include concrete implications only when the source supports them.
+- Preserve exact companies, people, technologies, amounts, dates, and constraints.
+- Do not add background, market framing, markdown, numbering, topics, quotes, or extra fields.
+""",
+    ),
+    "decision_brief": (
+        "Decision Brief",
+        "Frames key points around whether the reader should open the item.",
+        """You are a news editor writing a decision brief for a busy reader. Read the provided
+evidence and produce a structured summary that helps the reader decide whether to open the item.
+
+Field guidance:
+- title: factual feed headline, <=95 characters.
+- article_url: canonical article URL when available.
+- key_points: include 3-4 distinct complete sentences, <=220 characters each; use 2 only for very sparse evidence.
+- summary: required natural 2-3 sentence overview paragraph, 180-500 characters when possible.
+- classification: use "to_read" when the item has concrete news, practical detail, or high discussion value; otherwise use "skip".
+
+Rules:
+- Key points should answer: what happened, why it matters now, who or what is affected, and what detail makes the item worth reading.
+- Surface numbers, timelines, product names, policy changes, benchmark results, funding details, or technical constraints when present.
+- Be explicit when the source is a claim, rumor, benchmark, opinion, or early report.
+- Avoid generic phrases like "raises questions" unless the evidence names the question.
+- Never include markdown, numbering, topics, quotes, or fields outside the schema.
+""",
+    ),
+    "fact_dense": (
+        "Fact Dense",
+        "Maximizes concrete facts per key point while staying concise.",
+        """You are a concise but fact-dense news summarizer. Read the article content and
+aggregator context, then produce a structured output that gives the feed more useful key points.
+
+Field guidance:
+- title: concrete factual headline, <=95 characters.
+- article_url: canonical article URL when available.
+- key_points: produce 3-4 fact-dense, non-overlapping complete sentences, <=220 characters each; only use 2 when there are not enough grounded facts.
+- summary: required 2-3 sentence overview paragraph, 180-500 characters when enough evidence exists.
+- classification: use "to_read" for items with clear informational value and "skip" for thin, promotional, or duplicate material.
+
+Rules:
+- Each key point should contain at least one concrete noun, named entity, metric, event, product, technical term, date, or constraint when available.
+- Remove filler and generic consequences; keep the strongest source-backed details.
+- Use aggregator discussion only for additional context or reaction, not as a substitute for article evidence.
+- Do not overstate certainty or infer motives not in the evidence.
+- Never include markdown, numbering, topics, quotes, or fields outside the schema.
+""",
+    ),
 }
 
 
@@ -224,6 +314,15 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Optional explicit news_items IDs, comma-separated. Only valid with --content-types news.",
+    )
+    parser.add_argument(
+        "--news-snapshot-file",
+        type=str,
+        default=None,
+        help=(
+            "Optional JSON snapshot of production news_items, either a raw row list or an "
+            "admin db query envelope. Only valid with --content-types news."
+        ),
     )
     parser.add_argument(
         "--news-statuses",
@@ -402,6 +501,20 @@ def parse_news_prompt_variants(raw_value: str | None) -> list[str]:
     if not aliases:
         raise ValueError("At least one news prompt variant is required")
     return aliases
+
+
+def parse_datetime_value(value: Any) -> datetime | None:
+    """Parse a JSON timestamp into a naive UTC-ish datetime for source ordering."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
 
 
 def validate_content_types(content_types: list[str]) -> list[EvalContentType]:
@@ -912,9 +1025,151 @@ def build_news_item_eval_source_payload(
         url=str(source_url),
         source_title=source_title,
         existing_summary_title=item.summary_title,
+        existing_summary_key_points=normalize_snapshot_key_points(item.summary_key_points),
+        existing_summary_text=clean_snapshot_text(item.summary_text),
         input_text=input_text,
         input_chars=len(input_text),
     )
+
+
+def clean_snapshot_text(value: Any) -> str | None:
+    """Normalize optional text from a production news snapshot."""
+    if not isinstance(value, str):
+        return None
+    cleaned = " ".join(value.split()).strip()
+    return cleaned or None
+
+
+def normalize_snapshot_key_points(value: Any) -> list[str]:
+    """Return key point text from string or structured key-point rows."""
+    if not isinstance(value, list):
+        return []
+    points: list[str] = []
+    for raw in value:
+        if isinstance(raw, dict):
+            text = clean_snapshot_text(raw.get("text") or raw.get("point"))
+        else:
+            text = clean_snapshot_text(raw)
+        if text:
+            points.append(text)
+    return points
+
+
+def load_news_snapshot_rows(snapshot_file: str) -> list[dict[str, Any]]:
+    """Load production news rows from a JSON snapshot or admin DB envelope."""
+    payload = json.loads(Path(snapshot_file).read_text(encoding="utf-8"))
+    rows: Any
+    if isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        data = payload.get("data")
+        rows = data.get("rows") if isinstance(data, dict) else payload.get("rows")
+    else:
+        rows = None
+
+    if not isinstance(rows, list):
+        raise ValueError("News snapshot must be a row list or admin db query envelope")
+    invalid_rows = [index for index, row in enumerate(rows, start=1) if not isinstance(row, dict)]
+    if invalid_rows:
+        raise ValueError(f"News snapshot includes non-object rows: {invalid_rows[:5]}")
+    return cast(list[dict[str, Any]], rows)
+
+
+def build_news_snapshot_eval_source_payload(row: dict[str, Any]) -> EvalSourcePayload | None:
+    """Build a report source payload from one serialized production news_item row."""
+    raw_id = row.get("id") or row.get("news_item_id")
+    if raw_id is None:
+        return None
+    try:
+        news_item_id = int(raw_id)
+    except (TypeError, ValueError):
+        return None
+
+    raw_metadata = row.get("raw_metadata")
+    if isinstance(raw_metadata, str):
+        try:
+            raw_metadata = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            raw_metadata = {}
+    if not isinstance(raw_metadata, dict):
+        raw_metadata = {}
+
+    article_title = clean_snapshot_text(row.get("article_title"))
+    if article_title is None:
+        article = raw_metadata.get("article")
+        if isinstance(article, dict):
+            article_title = clean_snapshot_text(article.get("title"))
+    summary_title = clean_snapshot_text(row.get("summary_title"))
+    if summary_title is None:
+        summary = raw_metadata.get("summary")
+        if isinstance(summary, dict):
+            summary_title = clean_snapshot_text(summary.get("title"))
+
+    item = SimpleNamespace(
+        id=news_item_id,
+        source_label=clean_snapshot_text(row.get("source_label")),
+        platform=clean_snapshot_text(row.get("platform")),
+        article_title=article_title,
+        article_domain=clean_snapshot_text(row.get("article_domain")),
+        article_url=clean_snapshot_text(row.get("article_url")),
+        canonical_story_url=clean_snapshot_text(row.get("canonical_story_url")),
+        canonical_item_url=clean_snapshot_text(row.get("canonical_item_url")),
+        discussion_url=clean_snapshot_text(row.get("discussion_url")),
+        summary_title=summary_title,
+        summary_key_points=normalize_snapshot_key_points(row.get("summary_key_points")),
+        summary_text=clean_snapshot_text(row.get("summary_text")),
+        raw_metadata=raw_metadata,
+        ingested_at=parse_datetime_value(row.get("ingested_at")),
+        created_at=parse_datetime_value(row.get("created_at")),
+        published_at=parse_datetime_value(row.get("published_at")),
+    )
+    article_body_text = clean_snapshot_text(row.get("article_body_text"))
+    input_text = _build_processing_prompt(
+        cast(NewsItem, item),
+        raw_metadata,
+        article_body_text=article_body_text,
+    )
+    if not input_text.strip():
+        return None
+
+    created_at = item.ingested_at or item.created_at or item.published_at
+    created_at_text = (
+        created_at.replace(tzinfo=UTC).isoformat() if created_at else datetime.now(UTC).isoformat()
+    )
+    source_url = (
+        item.article_url
+        or item.canonical_story_url
+        or item.canonical_item_url
+        or item.discussion_url
+        or "#"
+    )
+    return EvalSourcePayload(
+        content_id=news_item_id,
+        content_type="news",
+        created_at=created_at_text,
+        url=str(source_url),
+        source_title=item.article_title or item.summary_title,
+        existing_summary_title=item.summary_title,
+        existing_summary_key_points=list(item.summary_key_points),
+        existing_summary_text=item.summary_text,
+        input_text=input_text,
+        input_chars=len(input_text),
+    )
+
+
+def select_news_snapshot_eval_sources(
+    *,
+    snapshot_file: str,
+    sample_size: int,
+) -> tuple[list[EvalSourcePayload], list[int]]:
+    """Select eval sources from a serialized production news snapshot."""
+    rows = load_news_snapshot_rows(snapshot_file)
+    payloads = [
+        payload
+        for row in rows
+        if (payload := build_news_snapshot_eval_source_payload(row)) is not None
+    ]
+    return payloads[: min(sample_size, len(payloads))], []
 
 
 def select_news_item_eval_sources(
@@ -976,6 +1231,7 @@ def select_sources(
     *,
     content_ids: list[int],
     news_item_ids: list[int],
+    news_snapshot_file: str | None,
     news_statuses: list[str],
     news_require_article_body: bool,
     content_types: list[EvalContentType],
@@ -995,6 +1251,16 @@ def select_sources(
     Returns:
         Tuple of selected source payloads and missing IDs.
     """
+    if news_snapshot_file:
+        if content_types != ["news"]:
+            raise ValueError("--news-snapshot-file is only supported with --content-types news")
+        if content_ids or news_item_ids:
+            raise ValueError("--news-snapshot-file cannot be combined with explicit IDs")
+        return select_news_snapshot_eval_sources(
+            snapshot_file=news_snapshot_file,
+            sample_size=sample_size,
+        )
+
     if not content_ids and content_types == ["news"]:
         return select_news_item_eval_sources(
             news_item_ids=news_item_ids,
@@ -1601,16 +1867,6 @@ def _render_output_payload(payload: dict[str, Any]) -> str:
             )
         return "".join(blocks)
 
-    summary_text = _get_text(payload, keys=("summary", "overview", "takeaway"))
-    if summary_text:
-        blocks.append(
-            f"""
-            <section class="output-section">
-              <h6>Summary</h6>
-              {_render_paragraphs(summary_text)}
-            </section>
-            """
-        )
     key_points = _collect_text_items(payload.get("key_points"), keys=("text", "point"))
     if key_points:
         blocks.append(
@@ -1618,6 +1874,16 @@ def _render_output_payload(payload: dict[str, Any]) -> str:
             <section class="output-section">
               <h6>Key Points</h6>
               {_render_string_list(key_points)}
+            </section>
+            """
+        )
+    summary_text = _get_text(payload, keys=("summary", "overview", "takeaway"))
+    if summary_text:
+        blocks.append(
+            f"""
+            <section class="output-section summary-output">
+              <h6>Summary</h6>
+              {_render_paragraphs(summary_text)}
             </section>
             """
         )
@@ -1686,29 +1952,40 @@ def render_html(report_payload: dict[str, Any]) -> str:
             usage = cell["usage"] or {}
             output = cell["output"] if isinstance(cell.get("output"), dict) else {}
             payload_text = json.dumps(cell["output"], ensure_ascii=False, indent=2)
+            prompt_variant_label = str(
+                cell.get("prompt_variant_label") or cell.get("prompt_variant") or "Default"
+            )
+            key_point_count = len(
+                _collect_text_items(output.get("key_points"), keys=("text", "point"))
+            )
             model_columns.append(
                 f"""
                 <article class="model-card ok">
                   <header>
-                    <h4>{html_escape(cell["model_label"])}</h4>
-                    <p class="mono">{html_escape(cell["model_spec"])}</p>
-                    <p class="status ok">{html_escape(cell["status"])}</p>
+                    <div>
+                      <h4>{html_escape(prompt_variant_label)}</h4>
+                      <p class="key-point-count">{key_point_count} key points</p>
+                    </div>
                   </header>
-                  <dl class="metrics">
-                    <div><dt>Attempt</dt><dd>{cell["attempt"]}</dd></div>
-                    <div><dt>Prompt</dt><dd>{html_escape(str(cell.get("prompt_type", "unknown")))}</dd></div>
-                    <div><dt>Variant</dt><dd>{html_escape(str(cell.get("prompt_variant_label") or cell.get("prompt_variant") or "default"))}</dd></div>
-                    <div><dt>Latency</dt><dd>{cell["latency_ms"] if cell["latency_ms"] is not None else "n/a"} ms</dd></div>
-                    <div><dt>Input Tokens</dt><dd>{usage.get("input_tokens") if usage.get("input_tokens") is not None else "n/a"}</dd></div>
-                    <div><dt>Output Tokens</dt><dd>{usage.get("output_tokens") if usage.get("output_tokens") is not None else "n/a"}</dd></div>
-                    <div><dt>Total Tokens</dt><dd>{usage.get("total_tokens") if usage.get("total_tokens") is not None else "n/a"}</dd></div>
-                    <div><dt>Request Chars</dt><dd>{cell["request_chars"]}</dd></div>
-                    <div><dt>Req Tokens (est)</dt><dd>{cell["request_tokens_estimate"]}</dd></div>
-                    <div><dt>Output Chars</dt><dd>{cell["output_chars"]}</dd></div>
-                  </dl>
                   <section class="output-body">
                     {_render_output_payload(output)}
                   </section>
+                  <details class="run-details">
+                    <summary>Run details</summary>
+                    <dl class="metrics">
+                      <div><dt>Status</dt><dd>{html_escape(cell["status"])}</dd></div>
+                      <div><dt>Model</dt><dd>{html_escape(cell["model_spec"])}</dd></div>
+                      <div><dt>Attempt</dt><dd>{cell["attempt"]}</dd></div>
+                      <div><dt>Prompt</dt><dd>{html_escape(str(cell.get("prompt_type", "unknown")))}</dd></div>
+                      <div><dt>Latency</dt><dd>{cell["latency_ms"] if cell["latency_ms"] is not None else "n/a"} ms</dd></div>
+                      <div><dt>Input Tokens</dt><dd>{usage.get("input_tokens") if usage.get("input_tokens") is not None else "n/a"}</dd></div>
+                      <div><dt>Output Tokens</dt><dd>{usage.get("output_tokens") if usage.get("output_tokens") is not None else "n/a"}</dd></div>
+                      <div><dt>Total Tokens</dt><dd>{usage.get("total_tokens") if usage.get("total_tokens") is not None else "n/a"}</dd></div>
+                      <div><dt>Request Chars</dt><dd>{cell["request_chars"]}</dd></div>
+                      <div><dt>Req Tokens (est)</dt><dd>{cell["request_tokens_estimate"]}</dd></div>
+                      <div><dt>Output Chars</dt><dd>{cell["output_chars"]}</dd></div>
+                    </dl>
+                  </details>
                   <details>
                     <summary>Raw JSON</summary>
                     <pre>{html_escape(payload_text)}</pre>
@@ -1742,6 +2019,19 @@ def render_html(report_payload: dict[str, Any]) -> str:
             if model_columns
             else '<p class="all-failed">No successful model responses for this content item.</p>'
         )
+        existing_points = item.get("existing_summary_key_points") or []
+        existing_summary_text = str(item.get("existing_summary_text") or "").strip()
+        existing_summary_title = str(item.get("existing_summary_title") or "").strip()
+        existing_summary_block = ""
+        if existing_summary_title or existing_summary_text or existing_points:
+            existing_summary_block = f"""
+              <section class="existing-summary">
+                <h4>Current Live Key Points</h4>
+                {f"<h5>{html_escape(existing_summary_title)}</h5>" if existing_summary_title else ""}
+                {_render_string_list(cast(list[str], existing_points), class_name="output-list") if existing_points else ""}
+                {f"<details><summary>Live summary text</summary>{_render_paragraphs(existing_summary_text)}</details>" if existing_summary_text else ""}
+              </section>
+            """
         sections.append(
             f"""
             <section class="content-card">
@@ -1754,6 +2044,7 @@ def render_html(report_payload: dict[str, Any]) -> str:
                 <h3>{html_escape(item["source_title"] or "Untitled")}</h3>
                 <a href="{html_escape(item["url"])}" target="_blank">{html_escape(item["url"])}</a>
               </header>
+              {existing_summary_block}
               {model_grid}
               {failures_block}
             </section>
@@ -1786,16 +2077,15 @@ def render_html(report_payload: dict[str, Any]) -> str:
       margin: 0;
       font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: var(--text);
-      background: linear-gradient(180deg, #ffffff 0%, var(--bg) 220px);
+      background: var(--bg);
     }}
     .container {{ max-width: 1600px; margin: 0 auto; padding: 24px; }}
     .summary {{
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: 10px;
       padding: 18px;
       margin-bottom: 18px;
-      box-shadow: 0 8px 30px rgba(16, 24, 40, 0.06);
     }}
     h1 {{ margin: 0 0 10px 0; font-size: 28px; }}
     h2 {{ margin: 0 0 8px 0; font-size: 18px; }}
@@ -1838,44 +2128,57 @@ def render_html(report_payload: dict[str, Any]) -> str:
     .content-card {{
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: 10px;
       padding: 16px;
       margin-bottom: 14px;
-      box-shadow: 0 8px 30px rgba(16, 24, 40, 0.05);
     }}
     .content-header h3 {{ margin: 8px 0; font-size: 20px; }}
     .content-header a {{ color: var(--accent); text-decoration: none; word-break: break-all; }}
+    .existing-summary {{
+      margin-top: 12px;
+      border: 1px solid #d0d5dd;
+      border-radius: 10px;
+      padding: 12px;
+      background: #f8fafc;
+      display: grid;
+      gap: 8px;
+    }}
+    .existing-summary h4 {{
+      margin: 0;
+      font-size: 13px;
+      color: var(--muted);
+    }}
+    .existing-summary h5 {{ margin: 0; font-size: 16px; }}
+    .existing-summary p {{ margin: 0; font-size: 14px; line-height: 1.45; }}
     .meta {{ display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }}
     .pill {{
       border: 1px solid #84adff;
       color: #1849a9;
-      border-radius: 999px;
+      border-radius: 6px;
       padding: 2px 8px;
       font-weight: 600;
       background: #eff8ff;
     }}
     .model-grid {{
       margin-top: 14px;
-      display: flex;
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      gap: 12px;
-      padding-bottom: 6px;
-      scroll-snap-type: x proximity;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
     }}
     .model-card {{
-      flex: 0 0 min(460px, calc(100vw - 64px));
-      scroll-snap-align: start;
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 8px;
       padding: 12px;
       background: #fff;
-      max-height: 82vh;
-      overflow-y: auto;
     }}
-    .model-card.ok {{ background: var(--ok-bg); border-color: #6ce9a6; }}
+    .model-card.ok {{ background: #fff; border-color: var(--border); }}
     .model-card.error {{ background: var(--error-bg); border-color: #fda29b; }}
     .model-card h4 {{ margin: 0; font-size: 16px; }}
+    .key-point-count {{
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }}
     .mono {{ font-family: ui-monospace, Menlo, Monaco, "Cascadia Mono", monospace; font-size: 12px; color: var(--muted); margin: 4px 0 0; }}
     .status {{
       display: inline-block;
@@ -1892,8 +2195,13 @@ def render_html(report_payload: dict[str, Any]) -> str:
     .metrics {{
       margin: 10px 0;
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: minmax(0, 1fr);
       gap: 6px 10px;
+    }}
+    .metrics div {{
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 8px;
     }}
     .metrics dt {{ font-size: 12px; color: var(--muted); }}
     .metrics dd {{ margin: 0; font-size: 13px; font-weight: 600; }}
@@ -1912,8 +2220,6 @@ def render_html(report_payload: dict[str, Any]) -> str:
     .output-body h6 {{
       margin: 0 0 6px;
       font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
       color: var(--muted);
     }}
     .output-body p {{
@@ -2043,7 +2349,10 @@ def render_html(report_payload: dict[str, Any]) -> str:
     }}
     @media (max-width: 900px) {{
       .container {{ padding: 14px; }}
-      .model-card {{ flex-basis: calc(100vw - 40px); max-height: none; }}
+      .model-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    }}
+    @media (max-width: 640px) {{
+      .model-grid {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
@@ -2054,22 +2363,22 @@ def render_html(report_payload: dict[str, Any]) -> str:
       <p class="detail"><strong>Generated:</strong> {html_escape(report_payload["run_completed_at"])}</p>
       <p class="detail"><strong>Models:</strong> {html_escape(model_names)}</p>
       <p class="detail"><strong>Skipped Models:</strong> {html_escape(skipped_text)}</p>
-      <p class="detail"><strong>Config:</strong> content_types={html_escape(",".join(config["content_types"]))}, sample_size={config["sample_size"]}, recent_pool_size={config["recent_pool_size"]}, longform_template={html_escape(config["longform_template"])}, news_prompt_variants={html_escape(",".join(config.get("news_prompt_variants") or [])) or "default"}, news_statuses={html_escape(",".join(config.get("news_statuses") or [])) or "default"}, require_article_body={html_escape(str(config.get("news_require_article_body", False)))}, seed={html_escape(str(config["seed"]))}</p>
       <div class="grid">
         <div class="stat"><div class="label">Items</div><div class="value">{aggregate["items_total"]}</div></div>
         <div class="stat"><div class="label">Cells Total</div><div class="value">{aggregate["cells_total"]}</div></div>
         <div class="stat"><div class="label">Cells Success</div><div class="value">{aggregate["cells_successful"]}</div></div>
         <div class="stat"><div class="label">Cells Failed</div><div class="value">{aggregate["cells_failed"]}</div></div>
-        <div class="stat"><div class="label">Avg Latency (ms)</div><div class="value">{aggregate["avg_latency_ms"] if aggregate["avg_latency_ms"] is not None else "n/a"}</div></div>
-        <div class="stat"><div class="label">Avg In Tokens</div><div class="value">{aggregate["avg_input_tokens"] if aggregate["avg_input_tokens"] is not None else "n/a"}</div></div>
-        <div class="stat"><div class="label">Avg Out Tokens</div><div class="value">{aggregate["avg_output_tokens"] if aggregate["avg_output_tokens"] is not None else "n/a"}</div></div>
       </div>
-      <section class="prompt-section">
-        <h2>Prompts Used</h2>
+      <details class="run-details">
+        <summary>Run config</summary>
+        <p class="detail">content_types={html_escape(",".join(config["content_types"]))}, sample_size={config["sample_size"]}, recent_pool_size={config["recent_pool_size"]}, longform_template={html_escape(config["longform_template"])}, news_prompt_variants={html_escape(",".join(config.get("news_prompt_variants") or [])) or "default"}, news_statuses={html_escape(",".join(config.get("news_statuses") or [])) or "default"}, require_article_body={html_escape(str(config.get("news_require_article_body", False)))}, seed={html_escape(str(config["seed"]))}</p>
+      </details>
+      <details class="prompt-section">
+        <summary>Prompts used</summary>
         <div class="prompt-wrap">
           {prompt_cards}
         </div>
-      </section>
+      </details>
     </section>
     {"".join(sections)}
   </main>
@@ -2103,7 +2412,6 @@ def main() -> int:
     """
     args = parse_args()
     setup_logging(name="eval_html_report", level="INFO")
-    init_db()
 
     try:
         content_types = validate_content_types(parse_csv_list(args.content_types))
@@ -2118,6 +2426,12 @@ def main() -> int:
             raise ValueError("--news-item-ids is only supported with --content-types news")
         if news_item_ids and content_ids:
             raise ValueError("--news-item-ids cannot be combined with --content-ids")
+        if args.news_snapshot_file and content_types != ["news"]:
+            raise ValueError("--news-snapshot-file is only supported with --content-types news")
+        if args.news_snapshot_file and (news_item_ids or content_ids):
+            raise ValueError("--news-snapshot-file cannot be combined with explicit IDs")
+        if args.news_snapshot_file and args.news_require_article_body:
+            raise ValueError("--news-require-article-body is only supported for DB-backed sources")
         if news_prompt_variants and (
             args.custom_news_system_prompt_file or args.custom_news_user_template_file
         ):
@@ -2158,6 +2472,9 @@ def main() -> int:
         if args.custom_news_user_template_file
         else None
     )
+
+    if not args.news_snapshot_file:
+        init_db()
     output_dir = resolve_output_directory(args.output_dir)
     run_started_at = datetime.now(UTC)
 
@@ -2176,6 +2493,7 @@ def main() -> int:
     selected_sources, missing_ids = select_sources(
         content_ids=content_ids,
         news_item_ids=news_item_ids,
+        news_snapshot_file=args.news_snapshot_file,
         news_statuses=news_statuses,
         news_require_article_body=args.news_require_article_body,
         content_types=content_types,
@@ -2241,6 +2559,8 @@ def main() -> int:
                 "url": source.url,
                 "source_title": source.source_title,
                 "existing_summary_title": source.existing_summary_title,
+                "existing_summary_key_points": source.existing_summary_key_points,
+                "existing_summary_text": source.existing_summary_text,
                 "input_chars": source.input_chars,
                 "model_results": model_results,
             }
@@ -2258,6 +2578,7 @@ def main() -> int:
             "seed": args.seed,
             "content_ids": content_ids,
             "news_item_ids": news_item_ids,
+            "news_snapshot_file": args.news_snapshot_file,
             "news_statuses": news_statuses,
             "news_require_article_body": args.news_require_article_body,
             "timeout_seconds": args.timeout_seconds,

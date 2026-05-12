@@ -17,7 +17,7 @@ struct AssistantMessageBubble: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 6) {
             avatar
 
             VStack(alignment: .leading, spacing: 4) {
@@ -25,13 +25,13 @@ struct AssistantMessageBubble: View {
                     messageContent
                 } else {
                     messageContent
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.surfaceContainer)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.surfaceContainer.opacity(0.58))
                         .clipShape(bubbleShape)
                         .overlay(
                             bubbleShape
-                                .stroke(Color.outlineVariant.opacity(0.20), lineWidth: 0.5)
+                                .stroke(Color.outlineVariant.opacity(0.12), lineWidth: 0.5)
                         )
                 }
 
@@ -55,18 +55,18 @@ struct AssistantMessageBubble: View {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
             }
-
-            Spacer(minLength: 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var avatar: some View {
         Circle()
-            .fill(Color.chatAccent)
-            .frame(width: 24, height: 24)
+            .fill(Color.chatAccent.opacity(0.72))
+            .frame(width: 20, height: 20)
             .overlay(
                 Image(systemName: "brain.head.profile")
-                    .font(.system(size: 11))
+                    .font(.system(size: 9))
                     .foregroundStyle(.white)
             )
             .padding(.top, 2)
@@ -82,10 +82,10 @@ struct AssistantMessageBubble: View {
 
     private var bubbleShape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(
-            topLeadingRadius: 4,
-            bottomLeadingRadius: 16,
-            bottomTrailingRadius: 16,
-            topTrailingRadius: 16
+            topLeadingRadius: 3,
+            bottomLeadingRadius: 12,
+            bottomTrailingRadius: 12,
+            topTrailingRadius: 12
         )
     }
 

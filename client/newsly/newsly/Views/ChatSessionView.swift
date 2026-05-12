@@ -49,6 +49,9 @@ struct ChatSessionView: View {
                 dependencies.activeSessionManager.stopTracking(sessionId: viewModel.sessionId)
                 await viewModel.loadSession()
                 await viewModel.checkAndRefreshVoiceDictation()
+                if route.focusComposerOnAppear {
+                    isInputFocused = true
+                }
             }
             .onDisappear {
                 viewModel.handleDisappear()
@@ -56,9 +59,7 @@ struct ChatSessionView: View {
             .toolbar {
                 ChatSessionToolbarContent(
                     session: viewModel.session,
-                    onOpenArticle: openArticle,
-                    onShowHistory: onShowHistory,
-                    onSwitchProvider: switchProvider
+                    onOpenArticle: openArticle
                 )
             }
             .sheet(item: $shareContent) { content in
@@ -134,6 +135,7 @@ struct ChatSessionView: View {
         ChatComposerDock(
             inputText: $viewModel.inputText,
             isInputFocused: $isInputFocused,
+            session: viewModel.session,
             canStartCouncil: viewModel.canStartCouncil,
             canStartDeepResearch: viewModel.canStartDeepResearch,
             isStartingCouncil: viewModel.isStartingCouncil,
@@ -142,6 +144,8 @@ struct ChatSessionView: View {
             isTranscribing: viewModel.isTranscribing,
             isVoiceActionInFlight: viewModel.isVoiceActionInFlight,
             voiceDictationAvailable: viewModel.voiceDictationAvailable,
+            onShowHistory: onShowHistory,
+            onSwitchProvider: switchProvider,
             onStartCouncil: startCouncil,
             onStartDeepResearch: startDeepResearch,
             onToggleVoiceRecording: toggleVoiceRecording,

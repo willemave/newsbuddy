@@ -9,11 +9,6 @@ def _artifact_payload(extras: dict[str, object]) -> dict[str, object]:
         "artifact": {
             "type": "argument",
             "payload": {
-                "overview": (
-                    "The source makes a concrete argument about execution quality, evidence, "
-                    "and tradeoffs. It gives readers a way to judge the claim against the "
-                    "supporting material and known limits."
-                ),
                 "quotes": [
                     {
                         "text": "This first quote has enough source detail to be useful.",
@@ -105,3 +100,26 @@ def test_argument_artifact_accepts_shared_extra_fields() -> None:
     assert extras.supporting_arguments == [
         "The strongest support is the source's operational evidence."
     ]
+
+
+def test_artifact_payload_accepts_legacy_overview() -> None:
+    payload = _artifact_payload(
+        {
+            "thesis": "The source argues that execution quality matters more than raw demos.",
+            "counterpoint": (
+                "A fair objection is that demos can still reveal meaningful capability."
+            ),
+        }
+    )
+    artifact = payload["artifact"]
+    assert isinstance(artifact, dict)
+    artifact_payload = artifact["payload"]
+    assert isinstance(artifact_payload, dict)
+    artifact_payload["overview"] = (
+        "The older payload includes a narrative overview that is still accepted for "
+        "already-generated artifacts, but new prompts no longer request this field."
+    )
+
+    envelope = LongformArtifactEnvelope.model_validate(payload)
+
+    assert envelope.artifact.payload.overview is not None

@@ -16,6 +16,7 @@ struct ChatSessionRoute: Hashable {
     let initialUserMessageTimestamp: String?
     let pendingMessageId: Int?
     let pendingCouncilPrompt: String?
+    let focusComposerOnAppear: Bool
     var stableKey: String {
         [
             String(sessionId),
@@ -24,7 +25,8 @@ struct ChatSessionRoute: Hashable {
             initialUserMessageText ?? "",
             initialUserMessageTimestamp ?? "",
             pendingMessageId.map(String.init) ?? "",
-            pendingCouncilPrompt ?? ""
+            pendingCouncilPrompt ?? "",
+            String(focusComposerOnAppear)
         ].joined(separator: "|")
     }
 
@@ -36,7 +38,8 @@ struct ChatSessionRoute: Hashable {
         initialUserMessageText: String? = nil,
         initialUserMessageTimestamp: String? = nil,
         pendingMessageId: Int? = nil,
-        pendingCouncilPrompt: String? = nil
+        pendingCouncilPrompt: String? = nil,
+        focusComposerOnAppear: Bool = false
     ) {
         self.sessionId = sessionId
         self.session = session
@@ -46,6 +49,7 @@ struct ChatSessionRoute: Hashable {
         self.initialUserMessageTimestamp = initialUserMessageTimestamp
         self.pendingMessageId = pendingMessageId
         self.pendingCouncilPrompt = pendingCouncilPrompt
+        self.focusComposerOnAppear = focusComposerOnAppear
     }
 
     init(
@@ -53,7 +57,8 @@ struct ChatSessionRoute: Hashable {
         initialUserMessageText: String? = nil,
         initialUserMessageTimestamp: String? = nil,
         pendingMessageId: Int? = nil,
-        pendingCouncilPrompt: String? = nil
+        pendingCouncilPrompt: String? = nil,
+        focusComposerOnAppear: Bool = false
     ) {
         self.init(
             sessionId: session.id,
@@ -63,7 +68,8 @@ struct ChatSessionRoute: Hashable {
             initialUserMessageText: initialUserMessageText,
             initialUserMessageTimestamp: initialUserMessageTimestamp,
             pendingMessageId: pendingMessageId,
-            pendingCouncilPrompt: pendingCouncilPrompt
+            pendingCouncilPrompt: pendingCouncilPrompt,
+            focusComposerOnAppear: focusComposerOnAppear
         )
     }
 }

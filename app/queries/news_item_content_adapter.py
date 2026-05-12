@@ -8,6 +8,7 @@ from typing import Any
 from app.models.api.content import ContentDetailResponse, ContentSummaryResponse
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
 from app.models.db import NewsItem
+from app.services.news_relevant_links import NEWS_RELEVANT_LINKS_KEY, build_news_relevant_links
 from app.utils.news_titles import (
     get_news_article_title,
     resolve_news_display_title,
@@ -173,6 +174,7 @@ def present_news_item_detail(
     item: NewsItem,
     *,
     is_read: bool,
+    discussion_summary: dict[str, Any] | None = None,
 ) -> ContentDetailResponse:
     """Emit a legacy content detail response directly from a canonical news item."""
     metadata = dict(item.raw_metadata or {})
@@ -205,6 +207,16 @@ def present_news_item_detail(
 
     metadata.setdefault("discussion_url", item.discussion_url)
     metadata.setdefault("cluster", _cluster_metadata(item))
+    relevant_links = build_news_relevant_links(
+        metadata,
+        article_url=item.article_url or item.canonical_story_url,
+        discussion_url=item.discussion_url or item.canonical_item_url,
+        discussion_summary=discussion_summary,
+    )
+    if relevant_links:
+        metadata[NEWS_RELEVANT_LINKS_KEY] = relevant_links
+    else:
+        metadata.pop(NEWS_RELEVANT_LINKS_KEY, None)
 
     return ContentDetailResponse(
         id=_require_news_item_id(item),

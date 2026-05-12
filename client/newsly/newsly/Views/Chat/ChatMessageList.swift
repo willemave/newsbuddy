@@ -80,7 +80,8 @@ struct ChatMessageList: View {
                         }
                     }
                 }
-                .padding()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 10)
             }
             .contentMargins(.bottom, 12, for: .scrollContent)
             .onScrollGeometryChange(for: Bool.self) { geometry in

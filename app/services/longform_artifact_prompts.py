@@ -127,12 +127,15 @@ classifier.
 Candidate artifact types:
 {candidate_guidance}
 
-Every payload must use this five-block shape:
-- overview: 2-4 sentence narrative lede with who/what/when.
+Every payload must use this four-block reader detail shape:
 - quotes: 2-5 direct supporting quotes from the source, each with attribution when available.
 - extras: type-specific source facts, not commentary.
 - key_points: 4-8 items, each with heading and 1-2 sentences of real content.
 - takeaway: one sentence stating what the reader should leave with.
+
+The detail view begins at takeaway. Do not create an overview, narrative lede, or type-labeled
+summary block before takeaway. one_line is only for feed previews and must not duplicate a
+detail-view introduction.
 
 Every extras object should include these shared reader-facing fields when the source supports them:
 - evidence: concrete facts, numbers, examples, or references.
@@ -152,7 +155,6 @@ Return ONLY valid JSON with exactly these top-level fields:
   "artifact": {{
     "type": one of [{candidates_json}],
     "payload": {{
-      "overview": "...",
       "quotes": [{{"text": "...", "attribution": "..."}}],
       "extras": {{ }},
       "key_points": [{{"heading": "...", "content": "..."}}],
@@ -187,6 +189,7 @@ Rules:
 - The ask must match the artifact type: argument=judge, mental_model=learn, playbook=copy,
   portrait=absorb, briefing=track, walkthrough=try, findings=update.
 - Never include envelope-level summary, key_points, source_details, or classification.
+- Never include payload.overview or any extra pre-takeaway lede.
 - Preserve names, numbers, dates, and technical terms exactly.
 - If the source is thin, still create the best fitting artifact and note uncertainty in content,
   not in extra fields.

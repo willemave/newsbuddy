@@ -184,10 +184,6 @@ final class ChatSessionViewModel {
             else if let topic = detail.session.topic, !topic.isEmpty, detail.messages.isEmpty {
                 await sendMessage(text: topic)
             }
-            // If this is a contextual session with no messages, load initial suggestions
-            else if (detail.session.contentId != nil || detail.session.newsItemId != nil) && detail.messages.isEmpty {
-                await loadInitialSuggestions()
-            }
         } catch is CancellationError {
             logger.debug("[ViewModel] loadSession cancelled | sessionId=\(self.sessionId)")
         } catch {
@@ -277,25 +273,6 @@ final class ChatSessionViewModel {
         }
 
         throw ChatServiceError.timeout
-    }
-
-    /// Load initial follow-up question suggestions for article-based sessions
-    private func loadInitialSuggestions() async {
-        isSending = true
-        startThinkingTimer()
-        defer {
-            isSending = false
-            stopThinkingTimer()
-        }
-
-        do {
-            let assistant = try await chatService.getInitialSuggestions(sessionId: sessionId)
-            upsertServerMessage(assistant)
-        } catch is CancellationError {
-            logger.debug("[ViewModel] loadInitialSuggestions cancelled | sessionId=\(self.sessionId)")
-        } catch {
-            logger.error("[ViewModel] loadInitialSuggestions error | error=\(error.localizedDescription)")
-        }
     }
 
     func sendMessage(text overrideText: String? = nil) async {

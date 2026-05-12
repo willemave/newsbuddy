@@ -96,7 +96,7 @@ struct ContentDetailView: View {
     @State private var didTriggerSwipeHaptic: Bool = false
     // Transcript/Full Article collapsed state
     @State private var isTranscriptExpanded: Bool = false
-    @State private var isReferencedLinksExpanded: Bool = true
+    @State private var isRelevantLinksExpanded: Bool = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     init(
         contentId: Int,
@@ -256,9 +256,9 @@ struct ContentDetailView: View {
                                 }
                         }
 
-                        let referencedLinks = content.interestingExternalLinks
-                        if !referencedLinks.isEmpty {
-                            referencedLinksSection(links: referencedLinks)
+                        let relevantLinks = content.relevantLinks
+                        if content.contentTypeEnum != .news, !relevantLinks.isEmpty {
+                            relevantLinksSection(links: relevantLinks)
                                 .padding(.horizontal, DetailDesign.horizontalPadding)
                                 .padding(.top, DetailDesign.sectionSpacing)
                         }
@@ -288,6 +288,12 @@ struct ContentDetailView: View {
                                 .padding(.horizontal, DetailDesign.horizontalPadding)
                                 .padding(.top, DetailDesign.sectionSpacing)
                             }
+                        }
+
+                        if content.contentTypeEnum == .news, !relevantLinks.isEmpty {
+                            relevantLinksSection(links: relevantLinks)
+                                .padding(.horizontal, DetailDesign.horizontalPadding)
+                                .padding(.top, DetailDesign.sectionSpacing)
                         }
 
                         // Full Content Section (collapsible, modern style)
@@ -568,7 +574,11 @@ struct ContentDetailView: View {
                         provider: provider
                     )
                     activeSheet = nil
-                    openChatSession(sessionId: session.id, content: content)
+                    openChatSession(
+                        sessionId: session.id,
+                        content: content,
+                        focusComposerOnAppear: true
+                    )
                 }
             } else {
                 let session = try await ChatService.shared.startArticleChat(
@@ -587,7 +597,8 @@ struct ContentDetailView: View {
                     sessionId: session.id,
                     content: content,
                     initialUserMessage: pendingResponse?.userMessage,
-                    pendingMessageId: pendingResponse?.messageId
+                    pendingMessageId: pendingResponse?.messageId,
+                    focusComposerOnAppear: pendingResponse == nil
                 )
             }
         } catch {
@@ -716,7 +727,8 @@ struct ContentDetailView: View {
         content: ContentDetail,
         initialUserMessage: ChatMessage? = nil,
         pendingMessageId: Int? = nil,
-        pendingCouncilPrompt: String? = nil
+        pendingCouncilPrompt: String? = nil,
+        focusComposerOnAppear: Bool = false
     ) {
         let isNews = content.contentTypeEnum == .news
         openChatSession(
@@ -725,7 +737,8 @@ struct ContentDetailView: View {
             newsItemId: isNews ? content.id : nil,
             initialUserMessage: initialUserMessage,
             pendingMessageId: pendingMessageId,
-            pendingCouncilPrompt: pendingCouncilPrompt
+            pendingCouncilPrompt: pendingCouncilPrompt,
+            focusComposerOnAppear: focusComposerOnAppear
         )
     }
 
@@ -736,7 +749,8 @@ struct ContentDetailView: View {
         newsItemId: Int? = nil,
         initialUserMessage: ChatMessage? = nil,
         pendingMessageId: Int? = nil,
-        pendingCouncilPrompt: String? = nil
+        pendingCouncilPrompt: String? = nil,
+        focusComposerOnAppear: Bool = false
     ) {
         chatSessionManager.stopTracking(sessionId: sessionId)
         ChatNavigationCoordinator.shared.open(
@@ -747,7 +761,8 @@ struct ContentDetailView: View {
                 initialUserMessageText: initialUserMessage?.content,
                 initialUserMessageTimestamp: initialUserMessage?.timestamp,
                 pendingMessageId: pendingMessageId,
-                pendingCouncilPrompt: pendingCouncilPrompt
+                pendingCouncilPrompt: pendingCouncilPrompt,
+                focusComposerOnAppear: focusComposerOnAppear
             )
         )
     }
@@ -2111,15 +2126,15 @@ struct ContentDetailView: View {
                                             ProgressView()
                                                 .controlSize(.small)
                                         } else {
-                                            Image(systemName: addState == .added ? "checkmark" : "plus")
+                                            Image(systemName: discussionLinkAddIcon(for: addState))
                                         }
-                                        Text(addState == .added ? "Added" : "Add to Long Form")
+                                        Text(discussionLinkAddTitle(for: addState))
                                     }
                                     .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .tint(Color.terracottaPrimary)
-                                .disabled(addState != .idle)
+                                .disabled(isLinkActionDisabled(addState))
                             }
                         }
                         .padding(12)
@@ -2136,15 +2151,15 @@ struct ContentDetailView: View {
 
     // MARK: - Modern Section Components (Flat, no borders)
     @ViewBuilder
-    private func referencedLinksSection(links: [InterestingExternalLink]) -> some View {
+    private func relevantLinksSection(links: [RelevantLink]) -> some View {
         modernExpandableSection(
-            title: "Referenced Links",
+            title: "Relevant Links",
             icon: "link",
-            isExpanded: $isReferencedLinksExpanded
+            isExpanded: $isRelevantLinksExpanded
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(links.enumerated()), id: \.element.id) { index, link in
-                    referencedLinkRow(link)
+                    relevantLinkRow(link)
                     if index < links.count - 1 {
                         Divider()
                             .padding(.vertical, 10)
@@ -2155,42 +2170,141 @@ struct ContentDetailView: View {
     }
 
     @ViewBuilder
-    private func referencedLinkRow(_ link: InterestingExternalLink) -> some View {
+    private func relevantLinkRow(_ link: RelevantLink) -> some View {
         if let url = URL(string: link.url) {
-            Link(destination: url) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.subheadline)
-                        .foregroundColor(.accentColor)
-                        .frame(width: 20, height: 20)
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(link.title ?? link.url)
+            let state = viewModel.relevantLinkReadLaterState(for: link.id)
+            HStack(alignment: .top, spacing: 10) {
+                Link(destination: url) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "arrow.up.right.square")
                             .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(2)
+                            .foregroundColor(.accentColor)
+                            .frame(width: 20, height: 20)
 
-                        Text(link.reason)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(2)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(link.title ?? link.url)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(2)
 
-                        Text(link.url)
-                            .font(.caption2)
-                            .foregroundColor(.secondary.opacity(0.85))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                            Text(link.reason)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(2)
+
+                            HStack(spacing: 6) {
+                                if let source = relevantLinkSourceLabel(link.source) {
+                                    Text(source)
+                                        .font(.caption2)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.accentColor)
+                                }
+
+                                Text(link.url)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary.opacity(0.85))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
                     }
-
-                    Spacer(minLength: 0)
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("content.relevant_link.\(link.id)")
+
+                Spacer(minLength: 0)
+
+                Button {
+                    Task { await viewModel.addRelevantLinkToReadLater(link) }
+                } label: {
+                    HStack(spacing: 5) {
+                        if state == .adding {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: relevantLinkReadLaterIcon(for: state))
+                        }
+                        Text(relevantLinkReadLaterTitle(for: state))
+                    }
+                    .lineLimit(1)
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isLinkActionDisabled(state))
+                .accessibilityIdentifier("content.relevant_link.read_later.\(link.id)")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("content.referenced_link.\(link.id)")
+        }
+    }
+
+    private func relevantLinkSourceLabel(_ source: String?) -> String? {
+        switch source?.lowercased() {
+        case "article":
+            return "Article"
+        case "community":
+            return "Community"
+        default:
+            return nil
+        }
+    }
+
+    private func isLinkActionDisabled(_ state: LinkReadLaterState) -> Bool {
+        state == .adding || state == .added
+    }
+
+    private func discussionLinkAddTitle(for state: DiscussionLinkAddState) -> String {
+        switch state {
+        case .idle:
+            return "Add to Long Form"
+        case .adding:
+            return "Adding"
+        case .added:
+            return "Added"
+        case .failed:
+            return "Retry"
+        }
+    }
+
+    private func discussionLinkAddIcon(for state: DiscussionLinkAddState) -> String {
+        switch state {
+        case .idle:
+            return "plus"
+        case .adding:
+            return "plus"
+        case .added:
+            return "checkmark"
+        case .failed:
+            return "arrow.clockwise"
+        }
+    }
+
+    private func relevantLinkReadLaterTitle(for state: LinkReadLaterState) -> String {
+        switch state {
+        case .idle:
+            return "Read Later"
+        case .adding:
+            return "Adding"
+        case .added:
+            return "Saved"
+        case .failed:
+            return "Retry"
+        }
+    }
+
+    private func relevantLinkReadLaterIcon(for state: LinkReadLaterState) -> String {
+        switch state {
+        case .idle:
+            return "bookmark"
+        case .adding:
+            return "bookmark"
+        case .added:
+            return "checkmark"
+        case .failed:
+            return "arrow.clockwise"
         }
     }
 

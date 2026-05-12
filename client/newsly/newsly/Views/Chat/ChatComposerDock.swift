@@ -8,6 +8,7 @@ import SwiftUI
 struct ChatComposerDock: View {
     @Binding var inputText: String
     let isInputFocused: FocusState<Bool>.Binding
+    let session: ChatSessionSummary?
     let canStartCouncil: Bool
     let canStartDeepResearch: Bool
     let isStartingCouncil: Bool
@@ -16,6 +17,8 @@ struct ChatComposerDock: View {
     let isTranscribing: Bool
     let isVoiceActionInFlight: Bool
     let voiceDictationAvailable: Bool
+    let onShowHistory: (() -> Void)?
+    let onSwitchProvider: (ChatModelProvider) -> Void
     let onStartCouncil: () -> Void
     let onStartDeepResearch: () -> Void
     let onToggleVoiceRecording: () -> Void
@@ -26,6 +29,13 @@ struct ChatComposerDock: View {
         isSending ||
         isRecording ||
         isTranscribing
+    }
+
+    private var showsMoreActionsMenu: Bool {
+        onShowHistory != nil ||
+        session != nil ||
+        canStartCouncil ||
+        canStartDeepResearch
     }
 
     var body: some View {
@@ -47,23 +57,57 @@ struct ChatComposerDock: View {
         .padding(.horizontal, 12)
     }
 
-    private var modeMenu: some View {
+    private var moreActionsMenu: some View {
         Menu {
-            if canStartCouncil {
-                Button(action: onStartCouncil) {
-                    Label(
-                        isStartingCouncil ? "Starting Council…" : "Council",
-                        systemImage: "person.3.sequence.fill"
-                    )
+            if let onShowHistory {
+                Section {
+                    Button(action: onShowHistory) {
+                        Label("Chat History", systemImage: "clock.arrow.circlepath")
+                    }
+                    .accessibilityIdentifier("knowledge.chat_history")
                 }
-                .disabled(isStartingCouncil || isSending)
             }
 
-            if canStartDeepResearch {
-                Button(action: onStartDeepResearch) {
-                    Label("Deep Research", systemImage: "magnifyingglass.circle.fill")
+            if let session {
+                Section("Model") {
+                    Label("Current: \(session.providerDisplayName)", systemImage: session.providerIconFallback)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+
+                    if session.isCouncilMode {
+                        Label("Switching unavailable in Council", systemImage: "person.3.sequence.fill")
+                            .disabled(true)
+                    } else {
+                        ForEach(ChatModelProvider.allCases.filter { !$0.isDeepResearch }, id: \.self) { provider in
+                            Button {
+                                onSwitchProvider(provider)
+                            } label: {
+                                Label(provider.chatDisplayName, systemImage: provider.iconName)
+                            }
+                            .disabled(provider.rawValue == session.llmProvider)
+                        }
+                    }
                 }
-                .disabled(isSending)
+            }
+
+            if canStartCouncil || canStartDeepResearch {
+                Section("Actions") {
+                    if canStartCouncil {
+                        Button(action: onStartCouncil) {
+                            Label(
+                                isStartingCouncil ? "Starting Council…" : "Council",
+                                systemImage: "person.3.sequence.fill"
+                            )
+                        }
+                        .disabled(isStartingCouncil || isSending)
+                    }
+
+                    if canStartDeepResearch {
+                        Button(action: onStartDeepResearch) {
+                            Label("Deep Research", systemImage: "magnifyingglass.circle.fill")
+                        }
+                        .disabled(isSending)
+                    }
+                }
             }
         } label: {
             Image(systemName: "plus")
@@ -85,8 +129,8 @@ struct ChatComposerDock: View {
 
     private var inputRow: some View {
         HStack(alignment: .center, spacing: 10) {
-            if canStartCouncil || canStartDeepResearch {
-                modeMenu
+            if showsMoreActionsMenu {
+                moreActionsMenu
             }
 
             TextField("Message", text: $inputText, axis: .vertical)
@@ -200,6 +244,7 @@ private struct ChatComposerDockPreviewHost: View {
         ChatComposerDock(
             inputText: $inputText,
             isInputFocused: $isInputFocused,
+            session: ChatPreviewFixtures.session,
             canStartCouncil: true,
             canStartDeepResearch: true,
             isStartingCouncil: false,
@@ -208,6 +253,8 @@ private struct ChatComposerDockPreviewHost: View {
             isTranscribing: false,
             isVoiceActionInFlight: false,
             voiceDictationAvailable: true,
+            onShowHistory: {},
+            onSwitchProvider: { _ in },
             onStartCouncil: {},
             onStartDeepResearch: {},
             onToggleVoiceRecording: {},

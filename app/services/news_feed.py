@@ -20,7 +20,7 @@ from app.models.contracts import (
     NewsItemStatus,
     NewsItemVisibilityScope,
 )
-from app.models.db import NewsItem, NewsItemReadStatus, UserScraperConfig
+from app.models.db import NewsItem, NewsItemDiscussion, NewsItemReadStatus, UserScraperConfig
 from app.queries.news_item_content_adapter import (
     present_news_item_detail,
     present_news_item_summary,
@@ -290,9 +290,15 @@ def get_visible_news_item_detail(
     if row is None:
         return None
     item, row_is_read = row
+    discussion_summary = (
+        db.query(NewsItemDiscussion.summary)
+        .filter(NewsItemDiscussion.news_item_id == news_item_id)
+        .scalar()
+    )
     return present_news_item_detail(
         item,
         is_read=bool(row_is_read),
+        discussion_summary=discussion_summary if isinstance(discussion_summary, dict) else None,
     )
 
 

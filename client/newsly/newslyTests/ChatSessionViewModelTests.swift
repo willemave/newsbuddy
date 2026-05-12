@@ -280,15 +280,47 @@ final class ChatSessionViewModelTests: XCTestCase {
         ActiveChatSessionManager.shared.reset()
     }
 
+    func testEmptyContextualSessionDoesNotAutoGenerateInitialSuggestions() async {
+        let chatService = MockChatSessionService(getSessionHandler: { _ in
+            ChatSessionDetail(
+                session: Self.session(
+                    contentId: 7,
+                    articleTitle: "Tracked Article",
+                    hasMessages: false,
+                    councilMode: false
+                ),
+                messages: []
+            )
+        })
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService
+            )
+        )
+
+        await viewModel.loadSession()
+
+        XCTAssertEqual(chatService.initialSuggestionsCallCount, 0)
+        XCTAssertFalse(viewModel.isSending)
+        XCTAssertTrue(viewModel.timeline.isEmpty)
+        XCTAssertEqual(viewModel.session?.contentId, 7)
+    }
+
     private static func session(
         contentId: Int? = nil,
+        newsItemId: Int? = nil,
         articleTitle: String? = nil,
         hasPendingMessage: Bool = false,
-        activeChildSessionId: Int? = nil
+        activeChildSessionId: Int? = nil,
+        hasMessages: Bool = true,
+        councilMode: Bool? = true
     ) -> ChatSessionSummary {
         ChatSessionSummary(
             id: 42,
             contentId: contentId,
+            newsItemId: newsItemId,
             title: "Chat",
             sessionType: "knowledge_chat",
             topic: nil,
@@ -303,10 +335,10 @@ final class ChatSessionViewModelTests: XCTestCase {
             articleSource: nil,
             hasPendingMessage: hasPendingMessage,
             isSavedToKnowledge: false,
-            hasMessages: true,
+            hasMessages: hasMessages,
             lastMessagePreview: nil,
             lastMessageRole: nil,
-            councilMode: true,
+            councilMode: councilMode,
             activeChildSessionId: activeChildSessionId
         )
     }
@@ -327,21 +359,28 @@ private extension ChatDependencies {
 }
 
 private final class MockChatSessionService: ChatSessionServicing {
+    private let getSessionHandler: ((Int) async throws -> ChatSessionDetail)?
     private let sendMessageHandler: ((Int, String) async throws -> SendChatMessageResponse)?
     private let selectCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)?
     private let retryCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)?
+    private(set) var initialSuggestionsCallCount = 0
 
     init(
+        getSessionHandler: ((Int) async throws -> ChatSessionDetail)? = nil,
         sendMessageHandler: ((Int, String) async throws -> SendChatMessageResponse)? = nil,
         selectCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)? = nil,
         retryCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)? = nil
     ) {
+        self.getSessionHandler = getSessionHandler
         self.sendMessageHandler = sendMessageHandler
         self.selectCouncilBranchHandler = selectCouncilBranchHandler
         self.retryCouncilBranchHandler = retryCouncilBranchHandler
     }
 
     func getSession(id: Int) async throws -> ChatSessionDetail {
+        if let getSessionHandler {
+            return try await getSessionHandler(id)
+        }
         throw ChatServiceError.timeout
     }
 
@@ -357,6 +396,7 @@ private final class MockChatSessionService: ChatSessionServicing {
     }
 
     func getInitialSuggestions(sessionId: Int) async throws -> ChatMessage {
+        initialSuggestionsCallCount += 1
         throw ChatServiceError.timeout
     }
 

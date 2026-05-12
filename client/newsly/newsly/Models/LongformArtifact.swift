@@ -97,7 +97,7 @@ enum LongformArtifactDetailSection: Identifiable {
 }
 
 struct LongformArtifactPayload: Codable {
-    let overview: String
+    let overview: String?
     let quotes: [LongformArtifactQuote]
     let extrasRaw: [String: AnyCodable]
     let keyPoints: [LongformArtifactKeyPoint]
@@ -137,19 +137,6 @@ struct LongformArtifactEnvelope: Codable {
         case sourceContext = "source_context"
         case selectionTrace = "selection_trace"
         case feedPreview = "feed_preview"
-    }
-
-    var displayType: String {
-        switch artifact.type {
-        case "argument": return "Argument"
-        case "mental_model": return "Mental Model"
-        case "playbook": return "Playbook"
-        case "portrait": return "Portrait"
-        case "briefing": return "Briefing"
-        case "walkthrough": return "Walkthrough"
-        case "findings": return "Findings"
-        default: return artifact.type.replacingOccurrences(of: "_", with: " ").capitalized
-        }
     }
 
     var detailSections: [LongformArtifactDetailSection] {
