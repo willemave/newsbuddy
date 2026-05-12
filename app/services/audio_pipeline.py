@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.logging import get_logger
-from app.scraping.youtube_unified import load_youtube_client_config
+from app.scraping.youtube_config import load_youtube_client_config
 from app.services.whisper_local import get_whisper_local_service
 
 try:  # pragma: no cover - optional dependency in tests

@@ -6,7 +6,7 @@ import pytest
 import yt_dlp
 
 from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
-from app.scraping.youtube_unified import YouTubeClientConfig
+from app.scraping.youtube_config import YouTubeClientConfig
 
 
 @pytest.fixture(autouse=True)

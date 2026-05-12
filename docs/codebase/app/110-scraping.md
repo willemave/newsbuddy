@@ -27,5 +27,4 @@ Scheduled feed and site scrapers plus the orchestration runner that inserts new 
 | `app/scraping/runner.py` | `ScraperRunner` | Types: `ScraperRunner` |
 | `app/scraping/substack_unified.py` | `SubstackScraper`, `load_substack_feeds`, `run_substack_scraper` | Unified Substack scraper following the new architecture. |
 | `app/scraping/techmeme_unified.py` | `TechmemeFeedSettings`, `TechmemeSettings`, `TechmemeScraper`, `load_techmeme_config` | Dedicated scraper for Techmeme clusters. |
-| `app/scraping/twitter_unified.py` | `TwitterUnifiedScraper` | Legacy X scraper implementation kept on disk but no longer included in the default runner. |
-| `app/scraping/youtube_unified.py` | `YouTubeChannelConfig`, `YouTubeClientConfig`, `YouTubeUnifiedScraper`, `load_youtube_client_config`, `load_youtube_channels` | Unified YouTube channel scraper aligned with podcast ingestion flow. |
+| `app/scraping/youtube_config.py` | `YouTubeChannelConfig`, `YouTubeClientConfig`, `load_youtube_client_config`, `load_youtube_channels` | Shared YouTube yt-dlp configuration for active URL processing and podcast media downloads. |

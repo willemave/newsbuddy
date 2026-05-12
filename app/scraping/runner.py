@@ -11,7 +11,6 @@ from app.scraping.podcast_unified import PodcastUnifiedScraper
 from app.scraping.reddit_unified import RedditUnifiedScraper
 from app.scraping.substack_unified import SubstackScraper
 
-# from app.scraping.youtube_unified import YouTubeUnifiedScraper
 logger = get_logger(__name__)
 
 
@@ -44,7 +43,6 @@ class ScraperRunner:
             RedditUnifiedScraper(),
             SubstackScraper(),
             PodcastUnifiedScraper(),
-            # YouTubeUnifiedScraper(),  # Disabled - not working
             AtomScraper(),
             DiscussionCommentsScraper(),
         ]

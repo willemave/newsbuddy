@@ -2,23 +2,18 @@
 
 ## Overview
 
-We've successfully integrated YouTube video processing into the news app, treating YouTube videos as podcasts. This allows the system to:
+YouTube video processing treats individual YouTube URLs as podcast-like content. This allows the system to:
 
-1. Scrape YouTube channels and playlists for new videos
-2. Extract video metadata and transcripts
-3. Process videos through the existing podcast pipeline
-4. Summarize video content using AI
+1. Extract video metadata and transcripts
+2. Process videos through the existing podcast pipeline
+3. Summarize video content using AI
 
 ## Architecture
 
-### 1. YouTube Scraper (`app/scraping/youtube_unified.py`)
-- Reads channel and playlist configurations from `config/youtube.yml`
-- Uses yt-dlp to fetch video metadata
-- Creates content entries with `content_type=PODCAST`
-- Supports filtering by:
-  - Maximum age (default: 30 days)
-  - Minimum duration
-  - Maximum videos per channel
+### 1. YouTube configuration (`app/scraping/youtube_config.py`)
+- Reads shared yt-dlp client settings from `config/youtube.yml`
+- Supports optional cookies, proof-of-origin provider settings, throttling, and player-client hints
+- Keeps channel/playlist config parsing available for tooling, but scheduled YouTube scraping is retired
 
 ### 2. YouTube Processing Strategy (`app/processing_strategies/youtube_strategy.py`)
 - Handles YouTube URLs when processing individual links
@@ -44,18 +39,7 @@ client:
   throttle_seconds: 6                           # sleep between metadata fetches
   player_client: "mweb"                        # YouTube player client hint
 
-channels:
-  - name: "Lex Fridman Podcast"
-    channel_id: "UCgxzjK6GuOHVKR_08TT4hJQ"
-    url: "https://www.youtube.com/@lexfridman"
-    limit: 5
-    max_age_days: 30
-    language: "en"
-
-  - name: "All-In Podcast"
-    url: "https://www.youtube.com/@allinpodcast"
-    limit: 3
-    max_age_days: 7
+channels: []
 ```
 
 **Field reference**
@@ -94,19 +78,6 @@ YouTube videos are stored as podcasts with additional metadata:
 - `youtube_video`: Boolean flag to identify YouTube content
 
 ## Usage
-
-### Running the YouTube Scraper
-
-```bash
-# Run only the YouTube scraper and persist to the DB
-python scripts/run_scrapers.py --scrapers youtube
-
-# Dry-run a single channel without writing to the DB
-python scripts/test_youtube_scraper.py --name "Example" --url "https://www.youtube.com/@Example" --limit 2
-
-# Run all scrapers including YouTube
-python scripts/run_scrapers.py
-```
 
 ### Processing Individual YouTube URLs
 
