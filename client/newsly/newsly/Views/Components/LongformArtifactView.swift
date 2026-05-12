@@ -16,81 +16,35 @@ struct LongformArtifactView: View {
     let artifact: LongformArtifactEnvelope
     var contentId: Int?
 
+    private var accent: Color {
+        artifact.detailAccent
+    }
+
     var body: some View {
-        switch artifact.artifact.type {
+        ArtifactScaffold(artifact: artifact, accent: accent)
+    }
+}
+
+private extension LongformArtifactEnvelope {
+    var detailAccent: Color {
+        switch artifact.type {
         case "argument":
-            ArgumentView(artifact: artifact)
+            return .indigo
         case "mental_model":
-            MentalModelView(artifact: artifact)
+            return .teal
         case "playbook":
-            PlaybookView(artifact: artifact)
+            return .green
         case "portrait":
-            PortraitView(artifact: artifact)
+            return .purple
         case "briefing":
-            BriefingView(artifact: artifact)
+            return .orange
         case "walkthrough":
-            WalkthroughView(artifact: artifact)
+            return .cyan
         case "findings":
-            FindingsView(artifact: artifact)
+            return .red
         default:
-            ArtifactScaffold(artifact: artifact, accent: .blue)
+            return .blue
         }
-    }
-}
-
-struct ArgumentView: View {
-    let artifact: LongformArtifactEnvelope
-
-    var body: some View {
-        ArtifactScaffold(artifact: artifact, accent: .indigo)
-    }
-}
-
-struct MentalModelView: View {
-    let artifact: LongformArtifactEnvelope
-
-    var body: some View {
-        ArtifactScaffold(artifact: artifact, accent: .teal)
-    }
-}
-
-struct PlaybookView: View {
-    let artifact: LongformArtifactEnvelope
-
-    var body: some View {
-        ArtifactScaffold(artifact: artifact, accent: .green)
-    }
-}
-
-struct PortraitView: View {
-    let artifact: LongformArtifactEnvelope
-
-    var body: some View {
-        ArtifactScaffold(artifact: artifact, accent: .purple)
-    }
-}
-
-struct BriefingView: View {
-    let artifact: LongformArtifactEnvelope
-
-    var body: some View {
-        ArtifactScaffold(artifact: artifact, accent: .orange)
-    }
-}
-
-struct WalkthroughView: View {
-    let artifact: LongformArtifactEnvelope
-
-    var body: some View {
-        ArtifactScaffold(artifact: artifact, accent: .cyan)
-    }
-}
-
-struct FindingsView: View {
-    let artifact: LongformArtifactEnvelope
-
-    var body: some View {
-        ArtifactScaffold(artifact: artifact, accent: .red)
     }
 }
 
@@ -98,27 +52,31 @@ private struct ArtifactScaffold: View {
     let artifact: LongformArtifactEnvelope
     let accent: Color
 
-    private var payload: LongformArtifactPayload {
-        artifact.artifact.payload
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: ArtifactDesign.sectionSpacing) {
             ArtifactHeader(artifact: artifact, accent: accent)
-            OverviewBlock(text: payload.overview)
 
-            if !payload.quotes.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    ArtifactSectionHeader("Source Quotes", icon: "quote.opening", tint: accent)
-                    ForEach(payload.quotes) { quote in
-                        ArtifactQuoteCard(quote: quote, tint: accent)
-                    }
-                }
+            ForEach(artifact.detailSections) { section in
+                ArtifactDetailSectionView(section: section, tint: accent)
             }
+        }
+    }
+}
 
-            ExtrasPanel(sections: payload.extrasSections, tint: accent)
-            KeyPointList(points: payload.keyPoints, tint: accent)
-            TakeawayBanner(text: payload.takeaway, tint: accent)
+private struct ArtifactDetailSectionView: View {
+    let section: LongformArtifactDetailSection
+    let tint: Color
+
+    var body: some View {
+        switch section {
+        case .takeaway(let text):
+            TakeawayBanner(text: text, tint: tint)
+        case .keyPoints(let points):
+            KeyPointList(points: points, tint: tint)
+        case .sourceQuotes(let quotes):
+            SourceQuotesSection(quotes: quotes, tint: tint)
+        case .extra(let sections):
+            ExtraSection(sections: sections, tint: tint)
         }
     }
 }
@@ -143,43 +101,43 @@ private struct ArtifactHeader: View {
     }
 }
 
-private struct OverviewBlock: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.callout)
-            .foregroundColor(.primary.opacity(0.92))
-            .lineSpacing(5)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-private struct ExtrasPanel: View {
+private struct ExtraSection: View {
     let sections: [LongformExtrasSection]
     let tint: Color
 
     var body: some View {
-        if !sections.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                ArtifactSectionHeader("Frame", icon: "square.stack.3d.up", tint: tint)
+        VStack(alignment: .leading, spacing: 12) {
+            ArtifactSectionHeader("Extra", icon: "square.stack.3d.up", tint: tint)
 
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(sections) { section in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(section.title)
-                                .font(.footnote)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                                .textCase(.uppercase)
-                                .tracking(0.5)
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(sections) { section in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(section.title)
+                            .font(.footnote)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+                            .textCase(.uppercase)
+                            .tracking(0.5)
 
-                            ForEach(section.items, id: \.self) { item in
-                                ArtifactBulletRow(text: item)
-                            }
+                        ForEach(section.items, id: \.self) { item in
+                            ArtifactBulletRow(text: item)
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+private struct SourceQuotesSection: View {
+    let quotes: [LongformArtifactQuote]
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ArtifactSectionHeader("Source Quotes", icon: "quote.opening", tint: tint)
+            ForEach(quotes) { quote in
+                ArtifactQuoteCard(quote: quote, tint: tint)
             }
         }
     }

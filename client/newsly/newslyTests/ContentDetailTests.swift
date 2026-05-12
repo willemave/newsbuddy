@@ -233,8 +233,81 @@ final class ContentDetailTests: XCTestCase {
         )
     }
 
+    func testLongformArtifactDetailSectionsUseReaderOrderAndPreferredExtras() throws {
+        let artifact = try decodeArtifact(
+            from: """
+            {
+              "title": "Artifact title",
+              "one_line": "A concise description of why the argument matters now.",
+              "ask": "judge",
+              "artifact": {
+                "type": "argument",
+                "payload": {
+                  "overview": "This overview stays in the raw payload but is not the lead detail section.",
+                  "quotes": [
+                    {
+                      "text": "The first source quote gives the reader concrete evidence.",
+                      "attribution": "Source A"
+                    }
+                  ],
+                  "extras": {
+                    "thesis": "The source argues that reliable workflows matter more than isolated demos.",
+                    "evidence": ["The article cites adoption data from a named workflow."],
+                    "mental_model": ["Judge the system by repeated workflow reliability."],
+                    "counterpoint": "A fair objection is that demos can still expose important capabilities.",
+                    "arguments": ["The argument is supported by operational examples."]
+                  },
+                  "key_points": [
+                    {
+                      "heading": "Workflow Reliability",
+                      "content": "The piece says repeated reliability matters more than isolated performance."
+                    }
+                  ],
+                  "takeaway": "Judge the claim by its evidence and tradeoffs."
+                }
+              }
+            }
+            """
+        )
+
+        XCTAssertEqual(
+            artifact.detailSections.map(\.kind),
+            [.takeaway, .keyPoints, .sourceQuotes, .extra]
+        )
+
+        guard case .extra(let extraSections) = artifact.detailSections.last else {
+            return XCTFail("Expected final long-form artifact detail section to be Extra")
+        }
+
+        XCTAssertEqual(
+            extraSections.map(\.title),
+            ["Evidence", "Mental Model", "Counter Arguments", "Supporting Arguments", "Thesis"]
+        )
+        XCTAssertEqual(
+            extraSections[0].items,
+            ["The article cites adoption data from a named workflow."]
+        )
+        XCTAssertEqual(
+            extraSections[1].items,
+            ["Judge the system by repeated workflow reliability."]
+        )
+        XCTAssertEqual(
+            extraSections[2].items,
+            ["Counterpoint: A fair objection is that demos can still expose important capabilities."]
+        )
+        XCTAssertEqual(
+            extraSections[3].items,
+            ["Arguments: The argument is supported by operational examples."]
+        )
+    }
+
     private func decodeDetail(from json: String) throws -> ContentDetail {
         let data = Data(json.utf8)
         return try JSONDecoder().decode(ContentDetail.self, from: data)
+    }
+
+    private func decodeArtifact(from json: String) throws -> LongformArtifactEnvelope {
+        let data = Data(json.utf8)
+        return try JSONDecoder().decode(LongformArtifactEnvelope.self, from: data)
     }
 }
