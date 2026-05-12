@@ -232,17 +232,6 @@ def test_logs_exceptions_filters_by_operation(remote_context):
     assert result["exceptions"][0]["operation"] == "classify"
 
 
-def test_logs_exceptions_does_not_require_schema_models(remote_context, monkeypatch):
-    def _unexpected_schema_load():
-        raise AssertionError("schema models should not load for log-only commands")
-
-    monkeypatch.setattr("admin.remote_ops._load_schema_models", _unexpected_schema_load)
-
-    result = logs_exceptions(remote_context, limit=1)
-
-    assert result["returned"] == 1
-
-
 def test_preview_sanitize_content_metadata_returns_matching_rows(remote_context):
     harness = create_temporary_postgres_harness(
         schema_prefix="newsly_fix_preview",

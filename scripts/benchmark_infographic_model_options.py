@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """Generate a side-by-side HTML benchmark for additional infographic image models.
 
 This runner reuses the proven `fluxdev_process_chain` prompt from a previous
@@ -12,6 +13,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +26,9 @@ from uuid import uuid4
 import requests
 from dotenv import load_dotenv
 from PIL import Image
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.services.image_generation import (
     RUNWARE_API_URL,
@@ -54,10 +59,6 @@ class CaseFixture:
     case_title: str
     content_type: str
     full_prompt: str
-    fluxdev_image_src: Path
-    fluxdev_model: str
-    fluxdev_cost: float | None
-    fluxdev_elapsed: float | None
     existing_image_src: Path
     existing_model: str
     existing_cost: float | None
@@ -134,10 +135,6 @@ def load_fixture_cases(results_path: Path, target_case_ids: list[int] | None) ->
                 case_title=str(process_chain["case_title"]),
                 content_type=str(process_chain["content_type"]),
                 full_prompt=str(process_chain["prompt_text"]),
-                fluxdev_image_src=base_dir / str(process_chain["image_path"]),
-                fluxdev_model=str(process_chain["model"]),
-                fluxdev_cost=_to_float(process_chain.get("estimated_cost_usd")),
-                fluxdev_elapsed=_to_float(process_chain.get("elapsed_seconds")),
                 existing_image_src=base_dir / str(existing["image_path"]),
                 existing_model=str(existing["model"]),
                 existing_cost=_to_float(existing.get("estimated_cost_usd")),

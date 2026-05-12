@@ -6,7 +6,6 @@ import json
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -50,14 +49,6 @@ class RemoteContext:
     database_url: str
     logs_dir: Path
     service_log_dir: Path
-
-
-@lru_cache(maxsize=1)
-def _load_schema_models() -> tuple[Any, Any, Any, Any]:
-    """Load schema models lazily for DB-backed remote commands."""
-    from app.models.db import Content, ProcessingTask, VendorUsageRecord
-
-    return Content, VendorUsageRecord, ProcessingTask, None
 
 
 def db_tables(context: RemoteContext) -> dict[str, Any]:

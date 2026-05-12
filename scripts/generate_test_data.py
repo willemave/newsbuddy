@@ -159,52 +159,6 @@ NEWS_HEADLINES = [
     "NVIDIA H200 GPU Shortage Drives Cloud Compute Prices Up 40%",
 ]
 
-X_AUTHORS = [
-    ("swyx", "Shawn Wang"),
-    ("karpathy", "Andrej Karpathy"),
-    ("simonw", "Simon Willison"),
-    ("shreyas", "Shreyas Doshi"),
-    ("gregisenberg", "Greg Isenberg"),
-]
-
-X_LISTS = [
-    "AI Researchers",
-    "Product Builders",
-    "Infra Operators",
-]
-
-X_POST_TEXTS = [
-    (
-        "Open-sourced our eval harness for ranking support tickets. "
-        "The useful bit was not the model choice, it was enforcing "
-        "failure-mode labels before scoring."
-    ),
-    (
-        "We cut onboarding drop-off by 18% after replacing a 7-step setup "
-        "with a single working default and progressive configuration. "
-        "Shipping the opinionated path mattered more than extra options."
-    ),
-    (
-        "Latency on our retrieval path dropped from 1.4s to 380ms after "
-        "moving embedding refresh out of the request path. Biggest gain "
-        "came from deleting work, not optimizing queries."
-    ),
-    (
-        "Interesting trend: more teams are using LLMs to structure messy "
-        "internal text than to generate polished external copy. Higher "
-        "leverage, lower trust cost."
-    ),
-    (
-        "If your AI feature needs a settings page before it proves value, "
-        "you probably shipped the configuration surface before the product."
-    ),
-    (
-        "New benchmark: our speech pipeline now holds p95 under 700ms "
-        "on-device for short utterances. Still weak on noisy rooms, but "
-        "the baseline is finally usable."
-    ),
-]
-
 DISCUSSION_COMMENTS = [
     {
         "author": "tptacek",

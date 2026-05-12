@@ -448,14 +448,6 @@ def _sync_logs(config: AdminConfig, *, destination: Path) -> dict[str, Any]:
     return synced
 
 
-def _sync_database(config: AdminConfig, *, destination: Path) -> dict[str, Any]:
-    del config, destination
-    raise AdminCLIError(
-        "Local database sync no longer supports SQLite snapshots. "
-        "Use --skip-sync-db with a reachable PostgreSQL URL."
-    )
-
-
 def _resolve_database_url(raw_value: str) -> str:
     value = str(raw_value).strip()
     if "://" not in value:

@@ -45,7 +45,6 @@ class CaseFixture:
     existing_cost: float | None
     existing_elapsed: float | None
     existing_prompt_text: str
-    process_prompt_text: str
     story_title: str
     editorial_narrative: str
     key_facts: tuple[str, ...]
@@ -106,7 +105,6 @@ def load_fixture_cases(results_path: Path, target_case_ids: list[int]) -> list[C
                 existing_cost=to_float(existing.get("estimated_cost_usd")),
                 existing_elapsed=to_float(existing.get("elapsed_seconds")),
                 existing_prompt_text=str(existing["prompt_text"]),
-                process_prompt_text=str(process["prompt_text"]),
                 story_title=story_title,
                 editorial_narrative=narrative,
                 key_facts=key_facts,
