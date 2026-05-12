@@ -385,7 +385,7 @@ class Settings(BaseSettings):
     whisper_model_size: str = "base"  # tiny, base, small, medium, large
     whisper_device: str = "auto"  # auto, cpu, cuda, mps
     tweet_video_enabled: bool = True
-    tweet_video_max_duration_seconds: int = Field(default=600, ge=1)
+    tweet_video_max_duration_seconds: int = Field(default=1800, ge=1)
 
     # HTTP client
     http_timeout_seconds: int = 30
@@ -681,16 +681,6 @@ class Settings(BaseSettings):
         """Return the directory for temporary tweet video audio downloads."""
 
         return (self.storage.media_base_dir / "tweet_videos").resolve()
-
-    @property
-    def substack_media_dir(self) -> Path:
-        """Return the directory for storing Substack assets.
-
-        Returns:
-            Path: Absolute directory path for Substack media output.
-        """
-
-        return (self.storage.media_base_dir / "substack").resolve()
 
     @property
     def logs_dir(self) -> Path:

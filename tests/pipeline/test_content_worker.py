@@ -22,7 +22,6 @@ from app.services.youtube_equivalent_resolver import (
 def mock_dependencies():
     """Mock all external dependencies."""
     with (
-        patch("app.pipeline.worker.get_checkout_manager") as mock_checkout,
         patch("app.pipeline.worker.get_http_service") as mock_http,
         patch("app.pipeline.worker.get_queue_service") as mock_queue,
         patch("app.pipeline.worker.get_task_queue_gateway") as mock_queue_gateway,
@@ -31,7 +30,6 @@ def mock_dependencies():
         patch("app.pipeline.worker.get_db") as mock_get_db,
     ):
         yield {
-            "checkout": mock_checkout,
             "http": mock_http,
             "queue": mock_queue,
             "queue_gateway": mock_queue_gateway,
@@ -48,7 +46,6 @@ class TestContentWorker:
         """Test worker initialization."""
         worker = ContentWorker()
 
-        assert worker.checkout_manager is not None
         assert worker.http_service is not None
         assert worker.queue_service is not None
         assert worker.strategy_registry is not None
@@ -125,6 +122,42 @@ class TestContentWorker:
         )
 
         assert worker._tweet_video_audio_task(content) == TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO
+
+    def test_tweet_video_gate_recovers_snapshot_video_metadata(
+        self,
+        mock_dependencies,
+        monkeypatch,
+    ):
+        worker = ContentWorker()
+        monkeypatch.setattr(
+            "app.pipeline.worker.settings",
+            SimpleNamespace(
+                tweet_video_enabled=True,
+                tweet_video_max_duration_seconds=1800,
+            ),
+        )
+        content = ContentData(
+            id=123,
+            content_type=ContentType.ARTICLE,
+            url="https://x.com/i/status/123",
+            platform="twitter",
+            status=ContentStatus.PROCESSING,
+            metadata={
+                "platform": "twitter",
+                "has_video": False,
+                "tweet_video_skip_reason": "duration_limit",
+                "content_to_summarize": "Tweet text",
+                "tweet_snapshot": {
+                    "has_video": True,
+                    "video_duration_ms": 1_202_451,
+                },
+            },
+        )
+
+        assert worker._tweet_video_audio_task(content) == TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO
+        assert content.metadata["has_video"] is True
+        assert content.metadata["video_duration_ms"] == 1_202_451
+        assert "tweet_video_skip_reason" not in content.metadata
 
     def test_tweet_video_duration_limit_degrades_to_text_summary(
         self,

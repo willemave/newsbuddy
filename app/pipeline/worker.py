@@ -16,8 +16,11 @@ from app.models.metadata.state import (
     normalize_metadata_shape,
     update_processing_state,
 )
-from app.pipeline.checkout import get_checkout_manager
 from app.pipeline.podcast_workers import PodcastMediaWorker
+from app.pipeline.tweet_video_metadata import (
+    promote_tweet_video_metadata,
+    resolve_tweet_video_metadata,
+)
 from app.processing_strategies.registry import get_strategy_registry
 from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
 from app.services.content_bodies import sync_content_body_storage
@@ -57,7 +60,6 @@ class ContentWorker:
     """Unified worker for processing all content types."""
 
     def __init__(self):
-        self.checkout_manager = get_checkout_manager()
         self.http_service = get_http_service()
         self.queue_service = get_queue_service()
         self.queue_gateway = get_task_queue_gateway()
@@ -316,7 +318,8 @@ class ContentWorker:
             return None
         if platform != "twitter":
             return None
-        if not metadata.get("has_video"):
+        has_video, duration_ms = resolve_tweet_video_metadata(metadata)
+        if not has_video:
             return None
         if (
             isinstance(metadata.get("video_transcript"), str)
@@ -329,7 +332,6 @@ class ContentWorker:
             metadata["tweet_video_skip_reason"] = "disabled"
             return None
 
-        duration_ms = metadata.get("video_duration_ms")
         if isinstance(duration_ms, int):
             max_ms = settings.tweet_video_max_duration_seconds * 1000
             if duration_ms > max_ms:
@@ -343,6 +345,7 @@ class ContentWorker:
                 )
                 return None
 
+        promote_tweet_video_metadata(metadata, duration_ms=duration_ms)
         return TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO
 
     def _process_article(self, content: ContentData) -> bool:

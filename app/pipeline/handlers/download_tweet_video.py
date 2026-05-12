@@ -9,6 +9,10 @@ from app.models.contracts import ContentStatus
 from app.models.db import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.pipeline.tweet_video_metadata import (
+    promote_tweet_video_metadata,
+    resolve_tweet_video_metadata,
+)
 from app.services.audio_pipeline import download_audio_via_ytdlp
 from app.services.queue import TaskType
 
@@ -33,14 +37,21 @@ class DownloadTweetVideoAudioHandler:
                     return TaskResult.fail("Content not found", retryable=False)
 
                 metadata = dict(content.content_metadata or {})
-                if not context.settings.tweet_video_enabled or not metadata.get("has_video"):
+                has_video, duration_ms = resolve_tweet_video_metadata(metadata)
+                if not context.settings.tweet_video_enabled:
+                    metadata["has_video"] = False
+                    metadata["tweet_video_skip_reason"] = "disabled"
+                    content.content_metadata = metadata
+                    db.commit()
+                    context.queue.enqueue(TaskType.SUMMARIZE, content_id=content_id)
+                    return TaskResult.ok()
+                if not has_video:
                     metadata["has_video"] = False
                     content.content_metadata = metadata
                     db.commit()
                     context.queue.enqueue(TaskType.SUMMARIZE, content_id=content_id)
                     return TaskResult.ok()
 
-                duration_ms = metadata.get("video_duration_ms")
                 if isinstance(duration_ms, int):
                     max_ms = context.settings.tweet_video_max_duration_seconds * 1000
                     if duration_ms > max_ms:
@@ -51,6 +62,7 @@ class DownloadTweetVideoAudioHandler:
                         context.queue.enqueue(TaskType.SUMMARIZE, content_id=content_id)
                         return TaskResult.ok()
 
+                promote_tweet_video_metadata(metadata, duration_ms=duration_ms)
                 target_dir = context.settings.tweet_video_media_dir / f"content-{content_id}"
                 tweet_url = (
                     metadata.get("tweet_url") or metadata.get("discussion_url") or str(content.url)
