@@ -21,10 +21,6 @@ SAMPLE_HTML_CONTENT = """
 </html>
 """
 
-SAMPLE_ARXIV_HTML_CONTENT = """
-<html><head><title>ArXiv Page</title></head><body>Abstract page, not PDF.</body></html>
-"""
-
 SAMPLE_EXTRACTED_MARKDOWN = """
 # Test Article Title
 

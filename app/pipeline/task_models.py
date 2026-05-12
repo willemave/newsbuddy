@@ -40,20 +40,6 @@ class TaskEnvelope(BaseModel):
         """Build a TaskEnvelope from raw queue data."""
         return cls.model_validate(task_data)
 
-    def to_legacy_task_data(self) -> dict[str, Any]:
-        """Return a task dict compatible with legacy handlers."""
-        return {
-            "id": self.id,
-            "task_type": self.task_type.value,
-            "content_id": self.content_id,
-            "payload": self.payload,
-            "retry_count": self.retry_count,
-            "status": self.status,
-            "queue_name": self.queue_name,
-            "created_at": self.created_at,
-            "started_at": self.started_at,
-        }
-
 
 class TaskResult(BaseModel):
     """Outcome for task processing."""

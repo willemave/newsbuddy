@@ -17,7 +17,6 @@ from app.models.contracts import ContentStatus
 from app.models.db import Content
 from app.models.domain.content import ContentData
 from app.models.domain.content_mapper import content_to_domain, domain_to_content
-from app.scraping.youtube_unified import YouTubeClientConfig
 from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.audio_pipeline import (
     download_audio_via_ytdlp,
@@ -303,14 +302,6 @@ class PodcastDownloadWorker:
         if "/shorts/" in parsed.path:
             return parsed.path.split("/shorts/", 1)[1].split("/", 1)[0]
         return None
-
-    def _build_youtube_extractor_args(
-        self, client_config: YouTubeClientConfig
-    ) -> dict[str, dict[str, list[str]]]:
-        from app.services.audio_pipeline import build_youtube_extractor_args
-
-        del client_config
-        return build_youtube_extractor_args()
 
     def _download_youtube_audio(self, url: str, title: str | None, content_id: int) -> Path:
         youtube_dir = self.base_dir / "youtube"

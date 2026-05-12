@@ -29,7 +29,6 @@ class TestPipelineWithRealData:
         with (
             patch("app.pipeline.worker.get_http_service"),
             patch("app.pipeline.worker.get_strategy_registry") as mock_registry,
-            patch("app.pipeline.worker.get_checkout_manager"),
             patch("app.pipeline.worker.get_task_queue_gateway") as mock_queue_gateway,
         ):
             # Setup strategy mock
@@ -79,7 +78,6 @@ class TestPipelineWithRealData:
 
         # Mock dependencies
         with (
-            patch("app.pipeline.worker.get_checkout_manager"),
             patch("app.pipeline.worker.get_task_queue_gateway") as mock_queue_gateway,
             patch("app.pipeline.worker.PodcastMediaWorker"),
         ):

@@ -67,10 +67,6 @@ class StrategyRegistry:
         logger.warning(f"No strategy found for URL: {url}")
         return None
 
-    def list_strategies(self) -> list[str]:
-        """List all registered strategy names."""
-        return [s.__class__.__name__ for s in self.strategies]
-
 
 # Global registry instance
 _registry = None

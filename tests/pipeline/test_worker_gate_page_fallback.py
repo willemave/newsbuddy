@@ -60,7 +60,6 @@ def _patch_worker_dependencies(monkeypatch, strategy: _FakeHtmlStrategy) -> None
     monkeypatch.setattr("app.pipeline.worker.get_strategy_registry", lambda: registry)
     monkeypatch.setattr("app.pipeline.worker.get_http_service", lambda: Mock())
     monkeypatch.setattr("app.pipeline.worker.get_queue_service", lambda: Mock())
-    monkeypatch.setattr("app.pipeline.worker.get_checkout_manager", lambda: Mock())
 
 
 def _build_gate_extracted_data() -> dict[str, Any]:

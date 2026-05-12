@@ -7,7 +7,6 @@ import logging
 import re
 import threading
 from collections.abc import Coroutine
-from html import unescape
 from typing import Any
 from urllib.parse import urlparse
 
@@ -150,27 +149,6 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             return "ChinaTalk"
         else:
             return "web"
-
-    def _map_platform(self, source: str, url: str) -> str | None:
-        """Map platform from the detected source or URL.
-
-        Keeps platform taxonomy consistent with scrapers (substack, medium,
-        arxiv, pubmed, youtube, etc.). Returns None for generic web.
-        """
-        s = (source or "").lower()
-        if s == "substack":
-            return "substack"
-        if s == "medium":
-            return "medium"
-        if s == "arxiv":
-            return "arxiv"
-        if s in ("pubmed", "pmc"):
-            return "pubmed"
-        # Some Substack publications use custom domains (e.g., chinatalk.media)
-        if any(h in url for h in (".substack.com", "chinatalk.media")):
-            return "substack"
-        # Fallback: no clear platform
-        return None
 
     def preprocess_url(self, url: str) -> str:
         """
@@ -430,39 +408,6 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         if any(re.search(pattern, message) for pattern in non_retryable_patterns):
             return True
         return any(token in message for token in non_retryable_tokens)
-
-    @staticmethod
-    def _extract_title_from_html(html_content: str) -> str | None:
-        """Extract a page title from raw HTML."""
-
-        patterns = [
-            r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
-            r'<meta[^>]+name=["\']twitter:title["\'][^>]+content=["\']([^"\']+)["\']',
-            r'<meta[^>]+name=["\']title["\'][^>]+content=["\']([^"\']+)["\']',
-            r"<title[^>]*>(.*?)</title>",
-            r"<h1[^>]*>(.*?)</h1>",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, html_content, re.IGNORECASE | re.DOTALL)
-            if not match:
-                continue
-            raw_title = unescape(match.group(1)).strip()
-            title = re.sub(r"\s+", " ", raw_title) if raw_title else ""
-            cleaned = clean_title(title)
-            if cleaned:
-                return cleaned
-            if title:
-                return title
-        return None
-
-    @staticmethod
-    def _extract_text_from_html(html_content: str) -> str:
-        """Lightweight HTML to text extraction for fallback."""
-
-        without_scripts = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html_content)
-        without_tags = re.sub(r"(?is)<[^>]+>", " ", without_scripts)
-        text = unescape(without_tags)
-        return re.sub(r"\s+", " ", text).strip()
 
     @classmethod
     def _detect_access_gate(
