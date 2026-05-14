@@ -489,6 +489,17 @@ def _build_fix_script_args(args: argparse.Namespace) -> list[str]:
         script_args.append("--yes" if args.apply else "--dry-run")
         return script_args
 
+    if args.fix_command in {"move-to-spec-queues", "move-misrouted"}:
+        script_args = ["scripts/queue_control.py", "move-to-spec-queues"]
+        for status in args.statuses or []:
+            script_args.extend(["--status", status])
+        if args.task_type:
+            script_args.extend(["--task-type", args.task_type])
+        if args.limit is not None:
+            script_args.extend(["--limit", str(args.limit)])
+        script_args.append("--yes" if args.apply else "--dry-run")
+        return script_args
+
     if args.fix_command == "move-queue":
         script_args = [
             "scripts/queue_control.py",
@@ -698,6 +709,15 @@ def _build_fix_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser
         help="Move media tasks into the media queue",
     )
     move_media_parser.add_argument("--status", dest="statuses", action="append")
+
+    move_spec_parser = fix_subparsers.add_parser(
+        "move-to-spec-queues",
+        aliases=["move-misrouted"],
+        help="Move tasks into the queue partition declared by task specs",
+    )
+    move_spec_parser.add_argument("--status", dest="statuses", action="append")
+    move_spec_parser.add_argument("--task-type", default=None)
+    move_spec_parser.add_argument("--limit", type=int, default=None)
 
     move_queue_parser = fix_subparsers.add_parser("move-queue", help="Move tasks between queues")
     move_queue_parser.add_argument("--from-queue", required=True)

@@ -23,8 +23,12 @@ from app.core.settings import get_settings  # noqa: E402
 from app.models.contracts import (
     ContentStatus,  # noqa: E402
     ContentType,  # noqa: E402
+    TaskQueue,  # noqa: E402
+    TaskStatus,  # noqa: E402
+    TaskType,  # noqa: E402
 )
 from app.models.db import Content, ProcessingTask
+from app.services.queue import build_task_dedupe_key  # noqa: E402
 
 PODCAST_RESET_METADATA_KEYS = frozenset(
     {
@@ -190,9 +194,15 @@ def perform_reset(options: ResetOptions) -> ResetResult:
             for content in content_rows:
                 tasks_to_create.append(
                     ProcessingTask(
-                        task_type="process_content",
+                        task_type=TaskType.PROCESS_CONTENT.value,
                         content_id=content.id,
-                        status="pending",
+                        status=TaskStatus.PENDING.value,
+                        queue_name=TaskQueue.CONTENT.value,
+                        dedupe_key=build_task_dedupe_key(
+                            task_type=TaskType.PROCESS_CONTENT,
+                            content_id=content.id,
+                            queue_name=TaskQueue.CONTENT,
+                        ),
                         payload={
                             "content_type": content.content_type,
                             "url": content.url,

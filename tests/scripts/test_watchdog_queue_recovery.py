@@ -87,6 +87,67 @@ def test_run_watchdog_once_requeues_stale_sync_integration(db_session) -> None:
     assert stale_task.retry_count == 1
 
 
+def test_run_watchdog_once_moves_misrouted_queue_rows(db_session) -> None:
+    """Watchdog should normalize active rows created before queue splits."""
+    discussion_task = ProcessingTask(
+        task_type=TaskType.FETCH_NEWS_ITEM_DISCUSSION.value,
+        status=TaskStatus.PENDING.value,
+        payload={"news_item_id": 123},
+        queue_name=TaskQueue.CONTENT.value,
+    )
+    backfill_task = ProcessingTask(
+        task_type=TaskType.BACKFILL_FEEDS.value,
+        status=TaskStatus.PENDING.value,
+        payload={"user_id": 1, "config_ids": [2], "count": 10},
+        queue_name=TaskQueue.CONTENT.value,
+    )
+    audio_episode_task = ProcessingTask(
+        task_type=TaskType.GENERATE_AUDIO_EPISODE.value,
+        status=TaskStatus.PROCESSING.value,
+        payload={"audio_episode_id": 4},
+        queue_name=TaskQueue.MEDIA.value,
+    )
+    completed_misrouted_task = ProcessingTask(
+        task_type=TaskType.FETCH_DISCUSSION.value,
+        status=TaskStatus.COMPLETED.value,
+        payload={},
+        queue_name=TaskQueue.CONTENT.value,
+    )
+    db_session.add_all(
+        [
+            discussion_task,
+            backfill_task,
+            audio_episode_task,
+            completed_misrouted_task,
+        ]
+    )
+    db_session.commit()
+
+    result = run_watchdog_once(
+        session=db_session,
+        transcribe_stale_hours=2.0,
+        process_content_stale_hours=2.0,
+        process_news_item_stale_hours=2.0,
+        sync_integration_stale_hours=2.0,
+        alert_threshold=99,
+        slack_webhook_url=None,
+        dry_run=False,
+        action_limit=None,
+    )
+    db_session.commit()
+    db_session.refresh(discussion_task)
+    db_session.refresh(backfill_task)
+    db_session.refresh(audio_episode_task)
+    db_session.refresh(completed_misrouted_task)
+
+    assert result.moved_misrouted.action_name == "move_misrouted"
+    assert result.moved_misrouted.touched_count == 3
+    assert discussion_task.queue_name == TaskQueue.DISCUSSION.value
+    assert backfill_task.queue_name == TaskQueue.BACKFILL.value
+    assert audio_episode_task.queue_name == TaskQueue.AUDIO_EPISODE.value
+    assert completed_misrouted_task.queue_name == TaskQueue.CONTENT.value
+
+
 def test_parse_args_supports_process_news_item_stale_hours() -> None:
     """CLI parsing should expose the news-item stale-hours option."""
     args = _parse_args(["--process-news-item-stale-hours", "6"])
@@ -111,7 +172,7 @@ def test_main_retries_transient_operational_error() -> None:
         started_at=datetime.now(UTC),
         finished_at=datetime.now(UTC),
         dry_run=False,
-        moved_media=ActionResult("move_media", 0, [], {}),
+        moved_misrouted=ActionResult("move_misrouted", 0, [], {}),
         requeued_media=ActionResult("requeue_stale_media", 0, [], {}),
         requeued_process_content=ActionResult("requeue_stale_process_content", 0, [], {}),
         requeued_process_news_item=ActionResult("requeue_stale_process_news_item", 0, [], {}),

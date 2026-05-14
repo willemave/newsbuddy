@@ -409,6 +409,74 @@
 
           <div class="border border-gray-200 rounded-lg overflow-hidden">
             <div class="px-4 py-3 border-b border-gray-100">
+              <h3 class="text-sm font-semibold text-gray-900">Oldest Processing</h3>
+            </div>
+            {% if queue_health.processing %}
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-sm">
+                <thead>
+                  <tr class="border-b border-gray-100">
+                    <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Queue / Task</th>
+                    <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Processing</th>
+                    <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Oldest</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50">
+                  {% for row in queue_health.processing %}
+                  <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="px-4 py-2.5">
+                      <div class="font-medium text-gray-900">{{ row.queue_name }}</div>
+                      <div class="text-xs text-gray-400 font-mono">{{ row.task_type }}</div>
+                    </td>
+                    <td class="px-4 py-2.5 text-right tabular-nums text-gray-900">{{ row.processing_count }}</td>
+                    <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">{{ row.oldest_processing_age }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <div class="px-4 py-10 text-sm text-gray-400">No processing queue tasks.</div>
+            {% endif %}
+          </div>
+
+          <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100">
+              <h3 class="text-sm font-semibold text-gray-900">Queue Activity</h3>
+            </div>
+            {% if queue_health.activity %}
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-sm">
+                <thead>
+                  <tr class="border-b border-gray-100">
+                    <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Queue / Task</th>
+                    <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">In</th>
+                    <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Done</th>
+                    <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Fail</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50">
+                  {% for row in queue_health.activity %}
+                  <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="px-4 py-2.5">
+                      <div class="font-medium text-gray-900">{{ row.queue_name }}</div>
+                      <div class="text-xs text-gray-400 font-mono">{{ row.task_type }}</div>
+                    </td>
+                    <td class="px-4 py-2.5 text-right tabular-nums text-gray-900">{{ row.enqueued_count }}</td>
+                    <td class="px-4 py-2.5 text-right tabular-nums text-gray-900">{{ row.completed_count }}</td>
+                    <td class="px-4 py-2.5 text-right tabular-nums {% if row.failed_count > 0 %}text-red-600{% else %}text-gray-900{% endif %}">{{ row.failed_count }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <div class="px-4 py-10 text-sm text-gray-400">No queue activity in this window.</div>
+            {% endif %}
+          </div>
+
+          <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <div class="px-4 py-3 border-b border-gray-100">
               <h3 class="text-sm font-semibold text-gray-900">Failures and Retries</h3>
             </div>
             <div class="p-4">

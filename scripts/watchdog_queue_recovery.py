@@ -2,7 +2,7 @@
 """Automated queue watchdog for recovery actions.
 
 Runs the same safety actions operators have been running manually:
-1. Move media tasks into the dedicated media queue.
+1. Move active tasks into the queue partition declared by task specs.
 2. Requeue stale media processing tasks.
 3. Requeue stale content, news item, and integration processing tasks.
 
@@ -32,7 +32,14 @@ from app.core.logging import get_logger, setup_logging  # noqa: E402
 from app.core.observability import bound_log_context, build_log_extra  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
 from app.models.db import ProcessingTask  # noqa: E402
-from app.services.queue import TASK_QUEUE_BY_TYPE, TaskQueue, TaskStatus, TaskType  # noqa: E402
+from app.services.queue import (  # noqa: E402
+    TASK_QUEUE_BY_TYPE,
+    TASK_QUEUE_VALUE_BY_TYPE,
+    TaskQueue,
+    TaskStatus,
+    TaskType,
+    build_task_queue_mismatch_filter,
+)
 
 logger = get_logger(__name__)
 
@@ -71,7 +78,7 @@ class WatchdogRunResult:
     started_at: datetime
     finished_at: datetime
     dry_run: bool
-    moved_media: ActionResult
+    moved_misrouted: ActionResult
     requeued_media: ActionResult
     requeued_process_content: ActionResult
     requeued_process_news_item: ActionResult
@@ -81,7 +88,7 @@ class WatchdogRunResult:
     def total_touched(self) -> int:
         """Return the total touched tasks across all actions."""
         return (
-            self.moved_media.touched_count
+            self.moved_misrouted.touched_count
             + self.requeued_media.touched_count
             + self.requeued_process_content.touched_count
             + self.requeued_process_news_item.touched_count
@@ -131,18 +138,17 @@ def _create_session_factory(database_url: str | None = None) -> tuple[sessionmak
     return session_factory, engine, effective_database_url
 
 
-def _move_media_tasks(
+def _move_misrouted_tasks(
     session: Session,
     *,
     dry_run: bool,
     limit: int | None,
 ) -> ActionResult:
-    """Move media tasks to the media queue."""
+    """Move active tasks to the queue partition declared by task specs."""
     query = (
         session.query(ProcessingTask)
-        .filter(ProcessingTask.task_type.in_(MEDIA_TASK_TYPES))
         .filter(ProcessingTask.status.in_([TaskStatus.PENDING.value, TaskStatus.PROCESSING.value]))
-        .filter(ProcessingTask.queue_name != TaskQueue.MEDIA.value)
+        .filter(build_task_queue_mismatch_filter())
         .order_by(ProcessingTask.id.asc())
     )
     if limit:
@@ -153,15 +159,16 @@ def _move_media_tasks(
 
     if not dry_run:
         for row in rows:
-            row.queue_name = TaskQueue.MEDIA.value
+            expected_queue = TASK_QUEUE_VALUE_BY_TYPE.get(str(row.task_type))
+            if expected_queue is not None:
+                row.queue_name = expected_queue
 
     return ActionResult(
-        action_name="move_media",
+        action_name="move_misrouted",
         touched_count=len(rows),
         task_ids=task_ids,
         metadata={
-            "target_queue": TaskQueue.MEDIA.value,
-            "task_types": MEDIA_TASK_TYPES,
+            "expected_queues": TASK_QUEUE_VALUE_BY_TYPE,
             "statuses": [TaskStatus.PENDING.value, TaskStatus.PROCESSING.value],
             "limit": limit,
         },
@@ -222,7 +229,7 @@ def _record_watchdog_events(result: WatchdogRunResult) -> None:
     run_id = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
 
     action_results = [
-        result.moved_media,
+        result.moved_misrouted,
         result.requeued_media,
         result.requeued_process_content,
         result.requeued_process_news_item,
@@ -260,7 +267,7 @@ def _record_watchdog_events(result: WatchdogRunResult) -> None:
             context_data={
                 "run_id": run_id,
                 "total_touched": result.total_touched,
-                "moved_media": result.moved_media.touched_count,
+                "moved_misrouted": result.moved_misrouted.touched_count,
                 "requeued_media": result.requeued_media.touched_count,
                 "requeued_process_content": result.requeued_process_content.touched_count,
                 "requeued_process_news_item": result.requeued_process_news_item.touched_count,
@@ -277,7 +284,7 @@ def _send_slack_alert(webhook_url: str, result: WatchdogRunResult) -> tuple[bool
         "text": (
             "Queue watchdog touched tasks"
             f" | total={result.total_touched}"
-            f" move_media={result.moved_media.touched_count}"
+            f" move_misrouted={result.moved_misrouted.touched_count}"
             f" requeue_media={result.requeued_media.touched_count}"
             f" requeue_process_content={result.requeued_process_content.touched_count}"
             f" requeue_process_news_item={result.requeued_process_news_item.touched_count}"
@@ -345,7 +352,7 @@ def run_watchdog_once(
         sync_integration_stale_hours if sync_integration_stale_hours is not None else 2.0
     )
 
-    moved_media = _move_media_tasks(
+    moved_misrouted = _move_misrouted_tasks(
         session,
         dry_run=dry_run,
         limit=action_limit,
@@ -393,7 +400,7 @@ def run_watchdog_once(
         started_at=started_at,
         finished_at=finished_at,
         dry_run=dry_run,
-        moved_media=moved_media,
+        moved_misrouted=moved_misrouted,
         requeued_media=requeued_media,
         requeued_process_content=requeued_process_content,
         requeued_process_news_item=requeued_process_news_item,
@@ -503,7 +510,7 @@ def _print_result(result: WatchdogRunResult) -> None:
     print(f"  started_at: {result.started_at.isoformat()}")
     print(f"  finished_at: {result.finished_at.isoformat()}")
     print(f"  dry_run: {result.dry_run}")
-    print(f"  move_media: {result.moved_media.touched_count}")
+    print(f"  move_misrouted: {result.moved_misrouted.touched_count}")
     print(f"  requeue_stale_media: {result.requeued_media.touched_count}")
     print(f"  requeue_stale_process_content: {result.requeued_process_content.touched_count}")
     print(f"  requeue_stale_process_news_item: {result.requeued_process_news_item.touched_count}")

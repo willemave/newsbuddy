@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.models.contracts import ContentType
+from app.models.contracts import ContentType, TaskQueue, TaskStatus, TaskType
 from app.models.db import Content, ProcessingTask
 from scripts import reset_content_processing
 
@@ -67,4 +67,10 @@ def test_perform_reset_preserves_podcast_source_metadata(
         "feed_url": "https://cdn.example.com/feed.xml",
     }
     assert len(tasks) == 1
-    assert tasks[0].task_type == "process_content"
+    assert tasks[0].task_type == TaskType.PROCESS_CONTENT.value
+    assert tasks[0].status == TaskStatus.PENDING.value
+    assert tasks[0].queue_name == TaskQueue.CONTENT.value
+    assert (
+        tasks[0].dedupe_key
+        == f"{TaskQueue.CONTENT.value}|{TaskType.PROCESS_CONTENT.value}|content:{content.id}"
+    )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.contracts import TaskStatus
@@ -24,6 +24,21 @@ class QueueRetryBucket(BaseModel):
     pending_count: int
 
 
+class QueueProcessingBacklog(BaseModel):
+    queue_name: str
+    task_type: str
+    processing_count: int
+    oldest_processing_age_seconds: float | None
+
+
+class QueueTaskActivity(BaseModel):
+    queue_name: str
+    task_type: str
+    enqueued_count: int
+    completed_count: int
+    failed_count: int
+
+
 class QueueFailureSummary(BaseModel):
     task_type: str
     error_message: str
@@ -34,6 +49,8 @@ class QueueHealthSnapshot(BaseModel):
     generated_at: datetime
     window_hours: int = Field(ge=1)
     pending: list[QueueTaskBacklog]
+    processing: list[QueueProcessingBacklog]
+    activity: list[QueueTaskActivity]
     processing_count: int
     expired_lease_count: int
     retry_buckets: list[QueueRetryBucket]
@@ -52,6 +69,7 @@ def get_queue_health_snapshot(
     cutoff = now - timedelta(hours=window_hours)
 
     pending = _pending_backlog(db, now=now)
+    processing = _processing_backlog(db, now=now)
     processing_count = int(
         db.query(func.count(ProcessingTask.id))
         .filter(ProcessingTask.status == TaskStatus.PROCESSING.value)
@@ -67,6 +85,7 @@ def get_queue_health_snapshot(
         or 0
     )
     retry_buckets = _retry_buckets(db)
+    activity = _task_activity(db, cutoff=cutoff)
     recent_failed_count = int(
         db.query(func.count(ProcessingTask.id))
         .filter(ProcessingTask.status == TaskStatus.FAILED.value)
@@ -80,12 +99,50 @@ def get_queue_health_snapshot(
         generated_at=now.replace(tzinfo=UTC),
         window_hours=window_hours,
         pending=pending,
+        processing=processing,
+        activity=activity,
         processing_count=processing_count,
         expired_lease_count=expired_lease_count,
         retry_buckets=retry_buckets,
         recent_failed_count=recent_failed_count,
         top_failures=top_failures,
     )
+
+
+def _processing_backlog(db: Session, *, now: datetime) -> list[QueueProcessingBacklog]:
+    oldest_at = func.min(
+        func.coalesce(
+            ProcessingTask.started_at,
+            ProcessingTask.locked_at,
+            ProcessingTask.created_at,
+        )
+    )
+    rows = (
+        db.query(
+            ProcessingTask.queue_name,
+            ProcessingTask.task_type,
+            func.count(ProcessingTask.id),
+            oldest_at,
+        )
+        .filter(ProcessingTask.status == TaskStatus.PROCESSING.value)
+        .group_by(ProcessingTask.queue_name, ProcessingTask.task_type)
+        .order_by(
+            oldest_at.asc(),
+            func.count(ProcessingTask.id).desc(),
+            ProcessingTask.queue_name.asc(),
+            ProcessingTask.task_type.asc(),
+        )
+        .all()
+    )
+    return [
+        QueueProcessingBacklog(
+            queue_name=str(queue_name or "unknown"),
+            task_type=str(task_type or "unknown"),
+            processing_count=int(count or 0),
+            oldest_processing_age_seconds=_age_seconds(now, oldest_processing_at),
+        )
+        for queue_name, task_type, count, oldest_processing_at in rows
+    ]
 
 
 def _pending_backlog(db: Session, *, now: datetime) -> list[QueueTaskBacklog]:
@@ -99,7 +156,12 @@ def _pending_backlog(db: Session, *, now: datetime) -> list[QueueTaskBacklog]:
         )
         .filter(ProcessingTask.status == TaskStatus.PENDING.value)
         .group_by(ProcessingTask.queue_name, ProcessingTask.task_type)
-        .order_by(ProcessingTask.queue_name.asc(), ProcessingTask.task_type.asc())
+        .order_by(
+            oldest_at.asc(),
+            func.count(ProcessingTask.id).desc(),
+            ProcessingTask.queue_name.asc(),
+            ProcessingTask.task_type.asc(),
+        )
         .all()
     )
     return [
@@ -110,6 +172,67 @@ def _pending_backlog(db: Session, *, now: datetime) -> list[QueueTaskBacklog]:
             oldest_pending_age_seconds=_age_seconds(now, oldest_pending_at),
         )
         for queue_name, task_type, count, oldest_pending_at in rows
+    ]
+
+
+def _task_activity(db: Session, *, cutoff: datetime) -> list[QueueTaskActivity]:
+    enqueued_count = func.sum(case((ProcessingTask.created_at >= cutoff, 1), else_=0))
+    completed_count = func.sum(
+        case(
+            (
+                and_(
+                    ProcessingTask.status == TaskStatus.COMPLETED.value,
+                    ProcessingTask.completed_at >= cutoff,
+                ),
+                1,
+            ),
+            else_=0,
+        )
+    )
+    failed_count = func.sum(
+        case(
+            (
+                and_(
+                    ProcessingTask.status == TaskStatus.FAILED.value,
+                    ProcessingTask.completed_at >= cutoff,
+                ),
+                1,
+            ),
+            else_=0,
+        )
+    )
+    rows = (
+        db.query(
+            ProcessingTask.queue_name,
+            ProcessingTask.task_type,
+            enqueued_count,
+            completed_count,
+            failed_count,
+        )
+        .filter(
+            or_(
+                ProcessingTask.created_at >= cutoff,
+                ProcessingTask.completed_at >= cutoff,
+            )
+        )
+        .group_by(ProcessingTask.queue_name, ProcessingTask.task_type)
+        .order_by(
+            enqueued_count.desc(),
+            failed_count.desc(),
+            ProcessingTask.queue_name.asc(),
+            ProcessingTask.task_type.asc(),
+        )
+        .all()
+    )
+    return [
+        QueueTaskActivity(
+            queue_name=str(queue_name or "unknown"),
+            task_type=str(task_type or "unknown"),
+            enqueued_count=int(enqueued or 0),
+            completed_count=int(completed or 0),
+            failed_count=int(failed or 0),
+        )
+        for queue_name, task_type, enqueued, completed, failed in rows
     ]
 
 

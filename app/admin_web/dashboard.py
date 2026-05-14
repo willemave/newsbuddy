@@ -240,6 +240,27 @@ def _build_queue_health_dashboard(db: Session) -> dict[str, Any]:
             }
             for row in snapshot.pending[:10]
         ],
+        "processing": [
+            {
+                "queue_name": row.queue_name,
+                "task_type": row.task_type,
+                "processing_count": row.processing_count,
+                "oldest_processing_age": _format_duration_seconds(
+                    row.oldest_processing_age_seconds
+                ),
+            }
+            for row in snapshot.processing[:10]
+        ],
+        "activity": [
+            {
+                "queue_name": row.queue_name,
+                "task_type": row.task_type,
+                "enqueued_count": row.enqueued_count,
+                "completed_count": row.completed_count,
+                "failed_count": row.failed_count,
+            }
+            for row in snapshot.activity[:10]
+        ],
         "retry_buckets": snapshot.retry_buckets,
         "top_failures": snapshot.top_failures,
     }

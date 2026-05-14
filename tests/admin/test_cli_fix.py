@@ -57,6 +57,44 @@ def test_fix_requeue_stale_apply_requires_yes(tmp_path):
         _handle_fix(args, config=_config(tmp_path))
 
 
+def test_fix_move_to_spec_queues_preview_uses_dry_run(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    args = build_parser().parse_args(
+        [
+            "fix",
+            "move-to-spec-queues",
+            "--status",
+            "pending",
+            "--task-type",
+            "fetch_news_item_discussion",
+            "--limit",
+            "10",
+        ]
+    )
+
+    def fake_run_remote_script(config, script_args):
+        captured["config"] = config
+        captured["script_args"] = script_args
+        return {"stdout": "preview"}
+
+    monkeypatch.setattr("admin.cli.run_remote_script", fake_run_remote_script)
+
+    result = _handle_fix(args, config=_config(tmp_path))
+
+    assert result.data["stdout"] == "preview"
+    assert captured["script_args"] == [
+        "scripts/queue_control.py",
+        "move-to-spec-queues",
+        "--status",
+        "pending",
+        "--task-type",
+        "fetch_news_item_discussion",
+        "--limit",
+        "10",
+        "--dry-run",
+    ]
+
+
 def test_fix_reset_content_preview_uses_remote_helper(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
     args = build_parser().parse_args(["fix", "reset-content", "--hours", "4"])

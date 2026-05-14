@@ -26,8 +26,9 @@ from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
 
 from app.core.settings import get_settings
-from app.models.contracts import ContentStatus
+from app.models.contracts import ContentStatus, TaskQueue, TaskStatus, TaskType
 from app.models.db import Content, ProcessingTask
+from app.services.queue import build_task_dedupe_key
 
 LOG_FILE_SUFFIXES = (".jsonl", ".log", ".txt")
 
@@ -281,9 +282,15 @@ def reset_errored_content(
 
                 # Create new processing task
                 task = ProcessingTask(
-                    task_type="process_content",
+                    task_type=TaskType.PROCESS_CONTENT.value,
                     content_id=content.id,
-                    status="pending",
+                    status=TaskStatus.PENDING.value,
+                    queue_name=TaskQueue.CONTENT.value,
+                    dedupe_key=build_task_dedupe_key(
+                        task_type=TaskType.PROCESS_CONTENT,
+                        content_id=content.id,
+                        queue_name=TaskQueue.CONTENT,
+                    ),
                     payload={
                         "content_type": content.content_type,
                         "url": content.url,

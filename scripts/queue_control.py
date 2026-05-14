@@ -17,7 +17,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.settings import get_settings  # noqa: E402
 from app.models.db import Content, ProcessingTask  # noqa: E402
-from app.services.queue import TASK_QUEUE_BY_TYPE, TaskQueue, TaskStatus, TaskType  # noqa: E402
+from app.services.queue import (  # noqa: E402
+    TASK_QUEUE_BY_TYPE,
+    TASK_QUEUE_VALUE_BY_TYPE,
+    TaskQueue,
+    TaskStatus,
+    TaskType,
+    build_task_queue_mismatch_filter,
+)
 
 PROCESSING_TIMESTAMP_EXPR = func.coalesce(
     ProcessingTask.started_at,
@@ -329,6 +336,56 @@ def move_media_tasks(
     print(f"Moved tasks: {len(rows)}")
 
 
+def move_tasks_to_spec_queues(
+    session: Session,
+    *,
+    statuses: list[str],
+    task_type: str | None,
+    limit: int | None,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    """Move active task rows to the queue partition declared by task specs."""
+    try:
+        mismatch_filter = build_task_queue_mismatch_filter(task_type)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    rows_query = (
+        session.query(ProcessingTask)
+        .filter(ProcessingTask.status.in_(statuses))
+        .filter(mismatch_filter)
+        .order_by(ProcessingTask.id.asc())
+    )
+    if limit:
+        rows_query = rows_query.limit(limit)
+    rows = rows_query.all()
+
+    print(f"Mismatched queue assignments to move: {len(rows)}")
+    for row in rows[:20]:
+        expected_queue = TASK_QUEUE_VALUE_BY_TYPE.get(str(row.task_type))
+        print(
+            f"id={row.id} status={row.status} type={row.task_type} "
+            f"queue={row.queue_name} -> {expected_queue} content={row.content_id}"
+        )
+    if len(rows) > 20:
+        print(f"... plus {len(rows) - 20} more")
+
+    if dry_run:
+        print("Dry run only; no changes applied.")
+        return
+
+    if not force:
+        raise SystemExit("Refusing to move tasks without --yes")
+
+    for row in rows:
+        expected_queue = TASK_QUEUE_VALUE_BY_TYPE.get(str(row.task_type))
+        if expected_queue is not None:
+            row.queue_name = expected_queue
+    session.commit()
+    print(f"Moved tasks: {len(rows)}")
+
+
 def move_tasks_between_queues(
     session: Session,
     *,
@@ -485,6 +542,31 @@ def build_parser() -> argparse.ArgumentParser:
     move_parser.add_argument("--dry-run", action="store_true", help="Preview only")
     move_parser.add_argument("--yes", action="store_true", help="Apply changes")
 
+    move_spec_parser = subparsers.add_parser(
+        "move-to-spec-queues",
+        aliases=["move-misrouted"],
+        help="Move tasks to the queue partition declared by task specs",
+    )
+    move_spec_parser.add_argument(
+        "--status",
+        dest="statuses",
+        action="append",
+        choices=[status.value for status in TaskStatus],
+        help="Statuses to move (default: pending + processing)",
+    )
+    move_spec_parser.add_argument(
+        "--task-type",
+        choices=[task_type.value for task_type in TaskType],
+        help="Only move tasks for this task type",
+    )
+    move_spec_parser.add_argument(
+        "--limit",
+        type=int,
+        help="Move at most N matching rows",
+    )
+    move_spec_parser.add_argument("--dry-run", action="store_true", help="Preview only")
+    move_spec_parser.add_argument("--yes", action="store_true", help="Apply changes")
+
     move_queue_parser = subparsers.add_parser(
         "move-queue",
         help="Move tasks between queue partitions",
@@ -571,6 +653,19 @@ def main(argv: list[str] | None = None) -> int:
                     statuses=list(
                         args.statuses or [TaskStatus.PENDING.value, TaskStatus.PROCESSING.value]
                     ),
+                    dry_run=bool(args.dry_run),
+                    force=bool(args.yes),
+                )
+                return 0
+
+            if args.command in {"move-to-spec-queues", "move-misrouted"}:
+                move_tasks_to_spec_queues(
+                    session,
+                    statuses=list(
+                        args.statuses or [TaskStatus.PENDING.value, TaskStatus.PROCESSING.value]
+                    ),
+                    task_type=args.task_type,
+                    limit=args.limit,
                     dry_run=bool(args.dry_run),
                     force=bool(args.yes),
                 )
