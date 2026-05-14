@@ -16,6 +16,7 @@ struct OnboardingSuggestionCard: View {
         let icon: String
         let accentColor: Color
         let label: String
+        let hidesLabel: Bool
     }
 
     private var metadata: SuggestionMetadata {
@@ -24,52 +25,62 @@ struct OnboardingSuggestionCard: View {
             return SuggestionMetadata(
                 icon: "envelope.open",
                 accentColor: .watercolorMistyBlue,
-                label: "Newsletter"
+                label: "Newsletter",
+                hidesLabel: false
             )
         case "podcast_rss", "podcast":
             return SuggestionMetadata(
                 icon: "waveform",
                 accentColor: .watercolorDiffusedPeach,
-                label: "Podcast"
+                label: "Podcast",
+                hidesLabel: false
             )
         case "reddit":
             return SuggestionMetadata(
                 icon: "bubble.left.and.text.bubble.right",
                 accentColor: .watercolorPaleEmerald,
-                label: "Reddit"
+                label: "Reddit",
+                hidesLabel: true
             )
         default:
             return SuggestionMetadata(
                 icon: "doc.text",
                 accentColor: .watercolorSoftSky,
-                label: "Feed"
+                label: "Feed",
+                hidesLabel: false
             )
         }
     }
 
     var body: some View {
         Button(action: onToggle) {
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: metadata.icon)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(metadata.accentColor)
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !metadata.hidesLabel || sourceDetail != nil {
+                        HStack(spacing: 6) {
+                            Image(systemName: metadata.icon)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(metadata.accentColor)
 
-                        Text(metadata.label.uppercased())
-                            .font(.caption.weight(.semibold))
-                            .tracking(1.0)
-                            .foregroundColor(.watercolorSlate.opacity(0.62))
+                            if !metadata.hidesLabel {
+                                Text(metadata.label.uppercased())
+                                    .font(.caption.weight(.semibold))
+                                    .tracking(1.0)
+                                    .foregroundColor(.watercolorSlate.opacity(0.55))
+                            }
 
-                        if let sourceDetail, !sourceDetail.isEmpty {
-                            Text(".")
-                                .font(.caption)
-                                .foregroundColor(.watercolorSlate.opacity(0.38))
+                            if let sourceDetail, !sourceDetail.isEmpty {
+                                if !metadata.hidesLabel {
+                                    Circle()
+                                        .fill(Color.watercolorSlate.opacity(0.28))
+                                        .frame(width: 2, height: 2)
+                                }
 
-                            Text(sourceDetail)
-                                .font(.caption)
-                                .foregroundColor(.watercolorSlate.opacity(0.52))
-                                .lineLimit(1)
+                                Text(sourceDetail)
+                                    .font(.caption)
+                                    .foregroundColor(.watercolorSlate.opacity(0.55))
+                                    .lineLimit(1)
+                            }
                         }
                     }
 
@@ -82,7 +93,7 @@ struct OnboardingSuggestionCard: View {
                     if let rationale = suggestion.rationale, !rationale.isEmpty {
                         Text(rationale)
                             .font(.caption)
-                            .foregroundColor(.watercolorSlate.opacity(0.66))
+                            .foregroundColor(.watercolorSlate.opacity(0.62))
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
@@ -90,7 +101,7 @@ struct OnboardingSuggestionCard: View {
 
                 Spacer(minLength: 0)
 
-                selectionIndicator
+                OnboardingSelectionDot(isSelected: isSelected)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -98,23 +109,6 @@ struct OnboardingSuggestionCard: View {
         }
         .buttonStyle(EditorialCardButtonStyle())
         .accessibilityIdentifier("onboarding.suggestion.\(suggestion.stableKey)")
-    }
-
-    private var selectionIndicator: some View {
-        ZStack {
-            Circle()
-                .fill(
-                    isSelected
-                        ? Color.watercolorSlate.opacity(0.12)
-                        : Color.watercolorSlate.opacity(0.06)
-                )
-                .frame(width: 30, height: 30)
-
-            Image(systemName: isSelected ? "checkmark" : "plus")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(isSelected ? .watercolorSlate : .watercolorSlate.opacity(0.55))
-        }
-        .padding(.top, 2)
     }
 
     private var sourceDetail: String? {
@@ -138,19 +132,19 @@ struct OnboardingSuggestionCard: View {
     }
 
     private var cardSurface: some View {
-        RoundedRectangle(cornerRadius: 16)
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
             .fill(
                 isSelected
                     ? Color.watercolorBase.opacity(0.94)
                     : Color.watercolorBase.opacity(0.86)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(
                         isSelected
-                            ? Color.watercolorSlate.opacity(0.14)
+                            ? Color.watercolorPaleEmerald.opacity(0.32)
                             : Color.watercolorSlate.opacity(0.08),
-                        lineWidth: 0.5
+                        lineWidth: isSelected ? 0.75 : 0.5
                     )
             )
             .shadow(color: .black.opacity(isSelected ? 0.07 : 0.04), radius: 14, x: 0, y: 10)

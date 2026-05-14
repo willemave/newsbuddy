@@ -9,47 +9,119 @@ import SwiftUI
 
 struct LaneStatusRow: View {
     let lane: OnboardingDiscoveryLaneStatus
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(statusColor.opacity(0.12))
-                        .frame(width: 32, height: 32)
-                    Image(systemName: statusIcon)
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(statusColor)
+        HStack(alignment: .center, spacing: 12) {
+            statusIndicator
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(lane.name)
+                        .font(.callout.weight(isCompleted ? .regular : .medium))
+                        .foregroundColor(.watercolorSlate.opacity(isCompleted ? 0.7 : 0.95))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    if showsCountBadge {
+                        Text("\(lane.completedQueries)/\(lane.queryCount)")
+                            .font(.caption2.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundColor(.watercolorSlate.opacity(0.55))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Color.watercolorSlate.opacity(0.07))
+                            )
+                            .transition(.opacity)
+                    }
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(lane.name)
-                        .font(.callout)
-                        .foregroundColor(.watercolorSlate)
+                if showsProgressBar {
+                    WatercolorProgressBar(
+                        progress: laneProgress,
+                        isActive: lane.status == "processing"
+                    )
+                    .frame(height: 3)
+                    .transition(.opacity)
+                } else if !isCompleted {
                     Text(statusLabel)
                         .font(.caption)
-                        .foregroundColor(.watercolorSlate.opacity(0.62))
+                        .foregroundColor(.watercolorSlate.opacity(0.55))
+                        .transition(.opacity)
                 }
-
-                Spacer()
-
-                if lane.queryCount > 0 {
-                    Text("\(lane.completedQueries)/\(lane.queryCount)")
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundColor(.watercolorSlate.opacity(0.68))
-                }
-            }
-
-            if lane.queryCount > 0 {
-                ProgressView(value: laneProgress)
-                    .tint(statusColor)
-                    .scaleEffect(x: 1.0, y: 0.85, anchor: .center)
             }
         }
         .padding(.vertical, 4)
-        .animation(.easeInOut(duration: 0.2), value: lane.status)
-        .animation(.easeInOut(duration: 0.2), value: lane.completedQueries)
+        .opacity(rowOpacity)
+        .animation(
+            reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.3),
+            value: lane.status
+        )
+        .animation(
+            reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.3),
+            value: lane.completedQueries
+        )
+    }
+
+    @ViewBuilder
+    private var statusIndicator: some View {
+        ZStack {
+            Circle()
+                .fill(indicatorBackground)
+                .frame(width: 26, height: 26)
+
+            switch lane.status {
+            case "completed":
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.watercolorPaleEmerald)
+                    .transition(.scale(scale: 0.4).combined(with: .opacity))
+            case "failed":
+                Image(systemName: "exclamationmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.watercolorDiffusedPeach)
+            case "processing":
+                LanePulsingDot()
+            default:
+                Circle()
+                    .strokeBorder(
+                        Color.watercolorSlate.opacity(0.28),
+                        style: StrokeStyle(lineWidth: 1.2, dash: [2, 2.5])
+                    )
+                    .frame(width: 12, height: 12)
+            }
+        }
+    }
+
+    private var indicatorBackground: Color {
+        switch lane.status {
+        case "completed": return Color.watercolorPaleEmerald.opacity(0.16)
+        case "failed": return Color.watercolorDiffusedPeach.opacity(0.18)
+        case "processing": return Color.watercolorMistyBlue.opacity(0.14)
+        default: return Color.watercolorSlate.opacity(0.05)
+        }
+    }
+
+    private var rowOpacity: Double {
+        switch lane.status {
+        case "completed": return 0.88
+        case "failed", "processing": return 1.0
+        default: return 0.6
+        }
+    }
+
+    private var isCompleted: Bool { lane.status == "completed" }
+    private var isProcessing: Bool { lane.status == "processing" }
+
+    private var showsCountBadge: Bool {
+        lane.queryCount > 0 && !isCompleted && lane.status != "failed"
+    }
+
+    private var showsProgressBar: Bool {
+        lane.queryCount > 0 && !isCompleted && lane.status != "failed"
     }
 
     private var laneProgress: Double {
@@ -60,31 +132,106 @@ struct LaneStatusRow: View {
     private var statusLabel: String {
         switch lane.status {
         case "processing":
-            return lane.queryCount > 0 ? "Searching in progress" : "Searching..."
+            return lane.queryCount > 0 ? "Searching" : "Searching..."
         case "completed":
             return "Done"
         case "failed":
-            return "Failed"
+            return "Couldn't reach this source"
         default:
             return "Queued"
         }
     }
+}
 
-    private var statusIcon: String {
-        switch lane.status {
-        case "processing": return "hourglass"
-        case "completed": return "checkmark"
-        case "failed": return "exclamationmark"
-        default: return "circle"
+private struct WatercolorProgressBar: View {
+    let progress: Double
+    let isActive: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shimmerPhase: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geo in
+            let fillWidth = max(0, min(geo.size.width, geo.size.width * CGFloat(progress)))
+            let shimmerWidth = max(24, fillWidth * 0.35)
+
+            ZStack(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(Color.watercolorSlate.opacity(0.08))
+
+                Capsule(style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.watercolorMistyBlue.opacity(0.85),
+                                Color.watercolorPaleEmerald.opacity(0.9),
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: fillWidth)
+                    .overlay(alignment: .leading) {
+                        if shouldShimmer(fillWidth: fillWidth) {
+                            Rectangle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            .clear,
+                                            Color.white.opacity(0.65),
+                                            .clear,
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: shimmerWidth)
+                                .offset(x: shimmerPhase * (fillWidth + shimmerWidth) - shimmerWidth)
+                                .blendMode(.plusLighter)
+                        }
+                    }
+                    .clipShape(Capsule(style: .continuous))
+            }
+            .onAppear { restartShimmer(fillWidth: fillWidth) }
+            .onChange(of: isActive) { _, _ in restartShimmer(fillWidth: fillWidth) }
+            .onChange(of: progress) { _, _ in restartShimmer(fillWidth: fillWidth) }
         }
     }
 
-    private var statusColor: Color {
-        switch lane.status {
-        case "processing": return .watercolorSlate
-        case "completed": return .watercolorPaleEmerald
-        case "failed": return .watercolorDiffusedPeach
-        default: return .watercolorSlate.opacity(0.4)
+    private func shouldShimmer(fillWidth: CGFloat) -> Bool {
+        isActive && !reduceMotion && fillWidth > 8 && progress < 1
+    }
+
+    private func restartShimmer(fillWidth: CGFloat) {
+        guard shouldShimmer(fillWidth: fillWidth) else { return }
+        shimmerPhase = 0
+        withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
+            shimmerPhase = 1
+        }
+    }
+}
+
+private struct LanePulsingDot: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isPulsing = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.watercolorMistyBlue.opacity(0.45))
+                .frame(width: 14, height: 14)
+                .scaleEffect(isPulsing ? 1.6 : 0.85)
+                .opacity(isPulsing ? 0 : 0.65)
+
+            Circle()
+                .fill(Color.watercolorMistyBlue)
+                .frame(width: 7, height: 7)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                isPulsing = true
+            }
         }
     }
 }

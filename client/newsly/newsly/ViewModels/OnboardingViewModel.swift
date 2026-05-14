@@ -500,8 +500,7 @@ final class OnboardingViewModel: ObservableObject {
 
     private func handleDiscoveryTimeout() {
         hasReachedDiscoveryPollingLimit = true
-        discoveryErrorMessage =
-            "Discovery is taking longer than expected. You can keep waiting, try again, or use defaults."
+        discoveryErrorMessage = "Still searching — usually wraps up in a moment."
         errorMessage = nil
         persistProgress()
     }

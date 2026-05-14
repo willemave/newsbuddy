@@ -270,33 +270,49 @@ struct OnboardingFlowView: View {
                         .font(.callout)
                         .foregroundColor(.watercolorSlate.opacity(0.7))
                 } else {
-                    VStack(spacing: 12) {
-                        HStack {
-                            Text("Live progress")
-                                .font(.callout.weight(.semibold))
-                                .foregroundColor(.watercolorSlate)
+                    VStack(spacing: 14) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("LIVE PROGRESS")
+                                .font(.editorialMeta)
+                                .tracking(1.6)
+                                .foregroundColor(.watercolorSlate.opacity(0.55))
 
                             Spacer()
 
-                            Text("\(completedLaneCount)/\(viewModel.discoveryLanes.count)")
-                                .font(.caption.weight(.semibold))
-                                .monospacedDigit()
-                                .foregroundColor(.watercolorSlate.opacity(0.7))
+                            HStack(spacing: 3) {
+                                Text("\(completedLaneCount)")
+                                    .font(.footnote.weight(.semibold))
+                                    .monospacedDigit()
+                                    .foregroundColor(.watercolorSlate.opacity(0.78))
+                                Text("/\(viewModel.discoveryLanes.count)")
+                                    .font(.caption.weight(.medium))
+                                    .monospacedDigit()
+                                    .foregroundColor(.watercolorSlate.opacity(0.42))
+                            }
+                            .contentTransition(.numericText())
                         }
 
-                        ForEach(Array(viewModel.discoveryLanes.enumerated()), id: \.element.id) { index, lane in
-                            LaneStatusRow(lane: lane)
-                                .animation(
-                                    reduceMotion
-                                        ? .linear(duration: 0.01)
-                                        : .easeOut(duration: 0.36).delay(Double(index) * 0.08),
-                                    value: viewModel.discoveryLanes
-                                )
-                        }
+                        VStack(spacing: 6) {
+                            ForEach(Array(viewModel.discoveryLanes.enumerated()), id: \.element.id) { index, lane in
+                                LaneStatusRow(lane: lane)
+                                    .animation(
+                                        reduceMotion
+                                            ? .linear(duration: 0.01)
+                                            : .easeOut(duration: 0.36).delay(Double(index) * 0.08),
+                                        value: viewModel.discoveryLanes
+                                    )
 
-                        if isFinalizingLanes {
-                            finalizingRow
-                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                if index < viewModel.discoveryLanes.count - 1 || isFinalizingLanes {
+                                    Rectangle()
+                                        .fill(Color.watercolorSlate.opacity(0.06))
+                                        .frame(height: 0.5)
+                                }
+                            }
+
+                            if isFinalizingLanes {
+                                finalizingRow
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
                         }
                     }
                     .padding(20)
@@ -310,48 +326,108 @@ struct OnboardingFlowView: View {
 
             Spacer()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 Text(loadingFootnote)
                     .font(.caption)
                     .foregroundColor(.watercolorSlate.opacity(0.62))
 
                 if let message = viewModel.discoveryErrorMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundColor(.orange)
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.watercolorSlate.opacity(0.78))
+                            .padding(.top, 1)
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundColor(.watercolorSlate.opacity(0.84))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color.watercolorDiffusedPeach.opacity(0.18))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(Color.watercolorDiffusedPeach.opacity(0.32), lineWidth: 0.5)
+                            )
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
 
                 if viewModel.shouldOfferContinueWaiting {
-                    Button("Keep waiting") {
+                    Button {
                         viewModel.continueWaitingForDiscovery()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "hourglass")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Keep waiting")
+                                .font(.callout.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .foregroundColor(.watercolorBase)
+                        .background(primaryButtonBackground)
                     }
-                    .font(.callout.weight(.semibold))
-                    .foregroundColor(.watercolorSlate)
-                    .buttonStyle(OnboardingTextButtonStyle())
+                    .buttonStyle(OnboardingPrimaryPressStyle())
                     .accessibilityIdentifier("onboarding.loading.keep_waiting")
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
 
                 if viewModel.shouldOfferRetryFromLoading {
-                    Button("Try again") {
+                    Button {
                         withAnimation(.easeInOut(duration: 0.3)) {
                             viewModel.retryPersonalization()
                         }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Try again")
+                                .font(.callout.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                        .foregroundColor(.watercolorSlate)
+                        .background(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .fill(Color.watercolorSlate.opacity(0.08))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                        .stroke(Color.watercolorSlate.opacity(0.14), lineWidth: 0.5)
+                                )
+                        )
                     }
-                    .font(.callout.weight(.medium))
-                    .foregroundColor(.watercolorSlate.opacity(0.78))
-                    .buttonStyle(OnboardingTextButtonStyle())
+                    .buttonStyle(OnboardingPrimaryPressStyle())
                     .accessibilityIdentifier("onboarding.loading.retry")
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
 
                 Button("Use defaults instead") {
                     viewModel.chooseDefaults()
                 }
-                .font(.callout.weight(.medium))
-                .foregroundColor(.watercolorSlate.opacity(0.72))
+                .font(.footnote.weight(.medium))
+                .foregroundColor(.watercolorSlate.opacity(0.6))
                 .buttonStyle(OnboardingTextButtonStyle())
                 .accessibilityIdentifier("onboarding.loading.use_defaults")
+                .padding(.top, 2)
             }
             .padding(.bottom, 8)
+            .animation(
+                reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.42, dampingFraction: 0.86),
+                value: viewModel.discoveryErrorMessage
+            )
+            .animation(
+                reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.42, dampingFraction: 0.86),
+                value: viewModel.shouldOfferContinueWaiting
+            )
+            .animation(
+                reduceMotion ? .linear(duration: 0.01) : .spring(response: 0.42, dampingFraction: 0.86),
+                value: viewModel.shouldOfferRetryFromLoading
+            )
         }
         .padding(.horizontal, 24)
         .accessibilityIdentifier("onboarding.loading.screen")
@@ -584,13 +660,7 @@ struct OnboardingFlowView: View {
 
                     Spacer()
 
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundColor(
-                            isSelected
-                                ? Color.watercolorSlate
-                                : Color.watercolorSlate.opacity(0.32)
-                        )
+                    OnboardingSelectionDot(isSelected: isSelected)
                 }
                 .padding(12)
                 .background(
@@ -600,7 +670,7 @@ struct OnboardingFlowView: View {
                             RoundedRectangle(cornerRadius: 18)
                                 .stroke(
                                     isSelected
-                                        ? Color.watercolorSlate.opacity(0.32)
+                                        ? Color.watercolorPaleEmerald.opacity(0.4)
                                         : Color.watercolorSlate.opacity(0.10),
                                     lineWidth: isSelected ? 1 : 0.5
                                 )
@@ -625,7 +695,7 @@ struct OnboardingFlowView: View {
     }
 
     private var brutalistTopicChips: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("TOPICS")
                 .font(.editorialMeta)
                 .tracking(1.4)
@@ -640,16 +710,27 @@ struct OnboardingFlowView: View {
                         Text(topic.capitalized)
                             .font(.caption.weight(.semibold))
                             .foregroundColor(
-                                isOn ? Color.watercolorBase : Color.watercolorSlate.opacity(0.78)
+                                isOn
+                                    ? Color.watercolorSlate.opacity(0.95)
+                                    : Color.watercolorSlate.opacity(0.62)
                             )
-                            .padding(.horizontal, 10)
+                            .padding(.horizontal, 11)
                             .padding(.vertical, 6)
                             .background(
-                                Capsule()
+                                Capsule(style: .continuous)
                                     .fill(
                                         isOn
-                                            ? Color.watercolorSlate
-                                            : Color.watercolorSlate.opacity(0.08)
+                                            ? Color.watercolorPaleEmerald.opacity(0.22)
+                                            : Color.clear
+                                    )
+                                    .overlay(
+                                        Capsule(style: .continuous)
+                                            .strokeBorder(
+                                                isOn
+                                                    ? Color.watercolorPaleEmerald.opacity(0.4)
+                                                    : Color.watercolorSlate.opacity(0.18),
+                                                lineWidth: 0.75
+                                            )
                                     )
                             )
                     }
@@ -834,23 +915,31 @@ struct OnboardingFlowView: View {
     }
 
     private var finalizingRow: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(Color.watercolorSlate.opacity(0.10))
-                    .frame(width: 32, height: 32)
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(.watercolorSlate)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.watercolorMistyBlue.opacity(0.22),
+                                Color.watercolorPaleEmerald.opacity(0.22),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 26, height: 26)
+
+                FinalizingSparkle()
             }
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Finalizing")
-                    .font(.callout)
-                    .foregroundColor(.watercolorSlate)
+                    .font(.callout.weight(.medium))
+                    .foregroundColor(.watercolorSlate.opacity(0.95))
                 Text("Shaping your first picks")
                     .font(.caption)
-                    .foregroundColor(.watercolorSlate.opacity(0.62))
+                    .foregroundColor(.watercolorSlate.opacity(0.55))
             }
 
             Spacer()
@@ -898,7 +987,7 @@ struct OnboardingFlowView: View {
             return "Almost there"
         }
         if !viewModel.discoveryLanes.isEmpty {
-            return "\(completedLaneCount) of \(viewModel.discoveryLanes.count) lanes ready"
+            return "\(completedLaneCount) of \(viewModel.discoveryLanes.count) sources ready"
         }
         return "Usually takes about a minute or two"
     }
@@ -934,5 +1023,63 @@ private struct OnboardingTextButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
             .opacity(configuration.isPressed ? 0.72 : 1.0)
             .animation(.spring(response: 0.28, dampingFraction: 0.82), value: configuration.isPressed)
+    }
+}
+
+struct OnboardingSelectionDot: View {
+    let isSelected: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(
+                    isSelected
+                        ? Color.watercolorPaleEmerald.opacity(0.22)
+                        : Color.clear
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(
+                            isSelected
+                                ? Color.watercolorPaleEmerald.opacity(0.55)
+                                : Color.watercolorSlate.opacity(0.28),
+                            lineWidth: isSelected ? 1.2 : 1
+                        )
+                )
+                .frame(width: 26, height: 26)
+
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.watercolorPaleEmerald)
+                    .transition(.scale(scale: 0.4).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isSelected)
+    }
+}
+
+private struct FinalizingSparkle: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var breathing = false
+
+    var body: some View {
+        Image(systemName: "sparkles")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [.watercolorMistyBlue, .watercolorPaleEmerald],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .scaleEffect(breathing ? 1.12 : 0.92)
+            .opacity(breathing ? 1.0 : 0.78)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
+                    breathing = true
+                }
+            }
     }
 }
