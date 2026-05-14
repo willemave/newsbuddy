@@ -132,6 +132,146 @@ def test_load_news_snapshot_export_envelope(tmp_path) -> None:
     assert "Line one.\n\n## Heading\n\nLine two." in source.input_text
 
 
+def test_strip_urls_from_processed_raw_markdown_preserves_link_text() -> None:
+    stripped = report.strip_urls_from_processed_raw_markdown(
+        "Article URL: https://example.com/story\n"
+        "Read [the article](https://example.com/story?x=1) and "
+        "![chart](https://example.com/chart.png).\n"
+        "[![nested](https://example.com/nested.png)](https://example.com/nested-story)\n"
+        "[ref]: https://example.com/ref\n"
+        "[email](mailto:reader@example.com?subject=Story)\n"
+        '<a href="https://example.com/path">label</a>\n'
+        "Bare: www.example.com/path\n"
+        "Fragment: https://\n"
+        "Encoded title fragment %20https:// - Save\n"
+        "[[image: headshot]Reporter]("
+    )
+
+    assert "http" not in stripped
+    assert "www." not in stripped
+    assert "the article" in stripped
+    assert "[image: chart]" in stripped
+    assert "[image: nested]" in stripped
+    assert "[image: headshot]Reporter" in stripped
+    assert "[[image:" not in stripped
+    assert "[ref]:" not in stripped
+    assert "mailto:" not in stripped
+    assert "email" in stripped
+    assert "<a>label</a>" in stripped
+
+
+def test_analyze_source_input_quality_classifies_metadata_only() -> None:
+    quality = report.analyze_source_input_quality(
+        "Create a compact short-form news summary grounded only in this evidence.\n"
+        "Article title: Example\n\n"
+        "Excerpt:\nOnly an aggregator excerpt was available."
+    )
+
+    assert quality["status"] == "metadata_only"
+    assert quality["body_chars"] == 0
+    assert quality["excerpt_chars"] > 0
+
+
+def test_analyze_source_input_quality_flags_extractor_noise() -> None:
+    quality = report.analyze_source_input_quality(
+        "Create a compact short-form news summary grounded only in this evidence.\n"
+        "Article title: Example\n\n"
+        "Article body:\n"
+        "Skip to main content\n\n"
+        "The company announced the real update in one paragraph.\n\n"
+        "## Read Next\n"
+        "[Related story](https://example.com/related)\n"
+        "Our Standards: The Thomson Reuters Trust Principles."
+    )
+
+    assert quality["status"] == "extractor_noise"
+    assert "read next" in " ".join(quality["noise_markers"]).lower()
+
+
+def test_analyze_source_input_quality_allows_link_rich_github_readmes() -> None:
+    quality = report.analyze_source_input_quality(
+        "Article domain: github.com\n"
+        "Article URL: https://github.com/example/project\n\n"
+        "Article body:\n"
+        "# Example Project\n\n"
+        + " ".join(f"[Reference {index}](https://example.com/{index})" for index in range(80))
+        + "\n\n"
+        + ("This README explains the project architecture and usage. " * 60)
+    )
+
+    assert quality["status"] == "full_body"
+
+
+def test_analyze_source_input_quality_allows_link_rich_espn_articles() -> None:
+    quality = report.analyze_source_input_quality(
+        "Article domain: espn.com\n"
+        "Article URL: https://www.espn.com/mlb/story/_/id/1/example\n\n"
+        "Article body:\n"
+        "ST. LOUIS -- "
+        + " ".join(f"[Player {index}](https://espn.com/player/{index})" for index in range(35))
+        + "\n\n"
+        + ("The game story includes scoring details and quotes from players. " * 45)
+    )
+
+    assert quality["status"] == "full_body"
+
+
+def test_clean_processed_source_input_article_body_applies_publisher_cleanup() -> None:
+    processed_input = (
+        "Create a compact short-form news summary grounded only in this evidence.\n"
+        "Article domain: reuters.com\n"
+        "Article URL: https://www.reuters.com/example/story\n\n"
+        "Article body:\n"
+        "[Skip to main content](https://www.reuters.com/example/story#main-content) "
+        "LOS ANGELES, May 12 (Reuters) - The real article body starts here. "
+        "Advertisement · Scroll to continue "
+        "It includes another useful sentence. "
+        "Reporting by Reporter; Editing by Editor "
+        "Our Standards: The Thomson Reuters Trust Principles.\n\n"
+        "Excerpt:\n"
+        "Aggregator excerpt."
+    )
+
+    cleaned = report.clean_processed_source_input_article_body(processed_input)
+
+    assert "Article body:\nLOS ANGELES, May 12 (Reuters) -" in cleaned
+    assert "Skip to main content" not in cleaned
+    assert "Advertisement" not in cleaned
+    assert "Reporting by" not in cleaned
+    assert "another useful sentence.\n\nExcerpt:" in cleaned
+    assert "Excerpt:\nAggregator excerpt." in cleaned
+
+
+def test_build_source_input_quality_domain_counts_groups_weak_rows() -> None:
+    rows = [
+        {
+            "url": "https://example.com/one",
+            "input_text": "Article body:\nShort.",
+            "model_results": [],
+        },
+        {
+            "url": "https://example.com/two",
+            "input_text": "Excerpt:\nOnly metadata.",
+            "model_results": [],
+        },
+        {
+            "url": "https://full.example/three",
+            "input_text": "Article body:\n" + ("Complete article sentence. " * 80),
+            "model_results": [],
+        },
+    ]
+
+    counts = report.build_source_input_quality_domain_counts(rows)
+
+    assert counts == [
+        {
+            "domain": "example.com",
+            "total": 2,
+            "statuses": {"short_body": 1, "metadata_only": 1},
+        }
+    ]
+
+
 def test_render_html_includes_collapsed_source_input() -> None:
     html = report.render_html(
         {
@@ -173,5 +313,115 @@ def test_render_html_includes_collapsed_source_input() -> None:
         }
     )
 
+    assert "Source Body Quality" in html
+    assert 'data-quality-search placeholder="Filter title, domain, or ID"' in html
+    assert 'data-filter-quality="weak"' in html
+    assert 'data-source-quality="short_body"' in html
+    assert "Domains Needing Attention" in html
+    assert "example.com" in html
+    assert "Short body" in html
     assert "<summary>Processed raw markdown</summary>" in html
     assert "Article title: Example &lt;story&gt;" in html
+
+
+def test_render_html_includes_cleaned_source_preview_when_body_changes() -> None:
+    html = report.render_html(
+        {
+            "run_completed_at": "2026-05-12T00:00:00+00:00",
+            "config": {
+                "content_types": ["news"],
+                "sample_size": 1,
+                "recent_pool_size": 1,
+                "longform_template": "source_aware_editorial_v2",
+                "news_prompt_variants": ["key_point_depth"],
+                "news_statuses": ["ready"],
+                "news_require_article_body": False,
+                "seed": 1,
+            },
+            "aggregate": {
+                "items_total": 1,
+                "cells_total": 0,
+                "cells_successful": 0,
+                "cells_failed": 0,
+            },
+            "available_models": [],
+            "skipped_models": [],
+            "prompt_definitions": [],
+            "results": [
+                {
+                    "content_id": 123,
+                    "content_type": "news",
+                    "created_at": "2026-05-12T00:00:00+00:00",
+                    "url": "https://www.reuters.com/example/story",
+                    "source_title": "Reuters story",
+                    "existing_summary_title": None,
+                    "existing_summary_key_points": [],
+                    "existing_summary_text": None,
+                    "input_text": (
+                        "Article domain: reuters.com\n"
+                        "Article URL: https://www.reuters.com/example/story\n\n"
+                        "Article body:\n"
+                        "[Skip to main content](https://www.reuters.com/example/story) "
+                        "LOS ANGELES, May 12 (Reuters) - The article body. "
+                        "Advertisement · Scroll to continue "
+                        "Reporting by Reporter; Editing by Editor"
+                    ),
+                    "input_chars": 240,
+                    "model_results": [],
+                }
+            ],
+        }
+    )
+
+    assert "Cleaned source markdown preview (not used for this run)" in html
+    assert "Article body:\nLOS ANGELES, May 12 (Reuters) -" in html
+
+
+def test_render_html_can_strip_source_input_urls() -> None:
+    html = report.render_html(
+        {
+            "run_completed_at": "2026-05-12T00:00:00+00:00",
+            "config": {
+                "content_types": ["news"],
+                "sample_size": 1,
+                "recent_pool_size": 1,
+                "longform_template": "source_aware_editorial_v2",
+                "news_prompt_variants": ["key_point_depth"],
+                "news_statuses": ["ready"],
+                "news_require_article_body": False,
+                "strip_source_input_urls": True,
+                "seed": 1,
+            },
+            "aggregate": {
+                "items_total": 1,
+                "cells_total": 0,
+                "cells_successful": 0,
+                "cells_failed": 0,
+            },
+            "available_models": [],
+            "skipped_models": [],
+            "prompt_definitions": [],
+            "results": [
+                {
+                    "content_id": 123,
+                    "content_type": "news",
+                    "created_at": "2026-05-12T00:00:00+00:00",
+                    "url": "https://example.com/story",
+                    "source_title": "Example story",
+                    "existing_summary_title": None,
+                    "existing_summary_key_points": [],
+                    "existing_summary_text": None,
+                    "input_text": (
+                        "Article URL: https://example.com/story\n\n"
+                        "Article body:\nRead [the article](https://example.com/story)."
+                    ),
+                    "input_chars": 88,
+                    "model_results": [],
+                }
+            ],
+        }
+    )
+
+    assert "<summary>Processed raw markdown (URLs stripped)</summary>" in html
+    assert "Read the article." in html
+    assert "Article URL: https://example.com/story" not in html

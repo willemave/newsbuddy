@@ -28,8 +28,12 @@ from app.utils.url_utils import is_http_url, normalize_http_url
 logger = get_logger(__name__)
 
 AGGREGATOR_NATIVE_DOMAINS: dict[str, set[str]] = {
+    "brutalist": {"brutalist.report", "www.brutalist.report"},
     "hackernews": {"news.ycombinator.com"},
+    "mediagazer": {"mediagazer.com", "www.mediagazer.com"},
+    "memeorandum": {"memeorandum.com", "www.memeorandum.com"},
     "reddit": {"reddit.com", "www.reddit.com", "redd.it", "old.reddit.com"},
+    "techmeme": {"techmeme.com", "www.techmeme.com"},
     "twitter": {"x.com", "www.x.com", "twitter.com", "www.twitter.com"},
 }
 
@@ -100,7 +104,8 @@ def _existing_article_body_content(db: Session, article_url: str) -> Content | N
 
 
 def _choose_article_url(news_item: NewsItem) -> tuple[str | None, str | None]:
-    discussion_url = normalize_http_url(news_item.discussion_url or news_item.canonical_item_url)
+    discussion_url = normalize_http_url(news_item.discussion_url)
+    canonical_item_url = normalize_http_url(news_item.canonical_item_url)
     for candidate in (news_item.article_url, news_item.canonical_story_url):
         normalized = normalize_http_url(candidate)
         if normalized is None or not is_http_url(normalized):
@@ -108,6 +113,14 @@ def _choose_article_url(news_item: NewsItem) -> tuple[str | None, str | None]:
         if discussion_url and normalized == discussion_url:
             continue
         host = _extract_host(normalized)
+        if (
+            canonical_item_url
+            and normalized == canonical_item_url
+            and host
+            and news_item.platform
+            and host in AGGREGATOR_NATIVE_DOMAINS.get(news_item.platform, set())
+        ):
+            continue
         if (
             host
             and news_item.platform

@@ -998,6 +998,122 @@ def test_enrich_news_item_article_reuses_existing_article_content(db_session) ->
     assert extraction["status"] == "completed"
 
 
+def test_enrich_news_item_article_uses_direct_article_url_for_no_discussion_aggregator(
+    db_session,
+) -> None:
+    item = NewsItem(
+        ingest_key="news-item-brutalist-direct-url",
+        visibility_scope="global",
+        platform="brutalist",
+        source_type="Brutalist Report",
+        source_label="finance.yahoo.com",
+        source_external_id="brutalist-direct-url-1",
+        canonical_item_url="https://finance.yahoo.com/example/story.html",
+        canonical_story_url="https://finance.yahoo.com/example/story.html",
+        article_url="https://finance.yahoo.com/example/story.html",
+        article_title="Direct article from no-discussion aggregator",
+        article_domain="finance.yahoo.com",
+        discussion_url=None,
+        raw_metadata={"excerpt": None},
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    class _FakeStrategy:
+        def preprocess_url(self, url: str) -> str:
+            return url
+
+        def download_content(self, url: str) -> str:
+            return f"<html>{url}</html>"
+
+        def extract_data(
+            self,
+            _content: str,
+            url: str,
+            context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            assert context is not None
+            return {
+                "title": "Recovered Yahoo article",
+                "text_content": "Recovered public article body from the outbound article URL.",
+                "content_type": "html",
+                "source": "finance.yahoo.com",
+                "final_url_after_redirects": url,
+                "extraction_error": None,
+            }
+
+        def prepare_for_llm(self, extracted_data: dict[str, Any]) -> dict[str, Any]:
+            return {"content_to_summarize": extracted_data["text_content"]}
+
+    class _FakeRegistry:
+        def get_strategy(self, url: str) -> _FakeStrategy:
+            assert url == "https://finance.yahoo.com/example/story.html"
+            return _FakeStrategy()
+
+    result = enrich_news_item_article(
+        db_session,
+        news_item_id=_require_id(item.id),
+        strategy_registry=_FakeRegistry(),  # type: ignore[arg-type]
+    )
+
+    db_session.refresh(item)
+    assert result.success is True
+    assert result.status == "completed"
+    assert result.article_url == "https://finance.yahoo.com/example/story.html"
+    item_metadata = _metadata(item.raw_metadata)
+    body_ref = _metadata(item_metadata[NEWS_ARTICLE_BODY_REF_KEY])
+    extraction = _metadata(item_metadata["article_extraction"])
+    assert body_ref["kind"] == "storage"
+    assert extraction["status"] == "completed"
+    assert extraction["source"] == "storage"
+    assert extraction["article_url"] == "https://finance.yahoo.com/example/story.html"
+
+
+def test_enrich_news_item_article_skips_native_aggregator_item_url_without_discussion(
+    db_session,
+) -> None:
+    item = NewsItem(
+        ingest_key="news-item-hn-native-url",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="hn-native-url-1",
+        canonical_item_url="https://news.ycombinator.com/item?id=1",
+        canonical_story_url="https://news.ycombinator.com/item?id=1",
+        article_url="https://news.ycombinator.com/item?id=1",
+        article_title="Native HN discussion",
+        article_domain="news.ycombinator.com",
+        discussion_url=None,
+        raw_metadata={"excerpt": "HN discussion only."},
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    class _UnexpectedRegistry:
+        def get_strategy(self, url: str) -> object:
+            raise AssertionError(f"native aggregator URL should be skipped: {url}")
+
+    result = enrich_news_item_article(
+        db_session,
+        news_item_id=_require_id(item.id),
+        strategy_registry=_UnexpectedRegistry(),  # type: ignore[arg-type]
+    )
+
+    db_session.refresh(item)
+    assert result.success is True
+    assert result.status == "skipped"
+    item_metadata = _metadata(item.raw_metadata)
+    assert NEWS_ARTICLE_BODY_REF_KEY not in item_metadata
+    extraction = _metadata(item_metadata["article_extraction"])
+    assert extraction["status"] == "skipped"
+    assert extraction["error"] == "No outbound article URL to enrich"
+
+
 def test_enrich_news_item_article_uses_stored_tweet_metadata_without_x_refetch(
     db_session,
     monkeypatch,

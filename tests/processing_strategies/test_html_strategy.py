@@ -513,6 +513,260 @@ def test_extract_data_prefers_readability_text_for_chrome_heavy_crawl(
     assert extracted_data["extraction_error"] is None
 
 
+def test_trim_publisher_chrome_cleans_reuters_article_body() -> None:
+    raw_text = (
+        "[Skip to main content](https://www.reuters.com/story#main-content) "
+        "![Image](https://example.com/image.jpg) Caption. "
+        "BRUSSELS, May 12 (Reuters) - Meta offered rival AI chatbots free access "
+        "to WhatsApp while discussing commitments with EU regulators. "
+        "Make sense of the latest ESG trends affecting companies and governments "
+        "with the Reuters Sustainable Switch newsletter. Sign up here. "
+        "Advertisement · Scroll to continue "
+        "The EU antitrust enforcer welcomed the move. "
+        "Reporting by Foo Yun Chee; Editing by Nia Williams "
+        "Our Standards: The Thomson Reuters Trust Principles. ## Read Next"
+    )
+
+    cleaned = HtmlProcessorStrategy._trim_publisher_chrome(
+        "https://www.reuters.com/sustainability/example",
+        raw_text,
+    )
+
+    assert cleaned.startswith("BRUSSELS, May 12 (Reuters) -")
+    assert "newsletter" not in cleaned
+    assert "Advertisement" not in cleaned
+    assert "Reporting by" not in cleaned
+    assert "Our Standards" not in cleaned
+    assert "Read Next" not in cleaned
+    assert "The EU antitrust enforcer welcomed the move." in cleaned
+
+
+def test_trim_publisher_chrome_cleans_wsj_article_body() -> None:
+    raw_text = (
+        "Skip to Main Content Select - What to Read Next DJIA 49760.56 "
+        "Advertisement This copy is for your personal, non-commercial use only. "
+        "# SAP Launches Unified AI, Automation Suite ## German group seeks to stay "
+        "on top of a technology that cast doubt on software industry pricing. "
+        "The product brings together data, AI agents, and workflow automation. "
+        "Copyright ©2026 Dow Jones & Company, Inc. All Rights Reserved. "
+        "### Further Reading ### SAP Shares Climb on Cloud Business Resilience"
+    )
+
+    cleaned = HtmlProcessorStrategy._trim_publisher_chrome(
+        "https://www.wsj.com/tech/ai/example",
+        raw_text,
+    )
+
+    assert cleaned.startswith("# SAP Launches Unified AI")
+    assert "Skip to Main Content" not in cleaned
+    assert "This copy is for your personal" not in cleaned
+    assert "Copyright ©2026" not in cleaned
+    assert "Further Reading" not in cleaned
+    assert "workflow automation" in cleaned
+
+
+def test_extract_data_uses_direct_readability_for_espn_chrome_heavy_crawl(
+    html_strategy: HtmlProcessorStrategy,
+):
+    """Known public pages can recover clean article text when browser markdown is nav-heavy."""
+    url = "https://www.espn.com/mlb/story/_/id/1/example-story"
+    crawl_text = (
+        "Skip to main content Skip to navigation Top Events NBA NHL PGA Tour MLB WNBA "
+        + " ".join(f"[League {i}]({url}#)" for i in range(40))
+        + " ST. LOUIS -- The real article body appears after a large ESPN nav block."
+    )
+    direct_readable_text = (
+        "ST. LOUIS -- The real article body appears after a large ESPN nav block. "
+        "Refsnyder successfully challenged a third strike and then hit a go-ahead "
+        "home run in the ninth inning. "
+    ) * 4
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.metadata = {"title": "ESPN example story"}
+    mock_result.url = url
+    mock_result.cleaned_html = "<html><body>browser-cleaned chrome</body></html>"
+
+    mock_markdown = MagicMock()
+    mock_markdown.raw_markdown = crawl_text
+    mock_result.markdown = mock_markdown
+
+    mock_crawler = AsyncMock()
+    mock_crawler.arun = AsyncMock(return_value=mock_result)
+    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+
+    direct_response = httpx.Response(
+        200,
+        text="<html><body><article>Direct article body</article></body></html>",
+        request=httpx.Request("GET", url),
+    )
+    cast(Any, html_strategy.http_client.get).return_value = direct_response
+
+    with (
+        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.html_strategy.trafilatura.extract",
+            side_effect=[crawl_text, direct_readable_text],
+        ),
+    ):
+        extracted_data = html_strategy.extract_data("", url)
+
+    assert extracted_data["text_content"] == direct_readable_text.strip()
+    assert extracted_data["used_readability_extraction"] is True
+    assert extracted_data["used_direct_readability_extraction"] is True
+    cast(Any, html_strategy.http_client.get).assert_called_once_with(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 NewslyBot/1.0"},
+        timeout=20.0,
+    )
+
+
+def test_extract_data_retries_direct_readability_header_candidates(
+    html_strategy: HtmlProcessorStrategy,
+):
+    """Public direct fetch should try the next header profile after a blocked response."""
+    url = "https://techcrunch.com/2026/05/12/example-story"
+    crawl_text = (
+        "Latest Startups Venture Apple Security AI Apps Events Podcasts Newsletters "
+        "Submit Topics Latest AI " + " ".join(f"[Nav {i}]({url}#)" for i in range(30))
+    )
+    direct_readable_text = (
+        "The actual TechCrunch article starts here and contains enough reporting "
+        "to support a grounded short-form news summary."
+    ) * 5
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.metadata = {"title": "TechCrunch example story"}
+    mock_result.url = url
+    mock_result.cleaned_html = "<html><body>browser-cleaned chrome</body></html>"
+
+    mock_markdown = MagicMock()
+    mock_markdown.raw_markdown = crawl_text
+    mock_result.markdown = mock_markdown
+
+    mock_crawler = AsyncMock()
+    mock_crawler.arun = AsyncMock(return_value=mock_result)
+    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+
+    blocked_response = httpx.Response(
+        403,
+        text="<html><body>blocked</body></html>",
+        request=httpx.Request("GET", url),
+    )
+    blocked_error = httpx.HTTPStatusError(
+        "blocked",
+        request=blocked_response.request,
+        response=blocked_response,
+    )
+    direct_response = httpx.Response(
+        200,
+        text="<html><body><article>Direct clean article body</article></body></html>",
+        request=httpx.Request("GET", url),
+    )
+    cast(Any, html_strategy.http_client.get).side_effect = [blocked_error, direct_response]
+
+    with (
+        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.html_strategy.trafilatura.extract",
+            side_effect=[crawl_text, direct_readable_text],
+        ),
+    ):
+        extracted_data = html_strategy.extract_data("", url)
+
+    assert extracted_data["text_content"] == direct_readable_text.strip()
+    assert extracted_data["used_direct_readability_extraction"] is True
+    assert cast(Any, html_strategy.http_client.get).call_count == 2
+
+
+def test_extract_data_uses_github_readme_for_repo_urls(
+    html_strategy: HtmlProcessorStrategy,
+):
+    """GitHub repo pages should use README content instead of navigation-heavy HTML."""
+    url = "https://github.com/example/project"
+    readme = "# Project\n\nThis README explains the project without GitHub navigation chrome."
+    response = httpx.Response(
+        200,
+        text=readme,
+        request=httpx.Request("GET", "https://api.github.com/repos/example/project/readme"),
+    )
+    cast(Any, html_strategy.http_client.get).return_value = response
+
+    with patch("app.processing_strategies.html_strategy.AsyncWebCrawler") as crawler:
+        extracted_data = html_strategy.extract_data("", url)
+
+    assert extracted_data["title"] == "example/project README"
+    assert extracted_data["text_content"] == readme
+    assert extracted_data["source"] == "github.com"
+    assert extracted_data["used_github_readme_extraction"] is True
+    crawler.assert_not_called()
+    cast(Any, html_strategy.http_client.get).assert_called_once_with(
+        "https://api.github.com/repos/example/project/readme",
+        headers={
+            "Accept": "application/vnd.github.raw",
+            "User-Agent": "NewslyArticleFetcher/1.0 (+https://newsly.local)",
+        },
+        timeout=20.0,
+    )
+
+
+def test_extract_data_prefers_direct_readability_before_subtle_chrome_fallback(
+    html_strategy: HtmlProcessorStrategy,
+):
+    """Allowlisted public pages should not settle for cleaned text that still has chrome."""
+    url = "https://fortune.com/2026/05/10/example-story"
+    crawl_text = (
+        "- [Home](https://fortune.com/) - [Latest](https://fortune.com/section/latest/) "
+        + " ".join(f"[Nav {i}]({url}#)" for i in range(30))
+        + " The real story starts much later."
+    )
+    subtle_chrome_text = (
+        "Search [](https://fortune.com/) Subscribe for $1 Subscribe for $1 "
+        "The real story starts much later and contains useful reporting."
+    ) * 4
+    direct_readable_text = (
+        "The real story starts here with no nav prelude. It contains useful reporting "
+        "about the company, market context, and leadership decisions."
+    ) * 4
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.metadata = {"title": "Fortune example story"}
+    mock_result.url = url
+    mock_result.cleaned_html = "<html><body>cleaned but still chrome-heavy</body></html>"
+
+    mock_markdown = MagicMock()
+    mock_markdown.raw_markdown = crawl_text
+    mock_result.markdown = mock_markdown
+
+    mock_crawler = AsyncMock()
+    mock_crawler.arun = AsyncMock(return_value=mock_result)
+    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+
+    direct_response = httpx.Response(
+        200,
+        text="<html><body><article>Direct clean article body</article></body></html>",
+        request=httpx.Request("GET", url),
+    )
+    cast(Any, html_strategy.http_client.get).return_value = direct_response
+
+    with (
+        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.html_strategy.trafilatura.extract",
+            side_effect=[subtle_chrome_text, direct_readable_text],
+        ),
+    ):
+        extracted_data = html_strategy.extract_data("", url)
+
+    assert extracted_data["text_content"] == direct_readable_text.strip()
+    assert extracted_data["used_direct_readability_extraction"] is True
+
+
 def test_extract_data_with_browser_close_error(html_strategy: HtmlProcessorStrategy):
     """Test that browser close errors don't fail the extraction."""
     url = "https://en.wikipedia.org/wiki/Pfeilstorch"

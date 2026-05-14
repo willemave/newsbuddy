@@ -9,12 +9,14 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, NamedTuple, cast
+from urllib.parse import urlparse
 
 from sqlalchemy import desc
 
@@ -26,6 +28,7 @@ from app.core.logging import get_logger, setup_logging
 from app.core.settings import get_settings
 from app.models.contracts import NewsItemStatus
 from app.models.db import Content, NewsItem
+from app.processing_strategies.html_strategy import HtmlProcessorStrategy
 from app.services.admin_eval import (
     EVAL_MODEL_LABELS,
     EVAL_MODEL_SPECS,
@@ -337,6 +340,11 @@ def parse_args() -> argparse.Namespace:
         "--news-require-article-body",
         action="store_true",
         help="Skip news_items that cannot resolve full article body text.",
+    )
+    parser.add_argument(
+        "--strip-source-input-urls",
+        action="store_true",
+        help="Strip URLs from the rendered processed raw markdown blocks.",
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -1048,6 +1056,334 @@ def clean_snapshot_body_text(value: Any) -> str | None:
     return cleaned or None
 
 
+MARKDOWN_URL_PREFIX_RE = r"(?:https?://|www\.|mailto:)"
+MARKDOWN_LINKED_IMAGE_URL_RE = re.compile(
+    rf"\[!\[([^\]\n]*)\]\(\s*{MARKDOWN_URL_PREFIX_RE}[^\s)]*(?:\s+\"[^\"]*\")?\s*\)\]\(\s*{MARKDOWN_URL_PREFIX_RE}[^\s)]*(?:\s+\"[^\"]*\")?\s*\)",
+    flags=re.IGNORECASE,
+)
+MARKDOWN_IMAGE_URL_RE = re.compile(
+    rf"!\[([^\]\n]*)\]\(\s*{MARKDOWN_URL_PREFIX_RE}[^\s)]*(?:\s+\"[^\"]*\")?\s*\)",
+    flags=re.IGNORECASE,
+)
+MARKDOWN_LINK_URL_RE = re.compile(
+    rf"\[([^\]\n]*)\]\(\s*{MARKDOWN_URL_PREFIX_RE}[^\s)]*(?:\s+\"[^\"]*\")?\s*\)",
+    flags=re.IGNORECASE,
+)
+REFERENCE_LINK_URL_RE = re.compile(
+    rf"(?m)^[ \t]{{0,3}}\[[^\]\n]+\]:[ \t]*{MARKDOWN_URL_PREFIX_RE}[^\s]+[^\n]*\n?",
+    flags=re.IGNORECASE,
+)
+HTML_URL_ATTRIBUTE_RE = re.compile(
+    rf"""\s(?:href|src|srcset|poster|data-src)=["']{MARKDOWN_URL_PREFIX_RE}[^"']*["']""",
+    flags=re.IGNORECASE,
+)
+ANGLE_URL_RE = re.compile(rf"(?i)<{MARKDOWN_URL_PREFIX_RE}[^>\s]+>")
+BARE_URL_RE = re.compile(rf"(?i){MARKDOWN_URL_PREFIX_RE}[^\s<>\[\]{{}}\"']+")
+URL_SCHEME_FRAGMENT_RE = re.compile(r"(?i)https?://")
+MALFORMED_LINKED_IMAGE_RE = re.compile(
+    r"\[\[image: ([^\]\n]+)\](?:\[image: [^\]\n]+\])?\]\(",
+    flags=re.IGNORECASE,
+)
+MALFORMED_IMAGE_LABEL_LINK_RE = re.compile(
+    r"\[\[image: ([^\]\n]+)\]([^\]\n]*)\]\(",
+    flags=re.IGNORECASE,
+)
+SOURCE_SECTION_HEADING_RE = re.compile(
+    r"(?m)^(Article body|Excerpt|Discussion snippets):\n",
+)
+SOURCE_WORD_RE = re.compile(r"\b[\w'-]+\b")
+SOURCE_MARKDOWN_LINK_RE = re.compile(r"\[[^\]\n]+\]\([^)]+\)")
+SOURCE_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]\n]*\]\([^)]+\)")
+SOURCE_BARE_URL_RE = re.compile(rf"(?i){MARKDOWN_URL_PREFIX_RE}[^\s<>\[\]{{}}\"']+")
+SOURCE_FIELD_RE = re.compile(r"(?m)^([A-Za-z][A-Za-z ]+):[ \t]*(.*)$")
+SOURCE_QUALITY_ORDER = (
+    "full_body",
+    "short_body",
+    "metadata_only",
+    "access_restricted",
+    "challenge_or_bot_block",
+    "extractor_noise",
+    "missing_body",
+)
+SOURCE_QUALITY_LABELS = {
+    "full_body": "Full body",
+    "short_body": "Short body",
+    "metadata_only": "Metadata only",
+    "access_restricted": "Access restricted",
+    "challenge_or_bot_block": "Bot/challenge page",
+    "extractor_noise": "Noisy extraction",
+    "missing_body": "Missing body",
+}
+SOURCE_QUALITY_TONES = {
+    "full_body": "good",
+    "short_body": "warn",
+    "metadata_only": "warn",
+    "access_restricted": "bad",
+    "challenge_or_bot_block": "bad",
+    "extractor_noise": "bad",
+    "missing_body": "bad",
+}
+ACCESS_RESTRICTED_MARKERS = (
+    "subscribe to continue",
+    "subscribe to read",
+    "subscription required",
+    "only subscribers",
+    "already a subscriber",
+    "sign in to continue reading",
+    "register to continue",
+    "create an account to continue",
+    "unlock this article",
+    "you have reached your limit",
+    "limited number of free articles",
+    "paywall",
+)
+CHALLENGE_MARKERS = (
+    "403 forbidden",
+    "401 unauthorized",
+    "access denied",
+    "are you a robot",
+    "verify you are human",
+    "enable javascript",
+    "please enable js",
+    "please enable cookies",
+    "checking your browser",
+    "cloudflare",
+    "datadome",
+    "captcha",
+    "routing-loop",
+    "request blocked",
+)
+EXTRACTOR_NOISE_MARKERS = (
+    "skip to main content",
+    "## read next",
+    "read next -",
+    "purchase licensing rights",
+    "our standards:",
+    "the thomson reuters trust principles",
+    "- x - facebook - linkedin",
+    "share on facebook",
+    "share on linkedin",
+    "sign up here",
+    "advertisement",
+    "recommended for you",
+    "related stories",
+    "more from ",
+)
+
+
+def strip_urls_from_processed_raw_markdown(text: str) -> str:
+    """Remove URLs from processed source markdown while preserving readable text."""
+
+    def _replace_image(match: re.Match[str]) -> str:
+        alt_text = " ".join(match.group(1).split()).strip()
+        return f"[image: {alt_text}]" if alt_text else "[image]"
+
+    stripped = MARKDOWN_LINKED_IMAGE_URL_RE.sub(_replace_image, text)
+    stripped = MARKDOWN_IMAGE_URL_RE.sub(_replace_image, stripped)
+    stripped = MARKDOWN_LINK_URL_RE.sub(lambda match: match.group(1), stripped)
+    stripped = REFERENCE_LINK_URL_RE.sub("", stripped)
+    stripped = HTML_URL_ATTRIBUTE_RE.sub("", stripped)
+    stripped = ANGLE_URL_RE.sub("", stripped)
+    stripped = BARE_URL_RE.sub("", stripped)
+    stripped = URL_SCHEME_FRAGMENT_RE.sub("", stripped)
+    stripped = MALFORMED_IMAGE_LABEL_LINK_RE.sub(r"[image: \1]\2", stripped)
+    stripped = MALFORMED_LINKED_IMAGE_RE.sub(r"[image: \1]", stripped)
+    stripped = re.sub(r"[ \t]+([,.;:!?])", r"\1", stripped)
+    stripped = re.sub(r"[ \t]+\n", "\n", stripped)
+    stripped = re.sub(r"\n{3,}", "\n\n", stripped)
+    return stripped.strip()
+
+
+def extract_processed_source_sections(text: str) -> dict[str, str]:
+    """Extract top-level sections from the processed news prompt input."""
+    matches = list(SOURCE_SECTION_HEADING_RE.finditer(text))
+    sections: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        section_name = match.group(1).lower().replace(" ", "_")
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        section_text = text[start:end].strip()
+        if section_text:
+            sections[section_name] = section_text
+    return sections
+
+
+def extract_processed_source_fields(text: str) -> dict[str, str]:
+    """Extract simple top-level metadata fields from the processed news prompt input."""
+    fields: dict[str, str] = {}
+    for match in SOURCE_FIELD_RE.finditer(text):
+        name = match.group(1).strip().lower().replace(" ", "_")
+        value = match.group(2).strip()
+        if name not in {"article_body", "excerpt", "discussion_snippets"} and value:
+            fields[name] = value
+    return fields
+
+
+def is_expected_link_rich_source(domain: str, body_text: str) -> bool:
+    """Return true for useful source types that naturally contain many links."""
+    if domain in {"github.com", "www.github.com"} and re.search(r"(?m)^#\s+", body_text):
+        return True
+    return domain in {"espn.com", "www.espn.com"} and body_text.startswith(
+        ("ST. LOUIS --", "NEW YORK --", "BOSTON --", "CHICAGO --", "DENVER --")
+    )
+
+
+def analyze_source_input_quality(input_text: str) -> dict[str, Any]:
+    """Classify processed source input so crawler quality is visible in the report."""
+    sections = extract_processed_source_sections(input_text)
+    fields = extract_processed_source_fields(input_text)
+    article_url = fields.get("article_url") or ""
+    article_domain = fields.get("article_domain") or urlparse(article_url).netloc.lower()
+    body_text = sections.get("article_body", "")
+    excerpt_text = sections.get("excerpt", "")
+    body_chars = len(body_text)
+    body_words = len(SOURCE_WORD_RE.findall(body_text))
+    link_count = len(SOURCE_MARKDOWN_LINK_RE.findall(body_text)) + len(
+        SOURCE_BARE_URL_RE.findall(body_text)
+    )
+    image_count = len(SOURCE_MARKDOWN_IMAGE_RE.findall(body_text))
+    body_lower = body_text.lower()
+    link_density = link_count / max(body_words, 1)
+    found_challenge_markers = [marker for marker in CHALLENGE_MARKERS if marker in body_lower]
+    found_access_markers = [marker for marker in ACCESS_RESTRICTED_MARKERS if marker in body_lower]
+    found_noise_markers = [marker for marker in EXTRACTOR_NOISE_MARKERS if marker in body_lower]
+    link_density_noise = (
+        link_count >= 40
+        and link_density >= 0.08
+        and not is_expected_link_rich_source(article_domain, body_text)
+    )
+
+    if not body_text:
+        if excerpt_text:
+            status = "metadata_only"
+            reason = "No resolved article body; prompt is using the excerpt and metadata."
+        else:
+            status = "missing_body"
+            reason = "No article body or excerpt was present in the processed input."
+    elif found_challenge_markers and body_chars < 2500:
+        status = "challenge_or_bot_block"
+        reason = f"Looks like a bot/challenge page: {found_challenge_markers[0]}."
+    elif found_access_markers and body_chars < 3000:
+        status = "access_restricted"
+        reason = f"Looks access restricted: {found_access_markers[0]}."
+    elif len(found_noise_markers) >= 2 or link_density_noise:
+        status = "extractor_noise"
+        reason = (
+            "Article body includes navigation, sharing, related-story, or high-link-density noise."
+        )
+    elif body_chars < 900:
+        status = "short_body"
+        reason = "Resolved article body is short; this may be complete for brief wire posts or partial for longer articles."
+    else:
+        status = "full_body"
+        reason = "Resolved article body has enough text and no strong blocker/noise markers."
+
+    return {
+        "status": status,
+        "label": SOURCE_QUALITY_LABELS[status],
+        "tone": SOURCE_QUALITY_TONES[status],
+        "reason": reason,
+        "body_chars": body_chars,
+        "body_words": body_words,
+        "article_domain": article_domain,
+        "excerpt_chars": len(excerpt_text),
+        "link_count": link_count,
+        "image_count": image_count,
+        "noise_markers": found_noise_markers[:5],
+        "access_markers": found_access_markers[:5],
+        "challenge_markers": found_challenge_markers[:5],
+    }
+
+
+def clean_processed_source_input_article_body(input_text: str) -> str:
+    """Apply article-body cleanup to already-rendered news prompt input."""
+    sections = extract_processed_source_sections(input_text)
+    body_text = sections.get("article_body")
+    if not body_text:
+        return input_text
+    fields = extract_processed_source_fields(input_text)
+    article_url = fields.get("article_url")
+    article_domain = fields.get("article_domain")
+    if not article_url and article_domain:
+        article_url = f"https://{article_domain}/"
+    if not article_url:
+        return input_text
+
+    cleaned_body = HtmlProcessorStrategy._trim_publisher_chrome(article_url, body_text)
+    if not cleaned_body or cleaned_body == body_text:
+        return input_text
+
+    body_heading_match = re.search(r"(?m)^Article body:\n", input_text)
+    if not body_heading_match:
+        return input_text
+
+    following_match = re.search(
+        r"(?m)^(Excerpt|Discussion snippets):\n",
+        input_text[body_heading_match.end() :],
+    )
+    body_end = (
+        body_heading_match.end() + following_match.start() if following_match else len(input_text)
+    )
+    tail = input_text[body_end:]
+    if tail and not cleaned_body.endswith("\n"):
+        cleaned_body = f"{cleaned_body}\n\n"
+    return input_text[: body_heading_match.end()] + cleaned_body + tail
+
+
+def source_input_quality_for_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Return existing or computed source quality metadata for a report item."""
+    raw_quality = item.get("source_input_quality")
+    if isinstance(raw_quality, dict) and isinstance(raw_quality.get("status"), str):
+        status = str(raw_quality["status"])
+        return {
+            **raw_quality,
+            "label": str(raw_quality.get("label") or SOURCE_QUALITY_LABELS.get(status, status)),
+            "tone": str(raw_quality.get("tone") or SOURCE_QUALITY_TONES.get(status, "warn")),
+        }
+    return analyze_source_input_quality(str(item.get("input_text") or ""))
+
+
+def build_source_input_quality_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    """Count source quality classes for the report summary."""
+    counts = {status: 0 for status in SOURCE_QUALITY_ORDER}
+    for item in results:
+        quality = source_input_quality_for_item(item)
+        status = str(quality.get("status") or "missing_body")
+        counts[status] = counts.get(status, 0) + 1
+    return {status: count for status, count in counts.items() if count}
+
+
+def build_source_input_quality_domain_counts(
+    results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Summarize weak source-body quality by domain for the report header."""
+    domain_counts: dict[str, dict[str, int]] = {}
+    for item in results:
+        quality = source_input_quality_for_item(item)
+        status = str(quality.get("status") or "missing_body")
+        if status == "full_body":
+            continue
+        domain = urlparse(str(item.get("url") or "")).netloc or "(unknown)"
+        status_counts = domain_counts.setdefault(domain, {})
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    rows: list[dict[str, Any]] = []
+    for domain, status_counts in domain_counts.items():
+        total = sum(status_counts.values())
+        rows.append(
+            {
+                "domain": domain,
+                "total": total,
+                "statuses": {
+                    status: status_counts[status]
+                    for status in SOURCE_QUALITY_ORDER
+                    if status_counts.get(status)
+                },
+            }
+        )
+    return sorted(rows, key=lambda row: (-int(row["total"]), str(row["domain"])))
+
+
 def normalize_snapshot_key_points(value: Any) -> list[str]:
     """Return key point text from string or structured key-point rows."""
     if not isinstance(value, list):
@@ -1535,6 +1871,8 @@ def build_aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_latency_ms": average(latency_values),
         "avg_input_tokens": average(in_token_values),
         "avg_output_tokens": average(out_token_values),
+        "source_input_quality_counts": build_source_input_quality_counts(results),
+        "source_input_quality_domain_counts": build_source_input_quality_domain_counts(results),
     }
 
 
@@ -1901,6 +2239,108 @@ def _render_output_payload(payload: dict[str, Any]) -> str:
     return '<p class="empty-output">No structured fields found. Open Raw JSON below.</p>'
 
 
+def _render_source_quality_overview(counts: dict[str, int]) -> str:
+    """Render compact source-body quality counts for the report header."""
+    if not counts:
+        return ""
+    cards = []
+    for status in SOURCE_QUALITY_ORDER:
+        count = counts.get(status, 0)
+        if not count:
+            continue
+        label = SOURCE_QUALITY_LABELS.get(status, status)
+        tone = SOURCE_QUALITY_TONES.get(status, "warn")
+        cards.append(
+            f"""
+            <button class="quality-stat tone-{html_escape(tone)}" type="button" data-filter-quality="{html_escape(status)}">
+              <div class="label">{html_escape(label)}</div>
+              <div class="value">{count}</div>
+            </button>
+            """
+        )
+    return f"""
+      <section class="quality-overview">
+        <div class="quality-header">
+          <h2>Source Body Quality</h2>
+          <div class="quality-actions">
+            <button type="button" class="filter-button active" data-filter-quality="all">All</button>
+            <button type="button" class="filter-button" data-filter-quality="weak">Weak sources</button>
+            <input type="search" data-quality-search placeholder="Filter title, domain, or ID" />
+            <span class="visible-count" data-visible-count></span>
+          </div>
+        </div>
+        <div class="quality-grid">{"".join(cards)}</div>
+      </section>
+    """
+
+
+def _render_source_quality_summary(quality: dict[str, Any]) -> str:
+    """Render source-input quality diagnostics for one item."""
+    label = str(quality.get("label") or "Unknown")
+    tone = str(quality.get("tone") or "warn")
+    reason = str(quality.get("reason") or "")
+    body_chars = int(quality.get("body_chars") or 0)
+    body_words = int(quality.get("body_words") or 0)
+    link_count = int(quality.get("link_count") or 0)
+    image_count = int(quality.get("image_count") or 0)
+    marker_values = [
+        str(marker)
+        for marker in (
+            quality.get("challenge_markers")
+            or quality.get("access_markers")
+            or quality.get("noise_markers")
+            or []
+        )
+        if marker
+    ][:4]
+    marker_html = (
+        f"<span>Markers: {html_escape(', '.join(marker_values))}</span>" if marker_values else ""
+    )
+    return f"""
+      <div class="source-quality tone-{html_escape(tone)}">
+        <span class="quality-chip tone-{html_escape(tone)}">{html_escape(label)}</span>
+        <span>{html_escape(reason)}</span>
+        <span>{body_chars:,} body chars</span>
+        <span>{body_words:,} words</span>
+        <span>{link_count} links</span>
+        <span>{image_count} images</span>
+        {marker_html}
+      </div>
+    """
+
+
+def _render_weak_domain_summary(rows: list[dict[str, Any]]) -> str:
+    """Render domains with the most weak source-body rows."""
+    if not rows:
+        return ""
+    rendered_rows: list[str] = []
+    for row in rows[:12]:
+        raw_statuses = row.get("statuses")
+        statuses = raw_statuses if isinstance(raw_statuses, dict) else {}
+        status_text = ", ".join(
+            f"{SOURCE_QUALITY_LABELS.get(status, status)} {count}"
+            for status, count in statuses.items()
+        )
+        rendered_rows.append(
+            f"""
+            <tr>
+              <td>{html_escape(str(row.get("domain") or "(unknown)"))}</td>
+              <td>{int(row.get("total") or 0)}</td>
+              <td>{html_escape(status_text)}</td>
+            </tr>
+            """
+        )
+    return f"""
+      <details class="weak-domain-summary" open>
+        <summary>Domains Needing Attention</summary>
+        <table>
+          <thead><tr><th>Domain</th><th>Rows</th><th>Quality issues</th></tr></thead>
+          <tbody>{"".join(rendered_rows)}</tbody>
+        </table>
+      </details>
+    """
+
+
 def render_html(report_payload: dict[str, Any]) -> str:
     """Render a complete static HTML report.
 
@@ -1916,6 +2356,21 @@ def render_html(report_payload: dict[str, Any]) -> str:
     skipped_models = report_payload["skipped_models"]
     prompt_definitions = report_payload.get("prompt_definitions", [])
     results = report_payload["results"]
+    strip_source_input_urls = bool(config.get("strip_source_input_urls"))
+    quality_counts = aggregate.get("source_input_quality_counts")
+    if not isinstance(quality_counts, dict):
+        quality_counts = build_source_input_quality_counts(cast(list[dict[str, Any]], results))
+    quality_overview = _render_source_quality_overview(
+        {str(key): int(value) for key, value in quality_counts.items()}
+    )
+    domain_counts = aggregate.get("source_input_quality_domain_counts")
+    if not isinstance(domain_counts, list):
+        domain_counts = build_source_input_quality_domain_counts(
+            cast(list[dict[str, Any]], results)
+        )
+    weak_domain_summary = _render_weak_domain_summary(
+        [row for row in domain_counts if isinstance(row, dict)]
+    )
 
     def _prompt_title(prompt: dict[str, Any]) -> str:
         content_type = str(prompt.get("content_type", "unknown"))
@@ -1952,6 +2407,17 @@ def render_html(report_payload: dict[str, Any]) -> str:
 
     sections: list[str] = []
     for item in results:
+        source_quality = source_input_quality_for_item(cast(dict[str, Any], item))
+        source_quality_status = str(source_quality.get("status") or "unknown")
+        search_text = " ".join(
+            [
+                str(item.get("content_id") or ""),
+                str(item.get("content_type") or ""),
+                str(item.get("source_title") or ""),
+                str(item.get("url") or ""),
+            ]
+        ).lower()
+        source_quality_block = _render_source_quality_summary(source_quality)
         ok_cells = [cell for cell in item["model_results"] if cell.get("status") == "ok"]
         error_cells = [cell for cell in item["model_results"] if cell.get("status") != "ok"]
 
@@ -2041,26 +2507,54 @@ def render_html(report_payload: dict[str, Any]) -> str:
               </section>
             """
         source_input_text = str(item.get("input_text") or "").strip()
+        if strip_source_input_urls:
+            source_input_text = strip_urls_from_processed_raw_markdown(source_input_text)
         source_input_block = ""
+        cleaned_source_input_block = ""
+        raw_source_input_for_cleanup = str(item.get("input_text") or "").strip()
+        cleaned_source_input_text = clean_processed_source_input_article_body(
+            raw_source_input_for_cleanup
+        )
+        if cleaned_source_input_text != raw_source_input_for_cleanup:
+            rendered_cleaned_source_input = (
+                strip_urls_from_processed_raw_markdown(cleaned_source_input_text)
+                if strip_source_input_urls
+                else cleaned_source_input_text
+            )
+            cleaned_source_input_block = f"""
+              <details class="source-input cleaned-source-input">
+                <summary>Cleaned source markdown preview (not used for this run)</summary>
+                <pre>{html_escape(rendered_cleaned_source_input)}</pre>
+              </details>
+            """
         if source_input_text:
+            source_input_label = (
+                "Processed raw markdown (URLs stripped)"
+                if strip_source_input_urls
+                else "Processed raw markdown"
+            )
             source_input_block = f"""
               <details class="source-input">
-                <summary>Processed raw markdown</summary>
+                <summary>{html_escape(source_input_label)}</summary>
                 <pre>{html_escape(source_input_text)}</pre>
               </details>
             """
         sections.append(
             f"""
-            <section class="content-card">
+            <section class="content-card" data-source-quality="{html_escape(source_quality_status)}" data-search-text="{html_escape(search_text)}">
               <header class="content-header">
                 <div class="meta">
                   <span class="pill">{html_escape(item["content_type"])}</span>
+                  <span class="quality-chip tone-{html_escape(str(source_quality.get("tone") or "warn"))}">{html_escape(str(source_quality.get("label") or "Unknown"))}</span>
                   <span>ID {item["content_id"]}</span>
                   <span>Input chars {item["input_chars"]}</span>
+                  <span>Body chars {int(source_quality.get("body_chars") or 0):,}</span>
                 </div>
                 <h3>{html_escape(item["source_title"] or "Untitled")}</h3>
                 <a href="{html_escape(item["url"])}" target="_blank">{html_escape(item["url"])}</a>
               </header>
+              {source_quality_block}
+              {cleaned_source_input_block}
               {source_input_block}
               {existing_summary_block}
               {model_grid}
@@ -2143,6 +2637,115 @@ def render_html(report_payload: dict[str, Any]) -> str:
     .stat .label {{ color: var(--muted); font-size: 12px; }}
     .stat .value {{ font-size: 20px; font-weight: 700; }}
     .detail {{ margin-top: 8px; color: var(--muted); font-size: 13px; }}
+    .quality-overview {{
+      margin-top: 14px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }}
+    .quality-header {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }}
+    .quality-overview h2 {{
+      margin: 0;
+      font-size: 14px;
+      color: var(--muted);
+    }}
+    .quality-actions {{
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }}
+    .quality-actions input {{
+      min-width: 220px;
+      height: 32px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 0 9px;
+      font: inherit;
+      font-size: 13px;
+      color: var(--text);
+      background: #fff;
+    }}
+    .filter-button {{
+      height: 32px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 0 10px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      color: #344054;
+      background: #fff;
+      cursor: pointer;
+    }}
+    .filter-button.active {{
+      color: #1849a9;
+      border-color: #84adff;
+      background: #eff8ff;
+    }}
+    .visible-count {{
+      color: var(--muted);
+      font-size: 12px;
+      min-width: 86px;
+      text-align: right;
+    }}
+    .quality-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+    }}
+    .quality-stat {{
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #f8fafc;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }}
+    .quality-stat .label {{
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .quality-stat .value {{
+      margin-top: 2px;
+      font-size: 18px;
+      font-weight: 700;
+    }}
+    .quality-stat.tone-good {{ border-color: #75e0a7; background: #f0fdf4; }}
+    .quality-stat.tone-warn {{ border-color: #fdb022; background: #fffbeb; }}
+    .quality-stat.tone-bad {{ border-color: #fda29b; background: #fff5f5; }}
+    .weak-domain-summary {{
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+    }}
+    .weak-domain-summary table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 13px;
+    }}
+    .weak-domain-summary th,
+    .weak-domain-summary td {{
+      border-top: 1px solid var(--border);
+      padding: 7px 6px;
+      text-align: left;
+      vertical-align: top;
+    }}
+    .weak-domain-summary th {{
+      color: var(--muted);
+      font-size: 12px;
+    }}
     .content-card {{
       background: var(--card);
       border: 1px solid var(--border);
@@ -2150,6 +2753,7 @@ def render_html(report_payload: dict[str, Any]) -> str:
       padding: 16px;
       margin-bottom: 14px;
     }}
+    .content-card.is-hidden {{ display: none; }}
     .content-header h3 {{ margin: 8px 0; font-size: 20px; }}
     .content-header a {{ color: var(--accent); text-decoration: none; word-break: break-all; }}
     .existing-summary {{
@@ -2181,6 +2785,26 @@ def render_html(report_payload: dict[str, Any]) -> str:
       color: var(--text);
       border: 1px solid var(--border);
     }}
+    .cleaned-source-input {{
+      border-color: #84adff;
+      background: #eff8ff;
+    }}
+    .source-quality {{
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      align-items: center;
+      color: #344054;
+      font-size: 12px;
+      background: #f8fafc;
+    }}
+    .source-quality.tone-good {{ border-color: #75e0a7; background: #f0fdf4; }}
+    .source-quality.tone-warn {{ border-color: #fdb022; background: #fffbeb; }}
+    .source-quality.tone-bad {{ border-color: #fda29b; background: #fff5f5; }}
     .meta {{ display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }}
     .pill {{
       border: 1px solid #84adff;
@@ -2190,6 +2814,16 @@ def render_html(report_payload: dict[str, Any]) -> str:
       font-weight: 600;
       background: #eff8ff;
     }}
+    .quality-chip {{
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-weight: 700;
+      background: #f8fafc;
+    }}
+    .quality-chip.tone-good {{ border-color: #75e0a7; color: #027a48; background: #dcfae6; }}
+    .quality-chip.tone-warn {{ border-color: #fdb022; color: #93370d; background: #fef0c7; }}
+    .quality-chip.tone-bad {{ border-color: #fda29b; color: #b42318; background: #fee4e2; }}
     .model-grid {{
       margin-top: 14px;
       display: grid;
@@ -2400,6 +3034,8 @@ def render_html(report_payload: dict[str, Any]) -> str:
         <div class="stat"><div class="label">Cells Success</div><div class="value">{aggregate["cells_successful"]}</div></div>
         <div class="stat"><div class="label">Cells Failed</div><div class="value">{aggregate["cells_failed"]}</div></div>
       </div>
+      {quality_overview}
+      {weak_domain_summary}
       <details class="run-details">
         <summary>Run config</summary>
         <p class="detail">content_types={html_escape(",".join(config["content_types"]))}, sample_size={config["sample_size"]}, recent_pool_size={config["recent_pool_size"]}, longform_template={html_escape(config["longform_template"])}, news_prompt_variants={html_escape(",".join(config.get("news_prompt_variants") or [])) or "default"}, news_statuses={html_escape(",".join(config.get("news_statuses") or [])) or "default"}, require_article_body={html_escape(str(config.get("news_require_article_body", False)))}, seed={html_escape(str(config["seed"]))}</p>
@@ -2413,6 +3049,56 @@ def render_html(report_payload: dict[str, Any]) -> str:
     </section>
     {"".join(sections)}
   </main>
+  <script>
+    (() => {{
+      const cards = Array.from(document.querySelectorAll(".content-card"));
+      const controls = Array.from(document.querySelectorAll("[data-filter-quality]"));
+      const searchInput = document.querySelector("[data-quality-search]");
+      const visibleCount = document.querySelector("[data-visible-count]");
+      const weakStatuses = new Set([
+        "short_body",
+        "metadata_only",
+        "access_restricted",
+        "challenge_or_bot_block",
+        "extractor_noise",
+        "missing_body",
+      ]);
+      let activeQuality = "all";
+
+      function matchesQuality(card) {{
+        const status = card.dataset.sourceQuality || "";
+        if (activeQuality === "all") return true;
+        if (activeQuality === "weak") return weakStatuses.has(status);
+        return status === activeQuality;
+      }}
+
+      function applyFilters() {{
+        const query = (searchInput?.value || "").trim().toLowerCase();
+        let visible = 0;
+        for (const card of cards) {{
+          const searchText = card.dataset.searchText || "";
+          const shouldShow = matchesQuality(card) && (!query || searchText.includes(query));
+          card.classList.toggle("is-hidden", !shouldShow);
+          if (shouldShow) visible += 1;
+        }}
+        if (visibleCount) {{
+          visibleCount.textContent = `${{visible}} / ${{cards.length}} shown`;
+        }}
+      }}
+
+      for (const control of controls) {{
+        control.addEventListener("click", () => {{
+          activeQuality = control.dataset.filterQuality || "all";
+          for (const other of controls) {{
+            other.classList.toggle("active", other.dataset.filterQuality === activeQuality);
+          }}
+          applyFilters();
+        }});
+      }}
+      searchInput?.addEventListener("input", applyFilters);
+      applyFilters();
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -2594,6 +3280,7 @@ def main() -> int:
                 "existing_summary_text": source.existing_summary_text,
                 "input_text": source.input_text,
                 "input_chars": source.input_chars,
+                "source_input_quality": analyze_source_input_quality(source.input_text),
                 "model_results": model_results,
             }
         )
@@ -2613,6 +3300,7 @@ def main() -> int:
             "news_snapshot_file": args.news_snapshot_file,
             "news_statuses": news_statuses,
             "news_require_article_body": args.news_require_article_body,
+            "strip_source_input_urls": args.strip_source_input_urls,
             "timeout_seconds": args.timeout_seconds,
             "max_retries": args.max_retries,
             "max_input_chars": args.max_input_chars,

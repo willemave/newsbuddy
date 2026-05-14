@@ -75,24 +75,31 @@ def _run_coro_sync[T](coro: asyncio.Future[T] | Coroutine[Any, Any, T]) -> T:
 
 
 ACCESS_GATE_TITLE_MARKERS: tuple[str, ...] = (
+    "just a quick check",
     "just a moment",
     "checking your browser",
     "enable javascript",
     "verify you are human",
 )
 ACCESS_GATE_TEXT_MARKERS: tuple[str, ...] = (
+    "403 forbidden",
     "this site requires javascript to run correctly",
     "enable javascript and cookies to continue",
+    "please enable js and disable any ad blocker",
     "turn on javascript",
     "or unblock scripts",
     "checking your browser",
     "verify you are human",
     "not a robot",
+    "just a quick check",
+    "let us know you're not a robot",
     "detected unusual activity",
     "browser supports javascript and cookies",
     "blocking them from loading",
     "please wait while we verify",
     "ray id",
+    "routing-loop",
+    "routing loop detected",
 )
 ACCESS_GATE_HTML_MARKERS: tuple[str, ...] = (
     "cf-challenge",
@@ -102,9 +109,12 @@ ACCESS_GATE_HTML_MARKERS: tuple[str, ...] = (
 )
 PAYWALL_TEXT_MARKERS: tuple[str, ...] = (
     "subscribe to read",
+    "subscribe to read the full article",
     "subscribe to continue reading",
+    "subscribe to unlock",
     "sign in to continue reading",
     "this article is for subscribers",
+    "join high-powered tech and business leaders",
 )
 ACCESS_GATE_MAX_TEXT_LENGTH = 2500
 DISCUSSION_ONLY_MAX_TEXT_LENGTH = 8000
@@ -118,18 +128,176 @@ DISCUSSION_TAIL_MARKERS: tuple[str, ...] = (
     "\n### Discussion about this post",
     " #### Discussion about this post",
 )
+PUBLISHER_TAIL_MARKERS_BY_HOST: dict[str, tuple[str, ...]] = {
+    "reuters.com": (
+        " Our Standards:",
+        "\nOur Standards:",
+        " ## Read Next",
+        "\n## Read Next",
+        " Read Next / Editor's Picks",
+        "\nRead Next / Editor's Picks",
+        " - X - Facebook - Linkedin",
+    ),
+    "wsj.com": (
+        " Copyright ©2026 Dow Jones & Company",
+        " Copyright ©2025 Dow Jones & Company",
+        " ## Up Next",
+        "\n## Up Next",
+        " ### Further Reading",
+        "\n### Further Reading",
+        " ## Most Popular",
+        "\n## Most Popular",
+        " content frame **An error has occurred**",
+    ),
+}
+PUBLISHER_LEADING_MARKERS_BY_HOST: dict[str, tuple[str, ...]] = {
+    "wsj.com": (
+        " # ",
+        "\n# ",
+    ),
+}
+REUTERS_DATELINE_RE = re.compile(
+    r"(?:^|\s)(?:[A-Z][A-Z .'-]+,\s+)?[A-Z][a-z]+\.?\s+\d{1,2}\s+\(Reuters\)\s+-"
+)
+REUTERS_INLINE_NOISE_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"The Reuters [^.]{0,180} newsletter[^.]{0,180}\. Sign up here\. ?",
+            flags=re.IGNORECASE,
+        ),
+        "",
+    ),
+    (
+        re.compile(
+            r"Make sense of [^.]{0,180} newsletter\. Sign up here\. ?",
+            flags=re.IGNORECASE,
+        ),
+        "",
+    ),
+    (
+        re.compile(r"Advertisement · Scroll to continue ?", flags=re.IGNORECASE),
+        "",
+    ),
+)
 CHROME_HEAVY_TEXT_MARKERS: tuple[str, ...] = (
     "skip to main content",
     "exclusive news, data and analytics",
     "purchase licensing rights",
     "read next",
+    "manage your tracker preferences",
     "by clicking “sign up”",
     'by clicking "sign up"',
     "look out for an alert in your inbox",
     "markets.businessinsider.com/index",
+    "latest startups venture apple security ai apps events podcasts newsletters",
+    "stay on the cutting edge",
+    "top events nba nhl pga tour",
+    "accessenablerproxy",
+    "we value your privacy",
+    "apnews.com/world-news",
+    "mastodon.social/@stonetoolsblog",
+    "subscribe for $1subscribe for $1",
 )
 MIN_READABILITY_TEXT_LENGTH = 400
 LINK_DENSITY_HEAVY_THRESHOLD = 0.004
+DIRECT_READABILITY_HOST_SUFFIXES: tuple[str, ...] = (
+    "apnews.com",
+    "axios.com",
+    "bbc.com",
+    "bearblog.dev",
+    "businessinsider.com",
+    "cnbc.com",
+    "espn.com",
+    "eu-startups.com",
+    "finance.yahoo.com",
+    "fortune.com",
+    "ghost.io",
+    "gorillafund.org",
+    "insidehighered.com",
+    "medium.com",
+    "news.ycombinator.com",
+    "phys.org",
+    "quantamagazine.org",
+    "ruky.me",
+    "socket.dev",
+    "techcrunch.com",
+    "theguardian.com",
+    "theverge.com",
+    "tomshardware.com",
+    "wix-ux.com",
+    "zdnet.com",
+)
+GENERIC_DIRECT_READABILITY_HEADER_CANDIDATES: tuple[dict[str, str], ...] = (
+    {
+        "User-Agent": "NewslyArticleFetcher/1.0 (+https://newsly.local)",
+    },
+    {
+        "User-Agent": "curl/8.0.1",
+    },
+    {
+        "User-Agent": "",
+    },
+    {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        ),
+    },
+)
+DIRECT_READABILITY_HEADERS_BY_HOST: dict[str, tuple[dict[str, str], ...]] = {
+    "espn.com": (
+        {
+            "User-Agent": "Mozilla/5.0 NewslyBot/1.0",
+        },
+    ),
+    "gorillafund.org": (
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            ),
+        },
+    ),
+    "phys.org": (
+        {
+            "User-Agent": "NewslyArticleFetcher/1.0 (+https://newsly.local)",
+        },
+    ),
+    "socket.dev": (
+        {
+            "User-Agent": "",
+        },
+        {
+            "User-Agent": "curl/8.0.1",
+        },
+    ),
+    "techcrunch.com": (
+        {
+            "User-Agent": "NewslyArticleFetcher/1.0 (+https://newsly.local)",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        {
+            "User-Agent": "curl/8.0.1",
+        },
+        {
+            "User-Agent": "",
+        },
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            ),
+        },
+    ),
+}
+DIRECT_READABILITY_MIN_TEXT_LENGTH_BY_HOST: dict[str, int] = {
+    "axios.com": 250,
+}
+GITHUB_README_HEADERS: dict[str, str] = {
+    "Accept": "application/vnd.github.raw",
+    "User-Agent": "NewslyArticleFetcher/1.0 (+https://newsly.local)",
+}
 
 
 class HtmlProcessorStrategy(UrlProcessorStrategy):
@@ -476,6 +644,17 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         return None
 
     @staticmethod
+    def _detect_short_paywall_issue(*, text_content: str | None) -> str | None:
+        """Detect short subscription prompts even when metadata exposes the real title."""
+
+        normalized_text = re.sub(r"\s+", " ", text_content or "").strip().lower()
+        if not normalized_text or len(normalized_text) > ACCESS_GATE_MAX_TEXT_LENGTH:
+            return None
+        if any(marker in normalized_text for marker in PAYWALL_TEXT_MARKERS):
+            return "access restricted: paywall/subscription prompt"
+        return None
+
+    @staticmethod
     def _detect_missing_body_issue(
         *,
         title: str | None,
@@ -555,6 +734,10 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         if placeholder_title_reason:
             return placeholder_title_reason
 
+        paywall_reason = cls._detect_short_paywall_issue(text_content=text_content)
+        if paywall_reason:
+            return paywall_reason
+
         missing_body_reason = cls._detect_missing_body_issue(
             title=title,
             text_content=text_content,
@@ -574,12 +757,21 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         return text_content.count("](") / max(len(text_content), 1)
 
     @classmethod
+    def _has_chrome_marker(cls, text_content: str | None) -> bool:
+        normalized_text = re.sub(r"\s+", " ", text_content or "").strip().lower()
+        if not normalized_text:
+            return False
+        return any(marker in normalized_text for marker in CHROME_HEAVY_TEXT_MARKERS)
+
+    @classmethod
     def _looks_chrome_heavy(cls, text_content: str | None) -> bool:
         normalized_text = re.sub(r"\s+", " ", text_content or "").strip().lower()
         if not normalized_text:
             return False
-        marker_hit = any(marker in normalized_text for marker in CHROME_HEAVY_TEXT_MARKERS)
-        return marker_hit or cls._link_density(normalized_text) >= LINK_DENSITY_HEAVY_THRESHOLD
+        return (
+            cls._has_chrome_marker(normalized_text)
+            or cls._link_density(normalized_text) >= LINK_DENSITY_HEAVY_THRESHOLD
+        )
 
     @classmethod
     def _extract_readability_text(
@@ -609,45 +801,202 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         return cleaned or None
 
     @classmethod
+    def _direct_readability_header_candidates(cls, url: str) -> tuple[dict[str, str], ...]:
+        host = cls._host_for_url(url)
+        candidates: list[dict[str, str]] = []
+        for suffix, header_candidates in DIRECT_READABILITY_HEADERS_BY_HOST.items():
+            if host == suffix or host.endswith(f".{suffix}"):
+                candidates.extend(header_candidates)
+        candidates.extend(GENERIC_DIRECT_READABILITY_HEADER_CANDIDATES)
+
+        deduped: list[dict[str, str]] = []
+        seen: set[tuple[tuple[str, str], ...]] = set()
+        for candidate_headers in candidates:
+            key = tuple(sorted(candidate_headers.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(candidate_headers)
+        return tuple(deduped)
+
+    @classmethod
+    def _min_direct_readability_text_length(cls, url: str) -> int:
+        host = cls._host_for_url(url)
+        for suffix, min_length in DIRECT_READABILITY_MIN_TEXT_LENGTH_BY_HOST.items():
+            if host == suffix or host.endswith(f".{suffix}"):
+                return min_length
+        return MIN_READABILITY_TEXT_LENGTH
+
+    @classmethod
+    def _allows_direct_readability(cls, url: str) -> bool:
+        host = cls._host_for_url(url)
+        return any(
+            host == suffix or host.endswith(f".{suffix}")
+            for suffix in DIRECT_READABILITY_HOST_SUFFIXES
+        )
+
+    @classmethod
+    def _should_try_direct_readability(cls, url: str, crawl_text: str | None) -> bool:
+        if not cls._looks_chrome_heavy(crawl_text):
+            return False
+        return cls._allows_direct_readability(url)
+
+    def _extract_direct_readability_text(
+        self,
+        *,
+        url: str,
+        title: str | None,
+    ) -> str | None:
+        """Fetch public HTML directly and run trafilatura when browser markdown is chrome-heavy."""
+
+        if not self._allows_direct_readability(url):
+            return None
+
+        min_text_length = self._min_direct_readability_text_length(url)
+        for headers in self._direct_readability_header_candidates(url):
+            try:
+                response = self.http_client.get(
+                    url,
+                    headers=headers,
+                    timeout=20.0,
+                )
+            except Exception as exc:  # pragma: no cover - defensive network fallback
+                logger.debug(
+                    "HtmlStrategy: direct readability fetch failed for %s with headers %s: %s",
+                    url,
+                    sorted(headers.keys()),
+                    exc,
+                )
+                continue
+
+            html_content = getattr(response, "text", None)
+            if not isinstance(html_content, str) or not html_content.strip():
+                continue
+
+            extracted = self._extract_readability_text(html_content=html_content, url=url)
+            if extracted is None or len(extracted) < min_text_length:
+                continue
+
+            extraction_issue = self._detect_extraction_issue(
+                url=url,
+                title=title,
+                text_content=extracted,
+                html_content=html_content,
+            )
+            if extraction_issue:
+                continue
+            if self._has_chrome_marker(extracted):
+                continue
+            return extracted
+        return None
+
+    @staticmethod
+    def _github_repo_parts(url: str) -> tuple[str, str] | None:
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        if host not in {"github.com", "www.github.com"}:
+            return None
+
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) < 2:
+            return None
+
+        owner, repo = parts[0], parts[1]
+        if owner in {"features", "marketplace", "orgs", "topics"}:
+            return None
+        if repo.endswith(".git"):
+            repo = repo[:-4]
+        if not owner or not repo:
+            return None
+        return owner, repo
+
+    def _extract_github_readme_text(self, url: str) -> tuple[str, str] | None:
+        repo_parts = self._github_repo_parts(url)
+        if not repo_parts:
+            return None
+
+        owner, repo = repo_parts
+        readme_url = f"https://api.github.com/repos/{owner}/{repo}/readme"
+        try:
+            response = self.http_client.get(
+                readme_url,
+                headers=GITHUB_README_HEADERS,
+                timeout=20.0,
+            )
+        except Exception as exc:  # pragma: no cover - defensive network fallback
+            logger.debug("HtmlStrategy: GitHub README fetch failed for %s: %s", url, exc)
+            return None
+
+        readme_text = getattr(response, "text", None)
+        if not isinstance(readme_text, str):
+            return None
+
+        cleaned = readme_text.strip()
+        if not cleaned or cleaned.startswith("{"):
+            return None
+        return f"{owner}/{repo}", cleaned
+
     def _choose_best_extracted_text(
-        cls,
+        self,
         *,
         url: str,
         title: str | None,
         crawl_text: str,
         cleaned_html: str | None,
-    ) -> tuple[str, bool]:
-        readability_text = cls._extract_readability_text(html_content=cleaned_html, url=url)
+    ) -> tuple[str, bool, bool]:
+        readability_text = self._extract_readability_text(html_content=cleaned_html, url=url)
         if readability_text is None or len(readability_text) < MIN_READABILITY_TEXT_LENGTH:
-            return crawl_text, False
+            if self._should_try_direct_readability(url, crawl_text):
+                direct_readability_text = self._extract_direct_readability_text(
+                    url=url,
+                    title=title,
+                )
+                if direct_readability_text:
+                    return direct_readability_text, True, True
+            return crawl_text, False, False
 
-        readability_issue = cls._detect_extraction_issue(
+        readability_issue = self._detect_extraction_issue(
             url=url,
             title=title,
             text_content=readability_text,
             html_content=None,
         )
         if readability_issue:
-            return crawl_text, False
+            if self._should_try_direct_readability(url, crawl_text):
+                direct_readability_text = self._extract_direct_readability_text(
+                    url=url,
+                    title=title,
+                )
+                if direct_readability_text:
+                    return direct_readability_text, True, True
+            return crawl_text, False, False
 
         if not crawl_text.strip():
-            return readability_text, True
+            return readability_text, True, False
 
-        crawl_chrome_heavy = cls._looks_chrome_heavy(crawl_text)
-        readability_chrome_heavy = cls._looks_chrome_heavy(readability_text)
-        if crawl_chrome_heavy and not readability_chrome_heavy:
-            return readability_text, True
+        crawl_chrome_heavy = self._looks_chrome_heavy(crawl_text)
+        readability_chrome_heavy = self._looks_chrome_heavy(readability_text)
 
-        crawl_link_density = cls._link_density(crawl_text)
-        readability_link_density = cls._link_density(readability_text)
+        if crawl_chrome_heavy:
+            direct_readability_text = self._extract_direct_readability_text(
+                url=url,
+                title=title,
+            )
+            if direct_readability_text:
+                return direct_readability_text, True, True
+            if not readability_chrome_heavy:
+                return readability_text, True, False
+
+        crawl_link_density = self._link_density(crawl_text)
+        readability_link_density = self._link_density(readability_text)
         if (
             crawl_link_density >= LINK_DENSITY_HEAVY_THRESHOLD
             and readability_link_density <= crawl_link_density * 0.7
             and len(readability_text) >= MIN_READABILITY_TEXT_LENGTH
         ):
-            return readability_text, True
+            return readability_text, True, False
 
-        return crawl_text, False
+        return crawl_text, False, False
 
     @classmethod
     def _trim_discussion_tail(cls, url: str, text_content: str | None) -> str:
@@ -664,6 +1013,66 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                 break
 
         return trimmed_text
+
+    @classmethod
+    def _trim_publisher_chrome(cls, url: str, text_content: str | None) -> str:
+        """Trim known publisher chrome after an article body has already been extracted."""
+
+        if not text_content:
+            return ""
+
+        host = cls._host_for_url(url)
+        original_text = text_content.strip()
+        trimmed_text = original_text
+        changed = False
+
+        for suffix, markers in PUBLISHER_LEADING_MARKERS_BY_HOST.items():
+            if host != suffix and not host.endswith(f".{suffix}"):
+                continue
+            marker_indexes = [
+                marker_index
+                for marker in markers
+                if (marker_index := trimmed_text.find(marker)) != -1
+            ]
+            if marker_indexes:
+                trimmed_text = trimmed_text[min(marker_indexes) :].strip()
+                changed = True
+            break
+
+        if host == "reuters.com" or host.endswith(".reuters.com"):
+            dateline_match = REUTERS_DATELINE_RE.search(trimmed_text)
+            if dateline_match:
+                trimmed_text = trimmed_text[dateline_match.start() :].strip()
+                changed = True
+            for pattern, replacement in REUTERS_INLINE_NOISE_REPLACEMENTS:
+                updated_text = pattern.sub(replacement, trimmed_text)
+                if updated_text != trimmed_text:
+                    changed = True
+                    trimmed_text = updated_text
+            reporting_index = trimmed_text.find(" Reporting by ")
+            if reporting_index != -1:
+                trimmed_text = trimmed_text[:reporting_index].rstrip()
+                changed = True
+
+        for suffix, markers in PUBLISHER_TAIL_MARKERS_BY_HOST.items():
+            if host != suffix and not host.endswith(f".{suffix}"):
+                continue
+            marker_indexes = [
+                marker_index
+                for marker in markers
+                if (marker_index := trimmed_text.find(marker)) != -1
+            ]
+            if marker_indexes:
+                trimmed_text = trimmed_text[: min(marker_indexes)].rstrip()
+                changed = True
+            break
+
+        if not changed:
+            return original_text
+
+        trimmed_text = re.sub(r"[ \t]{2,}", " ", trimmed_text)
+        trimmed_text = re.sub(r"\n{3,}", "\n\n", trimmed_text)
+        return trimmed_text.strip()
 
     def _firecrawl_fallback_fetch(
         self,
@@ -688,7 +1097,10 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
 
         final_url = result.source_url or result.url or url
         title = clean_title(result.title) or "Untitled"
-        text_content = self._trim_discussion_tail(final_url, result.markdown)
+        text_content = self._trim_publisher_chrome(
+            final_url,
+            self._trim_discussion_tail(final_url, result.markdown),
+        )
         extraction_issue = self._detect_extraction_issue(
             url=final_url,
             title=title,
@@ -741,6 +1153,23 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
         # Detect source for metadata
         source = self._detect_source(url)
         logger.debug("HtmlStrategy: Starting extraction (url=%s, source=%s)", url, source)
+        github_readme = self._extract_github_readme_text(url)
+        if github_readme:
+            repo_name, readme_text = github_readme
+            return {
+                "title": f"{repo_name} README",
+                "author": None,
+                "publication_date": None,
+                "text_content": readme_text,
+                "content_type": "html",
+                "source": "github.com",
+                "final_url_after_redirects": url,
+                "table_markdown": None,
+                "feed_links": None,
+                "extraction_error": None,
+                "used_github_readme_extraction": True,
+            }
+
         table_strategy = self._build_table_extraction_strategy()
 
         try:
@@ -1030,33 +1459,81 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                 text_content=extracted_text,
                 html_content=result.cleaned_html,
             )
+            used_readability_extraction = False
+            used_direct_readability_extraction = False
+            tried_fallback_after_issue = False
             if extraction_issue:
                 logger.warning(
                     "HtmlStrategy: Suspect extraction detected for %s (%s)",
                     final_url,
                     extraction_issue,
                 )
-                fallback_data = self._firecrawl_fallback_fetch(final_url, source, context)
-                if fallback_data:
+                direct_readability_text = self._extract_direct_readability_text(
+                    url=final_url,
+                    title=title,
+                )
+                if direct_readability_text:
+                    extracted_text = direct_readability_text
+                    extraction_issue = None
+                    used_readability_extraction = True
+                    used_direct_readability_extraction = True
                     logger.info(
-                        "HtmlStrategy: Using fallback extraction for %s "
-                        "after malformed crawl4ai output",
+                        "HtmlStrategy: Using direct readability article text for %s "
+                        "after malformed crawl4ai output (text_length=%s)",
                         final_url,
+                        len(extracted_text),
                     )
-                    return fallback_data
+                else:
+                    tried_fallback_after_issue = True
+                    fallback_data = self._firecrawl_fallback_fetch(final_url, source, context)
+                    if fallback_data:
+                        logger.info(
+                            "HtmlStrategy: Using fallback extraction for %s "
+                            "after malformed crawl4ai output",
+                            final_url,
+                        )
+                        return fallback_data
 
-            extracted_text, used_readability_extraction = self._choose_best_extracted_text(
-                url=final_url,
-                title=title,
-                crawl_text=extracted_text,
-                cleaned_html=result.cleaned_html,
-            )
+            if not used_direct_readability_extraction:
+                (
+                    extracted_text,
+                    used_readability_extraction,
+                    used_direct_readability_extraction,
+                ) = self._choose_best_extracted_text(
+                    url=final_url,
+                    title=title,
+                    crawl_text=extracted_text,
+                    cleaned_html=result.cleaned_html,
+                )
             if used_readability_extraction:
                 logger.info(
                     "HtmlStrategy: Using readability-cleaned article text for %s (text_length=%s)",
                     final_url,
                     len(extracted_text),
                 )
+
+            extracted_text = self._trim_publisher_chrome(final_url, extracted_text)
+
+            post_cleanup_issue = self._detect_extraction_issue(
+                url=final_url,
+                title=title,
+                text_content=extracted_text,
+                html_content=None,
+            )
+            if post_cleanup_issue:
+                fallback_data = None
+                if not tried_fallback_after_issue:
+                    fallback_data = self._firecrawl_fallback_fetch(final_url, source, context)
+                if fallback_data:
+                    logger.info(
+                        "HtmlStrategy: Using fallback extraction for %s "
+                        "after malformed cleaned output",
+                        final_url,
+                    )
+                    return fallback_data
+                extraction_issue = post_cleanup_issue
+            else:
+                extraction_issue = None
 
             # Extract feed links from HTML for potential feed detection
             feed_links = None
@@ -1083,6 +1560,7 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                 "feed_links": feed_links,  # For feed detection in worker
                 "extraction_error": extraction_issue,
                 "used_readability_extraction": used_readability_extraction,
+                "used_direct_readability_extraction": used_direct_readability_extraction,
             }
 
         except Exception as e:
