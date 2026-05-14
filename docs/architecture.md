@@ -600,10 +600,16 @@ Async work is persisted in `processing_tasks`, not delegated to an external brok
 Defined in `app/models/contracts.py`:
 
 - `scrape`
+- `backfill_feeds`
 - `analyze_url`
 - `process_content`
+- `enrich_news_item_article`
+- `process_news_item`
+- `process_podcast_media`
 - `download_audio`
 - `transcribe`
+- `download_tweet_video_audio`
+- `transcribe_tweet_video`
 - `summarize`
 - `fetch_discussion`
 - `fetch_news_item_discussion`
@@ -612,37 +618,49 @@ Defined in `app/models/contracts.py`:
 - `onboarding_discover`
 - `dig_deeper`
 - `sync_integration`
+- `generate_insight_report`
+- `generate_audio_episode`
 
 ### 9.2 Queue partitions
 
 Defined in `TaskQueue`:
 
 - `content`
+- `media`
+- `audio_episode`
 - `image`
-- `transcribe`
 - `onboarding`
+- `backfill`
+- `discussion`
 - `twitter`
 - `chat`
 
-Current task-to-queue mapping in `app/services/queue.py`:
+Current task-to-queue mapping is declared in `app/pipeline/task_specs.py` and
+used by `app/services/queue.py`:
 
 | Task type | Queue |
 |---|---|
 | `scrape` | `content` |
+| `backfill_feeds` | `backfill` |
 | `analyze_url` | `content` |
 | `process_content` | `content` |
-| `download_audio` | `transcribe` |
-| `transcribe` | `transcribe` |
-| `download_tweet_video_audio` | `transcribe` |
-| `transcribe_tweet_video` | `transcribe` |
+| `enrich_news_item_article` | `content` |
+| `process_news_item` | `content` |
+| `process_podcast_media` | `media` |
+| `download_audio` | `media` |
+| `transcribe` | `media` |
+| `download_tweet_video_audio` | `media` |
+| `transcribe_tweet_video` | `media` |
 | `summarize` | `content` |
-| `fetch_discussion` | `content` |
-| `fetch_news_item_discussion` | `content` |
+| `fetch_discussion` | `discussion` |
+| `fetch_news_item_discussion` | `discussion` |
 | `generate_image` | `image` |
 | `discover_feeds` | `content` |
 | `onboarding_discover` | `onboarding` |
 | `dig_deeper` | `chat` |
 | `sync_integration` | `twitter` |
+| `generate_insight_report` | `content` |
+| `generate_audio_episode` | `audio_episode` |
 
 ### 9.3 Queue semantics
 
@@ -673,8 +691,12 @@ Responsibilities:
 Registered handlers:
 
 - scrape
+- backfill feeds
 - analyze URL
 - process content
+- enrich news-item article
+- process short-form news items
+- process podcast media
 - download audio
 - transcribe
 - download tweet video audio
@@ -683,11 +705,12 @@ Registered handlers:
 - fetch discussion
 - fetch news-item discussion
 - generate image
-- process short-form news items
 - discover feeds
 - onboarding discover
 - dig deeper
 - sync integration
+- generate insight report
+- generate audio episode
 
 ## 10. Content Ingestion and Processing Flow
 

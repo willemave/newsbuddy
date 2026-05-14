@@ -24,12 +24,15 @@ NC='\033[0m' # No Color
 usage() {
     echo "Usage: $0 [options] [services...]"
     echo ""
-    echo "Services: server, workers (content + media), scrapers (or 'all')"
+    echo "Services: server, workers (all queue partitions), scrapers (or 'all')"
     echo ""
     echo "Options:"
     echo "  -k, --kill     Kill running dev services"
     echo "  -s, --status   Show status of dev services"
     echo "  -h, --help     Show this help"
+    echo ""
+    echo "Environment:"
+    echo "  SKIP_MIGRATIONS=true   Start services without applying Alembic migrations"
     echo ""
     echo "Examples:"
     echo "  $0                    # Interactive - choose services"
@@ -217,8 +220,22 @@ for service in "${SERVICES[@]}"; do
             start_service "server" "python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
             ;;
         workers)
-            start_service "workers-content" "python scripts/run_workers.py --queue content --worker-slot 1 --stats-interval 60"
+            content_worker_procs="${CONTENT_WORKER_PROCS:-4}"
+            if ! [[ "$content_worker_procs" =~ ^[0-9]+$ ]] || [ "$content_worker_procs" -lt 1 ]; then
+                echo -e "${RED}CONTENT_WORKER_PROCS must be a positive integer${NC}"
+                exit 1
+            fi
+            for slot in $(seq 1 "$content_worker_procs"); do
+                start_service "workers-content-$slot" "python scripts/run_workers.py --queue content --worker-slot $slot --stats-interval 60"
+            done
             start_service "workers-media" "python scripts/run_workers.py --queue media --worker-slot 1 --stats-interval 60"
+            start_service "workers-audio-episode" "python scripts/run_workers.py --queue audio_episode --worker-slot 1 --stats-interval 60"
+            start_service "workers-image" "python scripts/run_workers.py --queue image --worker-slot 1 --stats-interval 60"
+            start_service "workers-onboarding" "python scripts/run_workers.py --queue onboarding --worker-slot 1 --stats-interval 60"
+            start_service "workers-backfill" "python scripts/run_workers.py --queue backfill --worker-slot 1 --stats-interval 60"
+            start_service "workers-discussion" "python scripts/run_workers.py --queue discussion --worker-slot 1 --stats-interval 60"
+            start_service "workers-twitter" "python scripts/run_workers.py --queue twitter --worker-slot 1 --stats-interval 60"
+            start_service "workers-chat" "python scripts/run_workers.py --queue chat --worker-slot 1 --stats-interval 60"
             ;;
         scrapers)
             start_service "scrapers" "python scripts/run_scrapers.py"

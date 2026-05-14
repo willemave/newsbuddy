@@ -7,8 +7,11 @@ Supervisor manages:
 - `news_app_server`
 - `news_app_workers_content`
 - `news_app_workers_image`
-- `news_app_workers_transcribe`
+- `news_app_workers_media`
+- `news_app_workers_audio_episode`
 - `news_app_workers_onboarding`
+- `news_app_workers_backfill`
+- `news_app_workers_discussion`
 - `news_app_workers_twitter`
 - `news_app_workers_chat`
 - optional `news_app_queue_watchdog`
@@ -73,17 +76,26 @@ command=/bin/bash -lc "/opt/news_app/scripts/start_server.sh"
 
 [program:news_app_workers_content]
 command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue content --worker-slot %(process_num)s --stats-interval 60"
-numprocs=1
+numprocs=4
 
 [program:news_app_workers_image]
 command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue image --worker-slot 1 --stats-interval 60"
 
-[program:news_app_workers_transcribe]
-command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue transcribe --worker-slot %(process_num)s --stats-interval 60"
+[program:news_app_workers_media]
+command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue media --worker-slot %(process_num)s --stats-interval 60"
 numprocs=1
+
+[program:news_app_workers_audio_episode]
+command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue audio_episode --worker-slot 1 --stats-interval 60"
 
 [program:news_app_workers_onboarding]
 command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue onboarding --worker-slot 1 --stats-interval 60"
+
+[program:news_app_workers_backfill]
+command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue backfill --worker-slot 1 --stats-interval 60"
+
+[program:news_app_workers_discussion]
+command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue discussion --worker-slot 1 --stats-interval 60"
 
 [program:news_app_workers_twitter]
 command=/bin/bash -lc "/opt/news_app/.venv/bin/python /opt/news_app/scripts/run_workers.py --queue twitter --worker-slot 1 --stats-interval 60"
@@ -110,8 +122,11 @@ Start or restart:
 sudo supervisorctl start news_app_server
 sudo supervisorctl start news_app_workers_content
 sudo supervisorctl start news_app_workers_image
-sudo supervisorctl start news_app_workers_transcribe
+sudo supervisorctl start news_app_workers_media
+sudo supervisorctl start news_app_workers_audio_episode
 sudo supervisorctl start news_app_workers_onboarding
+sudo supervisorctl start news_app_workers_backfill
+sudo supervisorctl start news_app_workers_discussion
 sudo supervisorctl start news_app_workers_twitter
 sudo supervisorctl start news_app_workers_chat
 sudo supervisorctl status
@@ -123,7 +138,9 @@ Tail logs:
 sudo tail -n 100 -f \
   /var/log/news_app/server.log \
   /var/log/news_app/workers.log \
-  /var/log/news_app/workers_image.log
+  /var/log/news_app/workers_image.log \
+  /var/log/news_app/workers_media.log \
+  /var/log/news_app/workers_discussion.log
 ```
 
 ## 5) Cron-managed schedulers
@@ -148,7 +165,7 @@ Current production cadence:
 ```
 
 Historical note: older SQLite-backed hosts kept `news_app_workers_content` and
-`news_app_workers_transcribe` at `numprocs=1` to limit writer contention.
+the old transcription worker group at `numprocs=1` to limit writer contention.
 SQLite is deprecated and unsupported as a Newsly runtime dialect. Current
 deployments should run PostgreSQL and size worker concurrency around Postgres
 capacity instead.
@@ -181,32 +198,32 @@ The bare-metal deploy workflow:
 Do not use `scripts/deploy/push_app.sh` for production deploys. That local rsync
 helper is not part of the supported path; GitHub Actions is.
 
-The workflow restarts only programs listed in `DEPLOY_PROGRAMS`. That variable must include the
-image worker after this queue split. Minimum value:
+The workflow restarts only programs listed in `DEPLOY_PROGRAMS`. That variable
+must include every active queue partition worker. Minimum value:
 
 ```text
-news_app_server news_app_workers_content news_app_workers_image news_app_workers_transcribe news_app_workers_onboarding news_app_workers_twitter news_app_workers_chat
+news_app_server news_app_workers_content news_app_workers_image news_app_workers_media news_app_workers_audio_episode news_app_workers_onboarding news_app_workers_backfill news_app_workers_discussion news_app_workers_twitter news_app_workers_chat
 ```
 
 If the watchdog is enabled on the host, append `news_app_queue_watchdog`. If YouTube PO token support is enabled, also append `news_app_bgutil_provider`.
 
-## 7) Post-deploy image-queue recovery
+## 7) Post-deploy queue recovery
 
-After the image queue rollout, move old pending image tasks out of `content`:
+After queue split changes, move existing pending/processing tasks to the queue
+partition declared by `app/pipeline/task_specs.py`:
 
 ```bash
 cd /opt/news_app
-.venv/bin/python scripts/queue_control.py move-queue \
-  --from-queue content \
-  --to-queue image \
-  --task-type generate_image \
-  --status pending \
+.venv/bin/python scripts/queue_control.py move-to-spec-queues \
   --yes
 ```
 
 Then verify:
 - `news_app_workers_image` is draining image tasks
-- content workers are no longer blocked behind image backlog
+- `news_app_workers_discussion` is draining discussion tasks
+- `news_app_workers_backfill` is draining feed backfills
+- `news_app_workers_audio_episode` is draining generated-audio tasks
+- content workers are no longer blocked behind split-out backlog
 - pending content processing tasks begin completing
 
 ## 8) Nginx reverse proxy

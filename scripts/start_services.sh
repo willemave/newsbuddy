@@ -25,7 +25,7 @@ Common options:
 Examples:
   scripts/start_services.sh all --env-file .env
   scripts/start_services.sh server --port 8000 --reload
-  scripts/start_services.sh workers --content-workers 2 --media-workers 1 --image-workers 1
+  scripts/start_services.sh workers --content-workers 4 --discussion-workers 1 --media-workers 1
   scripts/start_services.sh migrate --env-file .env
 EOF
 }
@@ -209,8 +209,11 @@ start_workers() {
   local stats_interval="30"
   local content_workers=""
   local media_workers=""
+  local audio_episode_workers=""
   local image_workers=""
   local onboarding_workers=""
+  local backfill_workers=""
+  local discussion_workers=""
   local twitter_workers=""
   local chat_workers=""
 
@@ -240,12 +243,24 @@ start_workers() {
         media_workers="$2"
         shift 2
         ;;
+      --audio-episode-workers|--tts-workers)
+        audio_episode_workers="$2"
+        shift 2
+        ;;
       --image-workers)
         image_workers="$2"
         shift 2
         ;;
       --onboarding-workers)
         onboarding_workers="$2"
+        shift 2
+        ;;
+      --backfill-workers)
+        backfill_workers="$2"
+        shift 2
+        ;;
+      --discussion-workers)
+        discussion_workers="$2"
         shift 2
         ;;
       --twitter-workers)
@@ -277,10 +292,13 @@ start_workers() {
 
   activate_runtime
 
-  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 2)}"
+  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 4)}"
   media_workers="${media_workers:-$(dotenv_get MEDIA_WORKER_PROCS "$(dotenv_get TRANSCRIBE_WORKER_PROCS 1)")}"
+  audio_episode_workers="${audio_episode_workers:-$(dotenv_get AUDIO_EPISODE_WORKER_PROCS "$(dotenv_get TTS_WORKER_PROCS 1)")}"
   image_workers="${image_workers:-$(dotenv_get IMAGE_WORKER_PROCS 1)}"
   onboarding_workers="${onboarding_workers:-$(dotenv_get ONBOARDING_WORKER_PROCS 1)}"
+  backfill_workers="${backfill_workers:-$(dotenv_get BACKFILL_WORKER_PROCS 1)}"
+  discussion_workers="${discussion_workers:-$(dotenv_get DISCUSSION_WORKER_PROCS 1)}"
   twitter_workers="${twitter_workers:-$(dotenv_get TWITTER_WORKER_PROCS 1)}"
   chat_workers="${chat_workers:-$(dotenv_get CHAT_WORKER_PROCS 1)}"
 
@@ -295,15 +313,18 @@ start_workers() {
 
   if ! [[ "${content_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${media_workers}" =~ ^[0-9]+$ ]] || \
+     ! [[ "${audio_episode_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${image_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${onboarding_workers}" =~ ^[0-9]+$ ]] || \
+     ! [[ "${backfill_workers}" =~ ^[0-9]+$ ]] || \
+     ! [[ "${discussion_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${twitter_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${chat_workers}" =~ ^[0-9]+$ ]]; then
     echo "ERROR: worker counts must be non-negative integers" >&2
     exit 1
   fi
 
-  local total_workers=$((content_workers + media_workers + image_workers + onboarding_workers + twitter_workers + chat_workers))
+  local total_workers=$((content_workers + media_workers + audio_episode_workers + image_workers + onboarding_workers + backfill_workers + discussion_workers + twitter_workers + chat_workers))
   if [[ "${total_workers}" -le 0 ]]; then
     echo "ERROR: at least one worker must be enabled" >&2
     exit 1
@@ -342,8 +363,11 @@ start_workers() {
 
   launch_worker_pool content "${content_workers}"
   launch_worker_pool media "${media_workers}"
+  launch_worker_pool audio_episode "${audio_episode_workers}"
   launch_worker_pool image "${image_workers}"
   launch_worker_pool onboarding "${onboarding_workers}"
+  launch_worker_pool backfill "${backfill_workers}"
+  launch_worker_pool discussion "${discussion_workers}"
   launch_worker_pool twitter "${twitter_workers}"
   launch_worker_pool chat "${chat_workers}"
 
@@ -481,8 +505,11 @@ start_all() {
   local crontab_path="${PROJECT_ROOT}/docker/crontab"
   local content_workers=""
   local media_workers=""
+  local audio_episode_workers=""
   local image_workers=""
   local onboarding_workers=""
+  local backfill_workers=""
+  local discussion_workers=""
   local twitter_workers=""
   local chat_workers=""
   local stats_interval="30"
@@ -527,12 +554,24 @@ start_all() {
         media_workers="$2"
         shift 2
         ;;
+      --audio-episode-workers|--tts-workers)
+        audio_episode_workers="$2"
+        shift 2
+        ;;
       --image-workers)
         image_workers="$2"
         shift 2
         ;;
       --onboarding-workers)
         onboarding_workers="$2"
+        shift 2
+        ;;
+      --backfill-workers)
+        backfill_workers="$2"
+        shift 2
+        ;;
+      --discussion-workers)
+        discussion_workers="$2"
         shift 2
         ;;
       --twitter-workers)
@@ -568,10 +607,13 @@ start_all() {
 
   activate_runtime
 
-  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 2)}"
+  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 4)}"
   media_workers="${media_workers:-$(dotenv_get MEDIA_WORKER_PROCS "$(dotenv_get TRANSCRIBE_WORKER_PROCS 1)")}"
+  audio_episode_workers="${audio_episode_workers:-$(dotenv_get AUDIO_EPISODE_WORKER_PROCS "$(dotenv_get TTS_WORKER_PROCS 1)")}"
   image_workers="${image_workers:-$(dotenv_get IMAGE_WORKER_PROCS 1)}"
   onboarding_workers="${onboarding_workers:-$(dotenv_get ONBOARDING_WORKER_PROCS 1)}"
+  backfill_workers="${backfill_workers:-$(dotenv_get BACKFILL_WORKER_PROCS 1)}"
+  discussion_workers="${discussion_workers:-$(dotenv_get DISCUSSION_WORKER_PROCS 1)}"
   twitter_workers="${twitter_workers:-$(dotenv_get TWITTER_WORKER_PROCS 1)}"
   chat_workers="${chat_workers:-$(dotenv_get CHAT_WORKER_PROCS 1)}"
 
@@ -617,8 +659,11 @@ start_all() {
     --env-file "${ENV_FILE}"
     --content-workers "${content_workers}"
     --media-workers "${media_workers}"
+    --audio-episode-workers "${audio_episode_workers}"
     --image-workers "${image_workers}"
     --onboarding-workers "${onboarding_workers}"
+    --backfill-workers "${backfill_workers}"
+    --discussion-workers "${discussion_workers}"
     --twitter-workers "${twitter_workers}"
     --chat-workers "${chat_workers}"
     --stats-interval "${stats_interval}"

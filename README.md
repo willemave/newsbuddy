@@ -229,6 +229,9 @@ The container exposes:
 - PostgreSQL: `127.0.0.1:5432`
 
 Set `NEWSLY_RUNTIME_MODE=server` in `.env.docker.local` to skip workers, the queue watchdog, and the scheduler while keeping the API server and embedded Postgres.
+The default Docker runtime starts the same queue partitions as production:
+content, media, audio episode, image, onboarding, backfill, discussion, twitter,
+and chat.
 
 ### Local Start Scripts
 
@@ -242,7 +245,7 @@ For native local development, use the unified launcher with `.env`:
 ./scripts/start_services.sh server --env-file .env --port 8000 --reload
 
 # Run just the workers
-./scripts/start_services.sh workers --env-file .env --content-workers 2 --media-workers 1
+./scripts/start_services.sh workers --env-file .env --content-workers 4 --discussion-workers 1 --media-workers 1
 
 # Run migrations explicitly
 ./scripts/start_services.sh migrate --env-file .env
