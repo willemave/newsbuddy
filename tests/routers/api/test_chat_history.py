@@ -151,7 +151,8 @@ def test_extract_messages_for_display_hides_intermediate_agent_scaffolding(db_se
     assert [message.role.value for message in display_messages] == ["user", "tool", "assistant"]
     assert display_messages[0].content == "Dig deeper into these news bullets."
     assert display_messages[1].display_type.value == "process_summary"
-    assert display_messages[1].content == "Thinking • Executed 1 tool and reviewed sources"
+    assert display_messages[1].process_label == "Thinking • Executed 1 tool and reviewed sources"
+    assert display_messages[1].content == "Executed 1 tool call:\n• exa_web_search"
     assert display_messages[2].content == "Final deep-dive answer."
     assert display_messages[2].feed_options[0].feed_url == "https://lucumr.pocoo.org/feed.atom"
 

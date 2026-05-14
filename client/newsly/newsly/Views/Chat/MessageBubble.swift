@@ -37,9 +37,14 @@ struct ProcessSummaryRow: View {
     let message: ChatMessage
     @State private var isExpanded = false
 
+    private var detail: String? {
+        message.processSummaryDetail
+    }
+
     var body: some View {
         VStack(alignment: .center, spacing: 6) {
             Button {
+                guard detail != nil else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
                     isExpanded.toggle()
                 }
@@ -50,8 +55,10 @@ struct ProcessSummaryRow: View {
                     Text(message.processSummaryText)
                         .lineLimit(isExpanded ? nil : 1)
                         .truncationMode(.tail)
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption2.weight(.semibold))
+                    if detail != nil {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                    }
                 }
                 .font(.terracottaBodySmall)
                 .foregroundStyle(Color.onSurfaceSecondary)
@@ -62,11 +69,11 @@ struct ProcessSummaryRow: View {
             }
             .buttonStyle(.plain)
 
-            if isExpanded, !message.content.isEmpty, message.content != message.processSummaryText {
-                Text(message.content)
+            if isExpanded, let detail {
+                Text(detail)
                     .font(.caption)
                     .foregroundStyle(Color.onSurfaceSecondary)
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(.leading)
                     .padding(.horizontal, 20)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }

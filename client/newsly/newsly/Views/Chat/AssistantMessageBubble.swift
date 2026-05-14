@@ -65,7 +65,7 @@ struct AssistantMessageBubble: View {
 
     private var bubbleShape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(
-            topLeadingRadius: 3,
+            topLeadingRadius: 12,
             bottomLeadingRadius: 12,
             bottomTrailingRadius: 12,
             topTrailingRadius: 12

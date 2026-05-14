@@ -6,7 +6,7 @@ from app.routers.api.chat import _format_process_summary_label
 def test_format_process_summary_label_includes_tool_count_for_search() -> None:
     """Search-backed summaries should expose the number of executed tools."""
     label = _format_process_summary_label(
-        ["exa_web_search", "exa_web_search", "other_tool"],
+        {"exa_web_search": 2, "other_tool": 1},
         has_intermediate_assistant_text=False,
     )
 
@@ -16,7 +16,7 @@ def test_format_process_summary_label_includes_tool_count_for_search() -> None:
 def test_format_process_summary_label_includes_tool_count_for_non_search_tools() -> None:
     """Generic tool usage should expose the number of executed tools."""
     label = _format_process_summary_label(
-        ["feed_lookup"],
+        {"feed_lookup": 1},
         has_intermediate_assistant_text=False,
     )
 

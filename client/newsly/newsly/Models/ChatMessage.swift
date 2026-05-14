@@ -229,6 +229,13 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         processLabel ?? content
     }
 
+    var processSummaryDetail: String? {
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedLabel = processSummaryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContent.isEmpty, trimmedContent != trimmedLabel else { return nil }
+        return trimmedContent
+    }
+
     var hasFeedOptions: Bool {
         !feedOptions.isEmpty
     }

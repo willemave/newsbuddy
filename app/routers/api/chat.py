@@ -125,14 +125,23 @@ def _resolve_message_status(db_message: ChatMessage) -> MessageProcessingStatusD
     return MessageProcessingStatusDto(raw_status)
 
 
+def _count_process_summary_tools(tool_names: list[str]) -> dict[str, int]:
+    tool_counts: dict[str, int] = {}
+    for raw_name in tool_names:
+        name = raw_name.strip() if raw_name else ""
+        if name:
+            tool_counts[name] = tool_counts.get(name, 0) + 1
+    return tool_counts
+
+
 def _format_process_summary_label(
-    tool_names: list[str],
+    tool_counts: dict[str, int],
     *,
     has_intermediate_assistant_text: bool,
 ) -> str | None:
     """Build a compact transcript label for intermediate tool/thinking activity."""
-    normalized_tool_names = {name.strip().lower() for name in tool_names if name and name.strip()}
-    tool_call_count = len([name for name in tool_names if name and name.strip()])
+    normalized_tool_names = {name.lower() for name in tool_counts}
+    tool_call_count = sum(tool_counts.values())
 
     if tool_call_count:
         tool_label = "tool" if tool_call_count == 1 else "tools"
@@ -144,6 +153,27 @@ def _format_process_summary_label(
 
     if has_intermediate_assistant_text:
         return "Thinking • Considered the request"
+
+    return None
+
+
+def _format_process_summary_detail(
+    tool_counts: dict[str, int],
+    *,
+    has_intermediate_assistant_text: bool,
+) -> str | None:
+    """Build expanded transcript detail for intermediate tool/thinking activity."""
+    if tool_counts:
+        total_count = sum(tool_counts.values())
+        tool_label = "tool call" if total_count == 1 else "tool calls"
+        lines = [f"Executed {total_count} {tool_label}:"]
+        for name, count in tool_counts.items():
+            count_suffix = f" x{count}" if count > 1 else ""
+            lines.append(f"• {name}{count_suffix}")
+        return "\n".join(lines)
+
+    if has_intermediate_assistant_text:
+        return "Prepared intermediate context before writing the final answer."
 
     return None
 
@@ -699,9 +729,15 @@ def _extract_messages_for_display(
                         assistant_responses.append("\n\n".join(response_text_parts))
 
             latest_assistant_text = assistant_responses[-1] if assistant_responses else None
+            has_intermediate_assistant_text = len(assistant_responses) > 1
+            tool_counts = _count_process_summary_tools(tool_names)
             process_summary_label = _format_process_summary_label(
-                tool_names,
-                has_intermediate_assistant_text=len(assistant_responses) > 1,
+                tool_counts,
+                has_intermediate_assistant_text=has_intermediate_assistant_text,
+            )
+            process_summary_detail = _format_process_summary_detail(
+                tool_counts,
+                has_intermediate_assistant_text=has_intermediate_assistant_text,
             )
 
             if process_summary_label:
@@ -713,7 +749,7 @@ def _extract_messages_for_display(
                         session_id=session_id_override or session_id,
                         role=ChatMessageRole.TOOL,
                         timestamp=message_timestamp,
-                        content=process_summary_label,
+                        content=process_summary_detail or process_summary_label,
                         display_type=ChatMessageDisplayType.PROCESS_SUMMARY,
                         process_label=process_summary_label,
                         status=status,

@@ -45,7 +45,7 @@ struct UserMessageBubble: View {
             topLeadingRadius: 14,
             bottomLeadingRadius: 14,
             bottomTrailingRadius: 14,
-            topTrailingRadius: 3
+            topTrailingRadius: 14
         )
     }
 }
