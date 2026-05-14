@@ -788,21 +788,16 @@ struct ContentDetailView: View {
                 }
             ) {
                 HStack(spacing: 12) {
-                    Image(systemName: "text.quote")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.indigo)
-                        .frame(width: 32, height: 32)
-                        .background(Color.indigo.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    sheetOptionIcon("text.quote", color: .indigo, size: 16)
 
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(
                             isNarrationActive(for: content)
                                 ? "Pause summary narration"
                                 : "Narrate summary here"
                         )
                         .font(.subheadline)
-                        .fontWeight(.medium)
+                        .fontWeight(.semibold)
                         .foregroundColor(.primary)
                         Text(
                             isNarrationActive(for: content)
@@ -817,9 +812,7 @@ struct ContentDetailView: View {
 
                     Spacer()
                 }
-                .padding(10)
-                .background(Color.surfaceSecondary)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .miniSheetOptionSurface()
             }
             .accessibilityIdentifier("content.dictate_summary_live")
 
@@ -828,25 +821,22 @@ struct ContentDetailView: View {
                     Task { await handleContentDiscussionAudio(for: content) }
                 } label: {
                     HStack(spacing: 12) {
-                        Image(
-                            systemName: isDiscussionAudioActive(for: content)
+                        sheetOptionIcon(
+                            isDiscussionAudioActive(for: content)
                                 ? "pause.fill"
-                                : "person.3.sequence.fill"
+                                : "person.3.sequence.fill",
+                            color: .orange,
+                            size: 16
                         )
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.orange)
-                        .frame(width: 32, height: 32)
-                        .background(Color.orange.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
 
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(
                                 isDiscussionAudioActive(for: content)
                                     ? "Pause expert discussion"
                                     : "Expert audio discussion"
                             )
                             .font(.subheadline)
-                            .fontWeight(.medium)
+                            .fontWeight(.semibold)
                             .foregroundColor(.primary)
                             Text(discussionAudioStatusText(for: content))
                                 .font(.caption)
@@ -862,11 +852,9 @@ struct ContentDetailView: View {
                                 .controlSize(.small)
                         }
                     }
-                    .padding(10)
-                    .background(Color.surfaceSecondary)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .miniSheetOptionSurface()
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SheetOptionButtonStyle())
                 .disabled(isDiscussionAudioLoading(for: content))
                 .accessibilityIdentifier("content.audio.expert_discussion")
             }
@@ -1449,40 +1437,51 @@ struct ContentDetailView: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(iconColor)
-                    .frame(width: 36, height: 36)
-                    .background(iconColor.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                sheetOptionIcon(icon, color: iconColor)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.body)
-                        .fontWeight(.medium)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
                         .foregroundColor(.primary)
                     Text(subtitle)
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.88)
                 }
 
                 Spacer()
 
                 if let badge {
                     Text(badge)
-                        .font(.caption)
-                        .fontWeight(.medium)
+                        .font(.caption2)
+                        .fontWeight(.semibold)
                         .foregroundColor(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Color.surfaceTertiary)
+                        .clipShape(Capsule())
                 }
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
-            .frame(minHeight: RowMetrics.compactHeight)
-            .background(Color.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .miniSheetOptionSurface()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SheetOptionButtonStyle())
         .disabled(disabled)
+        .opacity(disabled ? 0.55 : 1)
+    }
+
+    private func sheetOptionIcon(
+        _ icon: String,
+        color: Color,
+        size: CGFloat = 17
+    ) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: size, weight: .semibold))
+            .foregroundColor(color)
+            .frame(width: 34, height: 34)
+            .background(color.opacity(0.13))
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
     // MARK: - Share Sheet
@@ -2648,5 +2647,29 @@ struct ContentDetailView: View {
         didTriggerNavigation = true
         navigationDirection = -1
         currentIndex -= 1
+    }
+}
+
+private struct SheetOptionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .animation(.spring(response: 0.24, dampingFraction: 0.86), value: configuration.isPressed)
+    }
+}
+
+private extension View {
+    func miniSheetOptionSurface() -> some View {
+        self
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 56)
+            .background(Color.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.outlineVariant.opacity(0.28), lineWidth: 0.5)
+            )
     }
 }
