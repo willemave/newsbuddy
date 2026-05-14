@@ -1,0 +1,121 @@
+"""On-demand audio episode endpoints."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
+
+from app.core.db import get_db_session, get_readonly_db_session
+from app.core.deps import get_current_user, require_user_id
+from app.models.api.audio_episodes import AudioEpisodeResponse
+from app.models.db import AudioEpisode
+from app.models.db.users import User
+from app.services.audio_episodes import (
+    audio_episode_file_path,
+    create_content_council_episode,
+    create_fast_news_digest_episode,
+    enqueue_audio_episode_generation,
+    get_user_audio_episode,
+    present_audio_episode,
+)
+
+router = APIRouter()
+
+
+def _commit_enqueue_and_present(db: Session, episode: AudioEpisode) -> AudioEpisodeResponse:
+    """Commit the episode before queueing so workers can resolve it immediately."""
+
+    db.commit()
+    db.refresh(episode)
+    if episode.status != "completed":
+        episode_id = episode.id
+        if episode_id is None:
+            raise RuntimeError("Audio episode must be persisted before enqueue")
+        enqueue_audio_episode_generation(episode_id)
+    return present_audio_episode(episode)
+
+
+@router.post(
+    "/audio-episodes/fast-news",
+    response_model=AudioEpisodeResponse,
+    summary="Create an on-demand Fast Reads podcast episode",
+)
+def create_fast_news_audio_episode(
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AudioEpisodeResponse:
+    """Create or reuse a Fast Reads digest and enqueue generation."""
+
+    user_id = require_user_id(current_user)
+    episode = create_fast_news_digest_episode(db, user_id=user_id)
+    return _commit_enqueue_and_present(db, episode)
+
+
+@router.post(
+    "/{content_id}/audio-episodes/council",
+    response_model=AudioEpisodeResponse,
+    summary="Create an on-demand long-form discussion podcast episode",
+)
+def create_content_council_audio_episode(
+    content_id: Annotated[int, Path(..., gt=0)],
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AudioEpisodeResponse:
+    """Create or reuse a long-form expert discussion and enqueue generation."""
+
+    user_id = require_user_id(current_user)
+    episode = create_content_council_episode(db, user_id=user_id, content_id=content_id)
+    return _commit_enqueue_and_present(db, episode)
+
+
+@router.get(
+    "/audio-episodes/{audio_episode_id}",
+    response_model=AudioEpisodeResponse,
+    summary="Get audio episode generation status",
+)
+def get_audio_episode(
+    audio_episode_id: Annotated[int, Path(..., gt=0)],
+    db: Annotated[Session, Depends(get_readonly_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AudioEpisodeResponse:
+    """Return one audio episode for polling."""
+
+    user_id = require_user_id(current_user)
+    episode = get_user_audio_episode(db, user_id=user_id, audio_episode_id=audio_episode_id)
+    if episode is None:
+        raise HTTPException(status_code=404, detail="Audio episode not found")
+    return present_audio_episode(episode)
+
+
+@router.get(
+    "/audio-episodes/{audio_episode_id}/audio",
+    summary="Stream generated audio episode MP3",
+    responses={200: {"content": {"audio/mpeg": {}}}},
+)
+def get_audio_episode_audio(
+    audio_episode_id: Annotated[int, Path(..., gt=0)],
+    db: Annotated[Session, Depends(get_readonly_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> FileResponse:
+    """Return generated MP3 audio bytes for one completed episode."""
+
+    user_id = require_user_id(current_user)
+    episode = get_user_audio_episode(db, user_id=user_id, audio_episode_id=audio_episode_id)
+    if episode is None:
+        raise HTTPException(status_code=404, detail="Audio episode not found")
+    if episode.status != "completed":
+        raise HTTPException(status_code=409, detail="Audio episode is not ready")
+
+    path = audio_episode_file_path(episode)
+    if path is None or not path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return FileResponse(
+        path,
+        media_type=episode.audio_content_type or "audio/mpeg",
+        filename=f"audio-episode-{audio_episode_id}.mp3",
+        headers={"Cache-Control": "no-store"},
+    )

@@ -321,7 +321,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional JSON snapshot of production news_items, either a raw row list or an "
-            "admin db query envelope. Only valid with --content-types news."
+            "export envelope. Only valid with --content-types news."
         ),
     )
     parser.add_argument(
@@ -1040,6 +1040,14 @@ def clean_snapshot_text(value: Any) -> str | None:
     return cleaned or None
 
 
+def clean_snapshot_body_text(value: Any) -> str | None:
+    """Preserve article-body markdown from a production news snapshot."""
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def normalize_snapshot_key_points(value: Any) -> list[str]:
     """Return key point text from string or structured key-point rows."""
     if not isinstance(value, list):
@@ -1056,7 +1064,7 @@ def normalize_snapshot_key_points(value: Any) -> list[str]:
 
 
 def load_news_snapshot_rows(snapshot_file: str) -> list[dict[str, Any]]:
-    """Load production news rows from a JSON snapshot or admin DB envelope."""
+    """Load production news rows from a JSON snapshot or export envelope."""
     payload = json.loads(Path(snapshot_file).read_text(encoding="utf-8"))
     rows: Any
     if isinstance(payload, list):
@@ -1068,7 +1076,7 @@ def load_news_snapshot_rows(snapshot_file: str) -> list[dict[str, Any]]:
         rows = None
 
     if not isinstance(rows, list):
-        raise ValueError("News snapshot must be a row list or admin db query envelope")
+        raise ValueError("News snapshot must be a row list or export envelope")
     invalid_rows = [index for index, row in enumerate(rows, start=1) if not isinstance(row, dict)]
     if invalid_rows:
         raise ValueError(f"News snapshot includes non-object rows: {invalid_rows[:5]}")
@@ -1123,7 +1131,7 @@ def build_news_snapshot_eval_source_payload(row: dict[str, Any]) -> EvalSourcePa
         created_at=parse_datetime_value(row.get("created_at")),
         published_at=parse_datetime_value(row.get("published_at")),
     )
-    article_body_text = clean_snapshot_text(row.get("article_body_text"))
+    article_body_text = clean_snapshot_body_text(row.get("article_body_text"))
     input_text = _build_processing_prompt(
         cast(NewsItem, item),
         raw_metadata,
@@ -2032,6 +2040,15 @@ def render_html(report_payload: dict[str, Any]) -> str:
                 {f"<details><summary>Live summary text</summary>{_render_paragraphs(existing_summary_text)}</details>" if existing_summary_text else ""}
               </section>
             """
+        source_input_text = str(item.get("input_text") or "").strip()
+        source_input_block = ""
+        if source_input_text:
+            source_input_block = f"""
+              <details class="source-input">
+                <summary>Processed raw markdown</summary>
+                <pre>{html_escape(source_input_text)}</pre>
+              </details>
+            """
         sections.append(
             f"""
             <section class="content-card">
@@ -2044,6 +2061,7 @@ def render_html(report_payload: dict[str, Any]) -> str:
                 <h3>{html_escape(item["source_title"] or "Untitled")}</h3>
                 <a href="{html_escape(item["url"])}" target="_blank">{html_escape(item["url"])}</a>
               </header>
+              {source_input_block}
               {existing_summary_block}
               {model_grid}
               {failures_block}
@@ -2150,6 +2168,19 @@ def render_html(report_payload: dict[str, Any]) -> str:
     }}
     .existing-summary h5 {{ margin: 0; font-size: 16px; }}
     .existing-summary p {{ margin: 0; font-size: 14px; line-height: 1.45; }}
+    .source-input {{
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+    }}
+    .source-input pre {{
+      max-height: 520px;
+      background: #f8fafc;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }}
     .meta {{ display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }}
     .pill {{
       border: 1px solid #84adff;
@@ -2561,6 +2592,7 @@ def main() -> int:
                 "existing_summary_title": source.existing_summary_title,
                 "existing_summary_key_points": source.existing_summary_key_points,
                 "existing_summary_text": source.existing_summary_text,
+                "input_text": source.input_text,
                 "input_chars": source.input_chars,
                 "model_results": model_results,
             }

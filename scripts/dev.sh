@@ -7,6 +7,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 LOG_FILE="$PROJECT_ROOT/logs/dev.log"
 PID_FILE="$PROJECT_ROOT/logs/dev.pids"
+ALEMBIC_CONFIG_PATH="$PROJECT_ROOT/migrations/alembic.ini"
 
 cd "$PROJECT_ROOT"
 
@@ -23,7 +24,7 @@ NC='\033[0m' # No Color
 usage() {
     echo "Usage: $0 [options] [services...]"
     echo ""
-    echo "Services: server, workers, scrapers (or 'all')"
+    echo "Services: server, workers (content + media), scrapers (or 'all')"
     echo ""
     echo "Options:"
     echo "  -k, --kill     Kill running dev services"
@@ -120,6 +121,21 @@ start_service() {
     echo -e "  ${GREEN}Started${NC} (PID $pid)"
 }
 
+run_migrations() {
+    if [ "${SKIP_MIGRATIONS:-false}" = "true" ]; then
+        echo -e "${YELLOW}Skipping database migrations (SKIP_MIGRATIONS=true)${NC}"
+        return
+    fi
+
+    if [ ! -f "$ALEMBIC_CONFIG_PATH" ]; then
+        echo -e "${RED}Alembic config not found: $ALEMBIC_CONFIG_PATH${NC}"
+        exit 1
+    fi
+
+    echo -e "${BLUE}Running database migrations...${NC}"
+    python -m alembic -c "$ALEMBIC_CONFIG_PATH" upgrade head
+}
+
 # Parse options
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -187,6 +203,8 @@ if [ -f "$PROJECT_ROOT/.venv/bin/activate" ]; then
     source "$PROJECT_ROOT/.venv/bin/activate"
 fi
 
+run_migrations
+
 echo ""
 echo -e "${BLUE}Starting services: ${SERVICES[*]}${NC}"
 echo -e "Log file: $LOG_FILE"
@@ -199,7 +217,8 @@ for service in "${SERVICES[@]}"; do
             start_service "server" "python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
             ;;
         workers)
-            start_service "workers" "python scripts/run_workers.py --stats-interval 60"
+            start_service "workers-content" "python scripts/run_workers.py --queue content --worker-slot 1 --stats-interval 60"
+            start_service "workers-media" "python scripts/run_workers.py --queue media --worker-slot 1 --stats-interval 60"
             ;;
         scrapers)
             start_service "scrapers" "python scripts/run_scrapers.py"

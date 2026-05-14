@@ -20,6 +20,12 @@ Use this skill when the user asks for a daily checkup, production sweep, morning
 - Do not apply fixes unless the user explicitly asks.
 - If one command fails, report that clearly and continue with the others when possible.
 
+## Mode
+- Bare `daily-checkup`, `production sweep`, or `morning review` means triage and report only.
+- `investigate production` means gather live evidence first, trace the relevant code path, and report root cause plus the smallest durable fix before patching unless the user clearly asked for implementation.
+- `yes fix`, `fix it`, or `remediate` means apply the narrow approved fix, then verify with the same live signal that exposed the issue.
+- `commit`, `push`, or `deploy` are separate explicit requests. Do not infer them from a checkup.
+
 ## Time Window
 Compute a UTC `since` timestamp for the last 24 hours:
 
@@ -165,6 +171,12 @@ Suggested fixes:
 - confirm whether the issue is isolated to one provider
 - recommend fallback or retry policy review
 - inspect credential/config state only if the user asks for remediation
+
+## Remediation Rules
+- Before changing code or production state, identify the decisive signal: log line, exception cluster, DB row, queue state, health snapshot, or config/container mismatch.
+- Keep fixes scoped to the observed failure class. Do not fold in adjacent cleanup unless the user asks.
+- After applying a fix, rerun the smallest relevant live check, such as `admin health snapshot`, focused `logs exceptions`, a targeted DB query, or the specific admin fix preview/apply output.
+- If the user asks to commit after a narrow fix, check `git status` first and stage only the task files.
 
 ## Watchouts
 - `admin logs tail` defaults to Docker and is the best first check.

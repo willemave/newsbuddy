@@ -18,6 +18,23 @@ def test_detect_access_gate_from_javascript_notice() -> None:
     assert reason.startswith("access gate detected")
 
 
+def test_detect_access_gate_from_bloomberg_robot_page() -> None:
+    """Bloomberg robot-check pages should not be treated as article text."""
+    reason = HtmlProcessorStrategy._detect_access_gate(  # pylint: disable=protected-access
+        title="Bloomberg",
+        text_content=(
+            "We've detected unusual activity from your computer network. "
+            "To continue, please click the box below to let us know you're not a robot. "
+            "Please make sure your browser supports JavaScript and cookies and that you "
+            "are not blocking them from loading."
+        ),
+        html_content="<html><body>Bloomberg robot check</body></html>",
+    )
+
+    assert reason is not None
+    assert reason.startswith("access gate detected")
+
+
 def test_detect_access_gate_ignores_normal_article_content() -> None:
     """Normal article content should not be mistaken for an access gate."""
     reason = HtmlProcessorStrategy._detect_access_gate(  # pylint: disable=protected-access

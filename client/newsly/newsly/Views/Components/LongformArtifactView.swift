@@ -163,13 +163,6 @@ private struct TakeawayBanner: View {
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.leading, 14)
-        .overlay(
-            Rectangle()
-                .fill(tint.opacity(0.65))
-                .frame(width: 3),
-            alignment: .leading
-        )
     }
 }
 

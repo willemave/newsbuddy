@@ -298,6 +298,10 @@ def enrich_news_item_article(
         if extracted_data is None:
             raise ValueError("Article extraction produced no data")
 
+        extraction_error = _clean_string(extracted_data.get("extraction_error"))
+        if extraction_error:
+            raise ValueError(extraction_error)
+
         llm_data = _run_strategy_method(strategy.prepare_for_llm, extracted_data) or {}
         source_text = _clean_string(llm_data.get("content_to_summarize"))
         if source_text is None:

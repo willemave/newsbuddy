@@ -1127,6 +1127,73 @@ def test_enrich_news_item_article_passes_context_to_strategy(db_session) -> None
     assert extraction["status"] == "completed"
 
 
+def test_enrich_news_item_article_rejects_strategy_extraction_error(db_session) -> None:
+    item = NewsItem(
+        ingest_key="news-item-reject-extraction-error",
+        visibility_scope="global",
+        platform="techmeme",
+        source_type="Techmeme",
+        source_label="bloomberg.com",
+        source_external_id="reject-extraction-error-1",
+        article_url="https://www.bloomberg.com/news/articles/example",
+        canonical_story_url="https://www.bloomberg.com/news/articles/example",
+        article_title="Bloomberg story",
+        article_domain="bloomberg.com",
+        discussion_url="https://www.techmeme.com/example",
+        raw_metadata={"excerpt": "Aggregator excerpt."},
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    class _BlockedStrategy:
+        def preprocess_url(self, url: str) -> str:
+            return url
+
+        def download_content(self, url: str) -> str:
+            return url
+
+        def extract_data(
+            self,
+            _content: str,
+            url: str,
+            context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            assert context is not None
+            return {
+                "title": "Bloomberg",
+                "text_content": "We've detected unusual activity. Please prove you're not a robot.",
+                "content_type": "html",
+                "source": "bloomberg.com",
+                "final_url_after_redirects": url,
+                "extraction_error": "access gate detected: challenge/JS wall content",
+            }
+
+        def prepare_for_llm(self, extracted_data: dict[str, Any]) -> dict[str, Any]:
+            raise AssertionError("blocked extraction should not be prepared for summarization")
+
+    class _FakeRegistry:
+        def get_strategy(self, url: str) -> _BlockedStrategy:
+            assert url == "https://www.bloomberg.com/news/articles/example"
+            return _BlockedStrategy()
+
+    result = enrich_news_item_article(
+        db_session,
+        news_item_id=_require_id(item.id),
+        strategy_registry=_FakeRegistry(),  # type: ignore[arg-type]
+    )
+
+    db_session.refresh(item)
+    assert result.success is False
+    assert result.status == "failed"
+    item_metadata = _metadata(item.raw_metadata)
+    assert NEWS_ARTICLE_BODY_REF_KEY not in item_metadata
+    extraction = _metadata(item_metadata["article_extraction"])
+    assert extraction["status"] == "failed"
+    assert extraction["error"] == "access gate detected: challenge/JS wall content"
+
+
 def test_process_news_item_includes_resolved_article_body_in_prompt(
     db_session,
     monkeypatch,

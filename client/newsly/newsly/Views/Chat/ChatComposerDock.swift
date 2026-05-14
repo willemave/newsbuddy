@@ -31,6 +31,10 @@ struct ChatComposerDock: View {
         isTranscribing
     }
 
+    private var showsRecordingStatus: Bool {
+        isTranscribing || isRecording
+    }
+
     private var showsMoreActionsMenu: Bool {
         onShowHistory != nil ||
         session != nil ||
@@ -39,22 +43,24 @@ struct ChatComposerDock: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             inputRow
-            recordingStatus
+            if showsRecordingStatus {
+                recordingStatus
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color.surfacePrimary)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .stroke(Color.outlineVariant.opacity(0.22), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.04), radius: 10, y: 2)
+                .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
         )
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 8)
     }
 
     private var moreActionsMenu: some View {
@@ -113,7 +119,7 @@ struct ChatComposerDock: View {
             Image(systemName: "plus")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.onSurfaceSecondary)
-                .frame(width: 38, height: 38)
+                .frame(width: 34, height: 34)
                 .background(
                     Circle()
                         .fill(Color.surfaceSecondary.opacity(0.72))
@@ -128,7 +134,7 @@ struct ChatComposerDock: View {
     }
 
     private var inputRow: some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: 8) {
             if showsMoreActionsMenu {
                 moreActionsMenu
             }
@@ -139,12 +145,12 @@ struct ChatComposerDock: View {
                 .lineLimit(1...5)
                 .focused(isInputFocused)
                 .accessibilityIdentifier("knowledge.chat_input")
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
                 .background(Color.surfaceContainerHighest)
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(
                             isRecording ? Color.statusDestructive.opacity(0.6) : Color.outlineVariant.opacity(0.3),
                             lineWidth: 1
@@ -156,7 +162,7 @@ struct ChatComposerDock: View {
                 isEnabled: !isSending && !isVoiceActionInFlight && !isTranscribing,
                 isRecording: isRecording,
                 isBusy: isVoiceActionInFlight && !isRecording,
-                size: 38,
+                size: 34,
                 action: onToggleVoiceRecording
             )
             .opacity(voiceDictationAvailable || isRecording ? 1 : 0.72)
@@ -175,7 +181,7 @@ struct ChatComposerDock: View {
                     }
                 }
                 .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : .white)
-                .frame(width: 38, height: 38, alignment: .center)
+                .frame(width: 34, height: 34, alignment: .center)
                 .background(sendButtonDisabled ? Color.surfaceContainer : Color.chatUserBubble)
                 .clipShape(Circle())
             }

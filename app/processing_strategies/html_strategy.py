@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+import trafilatura
 from crawl4ai import (
     AsyncWebCrawler,
     BrowserConfig,
@@ -86,6 +87,10 @@ ACCESS_GATE_TEXT_MARKERS: tuple[str, ...] = (
     "or unblock scripts",
     "checking your browser",
     "verify you are human",
+    "not a robot",
+    "detected unusual activity",
+    "browser supports javascript and cookies",
+    "blocking them from loading",
     "please wait while we verify",
     "ray id",
 )
@@ -113,6 +118,18 @@ DISCUSSION_TAIL_MARKERS: tuple[str, ...] = (
     "\n### Discussion about this post",
     " #### Discussion about this post",
 )
+CHROME_HEAVY_TEXT_MARKERS: tuple[str, ...] = (
+    "skip to main content",
+    "exclusive news, data and analytics",
+    "purchase licensing rights",
+    "read next",
+    "by clicking “sign up”",
+    'by clicking "sign up"',
+    "look out for an alert in your inbox",
+    "markets.businessinsider.com/index",
+)
+MIN_READABILITY_TEXT_LENGTH = 400
+LINK_DENSITY_HEAVY_THRESHOLD = 0.004
 
 
 class HtmlProcessorStrategy(UrlProcessorStrategy):
@@ -550,6 +567,88 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             text_content=text_content,
         )
 
+    @staticmethod
+    def _link_density(text_content: str | None) -> float:
+        if not text_content:
+            return 0.0
+        return text_content.count("](") / max(len(text_content), 1)
+
+    @classmethod
+    def _looks_chrome_heavy(cls, text_content: str | None) -> bool:
+        normalized_text = re.sub(r"\s+", " ", text_content or "").strip().lower()
+        if not normalized_text:
+            return False
+        marker_hit = any(marker in normalized_text for marker in CHROME_HEAVY_TEXT_MARKERS)
+        return marker_hit or cls._link_density(normalized_text) >= LINK_DENSITY_HEAVY_THRESHOLD
+
+    @classmethod
+    def _extract_readability_text(
+        cls,
+        *,
+        html_content: str | None,
+        url: str,
+    ) -> str | None:
+        if not html_content:
+            return None
+        try:
+            extracted = trafilatura.extract(
+                html_content,
+                url=url,
+                output_format="markdown",
+                include_comments=False,
+                include_links=True,
+                favor_precision=True,
+                deduplicate=True,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug("HtmlStrategy: readability extraction failed for %s: %s", url, exc)
+            return None
+        if not isinstance(extracted, str):
+            return None
+        cleaned = extracted.strip()
+        return cleaned or None
+
+    @classmethod
+    def _choose_best_extracted_text(
+        cls,
+        *,
+        url: str,
+        title: str | None,
+        crawl_text: str,
+        cleaned_html: str | None,
+    ) -> tuple[str, bool]:
+        readability_text = cls._extract_readability_text(html_content=cleaned_html, url=url)
+        if readability_text is None or len(readability_text) < MIN_READABILITY_TEXT_LENGTH:
+            return crawl_text, False
+
+        readability_issue = cls._detect_extraction_issue(
+            url=url,
+            title=title,
+            text_content=readability_text,
+            html_content=None,
+        )
+        if readability_issue:
+            return crawl_text, False
+
+        if not crawl_text.strip():
+            return readability_text, True
+
+        crawl_chrome_heavy = cls._looks_chrome_heavy(crawl_text)
+        readability_chrome_heavy = cls._looks_chrome_heavy(readability_text)
+        if crawl_chrome_heavy and not readability_chrome_heavy:
+            return readability_text, True
+
+        crawl_link_density = cls._link_density(crawl_text)
+        readability_link_density = cls._link_density(readability_text)
+        if (
+            crawl_link_density >= LINK_DENSITY_HEAVY_THRESHOLD
+            and readability_link_density <= crawl_link_density * 0.7
+            and len(readability_text) >= MIN_READABILITY_TEXT_LENGTH
+        ):
+            return readability_text, True
+
+        return crawl_text, False
+
     @classmethod
     def _trim_discussion_tail(cls, url: str, text_content: str | None) -> str:
         """Remove trailing discussion sections from article text when possible."""
@@ -946,6 +1045,19 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                     )
                     return fallback_data
 
+            extracted_text, used_readability_extraction = self._choose_best_extracted_text(
+                url=final_url,
+                title=title,
+                crawl_text=extracted_text,
+                cleaned_html=result.cleaned_html,
+            )
+            if used_readability_extraction:
+                logger.info(
+                    "HtmlStrategy: Using readability-cleaned article text for %s (text_length=%s)",
+                    final_url,
+                    len(extracted_text),
+                )
+
             # Extract feed links from HTML for potential feed detection
             feed_links = None
             if result.cleaned_html:
@@ -970,6 +1082,7 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                 "table_markdown": table_markdown or None,
                 "feed_links": feed_links,  # For feed detection in worker
                 "extraction_error": extraction_issue,
+                "used_readability_extraction": used_readability_extraction,
             }
 
         except Exception as e:

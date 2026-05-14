@@ -15,6 +15,7 @@ struct ShortFormView: View {
     @ObservedObject var viewModel: ShortNewsListViewModel
     let onSelect: (ContentDetailRoute) -> Void
     @StateObject private var processingCountService = ProcessingCountService.shared
+    @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
     private let chatService = ChatService.shared
 
     /// Track which items have already been marked as read to avoid duplicates
@@ -23,6 +24,9 @@ struct ShortFormView: View {
     @State private var topVisibleItemId: Int?
     @State private var quickActionErrorMessage: String?
     @State private var activeQuickActionId: String?
+    @State private var fastNewsAudioEpisode: AudioEpisode?
+    @State private var isPreparingFastNewsAudio = false
+    @State private var fastNewsAudioErrorMessage: String?
 
     var body: some View {
         let items = viewModel.currentItems()
@@ -156,6 +160,68 @@ struct ShortFormView: View {
         }
     }
 
+    private var isPlayingFastNewsAudio: Bool {
+        guard let target = fastNewsAudioTarget else { return false }
+        return narrationPlaybackService.isSpeaking
+            && narrationPlaybackService.speakingTarget == target
+    }
+
+    private var fastNewsAudioTarget: NarrationTarget? {
+        fastNewsAudioEpisode.map { .audioEpisode($0.id) }
+    }
+
+    private var isFastNewsAudioCurrent: Bool {
+        guard let target = fastNewsAudioTarget else { return false }
+        return narrationPlaybackService.speakingTarget == target
+    }
+
+    private var shouldShowFastNewsAudioControls: Bool {
+        isPreparingFastNewsAudio || isFastNewsAudioCurrent
+    }
+
+    private func handleFastNewsAudioEpisode() {
+        if isPlayingFastNewsAudio {
+            narrationPlaybackService.pause()
+            return
+        }
+        guard !isPreparingFastNewsAudio else { return }
+
+        isPreparingFastNewsAudio = true
+        fastNewsAudioErrorMessage = nil
+
+        Task { @MainActor in
+            defer { isPreparingFastNewsAudio = false }
+
+            do {
+                let episode: AudioEpisode
+                if let existingEpisode = fastNewsAudioEpisode {
+                    episode = existingEpisode
+                } else {
+                    episode = try await AudioEpisodeService.shared.createFastNewsEpisode()
+                }
+                fastNewsAudioEpisode = episode
+                let completedEpisode = episode.status == "completed"
+                    ? episode
+                    : try await AudioEpisodeService.shared.waitForCompletedEpisode(episode)
+                fastNewsAudioEpisode = completedEpisode
+                let target = NarrationTarget.audioEpisode(completedEpisode.id)
+                try await narrationPlaybackService.playNarration(
+                    for: target,
+                    fetchAudio: {
+                        try await AudioEpisodeService.shared.fetchEpisodeAudio(
+                            id: completedEpisode.id
+                        )
+                    },
+                    fetchNarrationText: {
+                        completedEpisode.scriptText ?? completedEpisode.title
+                    }
+                )
+            } catch {
+                fastNewsAudioErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
     private func markItemsAboveAsRead() {
         guard let topVisibleItemId else { return }
         let items = viewModel.currentItems()
@@ -179,6 +245,18 @@ struct ShortFormView: View {
         VStack(alignment: .leading, spacing: 10) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
+                    Button {
+                        handleFastNewsAudioEpisode()
+                    } label: {
+                        ShortNewsAudioActionChip(
+                            isLoading: isPreparingFastNewsAudio,
+                            isPlaying: isPlayingFastNewsAudio
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isPreparingFastNewsAudio)
+                    .accessibilityIdentifier("short.audio.fast_reads")
+
                     ForEach(quickActions) { action in
                         Button {
                             startQuickAction(action)
@@ -194,6 +272,23 @@ struct ShortFormView: View {
                     }
                 }
                 .padding(.horizontal, Spacing.screenHorizontal)
+            }
+
+            if shouldShowFastNewsAudioControls {
+                NarrationPlaybackControlRow(
+                    playbackService: narrationPlaybackService,
+                    target: fastNewsAudioTarget,
+                    isPreparing: isPreparingFastNewsAudio,
+                    onTogglePlayback: handleFastNewsAudioEpisode
+                )
+                .padding(.horizontal, Spacing.screenHorizontal)
+            }
+
+            if let fastNewsAudioErrorMessage {
+                Text(fastNewsAudioErrorMessage)
+                    .font(.terracottaBodySmall)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, Spacing.screenHorizontal)
             }
 
             if let quickActionErrorMessage {
@@ -301,6 +396,38 @@ struct ShortFormView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .containerRelativeFrame(.vertical)
+        }
+    }
+}
+
+private struct ShortNewsAudioActionChip: View {
+    let isLoading: Bool
+    let isPlaying: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.terracottaPrimary)
+            } else {
+                Image(systemName: isPlaying ? "pause.fill" : "waveform")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.terracottaPrimary)
+            }
+
+            Text("Audio Brief")
+                .font(.terracottaBodyMedium.weight(.semibold))
+                .foregroundStyle(Color.onSurface)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.surfaceSecondary)
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
         }
     }
 }

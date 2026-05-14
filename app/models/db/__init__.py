@@ -2,6 +2,7 @@
 
 from app.models.db.analytics import AnalyticsInteraction
 from app.models.db.api_keys import UserApiKey
+from app.models.db.audio_episode import AudioEpisode
 from app.models.db.chat import ChatMessage, ChatSession
 from app.models.db.cli import CliLinkSession
 from app.models.db.content import (

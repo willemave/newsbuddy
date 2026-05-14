@@ -1,6 +1,6 @@
 ---
 name: ios-debugging
-description: Debug iOS apps in Simulator with XcodeBuildMCP, durable simulator log capture, screenshots, UI inspection, and small verified fixes. Use when reproducing UI bugs, navigation issues, crashes, hangs, or when simulator logs need to be captured reliably.
+description: Debug iOS apps in Simulator with XcodeBuildMCP, durable simulator log capture, screenshots, UI inspection, and small verified fixes. Use when reproducing UI bugs, navigation issues, crashes, hangs, tap/navigation lag, or when simulator logs need to be captured reliably.
 ---
 
 # iOS Debugging
@@ -29,6 +29,13 @@ Use this skill when the task involves:
    - LLDB state if the issue looks like a crash or hang
 7. Make the smallest fix that explains the observed failure.
 8. Rebuild, rerun the same flow, and prove the fix with the same evidence surface.
+
+## Mode and Scope
+- For interaction-lag reports, start with the exact SwiftUI tap/navigation path and Simulator evidence before assuming backend latency.
+- For product-shape changes, preserve the requested interaction contract. Examples: do not auto-start a chat unless the action is explicitly prompt-seeded; keep selection-based actions attached to the selection affordance.
+- If the user asks only to investigate, stop after evidence, root cause, and a proposed patch.
+- If the user asks to fix, implement the narrowest change that matches the reproduced failure and rerun the same flow.
+- Commit, push, and deploy are explicit follow-on requests, not implied by a successful simulator fix.
 
 ## Preferred Tooling
 
@@ -88,6 +95,8 @@ tail -n 100 /tmp/root-tab-flow.log
 - If you must use coordinates, call out that the UI lacks a stable selector
 - Re-read the UI tree before the next action when the layout changes
 - Verify outcomes with `snapshot_ui` or `screenshot`; simulator input tools confirm dispatch, not app-level success
+- When visible behavior is the requirement, capture before/after screenshots or UI snapshots rather than relying only on build success.
+- If a bug may cross backend and iOS state, trace both sides before patching, especially when IDs, cached detail state, or background refreshes are involved.
 
 ## Evidence Hierarchy
 Start with:
@@ -120,3 +129,4 @@ When using this skill, finish with:
 - the key screenshots, logs, or debugger evidence
 - the code fix and why it works, if code changed
 - the verification path used after the fix
+- any validation blocker, such as an unrelated compile error or simulator/runtime mismatch

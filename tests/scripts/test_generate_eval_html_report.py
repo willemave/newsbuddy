@@ -81,12 +81,13 @@ def test_resolve_prompt_for_source_uses_news_variant() -> None:
     assert "{content}" in user_template
 
 
-def test_load_news_snapshot_admin_envelope(tmp_path) -> None:
+def test_load_news_snapshot_export_envelope(tmp_path) -> None:
     snapshot_path = tmp_path / "snapshot.json"
     snapshot_path.write_text(
         json.dumps(
             {
                 "ok": True,
+                "command": "export.news-items-raw-snapshot",
                 "data": {
                     "rows": [
                         {
@@ -104,6 +105,7 @@ def test_load_news_snapshot_admin_envelope(tmp_path) -> None:
                                 {"text": "Second live point."},
                             ],
                             "summary_text": "The current live summary text.",
+                            "article_body_text": "Line one.\n\n## Heading\n\nLine two.",
                             "status": "ready",
                             "ingested_at": "2026-05-12T19:00:00",
                         }
@@ -127,3 +129,49 @@ def test_load_news_snapshot_admin_envelope(tmp_path) -> None:
     assert source.existing_summary_key_points == ["First live point.", "Second live point."]
     assert source.existing_summary_text == "The current live summary text."
     assert "Hacker News" in source.input_text
+    assert "Line one.\n\n## Heading\n\nLine two." in source.input_text
+
+
+def test_render_html_includes_collapsed_source_input() -> None:
+    html = report.render_html(
+        {
+            "run_completed_at": "2026-05-12T00:00:00+00:00",
+            "config": {
+                "content_types": ["news"],
+                "sample_size": 1,
+                "recent_pool_size": 1,
+                "longform_template": "source_aware_editorial_v2",
+                "news_prompt_variants": ["key_point_depth"],
+                "news_statuses": ["ready"],
+                "news_require_article_body": False,
+                "seed": 1,
+            },
+            "aggregate": {
+                "items_total": 1,
+                "cells_total": 0,
+                "cells_successful": 0,
+                "cells_failed": 0,
+            },
+            "available_models": [],
+            "skipped_models": [],
+            "prompt_definitions": [],
+            "results": [
+                {
+                    "content_id": 123,
+                    "content_type": "news",
+                    "created_at": "2026-05-12T00:00:00+00:00",
+                    "url": "https://example.com/story",
+                    "source_title": "Example story",
+                    "existing_summary_title": None,
+                    "existing_summary_key_points": [],
+                    "existing_summary_text": None,
+                    "input_text": "Article title: Example <story>\n\nArticle body:\nRaw markdown",
+                    "input_chars": 60,
+                    "model_results": [],
+                }
+            ],
+        }
+    )
+
+    assert "<summary>Processed raw markdown</summary>" in html
+    assert "Article title: Example &lt;story&gt;" in html

@@ -17,59 +17,42 @@ struct AssistantMessageBubble: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            avatar
-
-            VStack(alignment: .leading, spacing: 4) {
-                if rendersOwnBubble {
-                    messageContent
-                } else {
-                    messageContent
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Color.surfaceContainer.opacity(0.58))
-                        .clipShape(bubbleShape)
-                        .overlay(
-                            bubbleShape
-                                .stroke(Color.outlineVariant.opacity(0.12), lineWidth: 0.5)
-                        )
-                }
-
-                if !message.formattedTime.isEmpty {
-                    Text(message.formattedTime)
-                        .font(.caption2)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .padding(.horizontal, 4)
-                }
+        VStack(alignment: .leading, spacing: 4) {
+            if rendersOwnBubble {
+                messageContent
+            } else {
+                messageContent
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.surfaceContainer.opacity(0.58))
+                    .clipShape(bubbleShape)
+                    .overlay(
+                        bubbleShape
+                            .stroke(Color.outlineVariant.opacity(0.12), lineWidth: 0.5)
+                    )
             }
-            .contextMenu {
-                Button {
-                    onShare?(message.content)
-                } label: {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                }
 
-                Button {
-                    UIPasteboard.general.string = message.content
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                }
+            if !message.formattedTime.isEmpty {
+                Text(message.formattedTime)
+                    .font(.caption2)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .padding(.horizontal, 4)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contextMenu {
+            Button {
+                onShare?(message.content)
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+
+            Button {
+                UIPasteboard.general.string = message.content
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var avatar: some View {
-        Circle()
-            .fill(Color.chatAccent.opacity(0.72))
-            .frame(width: 20, height: 20)
-            .overlay(
-                Image(systemName: "brain.head.profile")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white)
-            )
-            .padding(.top, 2)
     }
 
     private var rendersOwnBubble: Bool {

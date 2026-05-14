@@ -467,6 +467,52 @@ def test_extract_data_rejects_malformed_firecrawl_fallback(
     assert extracted_data.get("used_firecrawl_fallback") is None
 
 
+def test_extract_data_prefers_readability_text_for_chrome_heavy_crawl(
+    html_strategy: HtmlProcessorStrategy,
+):
+    """Successful crawls should still strip page chrome before persistence."""
+    url = "https://www.reuters.com/example-story"
+    crawl_text = (
+        "[Skip to main content](https://www.reuters.com/example-story#main-content) "
+        "[Exclusive news, data and analytics](https://www.reuters.com/differentiator/) "
+        + " ".join(f"[Related story {i}](https://www.reuters.com/related-{i})" for i in range(40))
+        + " LOS ANGELES, May 12 (Reuters) - The real article body starts here."
+    )
+    readable_text = (
+        "LOS ANGELES, May 12 (Reuters) - The real article body starts here. "
+        "Regulators approved the spectrum transfer after reviewing public interest "
+        "conditions, competition concerns, and deployment requirements. "
+    ) * 4
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.metadata = {"title": "Reuters example story"}
+    mock_result.url = url
+    mock_result.cleaned_html = "<html><body><article>Readable article body</article></body></html>"
+
+    mock_markdown = MagicMock()
+    mock_markdown.raw_markdown = crawl_text
+    mock_result.markdown = mock_markdown
+
+    mock_crawler = AsyncMock()
+    mock_crawler.arun = AsyncMock(return_value=mock_result)
+    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.html_strategy.trafilatura.extract",
+            return_value=readable_text,
+        ),
+    ):
+        extracted_data = html_strategy.extract_data("", url)
+
+    assert extracted_data["text_content"] == readable_text.strip()
+    assert extracted_data["used_readability_extraction"] is True
+    assert extracted_data["extraction_error"] is None
+
+
 def test_extract_data_with_browser_close_error(html_strategy: HtmlProcessorStrategy):
     """Test that browser close errors don't fail the extraction."""
     url = "https://en.wikipedia.org/wiki/Pfeilstorch"

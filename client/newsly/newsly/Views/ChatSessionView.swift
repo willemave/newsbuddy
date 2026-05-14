@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatSessionView: View {
     @EnvironmentObject private var authViewModel: AuthenticationViewModel
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ChatSessionViewModel
     let onShowHistory: (() -> Void)?
     @FocusState private var isInputFocused: Bool
@@ -37,6 +38,9 @@ struct ChatSessionView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomDock
             }
+            .overlay(alignment: .topLeading) {
+                floatingBackButton
+            }
             .sheet(isPresented: $isCouncilSettingsPresented) {
                 NavigationStack {
                     SettingsView(scrollToCouncilOnAppear: true)
@@ -44,7 +48,9 @@ struct ChatSessionView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(.hidden, for: .tabBar)
             .task(id: route.stableKey) {
                 dependencies.activeSessionManager.stopTracking(sessionId: viewModel.sessionId)
                 await viewModel.loadSession()
@@ -55,12 +61,6 @@ struct ChatSessionView: View {
             }
             .onDisappear {
                 viewModel.handleDisappear()
-            }
-            .toolbar {
-                ChatSessionToolbarContent(
-                    session: viewModel.session,
-                    onOpenArticle: openArticle
-                )
             }
             .sheet(item: $shareContent) { content in
                 ShareSheet(content: content)
@@ -80,11 +80,6 @@ struct ChatSessionView: View {
         } catch {
             viewModel.errorMessage = "Failed to switch model: \(error.localizedDescription)"
         }
-    }
-
-    private func openArticle(_ urlString: String) {
-        guard let url = URL(string: urlString) else { return }
-        UIApplication.shared.open(url)
     }
 
     private var messageListView: some View {
@@ -110,6 +105,26 @@ struct ChatSessionView: View {
         )
     }
 
+    private var floatingBackButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color.onSurface)
+                .frame(width: 44, height: 44)
+                .background(Color.surfacePrimary.opacity(0.72), in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.outlineVariant.opacity(0.16), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back")
+        .padding(.leading, 16)
+        .padding(.top, 12)
+    }
+
     private func presentShareSheet(for content: String) {
         shareContent = ShareContent(
             messageContent: content,
@@ -127,8 +142,8 @@ struct ChatSessionView: View {
 
             composerDock
         }
-        .padding(.top, 10)
-        .padding(.bottom, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 6)
     }
 
     private var composerDock: some View {

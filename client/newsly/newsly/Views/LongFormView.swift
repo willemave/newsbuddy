@@ -13,6 +13,7 @@ struct LongFormView: View {
     let onSelect: (ContentDetailRoute) -> Void
 
     @StateObject private var unreadCountService = UnreadCountService.shared
+    @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
     @StateObject private var sourcesViewModel = ScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
     )
@@ -20,6 +21,9 @@ struct LongFormView: View {
     @State private var isProcessingBulk = false
     @State private var hasLoadedBootstrapSources = false
     @State private var pendingOpenContentId: Int?
+    @State private var loadingAudioContentIds: Set<Int> = []
+    @State private var audioEpisodeByContentId: [Int: AudioEpisode] = [:]
+    @State private var audioErrorByContentId: [Int: String] = [:]
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -170,6 +174,13 @@ struct LongFormView: View {
         LongFormCard(
             content: content,
             variant: variant,
+            playbackService: narrationPlaybackService,
+            isAudioSupported: supportsAudioDiscussion(for: content),
+            isAudioPreparing: isAudioPreparing(for: content),
+            isAudioPlaying: isAudioPlaying(for: content),
+            isAudioControlVisible: shouldShowAudioControls(for: content),
+            audioTarget: audioTarget(for: content),
+            audioErrorMessage: audioErrorByContentId[content.id],
             onMarkRead: {
                 viewModel.markAsRead(content.id)
             },
@@ -188,12 +199,11 @@ struct LongFormView: View {
             },
             onOpen: {
                 openContent(content, allItems: allItems)
+            },
+            onToggleAudio: {
+                handleAudioDiscussion(for: content)
             }
         )
-        .contentShape(RoundedRectangle(cornerRadius: CardMetrics.cardCornerRadius, style: .continuous))
-        .onTapGesture {
-            openContent(content, allItems: allItems)
-        }
         .buttonStyle(.plain)
         .accessibilityIdentifier("long.row.\(content.id)")
         .onAppear {
@@ -201,6 +211,105 @@ struct LongFormView: View {
                 viewModel.loadMoreTrigger.send(())
             }
         }
+    }
+
+    private func supportsAudioDiscussion(for content: ContentSummary) -> Bool {
+        guard let type = content.contentTypeEnum else { return false }
+        return type == .article || type == .podcast
+    }
+
+    private func audioTarget(for content: ContentSummary) -> NarrationTarget? {
+        guard let episode = audioEpisodeByContentId[content.id] else { return nil }
+        return .audioEpisode(episode.id)
+    }
+
+    private func isAudioCurrent(for content: ContentSummary) -> Bool {
+        guard let target = audioTarget(for: content) else { return false }
+        return narrationPlaybackService.speakingTarget == target
+    }
+
+    private func isAudioPlaying(for content: ContentSummary) -> Bool {
+        isAudioCurrent(for: content) && narrationPlaybackService.isSpeaking
+    }
+
+    private func isAudioPreparing(for content: ContentSummary) -> Bool {
+        loadingAudioContentIds.contains(content.id)
+    }
+
+    private func shouldShowAudioControls(for content: ContentSummary) -> Bool {
+        isAudioPreparing(for: content) || isAudioCurrent(for: content)
+    }
+
+    private func handleAudioDiscussion(for content: ContentSummary) {
+        Task { @MainActor in
+            await handleAudioDiscussionTask(for: content)
+        }
+    }
+
+    @MainActor
+    private func handleAudioDiscussionTask(for content: ContentSummary) async {
+        if isAudioPlaying(for: content) {
+            narrationPlaybackService.pause()
+            return
+        }
+        guard supportsAudioDiscussion(for: content) else { return }
+        guard !isAudioPreparing(for: content) else { return }
+
+        if isAudioCurrent(for: content),
+           let episode = audioEpisodeByContentId[content.id] {
+            await playAudioDiscussionEpisode(episode, contentId: content.id)
+            return
+        }
+
+        loadingAudioContentIds.insert(content.id)
+        audioErrorByContentId[content.id] = nil
+        defer { loadingAudioContentIds.remove(content.id) }
+
+        do {
+            let episode: AudioEpisode
+            if let existingEpisode = audioEpisodeByContentId[content.id] {
+                episode = existingEpisode
+            } else {
+                episode = try await AudioEpisodeService.shared.createContentCouncilEpisode(
+                    contentId: content.id
+                )
+            }
+            audioEpisodeByContentId[content.id] = episode
+            let completedEpisode = episode.status == "completed"
+                ? episode
+                : try await AudioEpisodeService.shared.waitForCompletedEpisode(episode)
+            audioEpisodeByContentId[content.id] = completedEpisode
+            try await playCompletedAudioDiscussionEpisode(completedEpisode)
+        } catch {
+            audioErrorByContentId[content.id] = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func playAudioDiscussionEpisode(_ episode: AudioEpisode, contentId: Int) async {
+        do {
+            let completedEpisode = episode.status == "completed"
+                ? episode
+                : try await AudioEpisodeService.shared.waitForCompletedEpisode(episode)
+            audioEpisodeByContentId[contentId] = completedEpisode
+            try await playCompletedAudioDiscussionEpisode(completedEpisode)
+        } catch {
+            audioErrorByContentId[contentId] = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func playCompletedAudioDiscussionEpisode(_ episode: AudioEpisode) async throws {
+        let target = NarrationTarget.audioEpisode(episode.id)
+        try await narrationPlaybackService.playNarration(
+            for: target,
+            fetchAudio: {
+                try await AudioEpisodeService.shared.fetchEpisodeAudio(id: episode.id)
+            },
+            fetchNarrationText: {
+                episode.scriptText ?? episode.title
+            }
+        )
     }
 
     private func openContent(_ content: ContentSummary, allItems: [ContentSummary]) {

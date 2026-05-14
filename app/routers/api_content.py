@@ -20,6 +20,7 @@ from app.models.api.content_actions import (
 )
 from app.models.api.content_discussions import ContentDiscussionResponse
 from app.routers.api import (
+    audio_episodes,
     chat,
     content_actions,
     content_detail,
@@ -39,6 +40,7 @@ router = APIRouter(
 
 router.include_router(content_list.router)
 router.include_router(narration.router)
+router.include_router(audio_episodes.router)
 router.include_router(stats.router)
 router.include_router(content_detail.router)
 router.include_router(read_status.router)

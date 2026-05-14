@@ -11,10 +11,18 @@ import UIKit
 struct LongFormCard: View {
     let content: ContentSummary
     var variant: Variant = .hero
+    @ObservedObject var playbackService: NarrationPlaybackService
+    var isAudioSupported = false
+    var isAudioPreparing = false
+    var isAudioPlaying = false
+    var isAudioControlVisible = false
+    var audioTarget: NarrationTarget?
+    var audioErrorMessage: String?
     var onMarkRead: (() -> Void)?
     var onToggleKnowledgeSave: (() -> Void)?
     var onDigDeeper: ((String) -> Void)?
     var onOpen: (() -> Void)?
+    var onToggleAudio: (() -> Void)?
 
     enum Variant {
         case hero
@@ -44,27 +52,30 @@ struct LongFormCard: View {
                         endPoint: .bottom
                     )
                 }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onOpen?()
-                }
-
-            VStack(alignment: .leading, spacing: 0) {
-                // Badge + metadata
-                HStack(spacing: 8) {
-                    badgeView
-
-                    if let relativeTime = content.relativeTimeDisplay {
-                        Text(relativeTime)
-                            .font(.terracottaBodySmall)
-                            .foregroundStyle(Color.onSurfaceSecondary)
+                .overlay(alignment: .topTrailing) {
+                    if isAudioSupported {
+                        audioActionButton
+                            .padding(12)
                     }
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
                     onOpen?()
                 }
-                .padding(.bottom, 8)
+
+            VStack(alignment: .leading, spacing: 0) {
+                if let relativeTime = content.relativeTimeDisplay {
+                    HStack(spacing: 8) {
+                        Text(relativeTime)
+                            .font(.terracottaBodySmall)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onOpen?()
+                    }
+                    .padding(.bottom, 8)
+                }
 
                 // Headline
                 SelectableText(
@@ -135,6 +146,26 @@ struct LongFormCard: View {
                     }
                     .padding(.top, 4)
                 }
+
+                if isAudioControlVisible {
+                    NarrationPlaybackControlRow(
+                        playbackService: playbackService,
+                        target: audioTarget,
+                        isPreparing: isAudioPreparing,
+                        onTogglePlayback: {
+                            onToggleAudio?()
+                        }
+                    )
+                    .padding(.top, 12)
+                }
+
+                if let audioErrorMessage {
+                    Text(audioErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                        .padding(.top, 8)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
@@ -160,16 +191,31 @@ struct LongFormCard: View {
         .shadow(color: Color.onSurface.opacity(0.06), radius: 32, x: 0, y: 8)
     }
 
-    @ViewBuilder
-    private var badgeView: some View {
-        Text(badgeLabel)
-            .font(.terracottaCategoryPill)
-            .tracking(0.5)
-            .foregroundStyle(Color.terracottaPrimary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Color.terracottaPrimary.opacity(0.1))
-            .clipShape(Capsule())
+    private var audioActionButton: some View {
+        Button {
+            onToggleAudio?()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(Color.surfacePrimary.opacity(0.92))
+                    .frame(width: 38, height: 38)
+                    .shadow(color: Color.onSurface.opacity(0.16), radius: 10, x: 0, y: 4)
+
+                if isAudioPreparing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.terracottaPrimary)
+                } else {
+                    Image(systemName: isAudioPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Color.terracottaPrimary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isAudioPreparing)
+        .accessibilityIdentifier("long.action.audio.\(content.id)")
+        .accessibilityLabel(isAudioPlaying ? "Pause audio discussion" : "Play audio discussion")
     }
 
     @ViewBuilder
@@ -242,20 +288,6 @@ struct LongFormCard: View {
             return typeName.uppercased()
         }
         return "NEWSLY"
-    }
-
-    private var badgeLabel: String {
-        if let artifactType = content.artifactType ?? content.feedPreview?.artifactType,
-           !artifactType.isEmpty {
-            return artifactType.replacingOccurrences(of: "_", with: " ").uppercased()
-        }
-        if let primaryTopic = content.primaryTopic, !primaryTopic.isEmpty {
-            return primaryTopic.uppercased()
-        }
-        if let typeName = content.contentTypeEnum?.displayName {
-            return typeName.uppercased()
-        }
-        return "ARTICLE"
     }
 
     private var contentTypeIcon: String {

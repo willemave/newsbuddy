@@ -57,6 +57,7 @@ class TaskType(StrEnum):
     DIG_DEEPER = "dig_deeper"
     SYNC_INTEGRATION = "sync_integration"
     GENERATE_INSIGHT_REPORT = "generate_insight_report"
+    GENERATE_AUDIO_EPISODE = "generate_audio_episode"
 
 
 class TaskQueue(StrEnum):

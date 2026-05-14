@@ -63,6 +63,7 @@ from app.constants import (
     SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE,
     SUMMARY_KIND_LONG_INTERLEAVED,
     SUMMARY_KIND_LONG_STRUCTURED,
+    SUMMARY_KIND_LONGFORM_ARTIFACT,
     SUMMARY_KIND_SHORT_NEWS,
     SUMMARY_VERSION_V1,
     SUMMARY_VERSION_V2,
@@ -72,6 +73,11 @@ from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, ContentDiscussion, ContentReadStatus, ContentStatusEntry
 from app.models.db.users import User
 from app.models.metadata.articles import ArticleMetadata
+from app.models.metadata.longform_artifacts import (
+    ARTIFACT_ASK_BY_TYPE,
+    ArtifactType,
+    LongformArtifactEnvelope,
+)
 from app.models.metadata.podcasts import PodcastMetadata
 from app.models.metadata.summaries import (
     BulletedSummary,
@@ -223,6 +229,7 @@ DISCUSSION_COMMENTS = [
 ]
 
 SUMMARY_FORMATS = [
+    "longform_artifact",
     "editorial_narrative",
     "bulleted",
     "interleaved_v2",
@@ -569,15 +576,276 @@ def generate_editorial_narrative(title: str, topic: str) -> EditorialNarrativeSu
     )
 
 
+def generate_artifact_quotes(source: str) -> list[dict[str, str]]:
+    """Generate source-style quotes for typed long-form artifacts."""
+    return [
+        {
+            "text": (
+                "The teams getting durable value are the ones turning experiments into "
+                "repeatable operating practices."
+            ),
+            "attribution": source,
+        },
+        {
+            "text": (
+                "Capability matters, but the deployment system around it determines whether "
+                "people can trust the result."
+            ),
+            "attribution": source,
+        },
+    ]
+
+
+def generate_artifact_key_points(topic: str, count: int = 5) -> list[dict[str, str]]:
+    """Generate headed key points for typed long-form artifacts."""
+    candidates = [
+        (
+            "Operating Constraint",
+            (
+                f"{topic} is framed as an operating constraint, not a side experiment, "
+                "because teams now need reliable ownership, monitoring, and review loops."
+            ),
+        ),
+        (
+            "Adoption Test",
+            (
+                "The useful test is whether the workflow survives repeated use by real teams, "
+                "not whether a demo works once under ideal conditions."
+            ),
+        ),
+        (
+            "Governance Pressure",
+            (
+                "Security, procurement, and finance teams are moving earlier into the process "
+                "because model behavior is becoming a production dependency."
+            ),
+        ),
+        (
+            "Execution Moat",
+            (
+                "The source suggests that implementation discipline can become a stronger moat "
+                "than access to the newest technical primitive."
+            ),
+        ),
+        (
+            "Cost Visibility",
+            (
+                "Clear usage and cost reporting changes buyer behavior by exposing which systems "
+                "create durable throughput and which only create activity."
+            ),
+        ),
+        (
+            "User Trust",
+            (
+                "Trust depends on understandable failures, clear escalation paths, and product "
+                "surfaces that make system limits visible without forcing users to debug them."
+            ),
+        ),
+    ]
+    return [{"heading": heading, "content": content} for heading, content in candidates[:count]]
+
+
+def generate_longform_artifact(
+    title: str,
+    topic: str,
+    *,
+    url: str,
+    source: str,
+    platform: str,
+) -> LongformArtifactEnvelope:
+    """Generate a typed long-form artifact summary matching the current app renderer."""
+    artifact_type: ArtifactType = random.choice(
+        ["argument", "mental_model", "playbook", "briefing", "findings"]
+    )
+    shared_extras = {
+        "evidence": [
+            (
+                "The source points to implementation details, organizational behavior, "
+                "and repeated workflow use."
+            ),
+            "The examples emphasize reliability, ownership, governance, and cost visibility.",
+        ],
+        "mental_model": [
+            (
+                "Judge technology by the operating system it creates around teams, not only "
+                "by its frontier capability."
+            )
+        ],
+        "counter_arguments": [
+            (
+                "Early capability improvements can still matter even when operational maturity "
+                "is incomplete."
+            )
+        ],
+        "supporting_arguments": [
+            (
+                "Teams that define ownership and measurement earlier tend to convert pilots "
+                "into production usage."
+            )
+        ],
+    }
+    extras_by_type: dict[str, dict[str, Any]] = {
+        "argument": {
+            **shared_extras,
+            "thesis": (
+                f"{title} argues that {topic.lower()} only matters when it becomes a "
+                "reliable operating practice rather than an isolated demo."
+            ),
+            "counterpoint": (
+                "A fair objection is that raw technical gains can still unlock new behavior "
+                "before teams have mature process around them."
+            ),
+        },
+        "mental_model": {
+            **shared_extras,
+            "what_it_explains": (
+                "It explains why teams with similar tools get different outcomes once usage, "
+                "ownership, and governance pressure enter the system."
+            ),
+            "when_to_use_it": (
+                "Use it when evaluating whether a new capability is ready for production "
+                "workflows rather than a contained pilot."
+            ),
+        },
+        "playbook": {
+            **shared_extras,
+            "situation": (
+                "A team has a promising workflow but needs to make it reliable enough for "
+                "daily production use."
+            ),
+            "outcome": (
+                "The target outcome is a workflow with clear owners, visible costs, measurable "
+                "quality, and failure paths users can understand."
+            ),
+        },
+        "briefing": {
+            **shared_extras,
+            "timeline": [
+                {
+                    "when": "Pilot phase",
+                    "what": (
+                        "Teams prove the workflow can create value under controlled conditions."
+                    ),
+                },
+                {
+                    "when": "Production phase",
+                    "what": (
+                        "Ownership, monitoring, cost controls, and governance decide whether "
+                        "usage scales."
+                    ),
+                },
+            ],
+            "key_actors": [
+                {
+                    "name": "Platform teams",
+                    "stake": "They need reusable infrastructure and clear operational boundaries.",
+                },
+                {
+                    "name": "Product teams",
+                    "stake": (
+                        "They need workflow gains without absorbing hidden reliability problems."
+                    ),
+                },
+            ],
+            "what_to_watch": (
+                "Watch whether the next iteration adds clearer ownership, better observability, "
+                "and more explicit quality gates."
+            ),
+        },
+        "findings": {
+            **shared_extras,
+            "question": (
+                f"The source asks whether {topic.lower()} is creating durable workflow gains "
+                "or just more visible experimentation."
+            ),
+            "method": (
+                "It compares implementation patterns, organizational constraints, and the "
+                "difference between demos and repeated operational use."
+            ),
+            "limits": (
+                "The generated fixture is representative test content, so it is useful for UI "
+                "exercise but not evidence for a real-world claim."
+            ),
+        },
+    }
+    one_line = (
+        f"A typed {artifact_type.replace('_', ' ')} artifact about turning {topic.lower()} "
+        "from demo energy into dependable production practice."
+    )
+    payload = {
+        "title": title,
+        "one_line": one_line,
+        "ask": ARTIFACT_ASK_BY_TYPE[artifact_type],
+        "artifact": {
+            "type": artifact_type,
+            "payload": {
+                "overview": (
+                    f"{title} treats {topic.lower()} as a test of operating maturity. "
+                    "The useful question is not whether a demo looks impressive, but whether "
+                    "teams can make the workflow reliable, governable, and economically legible "
+                    "once it becomes part of everyday work."
+                ),
+                "quotes": generate_artifact_quotes(source),
+                "key_points": generate_artifact_key_points(topic),
+                "takeaway": (
+                    "Treat the artifact as a production-readiness lens: capability only matters "
+                    "when the surrounding workflow can carry it."
+                ),
+                "extras": extras_by_type[artifact_type],
+            },
+        },
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source_context": {
+            "url": url,
+            "source_name": source,
+            "publication_date": random_datetime(30).date().isoformat(),
+            "platform": platform,
+        },
+        "selection_trace": {
+            "source_hint": f"article:{platform}",
+            "candidates": ["argument", "mental_model", "playbook", "briefing", "findings"],
+            "selected": artifact_type,
+            "reason": (
+                "The fixture is designed to exercise the current typed long-form artifact "
+                "renderer with enough structure for detail and feed preview states."
+            ),
+            "confidence": round(random.uniform(0.72, 0.92), 2),
+        },
+        "feed_preview": {
+            "title": title,
+            "one_line": one_line,
+            "preview_bullets": [
+                "Exercises the new typed artifact summary shape.",
+                "Includes headed key points, source quotes, extras, and a feed preview.",
+                "Visible in the local long-form inbox for app testing.",
+            ],
+            "reason_to_read": (
+                "Use this fixture to inspect the new long-form card and detail rendering "
+                "without waiting for a live ingestion run."
+            ),
+            "artifact_type": artifact_type,
+        },
+    }
+    return LongformArtifactEnvelope.model_validate(payload)
+
+
 def resolve_summary_format(summary_format: str) -> str:
     """Normalize summary format selection."""
     if summary_format != "mixed":
         return summary_format
     return random.choices(
         SUMMARY_FORMATS,
-        weights=[0.35, 0.3, 0.2, 0.1, 0.05],
+        weights=[0.3, 0.25, 0.2, 0.1, 0.1, 0.05],
         k=1,
     )[0]
+
+
+def summary_classification(summary: SummaryPayload) -> str:
+    """Return a content classification for summary payloads without a classification field."""
+    classification = getattr(summary, "classification", None)
+    if isinstance(classification, str) and classification in {"to_read", "skip"}:
+        return classification
+    return "to_read"
 
 
 class ArticleGenerator:
@@ -601,7 +869,17 @@ class ArticleGenerator:
         summary_kind = SUMMARY_KIND_LONG_BULLETS
         summary_version = SUMMARY_VERSION_V1
 
-        if selected_format == "editorial_narrative":
+        if selected_format == "longform_artifact":
+            summary = generate_longform_artifact(
+                title=title,
+                topic=topics[0],
+                url=url,
+                source=source,
+                platform="web",
+            )
+            summary_kind = SUMMARY_KIND_LONGFORM_ARTIFACT
+            summary_version = SUMMARY_VERSION_V1
+        elif selected_format == "editorial_narrative":
             summary = generate_editorial_narrative(title=title, topic=topics[0])
             summary_kind = SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE
             summary_version = SUMMARY_VERSION_V1
@@ -694,7 +972,7 @@ class ArticleGenerator:
             "source": source,
             "platform": "web",
             "status": status,
-            "classification": summary.classification,
+            "classification": summary_classification(summary),
             "content_metadata": metadata.model_dump(mode="json", exclude_none=True),
             "publication_date": metadata.publication_date,
             "processed_at": random_datetime(5) if status == ContentStatus.COMPLETED.value else None,
@@ -723,7 +1001,17 @@ class PodcastGenerator:
         summary_kind = SUMMARY_KIND_LONG_BULLETS
         summary_version = SUMMARY_VERSION_V1
 
-        if selected_format == "editorial_narrative":
+        if selected_format == "longform_artifact":
+            summary = generate_longform_artifact(
+                title=title,
+                topic=topics[0],
+                url=url,
+                source=source,
+                platform="podcast",
+            )
+            summary_kind = SUMMARY_KIND_LONGFORM_ARTIFACT
+            summary_version = SUMMARY_VERSION_V1
+        elif selected_format == "editorial_narrative":
             summary = generate_editorial_narrative(title=title, topic=topics[0])
             summary_kind = SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE
             summary_version = SUMMARY_VERSION_V1
@@ -824,7 +1112,7 @@ class PodcastGenerator:
             "source": source,
             "platform": "podcast",
             "status": status,
-            "classification": summary.classification,
+            "classification": summary_classification(summary),
             "content_metadata": metadata.model_dump(mode="json", exclude_none=True),
             "publication_date": random_datetime(60),
             "processed_at": random_datetime(5) if status == ContentStatus.COMPLETED.value else None,
@@ -1193,6 +1481,7 @@ def main():
         "--article-summary-format",
         choices=[
             "mixed",
+            "longform_artifact",
             "editorial_narrative",
             "bulleted",
             "interleaved_v2",
@@ -1206,6 +1495,7 @@ def main():
         "--podcast-summary-format",
         choices=[
             "mixed",
+            "longform_artifact",
             "editorial_narrative",
             "bulleted",
             "interleaved_v2",

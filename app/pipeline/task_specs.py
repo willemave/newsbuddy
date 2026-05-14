@@ -41,6 +41,10 @@ class NewsItemIdPayload(TaskPayload):
     news_item_id: int
 
 
+class AudioEpisodePayload(TaskPayload):
+    audio_episode_id: int
+
+
 @dataclass(frozen=True)
 class TaskSpec:
     task_type: TaskType
@@ -116,6 +120,11 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         TaskType.GENERATE_INSIGHT_REPORT,
         TaskQueue.CONTENT,
         UserPayload,
+    ),
+    TaskType.GENERATE_AUDIO_EPISODE: TaskSpec(
+        TaskType.GENERATE_AUDIO_EPISODE,
+        TaskQueue.MEDIA,
+        AudioEpisodePayload,
     ),
 }
 

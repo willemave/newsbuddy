@@ -82,6 +82,8 @@ struct ContentDetailView: View {
     @State private var chatError: String?
     @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
     @State private var loadingNarrationTargets: Set<NarrationTarget> = []
+    @State private var loadingDiscussionAudioContentIds: Set<Int> = []
+    @State private var discussionAudioEpisodeByContentId: [Int: AudioEpisode] = [:]
     @State private var activeAlert: ViewAlert?
     // Full image viewer
     @State private var selectedImageAsset: DetailImageAsset?
@@ -796,7 +798,7 @@ struct ContentDetailView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(
                             isNarrationActive(for: content)
-                                ? "Stop summary narration"
+                                ? "Pause summary narration"
                                 : "Narrate summary here"
                         )
                         .font(.subheadline)
@@ -804,7 +806,7 @@ struct ContentDetailView: View {
                         .foregroundColor(.primary)
                         Text(
                             isNarrationActive(for: content)
-                                ? "End spoken playback"
+                                ? "Resume from this spot later"
                                 : "Tap to listen at \(narrationPlaybackService.playbackSpeedTitle). Hold for speed options."
                         )
                         .font(.caption)
@@ -820,6 +822,54 @@ struct ContentDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             .accessibilityIdentifier("content.dictate_summary_live")
+
+            if supportsContentDiscussionAudio(for: content) {
+                Button {
+                    Task { await handleContentDiscussionAudio(for: content) }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(
+                            systemName: isDiscussionAudioActive(for: content)
+                                ? "pause.fill"
+                                : "person.3.sequence.fill"
+                        )
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.orange)
+                        .frame(width: 32, height: 32)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(
+                                isDiscussionAudioActive(for: content)
+                                    ? "Pause expert discussion"
+                                    : "Expert audio discussion"
+                            )
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                            Text(discussionAudioStatusText(for: content))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+
+                        Spacer()
+
+                        if isDiscussionAudioLoading(for: content) {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.surfaceSecondary)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .disabled(isDiscussionAudioLoading(for: content))
+                .accessibilityIdentifier("content.audio.expert_discussion")
+            }
         }
     }
 
@@ -828,8 +878,18 @@ struct ContentDetailView: View {
         return type == .article || type == .news || type == .podcast
     }
 
+    private func supportsContentDiscussionAudio(for content: ContentDetail) -> Bool {
+        guard let type = content.contentTypeEnum else { return false }
+        return type == .article || type == .podcast
+    }
+
     private func narrationTarget(for content: ContentDetail) -> NarrationTarget {
         .content(content.id)
+    }
+
+    private func discussionAudioTarget(for content: ContentDetail) -> NarrationTarget? {
+        guard let episode = discussionAudioEpisodeByContentId[content.id] else { return nil }
+        return .audioEpisode(episode.id)
     }
 
     @ViewBuilder
@@ -847,7 +907,7 @@ struct ContentDetailView: View {
 
     private func narrationAccessibilityLabel(for content: ContentDetail) -> String {
         if isNarrationActive(for: content) {
-            return "Stop summary narration"
+            return "Pause summary narration"
         }
         return "Narrate summary at \(narrationPlaybackService.playbackSpeedTitle)"
     }
@@ -861,6 +921,44 @@ struct ContentDetailView: View {
         loadingNarrationTargets.contains(narrationTarget(for: content))
     }
 
+    private func shouldShowSummaryPlaybackControls(for content: ContentDetail) -> Bool {
+        let target = narrationTarget(for: content)
+        return isNarrationLoading(for: content)
+            || narrationPlaybackService.speakingTarget == target
+    }
+
+    private func summaryPlaybackControls(for content: ContentDetail) -> some View {
+        NarrationPlaybackControlRow(
+            playbackService: narrationPlaybackService,
+            target: narrationTarget(for: content),
+            isPreparing: isNarrationLoading(for: content),
+            onTogglePlayback: {
+                Task { await handleSummaryNarration(for: content) }
+            }
+        )
+        .accessibilityIdentifier("content.audio.summary.controls")
+    }
+
+    private func isDiscussionAudioActive(for content: ContentDetail) -> Bool {
+        guard let target = discussionAudioTarget(for: content) else { return false }
+        return narrationPlaybackService.isSpeaking
+            && narrationPlaybackService.speakingTarget == target
+    }
+
+    private func isDiscussionAudioLoading(for content: ContentDetail) -> Bool {
+        loadingDiscussionAudioContentIds.contains(content.id)
+    }
+
+    private func discussionAudioStatusText(for content: ContentDetail) -> String {
+        if isDiscussionAudioLoading(for: content) {
+            return "Preparing audio"
+        }
+        if isDiscussionAudioActive(for: content) {
+            return "Playing"
+        }
+        return "5-minute council overview"
+    }
+
     @MainActor
     private func handleSummaryNarration(
         for content: ContentDetail,
@@ -870,7 +968,7 @@ struct ContentDetailView: View {
         let playbackRate = rate ?? narrationPlaybackService.playbackRate
         if isNarrationActive(for: content),
            abs(narrationPlaybackService.playbackRate - playbackRate) < 0.001 {
-            narrationPlaybackService.stop()
+            narrationPlaybackService.pause()
             return
         }
 
@@ -893,6 +991,51 @@ struct ContentDetailView: View {
             activeAlert = ViewAlert(
                 title: "Narration",
                 message: "Failed to load narration: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    @MainActor
+    private func handleContentDiscussionAudio(for content: ContentDetail) async {
+        if isDiscussionAudioActive(for: content) {
+            narrationPlaybackService.pause()
+            return
+        }
+        guard !isDiscussionAudioLoading(for: content) else { return }
+
+        loadingDiscussionAudioContentIds.insert(content.id)
+        defer { loadingDiscussionAudioContentIds.remove(content.id) }
+
+        do {
+            let episode: AudioEpisode
+            if let existingEpisode = discussionAudioEpisodeByContentId[content.id] {
+                episode = existingEpisode
+            } else {
+                episode = try await AudioEpisodeService.shared.createContentCouncilEpisode(
+                    contentId: content.id
+                )
+            }
+            discussionAudioEpisodeByContentId[content.id] = episode
+            let completedEpisode = episode.status == "completed"
+                ? episode
+                : try await AudioEpisodeService.shared.waitForCompletedEpisode(episode)
+            discussionAudioEpisodeByContentId[content.id] = completedEpisode
+            let target = NarrationTarget.audioEpisode(completedEpisode.id)
+            try await narrationPlaybackService.playNarration(
+                for: target,
+                fetchAudio: {
+                    try await AudioEpisodeService.shared.fetchEpisodeAudio(
+                        id: completedEpisode.id
+                    )
+                },
+                fetchNarrationText: {
+                    completedEpisode.scriptText ?? completedEpisode.title
+                }
+            )
+        } catch {
+            activeAlert = ViewAlert(
+                title: "Audio discussion",
+                message: "Failed to load audio discussion: \(error.localizedDescription)"
             )
         }
     }
@@ -1016,6 +1159,11 @@ struct ContentDetailView: View {
 
                     actionBar(content: content, overlaid: true)
                         .padding(.top, 2)
+
+                    if shouldShowSummaryPlaybackControls(for: content) {
+                        summaryPlaybackControls(for: content)
+                            .padding(.top, 2)
+                    }
                 }
                 .padding(.horizontal, DetailDesign.horizontalPadding)
                 .padding(.bottom, 10)
@@ -1076,6 +1224,12 @@ struct ContentDetailView: View {
                 actionBar(content: content, overlaid: false)
                     .padding(.horizontal, DetailDesign.horizontalPadding)
                     .padding(.top, 2)
+
+                if shouldShowSummaryPlaybackControls(for: content) {
+                    summaryPlaybackControls(for: content)
+                        .padding(.horizontal, DetailDesign.horizontalPadding)
+                        .padding(.top, 4)
+                }
             }
         }
     }
