@@ -65,8 +65,11 @@ class TaskQueue(StrEnum):
 
     CONTENT = "content"
     MEDIA = "media"
+    AUDIO_EPISODE = "audio_episode"
     IMAGE = "image"
     ONBOARDING = "onboarding"
+    BACKFILL = "backfill"
+    DISCUSSION = "discussion"
     TWITTER = "twitter"
     CHAT = "chat"
 

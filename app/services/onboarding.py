@@ -615,38 +615,23 @@ def complete_onboarding(
             db, user_id, request.selected_aggregators
         )
 
-    queue_gateway = get_task_queue_gateway()
     unique_feed_config_ids = list(dict.fromkeys(feed_config_ids_for_backfill))
-    task_id = None
+    backfill_payload: dict[str, Any] | None = None
     if unique_feed_config_ids:
         request_payload = FeedBatchBackfillRequest(
             user_id=user_id,
             config_ids=unique_feed_config_ids,
             count=DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
         )
-        task_id = queue_gateway.enqueue(
-            TaskType.BACKFILL_FEEDS,
-            payload=request_payload.model_dump(),
-            dedupe=True,
-        )
+        backfill_payload = request_payload.model_dump()
     sources_to_scrape = _resolve_scraper_sources(created_types - FEED_SUGGESTION_TYPES)
-    if sources_to_scrape:
-        scrape_task_id = queue_gateway.enqueue(
-            TaskType.SCRAPE,
-            payload={"sources": sources_to_scrape},
-        )
-        if task_id is None:
-            task_id = scrape_task_id
-
+    discovery_payload: dict[str, Any] | None = None
     if request.profile_summary:
-        queue_gateway.enqueue(
-            TaskType.ONBOARDING_DISCOVER,
-            payload={
-                "user_id": user_id,
-                "profile_summary": request.profile_summary,
-                "inferred_topics": request.inferred_topics or [],
-            },
-        )
+        discovery_payload = {
+            "user_id": user_id,
+            "profile_summary": request.profile_summary,
+            "inferred_topics": request.inferred_topics or [],
+        }
 
     try:
         _seed_recent_news_for_user(db, user_id)
@@ -679,7 +664,29 @@ def complete_onboarding(
         if should_update_twitter_username and user.twitter_username != normalized_username:
             user.twitter_username = normalized_username
         user.has_completed_onboarding = True
-        db.commit()
+    db.commit()
+
+    queue_gateway = get_task_queue_gateway()
+    task_id = None
+    if backfill_payload is not None:
+        task_id = queue_gateway.enqueue(
+            TaskType.BACKFILL_FEEDS,
+            payload=backfill_payload,
+            dedupe=True,
+        )
+    if sources_to_scrape:
+        scrape_task_id = queue_gateway.enqueue(
+            TaskType.SCRAPE,
+            payload={"sources": sources_to_scrape},
+        )
+        if task_id is None:
+            task_id = scrape_task_id
+
+    if discovery_payload is not None:
+        queue_gateway.enqueue(
+            TaskType.ONBOARDING_DISCOVER,
+            payload=discovery_payload,
+        )
 
     inbox_count = _estimate_inbox_count(db, user_id)
     inbox_count_estimate = max(inbox_count, 100)

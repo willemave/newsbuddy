@@ -28,4 +28,4 @@ def test_create_fast_news_audio_episode_enqueues_generation(
     task = db_session.query(ProcessingTask).one()
     assert task.task_type == TaskType.GENERATE_AUDIO_EPISODE.value
     assert task.payload == {"audio_episode_id": episode.id}
-    assert task.queue_name == "media"
+    assert task.queue_name == "audio_episode"

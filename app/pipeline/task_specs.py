@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.models.contracts import TaskQueue, TaskType
+from app.models.internal.feed_backfill import MAX_BACKFILL_COUNT
 
 
 class TaskPayload(BaseModel):
@@ -33,16 +34,35 @@ class GenerateImagePayload(ContentIdPayload):
     force: bool = False
 
 
-class UserPayload(TaskPayload):
-    user_id: int | None = None
+class RequiredUserPayload(TaskPayload):
+    user_id: int
 
 
 class NewsItemIdPayload(TaskPayload):
     news_item_id: int
 
 
+class BackfillFeedsPayload(RequiredUserPayload):
+    config_ids: list[int] = Field(..., min_length=1)
+    count: int = Field(..., ge=1, le=MAX_BACKFILL_COUNT)
+
+
+class DigDeeperPayload(RequiredUserPayload):
+    initial_message: str | None = None
+
+
 class AudioEpisodePayload(TaskPayload):
     audio_episode_id: int
+
+
+class SyncIntegrationPayload(RequiredUserPayload):
+    provider: str = "x"
+    trigger: str = "cron"
+
+
+class InsightReportPayload(RequiredUserPayload):
+    synthesis_model: str | None = None
+    effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,7 +84,11 @@ class TaskSpec:
 
 TASK_SPECS: dict[TaskType, TaskSpec] = {
     TaskType.SCRAPE: TaskSpec(TaskType.SCRAPE, TaskQueue.CONTENT, TaskPayload),
-    TaskType.BACKFILL_FEEDS: TaskSpec(TaskType.BACKFILL_FEEDS, TaskQueue.ONBOARDING, TaskPayload),
+    TaskType.BACKFILL_FEEDS: TaskSpec(
+        TaskType.BACKFILL_FEEDS,
+        TaskQueue.BACKFILL,
+        BackfillFeedsPayload,
+    ),
     TaskType.ANALYZE_URL: TaskSpec(TaskType.ANALYZE_URL, TaskQueue.CONTENT, AnalyzeUrlPayload),
     TaskType.PROCESS_CONTENT: TaskSpec(
         TaskType.PROCESS_CONTENT, TaskQueue.CONTENT, ContentIdPayload, True
@@ -75,7 +99,10 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         TaskPayload,
     ),
     TaskType.PROCESS_NEWS_ITEM: TaskSpec(
-        TaskType.PROCESS_NEWS_ITEM, TaskQueue.CONTENT, TaskPayload
+        TaskType.PROCESS_NEWS_ITEM,
+        TaskQueue.CONTENT,
+        NewsItemIdPayload,
+        True,
     ),
     TaskType.PROCESS_PODCAST_MEDIA: TaskSpec(
         TaskType.PROCESS_PODCAST_MEDIA,
@@ -99,11 +126,11 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
     ),
     TaskType.SUMMARIZE: TaskSpec(TaskType.SUMMARIZE, TaskQueue.CONTENT, ContentIdPayload, True),
     TaskType.FETCH_DISCUSSION: TaskSpec(
-        TaskType.FETCH_DISCUSSION, TaskQueue.CONTENT, ContentIdPayload, True
+        TaskType.FETCH_DISCUSSION, TaskQueue.DISCUSSION, ContentIdPayload, True
     ),
     TaskType.FETCH_NEWS_ITEM_DISCUSSION: TaskSpec(
         TaskType.FETCH_NEWS_ITEM_DISCUSSION,
-        TaskQueue.CONTENT,
+        TaskQueue.DISCUSSION,
         NewsItemIdPayload,
         True,
     ),
@@ -112,19 +139,28 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
     ),
     TaskType.DISCOVER_FEEDS: TaskSpec(TaskType.DISCOVER_FEEDS, TaskQueue.CONTENT, TaskPayload),
     TaskType.ONBOARDING_DISCOVER: TaskSpec(
-        TaskType.ONBOARDING_DISCOVER, TaskQueue.ONBOARDING, UserPayload
+        TaskType.ONBOARDING_DISCOVER,
+        TaskQueue.ONBOARDING,
+        RequiredUserPayload,
+        True,
     ),
-    TaskType.DIG_DEEPER: TaskSpec(TaskType.DIG_DEEPER, TaskQueue.CHAT, UserPayload),
-    TaskType.SYNC_INTEGRATION: TaskSpec(TaskType.SYNC_INTEGRATION, TaskQueue.TWITTER, UserPayload),
+    TaskType.DIG_DEEPER: TaskSpec(TaskType.DIG_DEEPER, TaskQueue.CHAT, DigDeeperPayload),
+    TaskType.SYNC_INTEGRATION: TaskSpec(
+        TaskType.SYNC_INTEGRATION,
+        TaskQueue.TWITTER,
+        SyncIntegrationPayload,
+        True,
+    ),
     TaskType.GENERATE_INSIGHT_REPORT: TaskSpec(
         TaskType.GENERATE_INSIGHT_REPORT,
         TaskQueue.CONTENT,
-        UserPayload,
+        InsightReportPayload,
     ),
     TaskType.GENERATE_AUDIO_EPISODE: TaskSpec(
         TaskType.GENERATE_AUDIO_EPISODE,
-        TaskQueue.MEDIA,
+        TaskQueue.AUDIO_EPISODE,
         AudioEpisodePayload,
+        True,
     ),
 }
 

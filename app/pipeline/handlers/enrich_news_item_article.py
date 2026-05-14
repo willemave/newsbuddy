@@ -34,7 +34,6 @@ class EnrichNewsItemArticleHandler:
                 context.queue_service.enqueue(
                     TaskType.PROCESS_NEWS_ITEM,
                     payload={"news_item_id": news_item_id},
-                    dedupe=False,
                 )
             if result.success:
                 return TaskResult.ok()

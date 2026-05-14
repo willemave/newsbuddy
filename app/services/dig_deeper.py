@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.db import ChatSession, Content, ContentDiscussion, ProcessingTask
+from app.models.db import ChatSession, Content, ContentDiscussion
 from app.services.chat_agent import create_processing_message, process_message_async
+from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
 from app.services.personal_markdown_library import sync_personal_markdown_for_content
-from app.services.queue import TaskQueue, TaskStatus, TaskType
+from app.services.queue import TaskType
 from app.utils.title_utils import resolve_content_display_title
 
 logger = get_logger(__name__)
@@ -53,14 +55,6 @@ def _require_message_id(message: Any) -> int:
     if message_id is None:
         raise ValueError("Chat message must be persisted before use")
     return int(message_id)
-
-
-def _require_task_id(task: ProcessingTask) -> int:
-    """Return a persisted processing-task ID or raise."""
-    task_id = task.id
-    if task_id is None:
-        raise ValueError("Processing task must be persisted before use")
-    return task_id
 
 
 def _build_content_context_snapshot(content: Content, user_id: int) -> str:
@@ -369,17 +363,16 @@ def enqueue_dig_deeper_task(
     Returns:
         Processing task ID.
     """
+    del db
     payload: dict[str, Any] = {"user_id": user_id}
-    if initial_message and initial_message.strip():
-        payload["initial_message"] = initial_message.strip()
-    task = ProcessingTask(
-        task_type=TaskType.DIG_DEEPER.value,
+    cleaned_initial_message = initial_message.strip() if initial_message else None
+    if cleaned_initial_message:
+        payload["initial_message"] = cleaned_initial_message
+    message_hash = hashlib.sha256((cleaned_initial_message or "").encode("utf-8")).hexdigest()[:16]
+    return get_task_queue_gateway().enqueue(
+        TaskType.DIG_DEEPER,
         content_id=content_id,
         payload=payload,
-        status=TaskStatus.PENDING.value,
-        queue_name=TaskQueue.CHAT.value,
+        dedupe=True,
+        dedupe_key=f"dig_deeper|user:{user_id}|content:{content_id}|message:{message_hash}",
     )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
-    return _require_task_id(task)

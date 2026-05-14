@@ -96,6 +96,14 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
     image_task_id = queue.enqueue(TaskType.GENERATE_IMAGE, content_id=9)
     transcribe_task_id = queue.enqueue(TaskType.TRANSCRIBE, content_id=2)
     tweet_video_task_id = queue.enqueue(TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO, content_id=4)
+    audio_episode_task_id = queue.enqueue(
+        TaskType.GENERATE_AUDIO_EPISODE,
+        payload={"audio_episode_id": 8},
+    )
+    backfill_task_id = queue.enqueue(
+        TaskType.BACKFILL_FEEDS,
+        payload={"user_id": 11, "config_ids": [1], "count": 5},
+    )
     news_discussion_task_id = queue.enqueue(
         TaskType.FETCH_NEWS_ITEM_DISCUSSION,
         payload={"news_item_id": 77},
@@ -121,6 +129,8 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
                     image_task_id,
                     transcribe_task_id,
                     tweet_video_task_id,
+                    audio_episode_task_id,
+                    backfill_task_id,
                     news_discussion_task_id,
                     onboarding_task_id,
                     integration_task_id,
@@ -135,7 +145,9 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
     assert tasks[image_task_id].queue_name == TaskQueue.IMAGE.value
     assert tasks[transcribe_task_id].queue_name == TaskQueue.MEDIA.value
     assert tasks[tweet_video_task_id].queue_name == TaskQueue.MEDIA.value
-    assert tasks[news_discussion_task_id].queue_name == TaskQueue.CONTENT.value
+    assert tasks[audio_episode_task_id].queue_name == TaskQueue.AUDIO_EPISODE.value
+    assert tasks[backfill_task_id].queue_name == TaskQueue.BACKFILL.value
+    assert tasks[news_discussion_task_id].queue_name == TaskQueue.DISCUSSION.value
     assert tasks[onboarding_task_id].queue_name == TaskQueue.ONBOARDING.value
     assert tasks[integration_task_id].queue_name == TaskQueue.TWITTER.value
     assert tasks[chat_task_id].queue_name == TaskQueue.CHAT.value
@@ -188,8 +200,8 @@ def test_enqueue_validates_payload_against_task_spec(db_session, monkeypatch):
         queue.enqueue(TaskType.ANALYZE_URL, payload={"content_id": "not-an-int"})
 
 
-def test_enqueue_does_not_dedupe_onboarding_tasks(db_session, monkeypatch):
-    """Non-content tasks can enqueue multiple pending jobs with different payloads."""
+def test_enqueue_allows_distinct_onboarding_payloads(db_session, monkeypatch):
+    """Onboarding dedupe still allows multiple active jobs with different payloads."""
     queue = _patch_db(monkeypatch, db_session)
 
     first_task_id = queue.enqueue(TaskType.ONBOARDING_DISCOVER, payload={"user_id": 1})
@@ -202,6 +214,35 @@ def test_enqueue_does_not_dedupe_onboarding_tasks(db_session, monkeypatch):
         .all()
     )
     assert len(queued_tasks) == 2
+
+
+def test_enqueue_dedupes_targeted_payload_tasks(db_session, monkeypatch):
+    """Payload-keyed tasks should reuse active work for the same logical request."""
+    queue = _patch_db(monkeypatch, db_session)
+
+    first_news_task_id = queue.enqueue(TaskType.PROCESS_NEWS_ITEM, payload={"news_item_id": 1})
+    second_news_task_id = queue.enqueue(TaskType.PROCESS_NEWS_ITEM, payload={"news_item_id": 1})
+    assert second_news_task_id == first_news_task_id
+
+    first_onboarding_task_id = queue.enqueue(
+        TaskType.ONBOARDING_DISCOVER,
+        payload={"user_id": 1, "run_id": 7},
+    )
+    second_onboarding_task_id = queue.enqueue(
+        TaskType.ONBOARDING_DISCOVER,
+        payload={"user_id": 1, "run_id": 7},
+    )
+    assert second_onboarding_task_id == first_onboarding_task_id
+
+    first_sync_task_id = queue.enqueue(
+        TaskType.SYNC_INTEGRATION,
+        payload={"user_id": 1, "provider": "x", "trigger": "cron"},
+    )
+    second_sync_task_id = queue.enqueue(
+        TaskType.SYNC_INTEGRATION,
+        payload={"user_id": 1, "provider": "x", "trigger": "cron"},
+    )
+    assert second_sync_task_id == first_sync_task_id
 
 
 def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
@@ -223,10 +264,28 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
                 queue_name=TaskQueue.MEDIA.value,
             ),
             ProcessingTask(
+                task_type=TaskType.GENERATE_AUDIO_EPISODE.value,
+                status=TaskStatus.PENDING.value,
+                payload={"audio_episode_id": 1},
+                queue_name=TaskQueue.AUDIO_EPISODE.value,
+            ),
+            ProcessingTask(
                 task_type=TaskType.ONBOARDING_DISCOVER.value,
                 status=TaskStatus.PENDING.value,
                 payload={"user_id": 1},
                 queue_name=TaskQueue.ONBOARDING.value,
+            ),
+            ProcessingTask(
+                task_type=TaskType.BACKFILL_FEEDS.value,
+                status=TaskStatus.PENDING.value,
+                payload={},
+                queue_name=TaskQueue.BACKFILL.value,
+            ),
+            ProcessingTask(
+                task_type=TaskType.FETCH_DISCUSSION.value,
+                status=TaskStatus.PENDING.value,
+                payload={},
+                queue_name=TaskQueue.DISCUSSION.value,
             ),
             ProcessingTask(
                 task_type=TaskType.DIG_DEEPER.value,
@@ -267,6 +326,27 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
     assert transcribe_task is not None
     assert transcribe_task["task_type"] == TaskType.TRANSCRIBE.value
     assert transcribe_task["queue_name"] == TaskQueue.MEDIA.value
+
+    audio_episode_task = queue.dequeue(
+        worker_id="audio-episode-test",
+        queue_name=TaskQueue.AUDIO_EPISODE,
+    )
+    assert audio_episode_task is not None
+    assert audio_episode_task["task_type"] == TaskType.GENERATE_AUDIO_EPISODE.value
+    assert audio_episode_task["queue_name"] == TaskQueue.AUDIO_EPISODE.value
+
+    backfill_task = queue.dequeue(worker_id="backfill-test", queue_name=TaskQueue.BACKFILL)
+    assert backfill_task is not None
+    assert backfill_task["task_type"] == TaskType.BACKFILL_FEEDS.value
+    assert backfill_task["queue_name"] == TaskQueue.BACKFILL.value
+
+    discussion_task = queue.dequeue(
+        worker_id="discussion-test",
+        queue_name=TaskQueue.DISCUSSION,
+    )
+    assert discussion_task is not None
+    assert discussion_task["task_type"] == TaskType.FETCH_DISCUSSION.value
+    assert discussion_task["queue_name"] == TaskQueue.DISCUSSION.value
 
     chat_task = queue.dequeue(worker_id="chat-test", queue_name=TaskQueue.CHAT)
     assert chat_task is not None

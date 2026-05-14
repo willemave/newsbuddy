@@ -20,10 +20,21 @@ from app.services.queue import TaskType
 @pytest.mark.usefixtures("stub_valid_feed_url")
 def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, test_user) -> None:
     calls: list[tuple[str, dict]] = []
+    commit_count = 0
+    queue_call_commit_counts: list[int] = []
+    original_commit = db_session.commit
+
+    def tracking_commit() -> None:
+        nonlocal commit_count
+        commit_count += 1
+        original_commit()
+
+    monkeypatch.setattr(db_session, "commit", tracking_commit)
 
     class FakeQueueGateway:
         def enqueue(self, task_type, content_id=None, payload=None, queue_name=None, dedupe=None):
             del content_id, queue_name, dedupe
+            queue_call_commit_counts.append(commit_count)
             calls.append((task_type.value, payload or {}))
             return 42
 
@@ -76,6 +87,8 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     assert backfill_calls[0][1]["count"] == 2
     assert any(call[0] == TaskType.SCRAPE.value for call in calls)
     assert any(call[0] == TaskType.ONBOARDING_DISCOVER.value for call in calls)
+    assert queue_call_commit_counts
+    assert min(queue_call_commit_counts) >= 1
     db_session.refresh(test_user)
     assert test_user.twitter_username == "willem_aw"
     assert test_user.has_completed_onboarding is True

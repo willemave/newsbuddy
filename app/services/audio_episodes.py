@@ -22,7 +22,7 @@ from app.models.api.audio_episodes import (
     AudioEpisodeResponse,
     AudioEpisodeStatus,
 )
-from app.models.contracts import ContentType, TaskQueue, TaskType
+from app.models.contracts import ContentType, TaskType
 from app.models.db import AudioEpisode, Content, NewsItem
 from app.models.domain.content_mapper import content_to_domain
 from app.repositories.content_detail_repository import get_visible_content
@@ -142,7 +142,6 @@ def enqueue_audio_episode_generation(audio_episode_id: int) -> int:
     return get_queue_service().enqueue(
         TaskType.GENERATE_AUDIO_EPISODE,
         payload={"audio_episode_id": audio_episode_id},
-        queue_name=TaskQueue.MEDIA,
         dedupe_key=f"audio_episode:{audio_episode_id}",
     )
 

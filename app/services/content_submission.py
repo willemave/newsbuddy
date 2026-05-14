@@ -21,8 +21,9 @@ from app.models.metadata.state import (
 from app.repositories import knowledge_repository
 from app.services import read_status
 from app.services.dig_deeper import enqueue_dig_deeper_task
+from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
-from app.services.queue import TaskQueue, TaskStatus, TaskType
+from app.services.queue import TaskStatus, TaskType
 from app.services.scraper_configs import ensure_inbox_status
 
 logger = get_logger(__name__)
@@ -139,20 +140,12 @@ def _ensure_analyze_url_task(
     if subscribe_to_feed:
         payload["subscribe_to_feed"] = True
 
-    task = ProcessingTask(
-        task_type=TaskType.ANALYZE_URL.value,
+    return get_task_queue_gateway().enqueue(
+        TaskType.ANALYZE_URL,
         content_id=content_id,
         payload=payload,
-        status=TaskStatus.PENDING.value,
-        queue_name=TaskQueue.CONTENT.value,
+        dedupe=True,
     )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
-    task_id = task.id
-    if task_id is None:
-        raise ValueError("Analyze task insert did not produce an id")
-    return int(task_id)
 
 
 def _apply_submission_user_state(

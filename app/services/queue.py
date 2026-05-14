@@ -24,6 +24,9 @@ ACTIVE_DEDUPE_INDEX_WHERE = text("dedupe_key IS NOT NULL AND status IN ('pending
 TASK_QUEUE_BY_TYPE: dict[TaskType, TaskQueue] = {
     task_type: task_spec.queue for task_type, task_spec in TASK_SPECS.items()
 }
+TASK_QUEUE_VALUE_BY_TYPE: dict[str, str] = {
+    task_type.value: queue.value for task_type, queue in TASK_QUEUE_BY_TYPE.items()
+}
 
 
 def _utc_now() -> datetime:
@@ -44,25 +47,50 @@ def _normalize_payload_for_dedupe(payload: dict[str, Any] | None) -> str | None:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
 
 
-def _build_dedupe_key(
+def build_task_dedupe_key(
     *,
     task_type: TaskType,
     content_id: int | None,
-    payload: dict[str, Any] | None,
-    queue_name: str,
-    should_dedupe: bool,
+    queue_name: TaskQueue | str,
+    payload: dict[str, Any] | None = None,
+    should_dedupe: bool = True,
 ) -> str | None:
     """Build a stable dedupe key for active work items."""
     if not should_dedupe:
         return None
 
-    parts = [queue_name, task_type.value]
+    queue_value = queue_name.value if isinstance(queue_name, TaskQueue) else queue_name
+    parts = [queue_value, task_type.value]
     if content_id is not None:
         parts.append(f"content:{content_id}")
     payload_fragment = _normalize_payload_for_dedupe(payload)
     if payload_fragment is not None and content_id is None:
         parts.append(f"payload:{payload_fragment}")
     return "|".join(parts)
+
+
+def build_task_queue_mismatch_filter(task_type: TaskType | str | None = None):
+    """Return a SQL filter for rows whose queue no longer matches task specs."""
+    expected_queues = TASK_QUEUE_VALUE_BY_TYPE
+    if task_type:
+        task_type_value = task_type.value if isinstance(task_type, TaskType) else task_type
+        expected_queue = expected_queues.get(task_type_value)
+        if expected_queue is None:
+            raise ValueError(f"No queue spec found for task type: {task_type_value}")
+        expected_queues = {task_type_value: expected_queue}
+
+    return or_(
+        *[
+            and_(
+                ProcessingTask.task_type == task_type_value,
+                or_(
+                    ProcessingTask.queue_name.is_(None),
+                    ProcessingTask.queue_name != expected_queue,
+                ),
+            )
+            for task_type_value, expected_queue in expected_queues.items()
+        ]
+    )
 
 
 def _lookup_active_task_by_dedupe_key(db, *, dedupe_key: str, active_task_order):
@@ -186,7 +214,7 @@ class QueueService:
             should_dedupe = dedupe if dedupe is not None else task_spec.dedupe_by_content
             resolved_dedupe_key = dedupe_key
             if resolved_dedupe_key is None:
-                resolved_dedupe_key = _build_dedupe_key(
+                resolved_dedupe_key = build_task_dedupe_key(
                     task_type=task_type,
                     content_id=content_id,
                     payload=task_payload,
