@@ -12,6 +12,8 @@ def test_create_fast_news_digest_episode_uses_unread_summaries(db_session, test_
     unread = create_news_item_row(
         db_session,
         index=1,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
         summary_title="AI labs ship voice agents",
         summary_text="Several labs shipped lower-latency voice agents.",
         summary_key_points=["Latency fell", "Voice UX moved from demos to products"],
@@ -19,6 +21,8 @@ def test_create_fast_news_digest_episode_uses_unread_summaries(db_session, test_
     read = create_news_item_row(
         db_session,
         index=2,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
         summary_title="Already read",
         summary_text="This one should not appear.",
     )
@@ -44,6 +48,45 @@ def test_create_fast_news_digest_episode_uses_unread_summaries(db_session, test_
             "article_url": "https://example.com/story-1",
             "discussion_url": "https://news.ycombinator.com/item?id=1001",
         }
+    ]
+
+
+def test_create_news_item_discussion_episode_uses_visible_summary(
+    db_session,
+    test_user,
+) -> None:
+    item = create_news_item_row(
+        db_session,
+        index=1,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        summary_title="AI chips move to liquid cooling",
+        summary_text="A startup raised fresh funding for dense liquid-cooled AI clusters.",
+        summary_key_points=["Density is rising", "Cooling is becoming a bottleneck"],
+    )
+    assert item.id is not None
+    db_session.add(NewsItemReadStatus(user_id=test_user.id, news_item_id=item.id))
+    db_session.commit()
+
+    episode = service.create_news_item_discussion_episode(
+        db_session,
+        user_id=test_user.id,
+        news_item_id=item.id,
+    )
+
+    assert episode.kind == service.NEWS_ITEM_DISCUSSION_KIND
+    assert episode.source_content_id is None
+    assert episode.source_item_ids == [item.id]
+    source_snapshot = episode.source_snapshot
+    assert isinstance(source_snapshot, dict)
+    assert source_snapshot["kind"] == service.NEWS_ITEM_DISCUSSION_KIND
+    assert source_snapshot["item"]["id"] == item.id
+    assert source_snapshot["item"]["summary"] == (
+        "A startup raised fresh funding for dense liquid-cooled AI clusters."
+    )
+    assert source_snapshot["item"]["key_points"] == [
+        "Density is rising",
+        "Cooling is becoming a bottleneck",
     ]
 
 

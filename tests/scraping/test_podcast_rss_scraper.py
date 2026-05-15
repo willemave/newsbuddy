@@ -3,8 +3,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from app.constants import AGGREGATOR_FEED_URL_PREFIX, AGGREGATOR_SCRAPER_TYPE
 from app.models.contracts import ContentStatus, ContentType, TaskType
-from app.models.db import NewsItem
+from app.models.db import NewsItem, NewsItemDiscussion, UserScraperConfig
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 
 
@@ -107,6 +108,7 @@ def test_existing_news_entries_are_not_reenqueued():
         patch("app.scraping.base.get_db", lambda: _db_context()),
         patch("app.scraping.base.get_queue_service", return_value=queue_service),
         patch("app.scraping.base.ensure_inbox_status", return_value=False),
+        patch("app.scraping.base.sync_news_item_discussion_from_news_item", return_value=None),
     ):
         scraper = PodcastUnifiedScraper()
         stats = scraper._save_items_with_stats([news_item])
@@ -115,8 +117,123 @@ def test_existing_news_entries_are_not_reenqueued():
     queue_service.enqueue.assert_not_called()
 
 
-def test_new_supported_news_item_enqueues_discussion_refresh(db_session):
-    """New HN/Reddit news items should queue the news-native discussion pipeline."""
+def test_existing_visible_due_news_enqueues_discussion_refresh(
+    db_session,
+    user_factory,
+):
+    """Duplicate HN/Reddit scrapes should enqueue refresh once a visible row is due."""
+    user = user_factory()
+    assert user.id is not None
+    db_session.add(
+        UserScraperConfig(
+            user_id=user.id,
+            scraper_type=AGGREGATOR_SCRAPER_TYPE,
+            display_name="hackernews",
+            feed_url=f"{AGGREGATOR_FEED_URL_PREFIX}hackernews",
+            config={"key": "hackernews"},
+            is_active=True,
+        )
+    )
+    existing = NewsItem(
+        ingest_key="existing-hn-due",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="12345",
+        canonical_item_url="https://news.ycombinator.com/item?id=12345",
+        canonical_story_url="https://example.com/story",
+        article_url="https://example.com/story",
+        article_title="Example story",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=12345",
+        raw_metadata={
+            "platform": "hackernews",
+            "aggregator": {
+                "external_id": "12345",
+                "metadata": {"comments_count": 1},
+            },
+        },
+        status="ready",
+    )
+    db_session.add(existing)
+    db_session.flush()
+    db_session.add(
+        NewsItemDiscussion(
+            news_item_id=existing.id,
+            platform="hackernews",
+            external_id="12345",
+            discussion_url="https://news.ycombinator.com/item?id=12345",
+            comment_count=1,
+            fetched_comment_count=1,
+            summary={"overview": "old"},
+            summary_status="completed",
+            raw_comments_ref={"kind": "storage"},
+            last_refresh_status="completed",
+            next_refresh_after=None,
+        )
+    )
+    db_session.commit()
+
+    queue_service = Mock()
+
+    @contextmanager
+    def _db_context():
+        yield db_session
+
+    news_item = {
+        "url": "https://example.com/story",
+        "title": "Example story",
+        "content_type": ContentType.NEWS,
+        "metadata": {
+            "platform": "hackernews",
+            "source": "Hacker News",
+            "source_type": "hackernews",
+            "source_label": "Hacker News",
+            "article": {
+                "url": "https://example.com/story",
+                "title": "Example story",
+                "source_domain": "example.com",
+            },
+            "aggregator": {
+                "name": "Hacker News",
+                "external_id": "12345",
+                "metadata": {"comments_count": 1},
+            },
+            "discussion_url": "https://news.ycombinator.com/item?id=12345",
+        },
+    }
+
+    with (
+        patch("app.scraping.base.get_db", lambda: _db_context()),
+        patch("app.scraping.base.get_queue_service", return_value=queue_service),
+        patch("app.scraping.base.ensure_inbox_status", return_value=False),
+    ):
+        scraper = PodcastUnifiedScraper()
+        stats = scraper._save_items_with_stats([news_item])
+
+    assert stats["duplicates"] == 1
+    queue_service.enqueue.assert_called_once_with(
+        TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+        payload={"news_item_id": existing.id},
+    )
+
+
+def test_new_visible_supported_news_item_enqueues_discussion_refresh(db_session, user_factory):
+    """New HN/Reddit news items should queue discussion refresh only when visible."""
+    user = user_factory()
+    assert user.id is not None
+    db_session.add(
+        UserScraperConfig(
+            user_id=user.id,
+            scraper_type=AGGREGATOR_SCRAPER_TYPE,
+            display_name="reddit",
+            feed_url=f"{AGGREGATOR_FEED_URL_PREFIX}reddit",
+            config={"key": "reddit"},
+            is_active=True,
+        )
+    )
+    db_session.commit()
     queue_service = Mock()
 
     @contextmanager
@@ -132,6 +249,11 @@ def test_new_supported_news_item_enqueues_discussion_refresh(db_session):
             "source": "example",
             "source_type": "reddit",
             "source_label": "example",
+            "summary": {
+                "title": "Example story",
+                "summary": "Example story summary",
+                "key_points": ["Example story point"],
+            },
             "article": {
                 "url": "https://example.com/story",
                 "title": "Example story",
@@ -156,12 +278,7 @@ def test_new_supported_news_item_enqueues_discussion_refresh(db_session):
 
     assert stats["saved"] == 1
     saved_item = db_session.query(NewsItem).filter(NewsItem.source_external_id == "abc123").one()
-    queue_service.enqueue.assert_any_call(
+    queue_service.enqueue.assert_called_once_with(
         TaskType.FETCH_NEWS_ITEM_DISCUSSION,
         payload={"news_item_id": saved_item.id},
-    )
-    queue_service.enqueue.assert_any_call(
-        TaskType.ENRICH_NEWS_ITEM_ARTICLE,
-        payload={"news_item_id": saved_item.id},
-        dedupe=False,
     )

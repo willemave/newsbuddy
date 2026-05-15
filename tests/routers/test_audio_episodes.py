@@ -12,6 +12,8 @@ def test_create_fast_news_audio_episode_enqueues_generation(
 ) -> None:
     create_news_item_row(
         db_session,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
         summary_title="New model ships",
         summary_text="A new model shipped with faster audio.",
     )
@@ -35,9 +37,12 @@ def test_create_fast_news_audio_episode_enqueues_generation(
 def test_create_fast_news_stream_delivery_does_not_enqueue_generation(
     client,
     db_session,
+    test_user,
 ) -> None:
     create_news_item_row(
         db_session,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
         summary_title="Streaming audio ships",
         summary_text="A stream-first episode should start without a queued worker.",
     )
@@ -47,6 +52,31 @@ def test_create_fast_news_stream_delivery_does_not_enqueue_generation(
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "pending"
+    assert payload["stream_url"] == f"/api/content/audio-episodes/{payload['id']}/stream"
+    assert db_session.query(AudioEpisode).count() == 1
+    assert db_session.query(ProcessingTask).count() == 0
+
+
+def test_create_news_item_audio_episode_stream_delivery_does_not_enqueue_generation(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    item = create_news_item_row(
+        db_session,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        summary_title="News detail audio ships",
+        summary_text="The detail view should use a streaming podcast episode.",
+    )
+
+    response = client.post(f"/api/news/items/{item.id}/audio-episodes/discussion?delivery=stream")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "news_item_discussion"
+    assert payload["status"] == "pending"
+    assert payload["source_item_ids"] == [item.id]
     assert payload["stream_url"] == f"/api/content/audio-episodes/{payload['id']}/stream"
     assert db_session.query(AudioEpisode).count() == 1
     assert db_session.query(ProcessingTask).count() == 0

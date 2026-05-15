@@ -21,6 +21,7 @@ from app.core.logging import get_logger
 from app.core.model_defaults import SMART_MODEL_SPEC
 from app.core.settings import get_settings
 from app.models.api.audio_episodes import (
+    AudioEpisodeDelivery,
     AudioEpisodeKind,
     AudioEpisodeResponse,
     AudioEpisodeStatus,
@@ -31,7 +32,10 @@ from app.models.domain.content_mapper import content_to_domain
 from app.repositories.content_detail_repository import get_visible_content
 from app.services.content_bodies import get_content_body_resolver
 from app.services.llm_agents import get_basic_agent
-from app.services.news_feed import list_unread_visible_news_items
+from app.services.news_feed import (
+    get_visible_news_item,
+    list_unread_visible_news_items,
+)
 from app.services.queue import get_queue_service
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.voice.narration_tts import get_content_narration_tts_service
@@ -43,6 +47,7 @@ FAST_NEWS_DIGEST_KIND: Literal["fast_news_digest"] = "fast_news_digest"
 CONTENT_COUNCIL_DISCUSSION_KIND: Literal["content_council_discussion"] = (
     "content_council_discussion"
 )
+NEWS_ITEM_DISCUSSION_KIND: Literal["news_item_discussion"] = "news_item_discussion"
 PROMPT_VERSION = 1
 FAST_NEWS_LIMIT = 200
 LONGFORM_BODY_MAX_CHARS = 120_000
@@ -145,6 +150,38 @@ def create_content_council_episode(
     )
 
 
+def create_news_item_discussion_episode(
+    db: Session,
+    *,
+    user_id: int,
+    news_item_id: int,
+) -> AudioEpisode:
+    """Create or reuse a podcast-style discussion episode for one Fast Read item."""
+
+    item = get_visible_news_item(db, user_id=user_id, news_item_id=news_item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="News item not found")
+
+    source_item = _news_item_source_snapshot(item)
+    if not source_item.get("summary") and not source_item.get("key_points"):
+        raise HTTPException(status_code=400, detail="No Fast Read summary is available")
+
+    source_snapshot = {
+        "kind": NEWS_ITEM_DISCUSSION_KIND,
+        "item": source_item,
+    }
+    title = f"News discussion: {source_item['title']}"
+    return _create_or_reuse_episode(
+        db,
+        user_id=user_id,
+        kind=NEWS_ITEM_DISCUSSION_KIND,
+        title=title[:255],
+        source_content_id=None,
+        source_item_ids=[_required_int(item.id, "news item id")],
+        source_snapshot=source_snapshot,
+    )
+
+
 def enqueue_audio_episode_generation(audio_episode_id: int) -> int:
     """Enqueue background generation for an audio episode."""
 
@@ -194,6 +231,24 @@ def present_audio_episode(episode: AudioEpisode) -> AudioEpisodeResponse:
         created_at=_required_datetime(episode.created_at, "audio episode created_at"),
         updated_at=episode.updated_at,
     )
+
+
+def commit_audio_episode_delivery(
+    db: Session,
+    episode: AudioEpisode,
+    *,
+    delivery: AudioEpisodeDelivery,
+) -> AudioEpisodeResponse:
+    """Commit an episode, enqueue background work when requested, and return it."""
+
+    db.commit()
+    db.refresh(episode)
+    if delivery == "background" and episode.status != "completed":
+        episode_id = episode.id
+        if episode_id is None:
+            raise RuntimeError("Audio episode must be persisted before enqueue")
+        enqueue_audio_episode_generation(episode_id)
+    return present_audio_episode(episode)
 
 
 def audio_episode_file_path(episode: AudioEpisode) -> Path | None:
@@ -699,6 +754,8 @@ def _build_script_prompt(episode: AudioEpisode) -> str:
         return _build_fast_news_prompt(episode.source_snapshot or {})
     if episode.kind == CONTENT_COUNCIL_DISCUSSION_KIND:
         return _build_content_council_prompt(episode.source_snapshot or {})
+    if episode.kind == NEWS_ITEM_DISCUSSION_KIND:
+        return _build_news_item_discussion_prompt(episode.source_snapshot or {})
     raise ValueError(f"Unsupported audio episode kind: {episode.kind}")
 
 
@@ -744,6 +801,28 @@ Shape:
 - End with a concise takeaway and why the piece is worth remembering.
 
 Long-form source JSON:
+{json.dumps(source_snapshot, ensure_ascii=False, indent=2)}
+"""
+
+
+def _build_news_item_discussion_prompt(source_snapshot: dict[str, Any]) -> str:
+    return f"""Create a roughly 5 minute podcast-style discussion about this single Fast Read.
+
+Goal:
+- Use only the supplied summary, key points, and links metadata.
+- Give listeners the headline, context, stakes, and what to watch next.
+- Make it a compact expert roundtable, not a read-aloud summary.
+- Do not invent extra facts beyond the source material.
+
+Shape:
+- 520-660 spoken words.
+- Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
+- 8-14 turns.
+- Use speaker='host' for framing, speaker='cohost' for synthesis, and
+  speaker='expert' for sharper analysis.
+- End with a concise takeaway.
+
+Fast Read source JSON:
 {json.dumps(source_snapshot, ensure_ascii=False, indent=2)}
 """
 
@@ -886,6 +965,8 @@ def _audio_episode_kind(value: str | None) -> AudioEpisodeKind:
         return FAST_NEWS_DIGEST_KIND
     if value == CONTENT_COUNCIL_DISCUSSION_KIND:
         return CONTENT_COUNCIL_DISCUSSION_KIND
+    if value == NEWS_ITEM_DISCUSSION_KIND:
+        return NEWS_ITEM_DISCUSSION_KIND
     raise ValueError(f"Unsupported audio episode kind: {value}")
 
 

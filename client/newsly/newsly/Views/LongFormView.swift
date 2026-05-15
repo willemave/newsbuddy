@@ -159,10 +159,11 @@ struct LongFormView: View {
             cardLink(content: content, variant: .hero, allItems: allItems)
 
         case .pair(let left, let right):
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 cardLink(content: left, variant: .compact, allItems: allItems)
                 cardLink(content: right, variant: .compact, allItems: allItems)
             }
+            .frame(maxWidth: .infinity, alignment: .top)
 
         case .single(let content):
             cardLink(content: content, variant: .compact, allItems: allItems)
@@ -211,6 +212,7 @@ struct LongFormView: View {
                 viewModel.loadMoreTrigger.send(())
             }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func supportsAudioDiscussion(for content: ContentSummary) -> Bool {

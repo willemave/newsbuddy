@@ -8,6 +8,19 @@ import UIKit
 /// Custom UITextView that adds "Dig Deeper" to the edit menu.
 class DigDeeperTextView: UITextView {
     var onDigDeeper: ((String) -> Void)?
+    var adaptiveTextColor: UIColor? {
+        didSet {
+            applyAdaptiveTextColor()
+        }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) != false else {
+            return
+        }
+        applyAdaptiveTextColor()
+    }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(digDeeperAction(_:)) {
@@ -49,5 +62,10 @@ class DigDeeperTextView: UITextView {
         DispatchQueue.main.async {
             callback?(captured)
         }
+    }
+
+    private func applyAdaptiveTextColor() {
+        guard let adaptiveTextColor else { return }
+        textColor = adaptiveTextColor.resolvedColor(with: traitCollection)
     }
 }

@@ -13,7 +13,10 @@ from app.services.news_ingestion import (
     should_enqueue_news_item_enrichment,
     upsert_news_item,
 )
-from app.services.news_item_discussions import sync_news_item_discussion_from_news_item
+from app.services.news_item_discussions import (
+    should_enqueue_news_item_discussion_refresh,
+    sync_news_item_discussion_from_news_item,
+)
 from app.services.queue import TaskType, get_queue_service
 from app.services.scraper_configs import (
     ensure_inbox_status,
@@ -126,10 +129,13 @@ class BaseScraper(ABC):
                         discussion_row = sync_news_item_discussion_from_news_item(db, news_item)
                         if discussion_row is not None:
                             db.commit()
-                            if was_created and news_item.id is not None:
+                            if should_enqueue_news_item_discussion_refresh(
+                                db,
+                                row=discussion_row,
+                            ):
                                 self.queue_service.enqueue(
                                     TaskType.FETCH_NEWS_ITEM_DISCUSSION,
-                                    payload={"news_item_id": news_item.id},
+                                    payload={"news_item_id": discussion_row.news_item_id},
                                 )
                         if should_enqueue_news_item_enrichment(
                             news_item=news_item,

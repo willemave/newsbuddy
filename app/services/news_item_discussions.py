@@ -11,12 +11,16 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy import cast as sa_cast
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Session, aliased
 
+from app.constants import AGGREGATOR_SCRAPER_TYPE
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.db import NewsItem, NewsItemDiscussion
+from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
+from app.models.db import NewsItem, NewsItemDiscussion, User, UserScraperConfig
 from app.models.metadata.summaries import DiscussionSummary
 from app.services.discussion_fetcher import (
     DiscussionFetchError,
@@ -48,6 +52,7 @@ REFRESH_STATUS_PROCESSING = "processing"
 REFRESH_TTL_HOLD_STATUSES = frozenset({"completed", "failed", REFRESH_STATUS_PROCESSING})
 REFRESH_EMPTY_FETCH_BLOCK_STATUSES = ("failed", REFRESH_STATUS_PROCESSING)
 NEWS_DISCUSSION_SUMMARY_VERSION = 1
+DEFAULT_DISCUSSION_REFRESH_ENQUEUE_LIMIT = 100
 MAX_STORED_COMMENTS = 1_000
 MAX_SUMMARY_COMMENTS = 200
 MAX_SUMMARY_LINKS = 50
@@ -281,22 +286,141 @@ def sync_news_item_discussion_from_news_item(
     return row
 
 
-def sync_missing_news_item_discussions(db: Session, *, limit: int = 500) -> int:
-    """Backfill latest discussion rows for supported news items missing one."""
+def _ready_representative_news_item_clause():
+    return and_(
+        NewsItem.status == NewsItemStatus.READY.value,
+        NewsItem.representative_news_item_id.is_(None),
+    )
+
+
+def _visible_to_active_user_clause():
+    """Return a SQL clause matching rows visible in at least one active user's feed."""
+    active_owner_exists = exists(
+        select(User.id).where(
+            User.id == NewsItem.owner_user_id,
+            User.is_active.is_(True),
+        )
+    )
+
+    aggregator_key = sa_cast(UserScraperConfig.config, JSONB)["key"].astext
+    active_aggregator_subscription_exists = exists(
+        select(UserScraperConfig.id)
+        .join(User, User.id == UserScraperConfig.user_id)
+        .where(User.is_active.is_(True))
+        .where(UserScraperConfig.scraper_type == AGGREGATOR_SCRAPER_TYPE)
+        .where(UserScraperConfig.is_active.is_(True))
+        .where(func.lower(aggregator_key) == NewsItem.platform)
+    )
+
+    fallback_user = aliased(User)
+    fallback_config = aliased(UserScraperConfig)
+    fallback_news_item = aliased(NewsItem)
+    fallback_config_key = sa_cast(fallback_config.config, JSONB)["key"].astext
+
+    fallback_user_has_aggregator = exists(
+        select(fallback_config.id)
+        .where(fallback_config.user_id == fallback_user.id)
+        .where(fallback_config.scraper_type == AGGREGATOR_SCRAPER_TYPE)
+        .where(fallback_config.is_active.is_(True))
+        .where(fallback_config_key.is_not(None))
+    )
+    fallback_user_has_scoped_scraper_news = exists(
+        select(fallback_news_item.id)
+        .where(fallback_news_item.visibility_scope == NewsItemVisibilityScope.USER.value)
+        .where(fallback_news_item.owner_user_id == fallback_user.id)
+        .where(fallback_news_item.user_scraper_config_id.is_not(None))
+        .where(
+            fallback_news_item.status.in_(
+                [
+                    NewsItemStatus.NEW.value,
+                    NewsItemStatus.PROCESSING.value,
+                    NewsItemStatus.READY.value,
+                ]
+            )
+        )
+    )
+    active_fallback_user_exists = exists(
+        select(fallback_user.id)
+        .where(fallback_user.is_active.is_(True))
+        .where(~fallback_user_has_aggregator)
+        .where(~fallback_user_has_scoped_scraper_news)
+    )
+
+    user_scoped_clause = and_(
+        NewsItem.visibility_scope == NewsItemVisibilityScope.USER.value,
+        active_owner_exists,
+    )
+    subscribed_global_clause = and_(
+        NewsItem.visibility_scope == NewsItemVisibilityScope.GLOBAL.value,
+        active_aggregator_subscription_exists,
+    )
+    fallback_global_clause = and_(
+        NewsItem.visibility_scope == NewsItemVisibilityScope.GLOBAL.value,
+        or_(NewsItem.source_type.is_(None), NewsItem.source_type != "reddit"),
+        active_fallback_user_exists,
+    )
+    return or_(user_scoped_clause, subscribed_global_clause, fallback_global_clause)
+
+
+def _supported_discussion_news_item_clause():
+    return or_(
+        NewsItem.platform.in_(["hackernews", "reddit", "hn"]),
+        NewsItem.discussion_url.ilike("%ycombinator.com%"),
+        NewsItem.discussion_url.ilike("%reddit.com%"),
+        NewsItem.canonical_item_url.ilike("%ycombinator.com%"),
+        NewsItem.canonical_item_url.ilike("%reddit.com%"),
+    )
+
+
+def is_news_item_discussion_visible_to_active_user(db: Session, *, news_item_id: int) -> bool:
+    """Return whether a news item is currently visible in at least one active user's feed."""
+    return (
+        db.query(NewsItem.id)
+        .filter(NewsItem.id == news_item_id)
+        .filter(_ready_representative_news_item_clause())
+        .filter(_visible_to_active_user_clause())
+        .first()
+        is not None
+    )
+
+
+def should_enqueue_news_item_discussion_refresh(
+    db: Session,
+    *,
+    row: NewsItemDiscussion,
+    now: datetime | None = None,
+) -> bool:
+    """Return whether a scrape should enqueue a full discussion refresh."""
+    if row.news_item_id is None:
+        return False
+
+    current_time = now or _utcnow_naive()
+    if row.next_refresh_after is not None and row.next_refresh_after > current_time:
+        return False
+    return is_news_item_discussion_visible_to_active_user(
+        db,
+        news_item_id=row.news_item_id,
+    )
+
+
+def sync_missing_visible_news_item_discussions(db: Session, *, limit: int = 500) -> int:
+    """Backfill discussion rows only for supported items visible to active users."""
     existing_ids = db.query(NewsItemDiscussion.news_item_id)
     candidates = (
         db.query(NewsItem)
         .filter(NewsItem.id.notin_(existing_ids))
-        .filter(
-            or_(
-                NewsItem.platform.in_(["hackernews", "reddit", "hn"]),
-                NewsItem.discussion_url.ilike("%ycombinator.com%"),
-                NewsItem.discussion_url.ilike("%reddit.com%"),
-                NewsItem.canonical_item_url.ilike("%ycombinator.com%"),
-                NewsItem.canonical_item_url.ilike("%reddit.com%"),
-            )
+        .filter(_ready_representative_news_item_clause())
+        .filter(_visible_to_active_user_clause())
+        .filter(_supported_discussion_news_item_clause())
+        .order_by(
+            func.coalesce(
+                NewsItem.published_at,
+                NewsItem.processed_at,
+                NewsItem.ingested_at,
+                NewsItem.created_at,
+            ).desc(),
+            NewsItem.id.desc(),
         )
-        .order_by(NewsItem.ingested_at.desc(), NewsItem.id.desc())
         .limit(limit)
         .all()
     )
@@ -307,6 +431,57 @@ def sync_missing_news_item_discussions(db: Session, *, limit: int = 500) -> int:
     if created_or_updated:
         db.commit()
     return created_or_updated
+
+
+def list_due_news_item_discussion_refresh_candidates(
+    db: Session,
+    *,
+    limit: int = DEFAULT_DISCUSSION_REFRESH_ENQUEUE_LIMIT,
+    now: datetime | None = None,
+) -> list[int]:
+    """Return prioritized visible news-item IDs needing full discussion refresh."""
+    normalized_limit = max(1, min(limit, 1_000))
+    current_time = now or _utcnow_naive()
+
+    comment_delta = func.coalesce(NewsItemDiscussion.comment_count, 0) - func.coalesce(
+        NewsItemDiscussion.fetched_comment_count,
+        0,
+    )
+    missing_summary = or_(
+        NewsItemDiscussion.summary.is_(None),
+        NewsItemDiscussion.summary_status != "completed",
+        NewsItemDiscussion.raw_comments_ref.is_(None),
+    )
+    sort_timestamp = func.coalesce(
+        NewsItem.published_at,
+        NewsItem.processed_at,
+        NewsItem.ingested_at,
+        NewsItem.created_at,
+    )
+
+    rows = (
+        db.query(NewsItemDiscussion.news_item_id)
+        .join(NewsItem, NewsItem.id == NewsItemDiscussion.news_item_id)
+        .filter(NewsItemDiscussion.platform.in_(list(SUPPORTED_DISCUSSION_PLATFORMS)))
+        .filter(_ready_representative_news_item_clause())
+        .filter(_visible_to_active_user_clause())
+        .filter(
+            or_(
+                NewsItemDiscussion.next_refresh_after.is_(None),
+                NewsItemDiscussion.next_refresh_after <= current_time,
+            )
+        )
+        .order_by(
+            case((missing_summary, 1), else_=0).desc(),
+            comment_delta.desc(),
+            sort_timestamp.desc(),
+            NewsItemDiscussion.next_refresh_after.asc().nullsfirst(),
+            NewsItemDiscussion.updated_at.asc(),
+        )
+        .limit(normalized_limit)
+        .all()
+    )
+    return [int(news_item_id) for (news_item_id,) in rows if news_item_id is not None]
 
 
 def _fetch_json(client: httpx.Client, url: str, *, retryable_404: bool = False) -> dict[str, Any]:
@@ -924,44 +1099,3 @@ def refresh_news_item_discussion(
         summarized=summarized,
         retryable=True,
     )
-
-
-def refresh_due_news_item_discussions(
-    db: Session,
-    *,
-    limit: int = 10,
-    summarizer: ContentSummarizer | None = None,
-) -> list[NewsItemDiscussionRefreshResult]:
-    """Refresh due HN/Reddit discussion rows for the scheduled scraper."""
-    sync_missing_news_item_discussions(db, limit=max(limit * 10, 50))
-    now = _utcnow_naive()
-    rows = (
-        db.query(NewsItemDiscussion)
-        .filter(NewsItemDiscussion.platform.in_(list(SUPPORTED_DISCUSSION_PLATFORMS)))
-        .filter(
-            or_(
-                NewsItemDiscussion.next_refresh_after.is_(None),
-                NewsItemDiscussion.next_refresh_after <= now,
-            )
-        )
-        .order_by(
-            NewsItemDiscussion.next_refresh_after.asc().nullsfirst(),
-            NewsItemDiscussion.updated_at.asc(),
-        )
-        .limit(limit)
-        .all()
-    )
-
-    results: list[NewsItemDiscussionRefreshResult] = []
-    for row in rows:
-        news_item_id = row.news_item_id
-        if news_item_id is None:
-            continue
-        results.append(
-            refresh_news_item_discussion(
-                db,
-                news_item_id=news_item_id,
-                summarizer=summarizer,
-            )
-        )
-    return results

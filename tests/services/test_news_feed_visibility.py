@@ -121,8 +121,7 @@ def test_visibility_filters_global_items_to_user_aggregator_picks(
     )
     db_session.commit()
 
-    # No subscriptions yet → backwards-compat, both visible.
-    assert count_unread_news_items(db_session, user_id=user_id) == 2
+    assert count_unread_news_items(db_session, user_id=user_id) == 0
 
     _add_aggregator_subscription(db_session, user_id=user_id, key="hackernews")
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -10,14 +10,16 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session, get_readonly_db_session, get_session_factory
 from app.core.deps import get_current_user, require_user_id
-from app.models.api.audio_episodes import AudioEpisodeResponse
-from app.models.db import AudioEpisode
+from app.models.api.audio_episodes import (
+    AudioEpisodeDelivery,
+    AudioEpisodeResponse,
+)
 from app.models.db.users import User
 from app.services.audio_episodes import (
     audio_episode_file_path,
+    commit_audio_episode_delivery,
     create_content_council_episode,
     create_fast_news_digest_episode,
-    enqueue_audio_episode_generation,
     get_user_audio_episode,
     is_audio_episode_processing_stale,
     present_audio_episode,
@@ -25,25 +27,6 @@ from app.services.audio_episodes import (
 )
 
 router = APIRouter()
-AudioEpisodeDelivery = Literal["background", "stream"]
-
-
-def _commit_enqueue_and_present(
-    db: Session,
-    episode: AudioEpisode,
-    *,
-    delivery: AudioEpisodeDelivery,
-) -> AudioEpisodeResponse:
-    """Commit the episode before queueing so workers can resolve it immediately."""
-
-    db.commit()
-    db.refresh(episode)
-    if delivery == "background" and episode.status != "completed":
-        episode_id = episode.id
-        if episode_id is None:
-            raise RuntimeError("Audio episode must be persisted before enqueue")
-        enqueue_audio_episode_generation(episode_id)
-    return present_audio_episode(episode)
 
 
 @router.post(
@@ -60,7 +43,7 @@ def create_fast_news_audio_episode(
 
     user_id = require_user_id(current_user)
     episode = create_fast_news_digest_episode(db, user_id=user_id)
-    return _commit_enqueue_and_present(db, episode, delivery=delivery)
+    return commit_audio_episode_delivery(db, episode, delivery=delivery)
 
 
 @router.post(
@@ -78,7 +61,7 @@ def create_content_council_audio_episode(
 
     user_id = require_user_id(current_user)
     episode = create_content_council_episode(db, user_id=user_id, content_id=content_id)
-    return _commit_enqueue_and_present(db, episode, delivery=delivery)
+    return commit_audio_episode_delivery(db, episode, delivery=delivery)
 
 
 @router.get(

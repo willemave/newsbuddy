@@ -456,6 +456,13 @@ extension UIColor {
                 : UIColor(red: 0.290, green: 0.306, blue: 0.341, alpha: 1.0)  // #4A4E57
         }
     }
+    static var appOnSurface: UIColor {
+        UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.929, green: 0.925, blue: 0.910, alpha: 1.0)  // #edece8
+                : UIColor(red: 0.110, green: 0.110, blue: 0.098, alpha: 1.0)  // #1c1c19
+        }
+    }
     static var appOnSurfaceSecondary: UIColor {
         UIColor { tc in
             tc.userInterfaceStyle == .dark

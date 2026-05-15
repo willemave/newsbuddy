@@ -38,6 +38,17 @@ final class AudioEpisodeService {
         )
     }
 
+    func createNewsItemDiscussionEpisode(
+        newsItemId: Int,
+        delivery: AudioEpisodeDelivery = .background
+    ) async throws -> AudioEpisode {
+        try await client.request(
+            APIEndpoints.newsItemAudioEpisode(id: newsItemId),
+            method: "POST",
+            queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+        )
+    }
+
     func fetchEpisode(id: Int) async throws -> AudioEpisode {
         try await client.request(APIEndpoints.audioEpisode(id: id))
     }

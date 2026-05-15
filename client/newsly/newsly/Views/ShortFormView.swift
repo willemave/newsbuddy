@@ -55,7 +55,7 @@ struct ShortFormView: View {
                         .padding(.bottom, 24)
 
                     shortNewsQuickActions(items: items)
-                        .padding(.bottom, 20)
+                        .padding(.bottom, shouldShowFastNewsAudioControls ? 8 : 20)
 
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         // Day delimiter: show when this item starts a new day
@@ -291,6 +291,7 @@ struct ShortFormView: View {
                     .padding(.horizontal, Spacing.screenHorizontal)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func makeQuickActions(items: [ContentSummary]) -> [ShortNewsQuickAction] {
@@ -475,8 +476,8 @@ private struct ShortNewsRow: View, Equatable {
         lhs.item == rhs.item
     }
 
-    private var titleColor: Color {
-        item.isRead ? .secondary : .primary
+    private var titleUIColor: UIColor {
+        item.isRead ? .appOnSurfaceSecondary : .appOnSurface
     }
 
     private var titleUIFont: UIFont {
@@ -508,7 +509,7 @@ private struct ShortNewsRow: View, Equatable {
             // Headline
             SelectableText(
                 item.displayTitle,
-                textColor: UIColor(titleColor),
+                textColor: titleUIColor,
                 font: titleUIFont,
                 lineLimit: 3,
                 lineBreakMode: .byTruncatingTail,

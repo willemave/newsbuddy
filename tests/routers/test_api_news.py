@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.constants import AGGREGATOR_FEED_URL_PREFIX, AGGREGATOR_SCRAPER_TYPE
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content, NewsItem, NewsItemReadStatus
+from app.models.db import Content, NewsItem, NewsItemReadStatus, UserScraperConfig
 from app.repositories import knowledge_repository
 
 
@@ -89,11 +90,26 @@ def _create_news_item(
     return item
 
 
+def _subscribe_to_hackernews(db_session, *, user_id: int) -> None:
+    db_session.add(
+        UserScraperConfig(
+            user_id=user_id,
+            scraper_type=AGGREGATOR_SCRAPER_TYPE,
+            display_name="Hacker News",
+            feed_url=f"{AGGREGATOR_FEED_URL_PREFIX}hackernews",
+            is_active=True,
+            config={"key": "hackernews"},
+        )
+    )
+    db_session.flush()
+
+
 def test_list_news_items_hides_suppressed_members_and_marks_read(
     client,
     db_session,
     test_user,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     representative = _create_news_item(
         db_session,
         ingest_key="rep-1",
@@ -152,7 +168,9 @@ def test_list_news_items_hides_suppressed_members_and_marks_read(
 def test_list_news_items_falls_back_from_blocked_titles_to_summary_text(
     client,
     db_session,
+    test_user,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     item = _create_news_item(
         db_session,
         ingest_key="blocked-title",
@@ -177,6 +195,7 @@ def test_mark_news_items_read_is_idempotent_for_existing_rows(
     db_session,
     test_user,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     representative = _create_news_item(
         db_session,
         ingest_key="rep-existing",
@@ -217,7 +236,9 @@ def test_mark_news_items_read_is_idempotent_for_existing_rows(
 def test_list_news_items_uses_denormalized_comment_count_when_available(
     client,
     db_session,
+    test_user,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     news_item = _create_news_item(
         db_session,
         ingest_key="rep-comments",
@@ -269,7 +290,9 @@ def test_list_news_items_prefers_user_scoped_scraper_news_when_available(
 def test_list_news_items_excludes_global_reddit_items(
     client,
     db_session,
+    test_user,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     _create_news_item(
         db_session,
         ingest_key="global-hn-story",
@@ -293,7 +316,8 @@ def test_list_news_items_excludes_global_reddit_items(
     assert [item["title"] for item in payload["contents"]] == ["Global hacker news story"]
 
 
-def test_get_news_item_detail_includes_cluster_metadata(client, db_session) -> None:
+def test_get_news_item_detail_includes_cluster_metadata(client, db_session, test_user) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     news_item = _create_news_item(
         db_session,
         ingest_key="detail-1",
@@ -311,7 +335,8 @@ def test_get_news_item_detail_includes_cluster_metadata(client, db_session) -> N
     assert payload["metadata"]["summary"]["key_points"] == ["Point one", "Point two"]
 
 
-def test_list_news_items_falls_back_from_placeholder_titles(client, db_session) -> None:
+def test_list_news_items_falls_back_from_placeholder_titles(client, db_session, test_user) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     news_item = _create_news_item(
         db_session,
         ingest_key="skill-0",
@@ -337,7 +362,9 @@ def test_list_news_items_falls_back_from_placeholder_titles(client, db_session) 
 def test_get_news_item_detail_restores_key_points_when_summary_metadata_is_empty(
     client,
     db_session,
+    test_user,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     news_item = _create_news_item(
         db_session,
         ingest_key="detail-empty-summary",
@@ -361,7 +388,9 @@ def test_get_news_item_detail_restores_key_points_when_summary_metadata_is_empty
 def test_news_item_responses_prefer_materialized_summary_metadata_title(
     client,
     db_session,
+    test_user,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     news_item = _create_news_item(
         db_session,
         ingest_key="materialized-summary-title",
@@ -399,7 +428,9 @@ def test_news_item_responses_prefer_materialized_summary_metadata_title(
 def test_list_news_items_orders_by_published_at_before_ingested_at(
     client,
     db_session,
+    test_user,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     older_published = _create_news_item(
         db_session,
         ingest_key="older-published",
@@ -430,6 +461,7 @@ def test_convert_news_item_to_article_queues_processing(
     test_user,
     monkeypatch,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     news_item = _create_news_item(
         db_session,
         ingest_key="convert-1",
@@ -469,6 +501,7 @@ def test_convert_news_item_to_article_ignores_unrelated_content_id_collision(
     test_user,
     monkeypatch,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     unrelated_content = Content(
         url="https://example.com/unrelated-content",
         content_type=ContentType.ARTICLE.value,
@@ -518,6 +551,7 @@ def test_convert_news_item_to_article_reuses_existing_article_and_saves_to_knowl
     test_user,
     monkeypatch,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     existing_article = Content(
         url="https://example.com/convert-existing",
         source_url="https://example.com/convert-existing",

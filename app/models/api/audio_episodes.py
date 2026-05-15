@@ -5,7 +5,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-AudioEpisodeKind = Literal["fast_news_digest", "content_council_discussion"]
+AudioEpisodeKind = Literal[
+    "fast_news_digest",
+    "content_council_discussion",
+    "news_item_discussion",
+]
+AudioEpisodeDelivery = Literal["background", "stream"]
 AudioEpisodeStatus = Literal["pending", "processing", "completed", "failed"]
 
 

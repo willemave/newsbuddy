@@ -14,12 +14,17 @@ from app.commands.convert_news_to_article import (
 )
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
+from app.models.api.audio_episodes import AudioEpisodeDelivery, AudioEpisodeResponse
 from app.models.api.content import ContentDetailResponse, ContentListResponse
 from app.models.api.content_actions import BulkMarkReadRequest
 from app.models.api.content_discussions import ContentDiscussionResponse
 from app.models.api.news import ConvertNewsItemResponse
 from app.models.db.users import User
 from app.queries import get_news_item_discussion as get_news_item_discussion_query
+from app.services.audio_episodes import (
+    commit_audio_episode_delivery,
+    create_news_item_discussion_episode,
+)
 from app.services.news_feed import (
     bulk_mark_news_items_read,
     get_visible_news_item,
@@ -106,6 +111,27 @@ def get_news_item_discussion(
         user_id=require_user_id(current_user),
         news_item_id=news_item_id,
     )
+
+
+@router.post(
+    "/items/{news_item_id}/audio-episodes/discussion",
+    response_model=AudioEpisodeResponse,
+    summary="Create an on-demand Fast Read discussion podcast episode",
+)
+def create_news_item_audio_episode(
+    news_item_id: Annotated[int, Path(..., gt=0)],
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    delivery: Annotated[AudioEpisodeDelivery, Query()] = "background",
+) -> AudioEpisodeResponse:
+    """Create or reuse a single-item Fast Read discussion and enqueue generation."""
+
+    episode = create_news_item_discussion_episode(
+        db,
+        user_id=require_user_id(current_user),
+        news_item_id=news_item_id,
+    )
+    return commit_audio_episode_delivery(db, episode, delivery=delivery)
 
 
 @router.post(

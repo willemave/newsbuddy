@@ -58,7 +58,7 @@ struct SelectableText: UIViewRepresentable {
 
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
         uiView.text = text
-        uiView.textColor = textColor.resolvedColor(with: uiView.traitCollection)
+        uiView.adaptiveTextColor = textColor
         uiView.font = font
         uiView.textContainer.maximumNumberOfLines = lineLimit ?? 0
         uiView.textContainer.lineBreakMode = lineBreakMode

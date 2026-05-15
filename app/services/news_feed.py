@@ -63,26 +63,6 @@ def _news_item_sort_timestamp(item: NewsItem) -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _has_user_scoped_scraper_news(db: Session, *, user_id: int) -> bool:
-    return (
-        db.query(NewsItem.id)
-        .filter(NewsItem.visibility_scope == NewsItemVisibilityScope.USER.value)
-        .filter(NewsItem.owner_user_id == user_id)
-        .filter(NewsItem.user_scraper_config_id.is_not(None))
-        .filter(
-            NewsItem.status.in_(
-                [
-                    NewsItemStatus.NEW.value,
-                    NewsItemStatus.PROCESSING.value,
-                    NewsItemStatus.READY.value,
-                ]
-            )
-        )
-        .first()
-        is not None
-    )
-
-
 def _user_aggregator_subscriptions(db: Session, *, user_id: int) -> dict[str, list[str]]:
     """Return aggregator key → selected topics for the user's active subs.
 
@@ -151,19 +131,7 @@ def build_visible_news_item_filter(db: Session, *, user_id: int):
         )
         return or_(global_clause, user_clause)
 
-    if _has_user_scoped_scraper_news(db, user_id=user_id):
-        return user_clause
-
-    # Backwards-compat fallback for users who haven't picked aggregators yet:
-    # show legacy GLOBAL non-reddit rows alongside their user-scoped items.
-    global_non_reddit_clause = and_(
-        NewsItem.visibility_scope == NewsItemVisibilityScope.GLOBAL.value,
-        or_(
-            NewsItem.source_type.is_(None),
-            NewsItem.source_type != "reddit",
-        ),
-    )
-    return or_(global_non_reddit_clause, user_clause)
+    return user_clause
 
 
 def _news_item_is_read_clause(*, user_id: int):

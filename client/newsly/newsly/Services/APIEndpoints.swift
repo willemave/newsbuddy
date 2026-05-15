@@ -28,9 +28,6 @@ enum APIEndpoints {
     static func markContentUnread(id: Int) -> String {
         return "/api/content/\(id)/mark-unread"
     }
-    static func narration(_ target: NarrationTarget) -> String {
-        return "/api/content/narration/\(target.pathComponent)/\(target.id)"
-    }
     static let fastNewsAudioEpisode = "/api/content/audio-episodes/fast-news"
     static func contentCouncilAudioEpisode(id: Int) -> String {
         return "/api/content/\(id)/audio-episodes/council"
@@ -46,6 +43,9 @@ enum APIEndpoints {
     }
     static func newsItemDiscussion(id: Int) -> String {
         return "/api/news/items/\(id)/discussion"
+    }
+    static func newsItemAudioEpisode(id: Int) -> String {
+        return "/api/news/items/\(id)/audio-episodes/discussion"
     }
     static func newsItemDiscussionRefresh(id: Int) -> String {
         return "/api/news/items/\(id)/discussion/refresh"

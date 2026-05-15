@@ -81,9 +81,8 @@ struct ContentDetailView: View {
     @State private var isStartingChat: Bool = false
     @State private var chatError: String?
     @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
-    @State private var loadingNarrationTargets: Set<NarrationTarget> = []
-    @State private var loadingDiscussionAudioContentIds: Set<Int> = []
-    @State private var discussionAudioEpisodeByContentId: [Int: AudioEpisode] = [:]
+    @State private var loadingAudioEpisodeContentIds: Set<Int> = []
+    @State private var audioEpisodeByContentId: [Int: AudioEpisode] = [:]
     @State private var activeAlert: ViewAlert?
     // Full image viewer
     @State private var selectedImageAsset: DetailImageAsset?
@@ -452,12 +451,14 @@ struct ContentDetailView: View {
             viewModel.updateContentId(idToLoad, contentType: initialContentType)
             await viewModel.loadContent()
         }
-        .onChange(of: viewModel.content?.id) { _, newValue in
-            guard let id = newValue, let content = viewModel.content else { return }
-            if case .content(let activeContentId)? = narrationPlaybackService.speakingTarget,
-               activeContentId != id {
+        .onChange(of: viewModel.content?.id) { oldValue, newValue in
+            if let oldValue,
+               oldValue != newValue,
+               let oldTarget = podcastAudioTarget(forContentId: oldValue),
+               narrationPlaybackService.speakingTarget == oldTarget {
                 narrationPlaybackService.stop()
             }
+            guard let id = newValue, let content = viewModel.content else { return }
             if let type = content.contentTypeEnum {
                 readingStateStore.setCurrent(contentId: id, type: type)
             }
@@ -490,8 +491,9 @@ struct ContentDetailView: View {
             }
         }
         .onDisappear {
-            if let contentId = viewModel.content?.id,
-               narrationPlaybackService.speakingTarget == .content(contentId) {
+            if let content = viewModel.content,
+               let target = podcastAudioTarget(for: content),
+               narrationPlaybackService.speakingTarget == target {
                 narrationPlaybackService.stop()
             }
             readingStateStore.clear()
@@ -771,251 +773,194 @@ struct ContentDetailView: View {
 
     @ViewBuilder
     private func audioPromptCard(for content: ContentDetail) -> some View {
-        VStack(spacing: 10) {
-            NarrationPressButton(
-                isDisabled: isNarrationLoading(for: content),
-                accessibilityLabel: narrationAccessibilityLabel(for: content),
-                onTap: {
-                    Task { await handleSummaryNarration(for: content) }
-                },
-                onSelectPlaybackSpeed: { option in
-                    Task {
-                        await handleSummaryNarration(
-                            for: content,
-                            rate: option.rate
-                        )
-                    }
+        NarrationPressButton(
+            isDisabled: isPodcastAudioLoading(for: content),
+            accessibilityLabel: podcastAudioAccessibilityLabel(for: content),
+            onTap: {
+                Task { await handlePodcastAudio(for: content) }
+            },
+            onSelectPlaybackSpeed: { option in
+                Task {
+                    await handlePodcastAudio(
+                        for: content,
+                        rate: option.rate
+                    )
                 }
-            ) {
-                HStack(spacing: 12) {
-                    sheetOptionIcon("text.quote", color: .indigo, size: 16)
+            }
+        ) {
+            HStack(spacing: 12) {
+                sheetOptionIcon(
+                    isPodcastAudioActive(for: content)
+                        ? "pause.fill"
+                        : "person.3.sequence.fill",
+                    color: .orange,
+                    size: 16
+                )
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(
-                            isNarrationActive(for: content)
-                                ? "Pause summary narration"
-                                : "Narrate summary here"
-                        )
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                        Text(
-                            isNarrationActive(for: content)
-                                ? "Resume from this spot later"
-                                : "Tap to listen at \(narrationPlaybackService.playbackSpeedTitle). Hold for speed options."
-                        )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(
+                        isPodcastAudioActive(for: content)
+                            ? "Pause podcast overview"
+                            : "Podcast overview"
+                    )
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                    Text(podcastAudioStatusText(for: content))
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
-                    }
-
-                    Spacer()
                 }
-                .miniSheetOptionSurface()
-            }
-            .accessibilityIdentifier("content.dictate_summary_live")
 
-            if supportsContentDiscussionAudio(for: content) {
-                Button {
-                    Task { await handleContentDiscussionAudio(for: content) }
-                } label: {
-                    HStack(spacing: 12) {
-                        sheetOptionIcon(
-                            isDiscussionAudioActive(for: content)
-                                ? "pause.fill"
-                                : "person.3.sequence.fill",
-                            color: .orange,
-                            size: 16
-                        )
+                Spacer()
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(
-                                isDiscussionAudioActive(for: content)
-                                    ? "Pause expert discussion"
-                                    : "Expert audio discussion"
-                            )
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                            Text(discussionAudioStatusText(for: content))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.85)
-                        }
-
-                        Spacer()
-
-                        if isDiscussionAudioLoading(for: content) {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
-                    .miniSheetOptionSurface()
+                if isPodcastAudioLoading(for: content) {
+                    ProgressView()
+                        .controlSize(.small)
                 }
-                .buttonStyle(SheetOptionButtonStyle())
-                .disabled(isDiscussionAudioLoading(for: content))
-                .accessibilityIdentifier("content.audio.expert_discussion")
             }
+            .miniSheetOptionSurface()
         }
+        .accessibilityIdentifier("content.audio.podcast_overview")
     }
 
-    private func supportsSummaryNarration(for content: ContentDetail) -> Bool {
+    private func supportsPodcastAudio(for content: ContentDetail) -> Bool {
         guard let type = content.contentTypeEnum else { return false }
         return type == .article || type == .news || type == .podcast
     }
 
-    private func supportsContentDiscussionAudio(for content: ContentDetail) -> Bool {
-        guard let type = content.contentTypeEnum else { return false }
-        return type == .article || type == .podcast
+    private func podcastAudioTarget(for content: ContentDetail) -> NarrationTarget? {
+        podcastAudioTarget(forContentId: content.id)
     }
 
-    private func narrationTarget(for content: ContentDetail) -> NarrationTarget {
-        .content(content.id)
-    }
-
-    private func discussionAudioTarget(for content: ContentDetail) -> NarrationTarget? {
-        guard let episode = discussionAudioEpisodeByContentId[content.id] else { return nil }
+    private func podcastAudioTarget(forContentId contentId: Int) -> NarrationTarget? {
+        guard let episode = audioEpisodeByContentId[contentId] else { return nil }
         return .audioEpisode(episode.id)
     }
 
     @ViewBuilder
-    private func narrationActionIcon(for content: ContentDetail, overlaid: Bool = false) -> some View {
-        if isNarrationLoading(for: content) {
+    private func podcastAudioActionIcon(for content: ContentDetail, overlaid: Bool = false) -> some View {
+        if isPodcastAudioLoading(for: content) {
             ProgressView()
                 .scaleEffect(0.8)
                 .frame(width: 44, height: 44)
-        } else if isNarrationActive(for: content) {
+        } else if isPodcastAudioActive(for: content) {
             minimalActionIcon("speaker.wave.3.fill", color: overlaid ? .white : .blue, overlaid: overlaid)
         } else {
             minimalActionIcon("speaker.wave.2", color: .secondary, overlaid: overlaid)
         }
     }
 
-    private func narrationAccessibilityLabel(for content: ContentDetail) -> String {
-        if isNarrationActive(for: content) {
-            return "Pause summary narration"
+    private func podcastAudioAccessibilityLabel(for content: ContentDetail) -> String {
+        if isPodcastAudioActive(for: content) {
+            return "Pause podcast overview"
         }
-        return "Narrate summary at \(narrationPlaybackService.playbackSpeedTitle)"
+        return "Play podcast overview at \(narrationPlaybackService.playbackSpeedTitle)"
     }
 
-    private func isNarrationActive(for content: ContentDetail) -> Bool {
-        narrationPlaybackService.isSpeaking
-            && narrationPlaybackService.speakingTarget == narrationTarget(for: content)
-    }
-
-    private func isNarrationLoading(for content: ContentDetail) -> Bool {
-        loadingNarrationTargets.contains(narrationTarget(for: content))
-    }
-
-    private func shouldShowSummaryPlaybackControls(for content: ContentDetail) -> Bool {
-        let target = narrationTarget(for: content)
-        return isNarrationLoading(for: content)
-            || narrationPlaybackService.speakingTarget == target
-    }
-
-    private func summaryPlaybackControls(for content: ContentDetail) -> some View {
-        NarrationPlaybackControlRow(
-            playbackService: narrationPlaybackService,
-            target: narrationTarget(for: content),
-            isPreparing: isNarrationLoading(for: content),
-            onTogglePlayback: {
-                Task { await handleSummaryNarration(for: content) }
-            }
-        )
-        .accessibilityIdentifier("content.audio.summary.controls")
-    }
-
-    private func isDiscussionAudioActive(for content: ContentDetail) -> Bool {
-        guard let target = discussionAudioTarget(for: content) else { return false }
+    private func isPodcastAudioActive(for content: ContentDetail) -> Bool {
+        guard let target = podcastAudioTarget(for: content) else { return false }
         return narrationPlaybackService.isSpeaking
             && narrationPlaybackService.speakingTarget == target
     }
 
-    private func isDiscussionAudioLoading(for content: ContentDetail) -> Bool {
-        loadingDiscussionAudioContentIds.contains(content.id)
+    private func isPodcastAudioLoading(for content: ContentDetail) -> Bool {
+        loadingAudioEpisodeContentIds.contains(content.id)
     }
 
-    private func discussionAudioStatusText(for content: ContentDetail) -> String {
-        if isDiscussionAudioLoading(for: content) {
+    private func shouldShowPodcastPlaybackControls(for content: ContentDetail) -> Bool {
+        if isPodcastAudioLoading(for: content) {
+            return true
+        }
+        guard let target = podcastAudioTarget(for: content) else { return false }
+        return narrationPlaybackService.speakingTarget == target
+    }
+
+    private func podcastPlaybackControls(for content: ContentDetail) -> some View {
+        NarrationPlaybackControlRow(
+            playbackService: narrationPlaybackService,
+            target: podcastAudioTarget(for: content),
+            isPreparing: isPodcastAudioLoading(for: content),
+            onTogglePlayback: {
+                Task { await handlePodcastAudio(for: content) }
+            }
+        )
+        .accessibilityIdentifier("content.audio.podcast.controls")
+    }
+
+    private func podcastAudioStatusText(for content: ContentDetail) -> String {
+        if isPodcastAudioLoading(for: content) {
             return "Preparing audio"
         }
-        if isDiscussionAudioActive(for: content) {
-            return "Playing"
+        if isPodcastAudioActive(for: content) {
+            return "Playing at \(narrationPlaybackService.playbackSpeedTitle)"
         }
-        return "5-minute council overview"
+        return "5-minute podcast-style discussion"
     }
 
     @MainActor
-    private func handleSummaryNarration(
+    private func handlePodcastAudio(
         for content: ContentDetail,
         rate: Float? = nil
     ) async {
-        let target = narrationTarget(for: content)
         let playbackRate = rate ?? narrationPlaybackService.playbackRate
-        if isNarrationActive(for: content),
-           abs(narrationPlaybackService.playbackRate - playbackRate) < 0.001 {
-            narrationPlaybackService.pause()
+        if isPodcastAudioActive(for: content) {
+            if abs(narrationPlaybackService.playbackRate - playbackRate) < 0.001 {
+                narrationPlaybackService.pause()
+            } else {
+                narrationPlaybackService.setPlaybackRate(playbackRate)
+            }
             return
         }
+        guard supportsPodcastAudio(for: content) else { return }
+        guard !isPodcastAudioLoading(for: content) else { return }
 
-        loadingNarrationTargets.insert(target)
-        defer { loadingNarrationTargets.remove(target) }
-
-        do {
-            try await narrationPlaybackService.playNarration(
-                for: target,
-                rate: playbackRate,
-                fetchAudio: {
-                    try await NarrationService.shared.fetchNarrationAudio(for: target)
-                },
-                fetchNarrationText: {
-                    let response = try await NarrationService.shared.fetchNarration(for: target)
-                    return response.narrationText
-                }
-            )
-        } catch {
-            activeAlert = ViewAlert(
-                title: "Narration",
-                message: "Failed to load narration: \(error.localizedDescription)"
-            )
-        }
-    }
-
-    @MainActor
-    private func handleContentDiscussionAudio(for content: ContentDetail) async {
-        if isDiscussionAudioActive(for: content) {
-            narrationPlaybackService.pause()
-            return
-        }
-        guard !isDiscussionAudioLoading(for: content) else { return }
-
-        loadingDiscussionAudioContentIds.insert(content.id)
-        defer { loadingDiscussionAudioContentIds.remove(content.id) }
+        loadingAudioEpisodeContentIds.insert(content.id)
+        defer { loadingAudioEpisodeContentIds.remove(content.id) }
 
         do {
             let episode: AudioEpisode
-            if let existingEpisode = discussionAudioEpisodeByContentId[content.id] {
+            if let existingEpisode = audioEpisodeByContentId[content.id] {
                 episode = existingEpisode
             } else {
-                episode = try await AudioEpisodeService.shared.createContentCouncilEpisode(
-                    contentId: content.id,
-                    delivery: .stream
-                )
+                episode = try await createPodcastAudioEpisode(for: content)
             }
-            discussionAudioEpisodeByContentId[content.id] = episode
+            audioEpisodeByContentId[content.id] = episode
+            guard viewModel.content?.id == content.id else { return }
             let target = NarrationTarget.audioEpisode(episode.id)
             try await narrationPlaybackService.playStreamingNarration(
                 for: target,
+                rate: playbackRate,
                 fetchStreamResource: {
                     try await AudioEpisodeService.shared.streamResource(for: episode)
                 }
             )
         } catch {
             activeAlert = ViewAlert(
-                title: "Audio discussion",
-                message: "Failed to load audio discussion: \(error.localizedDescription)"
+                title: "Audio",
+                message: "Failed to load podcast audio: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func createPodcastAudioEpisode(for content: ContentDetail) async throws -> AudioEpisode {
+        switch content.contentTypeEnum {
+        case .article, .podcast:
+            return try await AudioEpisodeService.shared.createContentCouncilEpisode(
+                contentId: content.id,
+                delivery: .stream
+            )
+        case .news:
+            return try await AudioEpisodeService.shared.createNewsItemDiscussionEpisode(
+                newsItemId: content.id,
+                delivery: .stream
+            )
+        case .none:
+            throw NSError(
+                domain: "ContentDetailView",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This item does not support podcast audio."]
             )
         }
     }
@@ -1140,8 +1085,8 @@ struct ContentDetailView: View {
                     actionBar(content: content, overlaid: true)
                         .padding(.top, 2)
 
-                    if shouldShowSummaryPlaybackControls(for: content) {
-                        summaryPlaybackControls(for: content)
+                    if shouldShowPodcastPlaybackControls(for: content) {
+                        podcastPlaybackControls(for: content)
                             .padding(.top, 2)
                     }
                 }
@@ -1205,8 +1150,8 @@ struct ContentDetailView: View {
                     .padding(.horizontal, DetailDesign.horizontalPadding)
                     .padding(.top, 2)
 
-                if shouldShowSummaryPlaybackControls(for: content) {
-                    summaryPlaybackControls(for: content)
+                if shouldShowPodcastPlaybackControls(for: content) {
+                    podcastPlaybackControls(for: content)
                         .padding(.horizontal, DetailDesign.horizontalPadding)
                         .padding(.top, 4)
                 }
@@ -1309,27 +1254,27 @@ struct ContentDetailView: View {
                 .accessibilityIdentifier("content.action.knowledge")
             }
 
-            if supportsSummaryNarration(for: content) {
+            if supportsPodcastAudio(for: content) {
                 Spacer()
 
                 NarrationPressButton(
-                    isDisabled: isNarrationLoading(for: content),
-                    accessibilityLabel: narrationAccessibilityLabel(for: content),
+                    isDisabled: isPodcastAudioLoading(for: content),
+                    accessibilityLabel: podcastAudioAccessibilityLabel(for: content),
                     onTap: {
-                        Task { await handleSummaryNarration(for: content) }
+                        Task { await handlePodcastAudio(for: content) }
                     },
                     onSelectPlaybackSpeed: { option in
                         Task {
-                            await handleSummaryNarration(
+                            await handlePodcastAudio(
                                 for: content,
                                 rate: option.rate
                             )
                         }
                     }
                 ) {
-                    narrationActionIcon(for: content, overlaid: overlaid)
+                    podcastAudioActionIcon(for: content, overlaid: overlaid)
                 }
-                .accessibilityIdentifier("content.action.narrate_summary")
+                .accessibilityIdentifier("content.action.podcast_audio")
             }
 
             Spacer()
@@ -1692,7 +1637,7 @@ struct ContentDetailView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
 
-            if supportsSummaryNarration(for: content) {
+            if supportsPodcastAudio(for: content) {
                 audioPromptCard(for: content)
                     .padding(.horizontal, 20)
             }
