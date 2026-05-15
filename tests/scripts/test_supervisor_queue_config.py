@@ -5,11 +5,16 @@ from __future__ import annotations
 from configparser import RawConfigParser
 from pathlib import Path
 
+from app.models.contracts import TaskQueue
+
 
 def _load_config(config_path: str) -> RawConfigParser:
     parser = RawConfigParser()
     parser.read(Path(__file__).resolve().parents[2] / config_path)
     return parser
+
+
+EXPECTED_QUEUE_VALUES = {queue.value for queue in TaskQueue}
 
 
 def test_supervisor_config_runs_all_queue_partitions() -> None:
@@ -25,6 +30,10 @@ def test_supervisor_config_runs_all_queue_partitions() -> None:
         "program:news_app_workers_discussion": "--queue discussion",
         "program:news_app_workers_twitter": "--queue twitter",
         "program:news_app_workers_chat": "--queue chat",
+    }
+
+    assert set(required_programs) == {
+        f"program:news_app_workers_{queue}" for queue in EXPECTED_QUEUE_VALUES
     }
 
     for section, queue_arg in required_programs.items():
@@ -62,6 +71,8 @@ def test_docker_supervisor_config_runs_all_queue_partitions() -> None:
         "program:worker_twitter": "run-worker.sh twitter",
         "program:worker_chat": "run-worker.sh chat",
     }
+
+    assert set(required_programs) == {f"program:worker_{queue}" for queue in EXPECTED_QUEUE_VALUES}
 
     for section, queue_arg in required_programs.items():
         assert parser.has_section(section)

@@ -30,6 +30,7 @@ struct NarrationPlaybackControlRow: View {
             horizontalControls
             compactControls
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(Color.surfacePrimary.opacity(0.65))
@@ -44,6 +45,7 @@ struct NarrationPlaybackControlRow: View {
         HStack(spacing: 10) {
             playbackButton
             speedControls
+            Spacer(minLength: 8)
             progressScrubber
                 .frame(width: 112)
         }

@@ -151,6 +151,69 @@ def test_generate_audio_episode_persists_script_and_audio(
     assert captured_turns[0] == {"speaker": "host", "text": "Here is the setup."}
 
 
+def test_stream_audio_episode_chunks_persists_streamed_audio(
+    db_session,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    episode = AudioEpisode(
+        user_id=123,
+        kind=service.FAST_NEWS_DIGEST_KIND,
+        status="pending",
+        title="Fast Reads Brief",
+        input_hash="stream",
+        source_item_ids=[1],
+        source_snapshot={"kind": service.FAST_NEWS_DIGEST_KIND, "items": []},
+        prompt_version=service.PROMPT_VERSION,
+    )
+    db_session.add(episode)
+    db_session.commit()
+    db_session.refresh(episode)
+    assert episode.id is not None
+
+    script = service.AudioEpisodeScript(
+        title="Fast Reads Stream",
+        estimated_duration_seconds=300,
+        turns=[
+            service.AudioEpisodeTurn(speaker="host", text="Here is the setup."),
+            service.AudioEpisodeTurn(speaker="cohost", text="Here is why it matters."),
+            service.AudioEpisodeTurn(speaker="expert", text="Here is the sharper read."),
+            service.AudioEpisodeTurn(speaker="host", text="That is the takeaway."),
+            service.AudioEpisodeTurn(speaker="cohost", text="Watch the follow-up."),
+            service.AudioEpisodeTurn(speaker="expert", text="Keep an eye on adoption."),
+        ],
+    )
+
+    class FakeTtsService:
+        def stream_dialogue_mp3(self, *, turns, item_id=None, user_id=None):
+            assert item_id == episode.id
+            assert user_id == 123
+            assert list(turns)[0] == {"speaker": "host", "text": "Here is the setup."}
+            yield b"fake-"
+            yield b"stream"
+
+    monkeypatch.setattr(service, "_generate_script", lambda _episode: script)
+    monkeypatch.setattr(
+        service,
+        "get_content_narration_tts_service",
+        lambda: FakeTtsService(),
+    )
+    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(media_base_dir=tmp_path))
+
+    chunks = list(service.stream_audio_episode_chunks(audio_episode_id=episode.id, user_id=123))
+
+    assert chunks == [b"fake-", b"stream"]
+    db_session.expire_all()
+    generated = db_session.query(AudioEpisode).filter(AudioEpisode.id == episode.id).one()
+    assert generated.status == "completed"
+    assert generated.script_text is not None
+    assert generated.script_text.startswith("Fast Reads Stream")
+    audio_path = tmp_path / "audio_episodes" / f"audio-episode-{episode.id}.mp3"
+    assert generated.audio_storage_path == str(audio_path)
+    assert audio_path.read_bytes() == b"fake-stream"
+    assert not (tmp_path / "audio_episodes" / f"audio-episode-{episode.id}.mp3.part").exists()
+
+
 def test_fit_script_to_dialogue_limit_trims_overlong_turns() -> None:
     script = service.AudioEpisodeScript(
         title="Too Long",

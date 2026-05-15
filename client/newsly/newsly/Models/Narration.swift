@@ -46,6 +46,9 @@ struct AudioEpisode: Codable, Identifiable, Hashable {
     let id: Int
     let status: String
     let title: String
+    let durationSeconds: Int?
+    let audioUrl: String?
+    let streamUrl: String?
     let scriptText: String?
     let errorMessage: String?
 
@@ -53,6 +56,9 @@ struct AudioEpisode: Codable, Identifiable, Hashable {
         case id
         case status
         case title
+        case durationSeconds = "duration_seconds"
+        case audioUrl = "audio_url"
+        case streamUrl = "stream_url"
         case scriptText = "script_text"
         case errorMessage = "error_message"
     }

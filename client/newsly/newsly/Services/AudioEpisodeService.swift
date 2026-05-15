@@ -5,6 +5,11 @@
 
 import Foundation
 
+enum AudioEpisodeDelivery: String {
+    case background
+    case stream
+}
+
 final class AudioEpisodeService {
     static let shared = AudioEpisodeService()
 
@@ -12,17 +17,24 @@ final class AudioEpisodeService {
 
     private init() {}
 
-    func createFastNewsEpisode() async throws -> AudioEpisode {
+    func createFastNewsEpisode(
+        delivery: AudioEpisodeDelivery = .background
+    ) async throws -> AudioEpisode {
         try await client.request(
             APIEndpoints.fastNewsAudioEpisode,
-            method: "POST"
+            method: "POST",
+            queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
         )
     }
 
-    func createContentCouncilEpisode(contentId: Int) async throws -> AudioEpisode {
+    func createContentCouncilEpisode(
+        contentId: Int,
+        delivery: AudioEpisodeDelivery = .background
+    ) async throws -> AudioEpisode {
         try await client.request(
             APIEndpoints.contentCouncilAudioEpisode(id: contentId),
-            method: "POST"
+            method: "POST",
+            queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
         )
     }
 
@@ -35,6 +47,17 @@ final class AudioEpisodeService {
             APIEndpoints.audioEpisodeAudio(id: id),
             accept: "audio/mpeg"
         )
+    }
+
+    func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource {
+        guard let endpoint = episode.streamUrl ?? episode.audioUrl else {
+            throw NSError(
+                domain: "AudioEpisodeService",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "No audio stream is available."]
+            )
+        }
+        return try await client.authorizedMediaResource(endpoint, accept: "audio/mpeg")
     }
 
     func waitForCompletedEpisode(

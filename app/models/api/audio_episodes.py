@@ -20,6 +20,7 @@ class AudioEpisodeResponse(BaseModel):
     source_item_ids: list[int] = Field(default_factory=list)
     duration_seconds: int | None = None
     audio_url: str | None = None
+    stream_url: str | None = None
     script_text: str | None = None
     error_message: str | None = None
     created_at: datetime

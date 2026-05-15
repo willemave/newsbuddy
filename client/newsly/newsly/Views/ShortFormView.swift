@@ -197,23 +197,16 @@ struct ShortFormView: View {
                 if let existingEpisode = fastNewsAudioEpisode {
                     episode = existingEpisode
                 } else {
-                    episode = try await AudioEpisodeService.shared.createFastNewsEpisode()
+                    episode = try await AudioEpisodeService.shared.createFastNewsEpisode(
+                        delivery: .stream
+                    )
                 }
                 fastNewsAudioEpisode = episode
-                let completedEpisode = episode.status == "completed"
-                    ? episode
-                    : try await AudioEpisodeService.shared.waitForCompletedEpisode(episode)
-                fastNewsAudioEpisode = completedEpisode
-                let target = NarrationTarget.audioEpisode(completedEpisode.id)
-                try await narrationPlaybackService.playNarration(
+                let target = NarrationTarget.audioEpisode(episode.id)
+                try await narrationPlaybackService.playStreamingNarration(
                     for: target,
-                    fetchAudio: {
-                        try await AudioEpisodeService.shared.fetchEpisodeAudio(
-                            id: completedEpisode.id
-                        )
-                    },
-                    fetchNarrationText: {
-                        completedEpisode.scriptText ?? completedEpisode.title
+                    fetchStreamResource: {
+                        try await AudioEpisodeService.shared.streamResource(for: episode)
                     }
                 )
             } catch {

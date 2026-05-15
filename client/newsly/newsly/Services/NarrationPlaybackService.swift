@@ -22,6 +22,9 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
     private let synthesizer = AVSpeechSynthesizer()
     private let preferenceStore: NarrationPlaybackPreferenceStore
     private var audioPlayer: AVAudioPlayer?
+    private var streamPlayer: AVPlayer?
+    private var streamEndObserver: NSObjectProtocol?
+    private var streamFailureObserver: NSObjectProtocol?
     private var progressTimer: Timer?
     private var savedPlaybackPositions: [NarrationTarget: TimeInterval] = [:]
     private var cachedAudioByTarget: [NarrationTarget: Data] = [:]
@@ -48,6 +51,9 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
         if let audioPlayer {
             audioPlayer.enableRate = true
             audioPlayer.rate = normalizedRate
+        }
+        if let streamPlayer, isSpeaking {
+            streamPlayer.rate = normalizedRate
         }
     }
 
@@ -87,6 +93,31 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
             }
             speak(text: narrationText, for: target)
         }
+    }
+
+    func playStreamingNarration(
+        for target: NarrationTarget,
+        rate: Float = defaultPlaybackRate,
+        fetchStreamResource: () async throws -> AuthorizedMediaResource
+    ) async throws {
+        setPlaybackRate(rate)
+
+        if speakingTarget == target {
+            if try resumeStreamIfNeeded(for: target) {
+                return
+            }
+            if try resumeAudioIfNeeded(for: target) {
+                return
+            }
+            if isSpeaking {
+                return
+            }
+        }
+
+        stop()
+
+        let resource = try await fetchStreamResource()
+        try playAudioStream(resource, for: target)
     }
 
     func playCachedAudio(for target: NarrationTarget) -> Bool {
@@ -145,6 +176,43 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
         }
     }
 
+    func playAudioStream(_ resource: AuthorizedMediaResource, for target: NarrationTarget) throws {
+        let resumeTime = savedPlaybackPositions[target] ?? 0
+        stop()
+        do {
+            try configurePlaybackSession()
+
+            let asset = AVURLAsset(
+                url: resource.url,
+                options: ["AVURLAssetHTTPHeaderFieldsKey": resource.headers]
+            )
+            let item = AVPlayerItem(asset: asset)
+            let player = AVPlayer(playerItem: item)
+            player.automaticallyWaitsToMinimizeStalling = true
+
+            streamPlayer = player
+            observeStreamItem(item)
+            speakingTarget = target
+            isSpeaking = true
+            isPaused = false
+            currentTime = 0
+            duration = 0
+
+            if resumeTime > 0 {
+                player.seek(
+                    to: CMTime(seconds: resumeTime, preferredTimescale: 600),
+                    toleranceBefore: .zero,
+                    toleranceAfter: .zero
+                )
+            }
+            player.playImmediately(atRate: playbackRate)
+            startProgressTimer()
+        } catch {
+            resetPlaybackState()
+            throw error
+        }
+    }
+
     func speak(text: String, for target: NarrationTarget) {
         let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return }
@@ -182,6 +250,18 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
             return
         }
 
+        if let streamPlayer {
+            let currentSeconds = finiteSeconds(streamPlayer.currentTime().seconds) ?? 0
+            savedPlaybackPositions[target] = currentSeconds
+            currentTime = currentSeconds
+            duration = streamDuration(streamPlayer) ?? duration
+            streamPlayer.pause()
+            isSpeaking = false
+            isPaused = true
+            stopProgressTimer()
+            return
+        }
+
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -194,6 +274,8 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
             audioPlayer?.stop()
         }
         audioPlayer = nil
+        streamPlayer?.pause()
+        streamPlayer = nil
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -201,10 +283,22 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
     }
 
     func seek(to progress: Double, for target: NarrationTarget) {
-        guard speakingTarget == target, let audioPlayer else { return }
+        guard speakingTarget == target else { return }
         let clampedProgress = min(max(progress, 0), 1)
-        let nextTime = audioPlayer.duration * clampedProgress
-        audioPlayer.currentTime = nextTime
+        if let audioPlayer {
+            let nextTime = audioPlayer.duration * clampedProgress
+            audioPlayer.currentTime = nextTime
+            savedPlaybackPositions[target] = nextTime
+            syncProgressFromPlayer()
+            return
+        }
+        guard let streamPlayer, let streamDuration = streamDuration(streamPlayer) else { return }
+        let nextTime = streamDuration * clampedProgress
+        streamPlayer.seek(
+            to: CMTime(seconds: nextTime, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
         savedPlaybackPositions[target] = nextTime
         syncProgressFromPlayer()
     }
@@ -292,6 +386,51 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
         return true
     }
 
+    private func resumeStreamIfNeeded(for target: NarrationTarget) throws -> Bool {
+        guard isPaused, let streamPlayer else { return false }
+        try configurePlaybackSession()
+        streamPlayer.playImmediately(atRate: playbackRate)
+        speakingTarget = target
+        isSpeaking = true
+        isPaused = false
+        syncProgressFromPlayer()
+        startProgressTimer()
+        return true
+    }
+
+    private func observeStreamItem(_ item: AVPlayerItem) {
+        removeStreamObservers()
+        streamEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.resetPlaybackState(clearSavedPositionFor: self?.speakingTarget)
+            }
+        }
+        streamFailureObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.resetPlaybackState(clearSavedPositionFor: self?.speakingTarget)
+            }
+        }
+    }
+
+    private func removeStreamObservers() {
+        if let streamEndObserver {
+            NotificationCenter.default.removeObserver(streamEndObserver)
+            self.streamEndObserver = nil
+        }
+        if let streamFailureObserver {
+            NotificationCenter.default.removeObserver(streamFailureObserver)
+            self.streamFailureObserver = nil
+        }
+    }
+
     private func startProgressTimer() {
         stopProgressTimer()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -308,21 +447,30 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
     }
 
     private func syncProgressFromPlayer() {
-        guard let audioPlayer else {
-            currentTime = 0
-            duration = 0
+        if let audioPlayer {
+            currentTime = audioPlayer.currentTime
+            duration = audioPlayer.duration
             return
         }
-        currentTime = audioPlayer.currentTime
-        duration = audioPlayer.duration
+        if let streamPlayer {
+            currentTime = finiteSeconds(streamPlayer.currentTime().seconds) ?? 0
+            if let resolvedDuration = streamDuration(streamPlayer) {
+                duration = resolvedDuration
+            }
+            return
+        }
+        currentTime = 0
+        duration = 0
     }
 
     private func resetPlaybackState(clearSavedPositionFor target: NarrationTarget? = nil) {
         stopProgressTimer()
+        removeStreamObservers()
         if let target {
             savedPlaybackPositions.removeValue(forKey: target)
         }
         audioPlayer = nil
+        streamPlayer = nil
         isSpeaking = false
         isPaused = false
         speakingTarget = nil
@@ -332,6 +480,16 @@ final class NarrationPlaybackService: NSObject, ObservableObject, @preconcurrenc
             false,
             options: [.notifyOthersOnDeactivation]
         )
+    }
+
+    private func streamDuration(_ player: AVPlayer) -> TimeInterval? {
+        guard let duration = player.currentItem?.duration.seconds else { return nil }
+        return finiteSeconds(duration)
+    }
+
+    private func finiteSeconds(_ seconds: Double) -> TimeInterval? {
+        guard seconds.isFinite, seconds > 0 else { return nil }
+        return seconds
     }
 }
 

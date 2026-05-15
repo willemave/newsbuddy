@@ -62,6 +62,11 @@ struct APIRequestDescriptor<Response: Decodable> {
     }
 }
 
+struct AuthorizedMediaResource {
+    let url: URL
+    let headers: [String: String]
+}
+
 class APIClient {
     static let shared = APIClient()
     private let session: URLSession
@@ -134,6 +139,28 @@ class APIClient {
             authFailureReason: "request_data_no_refresh_remaining"
         )
         return data
+    }
+
+    func authorizedMediaResource(
+        _ endpoint: String,
+        accept: String? = nil
+    ) async throws -> AuthorizedMediaResource {
+        let (request, _) = try await buildRequest(
+            endpoint: endpoint,
+            method: "GET",
+            body: nil,
+            queryItems: nil,
+            accept: accept
+        )
+        guard let url = request.url else {
+            throw APIError.invalidURL
+        }
+        var headers = request.allHTTPHeaderFields ?? [:]
+        headers.removeValue(forKey: "Content-Type")
+        return AuthorizedMediaResource(
+            url: url,
+            headers: headers
+        )
     }
     
     func requestVoid(_ endpoint: String,

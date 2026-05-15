@@ -1000,24 +1000,16 @@ struct ContentDetailView: View {
                 episode = existingEpisode
             } else {
                 episode = try await AudioEpisodeService.shared.createContentCouncilEpisode(
-                    contentId: content.id
+                    contentId: content.id,
+                    delivery: .stream
                 )
             }
             discussionAudioEpisodeByContentId[content.id] = episode
-            let completedEpisode = episode.status == "completed"
-                ? episode
-                : try await AudioEpisodeService.shared.waitForCompletedEpisode(episode)
-            discussionAudioEpisodeByContentId[content.id] = completedEpisode
-            let target = NarrationTarget.audioEpisode(completedEpisode.id)
-            try await narrationPlaybackService.playNarration(
+            let target = NarrationTarget.audioEpisode(episode.id)
+            try await narrationPlaybackService.playStreamingNarration(
                 for: target,
-                fetchAudio: {
-                    try await AudioEpisodeService.shared.fetchEpisodeAudio(
-                        id: completedEpisode.id
-                    )
-                },
-                fetchNarrationText: {
-                    completedEpisode.scriptText ?? completedEpisode.title
+                fetchStreamResource: {
+                    try await AudioEpisodeService.shared.streamResource(for: episode)
                 }
             )
         } catch {

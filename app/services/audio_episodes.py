@@ -5,15 +5,18 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from datetime import UTC, datetime
+import time
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.model_defaults import SMART_MODEL_SPEC
 from app.core.settings import get_settings
@@ -46,6 +49,8 @@ LONGFORM_BODY_MAX_CHARS = 120_000
 AUDIO_EPISODE_MODEL = SMART_MODEL_SPEC
 SCRIPT_TIMEOUT_SECONDS = 180
 DIALOGUE_TEXT_CHAR_LIMIT = 4_600
+AUDIO_EPISODE_PROCESSING_STALE_AFTER = timedelta(minutes=15)
+AUDIO_EPISODE_FILE_CHUNK_SIZE = 1024 * 256
 
 SCRIPT_SYSTEM_PROMPT = """You write concise, natural podcast scripts for Newsly.
 Create spoken dialogue, not an essay. The format should feel like a smart tech/business
@@ -71,6 +76,10 @@ class AudioEpisodeScript(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
     estimated_duration_seconds: int = Field(..., ge=180, le=420)
     turns: list[AudioEpisodeTurn] = Field(..., min_length=6, max_length=18)
+
+
+class AudioEpisodeAlreadyProcessingError(RuntimeError):
+    """Raised when a live generator is already producing the episode."""
 
 
 def create_fast_news_digest_episode(db: Session, *, user_id: int) -> AudioEpisode:
@@ -165,6 +174,7 @@ def present_audio_episode(episode: AudioEpisode) -> AudioEpisodeResponse:
     """Build the API response for an audio episode."""
 
     episode_id = _required_int(episode.id, "audio episode id")
+    stream_url = f"/api/content/audio-episodes/{episode_id}/stream"
     audio_url = None
     if episode.status == "completed" and episode.audio_storage_path:
         audio_url = f"/api/content/audio-episodes/{episode_id}/audio"
@@ -178,6 +188,7 @@ def present_audio_episode(episode: AudioEpisode) -> AudioEpisodeResponse:
         source_item_ids=[int(item_id) for item_id in (episode.source_item_ids or [])],
         duration_seconds=episode.duration_seconds,
         audio_url=audio_url,
+        stream_url=stream_url,
         script_text=episode.script_text,
         error_message=episode.error_message,
         created_at=_required_datetime(episode.created_at, "audio episode created_at"),
@@ -202,6 +213,8 @@ def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisod
         raise ValueError(f"Audio episode {audio_episode_id} not found")
     if episode.status == "completed" and episode.audio_storage_path:
         return episode
+    if episode.status == "processing" and not is_audio_episode_processing_stale(episode):
+        return episode
 
     episode_id = _required_int(episode.id, "audio episode id")
     user_id = _required_int(episode.user_id, "audio episode user_id")
@@ -212,9 +225,8 @@ def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisod
     db.flush()
 
     try:
-        script = _generate_script(episode)
-        script = _fit_script_to_dialogue_limit(script)
-        script_text = _render_script_text(script)
+        script = _prepare_audio_episode_script(db, episode)
+        script_text = _required_str(episode.script_text, "audio episode script_text")
         audio_bytes = get_content_narration_tts_service().synthesize_dialogue_mp3(
             turns=[turn.model_dump(mode="json") for turn in script.turns],
             item_id=episode_id,
@@ -242,10 +254,6 @@ def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisod
         raise
 
     episode.status = "completed"
-    episode.title = script.title.strip() or episode.title
-    episode.script = script.model_dump(mode="json")
-    episode.script_text = script_text
-    episode.model = AUDIO_EPISODE_MODEL
     episode.audio_storage_path = str(audio_path)
     episode.audio_content_type = "audio/mpeg"
     episode.duration_seconds = _estimate_duration_seconds(script_text)
@@ -253,6 +261,188 @@ def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisod
     episode.completed_at = datetime.now(UTC).replace(tzinfo=None)
     db.flush()
     return episode
+
+
+def is_audio_episode_processing_stale(episode: AudioEpisode) -> bool:
+    """Return whether an in-flight episode is old enough for a new stream to retry."""
+
+    if episode.status != "processing":
+        return False
+    started_at = episode.started_at
+    if started_at is None:
+        return True
+    processing_age = datetime.now(UTC).replace(tzinfo=None) - started_at
+    return processing_age > AUDIO_EPISODE_PROCESSING_STALE_AFTER
+
+
+def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Iterator[bytes]:
+    """Generate and stream an audio episode while caching the completed MP3."""
+
+    SessionLocal = get_session_factory()
+    partial_path: Path | None = None
+    stream_started_at = time.perf_counter()
+    chunk_count = 0
+    audio_bytes = 0
+    first_chunk_ms: float | None = None
+    script_duration_ms = 0.0
+    episode_kind: str | None = None
+    script_text: str | None = None
+    cached_path: Path | None = None
+    script: AudioEpisodeScript | None = None
+    script_input: AudioEpisode | None = None
+    try:
+        with SessionLocal() as db:
+            episode = get_user_audio_episode(
+                db,
+                user_id=user_id,
+                audio_episode_id=audio_episode_id,
+            )
+            if episode is None:
+                raise ValueError(f"Audio episode {audio_episode_id} not found")
+
+            completed_path = audio_episode_file_path(episode)
+            if (
+                episode.status == "completed"
+                and completed_path is not None
+                and completed_path.exists()
+            ):
+                cached_path = completed_path
+
+            if cached_path is None:
+                is_active_processing = (
+                    episode.status == "processing"
+                    and not is_audio_episode_processing_stale(episode)
+                )
+                if is_active_processing:
+                    raise AudioEpisodeAlreadyProcessingError(
+                        "Audio episode is already being generated"
+                    )
+
+                episode.status = "processing"
+                episode.error_message = None
+                episode.started_at = datetime.now(UTC).replace(tzinfo=None)
+                episode.completed_at = None
+                if not completed_path or not completed_path.exists():
+                    episode.audio_storage_path = None
+                script = _script_from_episode(episode)
+                if script is None:
+                    script_input = _copy_episode_for_script_generation(episode)
+                db.commit()
+
+        if cached_path is not None:
+            yield from _read_audio_episode_file(cached_path)
+            return
+
+        if script is None:
+            if script_input is None:
+                raise RuntimeError("Audio episode script input was not prepared")
+            script_started_at = time.perf_counter()
+            script = _generate_script(script_input)
+            script_duration_ms = (time.perf_counter() - script_started_at) * 1000
+
+        with SessionLocal() as db:
+            episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).first()
+            if episode is None:
+                raise ValueError(f"Audio episode {audio_episode_id} not found")
+            script = _persist_audio_episode_script(db, episode, script)
+            script_text = _required_str(episode.script_text, "audio episode script_text")
+            episode_kind = str(episode.kind or "")
+            db.commit()
+
+        partial_path = _audio_episode_partial_file_path(audio_episode_id)
+        partial_path.parent.mkdir(parents=True, exist_ok=True)
+        partial_path.unlink(missing_ok=True)
+        final_path = _audio_episode_final_file_path(audio_episode_id)
+
+        tts_started_at = time.perf_counter()
+        with partial_path.open("wb") as output_file:
+            for chunk in get_content_narration_tts_service().stream_dialogue_mp3(
+                turns=[turn.model_dump(mode="json") for turn in script.turns],
+                item_id=audio_episode_id,
+                user_id=user_id,
+            ):
+                if not chunk:
+                    continue
+                if first_chunk_ms is None:
+                    first_chunk_ms = (time.perf_counter() - tts_started_at) * 1000
+                output_file.write(chunk)
+                audio_bytes += len(chunk)
+                chunk_count += 1
+                yield chunk
+
+        if audio_bytes <= 0:
+            raise RuntimeError("Audio episode stream produced no audio")
+
+        partial_path.replace(final_path)
+        partial_path = None
+
+        with SessionLocal() as db:
+            episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).first()
+            if episode is None:
+                raise ValueError(f"Audio episode {audio_episode_id} not found")
+            episode.status = "completed"
+            episode.audio_storage_path = str(final_path)
+            episode.audio_content_type = "audio/mpeg"
+            episode.duration_seconds = _estimate_duration_seconds(
+                _required_str(script_text, "audio episode script_text")
+            )
+            episode.error_message = None
+            episode.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            db.commit()
+
+        logger.info(
+            "Audio episode streamed and cached",
+            extra={
+                "component": "audio_episodes",
+                "operation": "stream",
+                "item_id": audio_episode_id,
+                "context_data": {
+                    "user_id": user_id,
+                    "kind": episode_kind,
+                    "script_duration_ms": round(script_duration_ms, 2),
+                    "tts_time_to_first_chunk_ms": round(first_chunk_ms or 0, 2),
+                    "stream_total_duration_ms": round(
+                        (time.perf_counter() - stream_started_at) * 1000,
+                        2,
+                    ),
+                    "stream_chunk_count": chunk_count,
+                    "audio_bytes": audio_bytes,
+                },
+            },
+        )
+    except GeneratorExit:
+        with SessionLocal() as db:
+            _handle_stream_cancelled(
+                db,
+                audio_episode_id=audio_episode_id,
+                partial_path=partial_path,
+            )
+        raise
+    except AudioEpisodeAlreadyProcessingError:
+        raise
+    except Exception as exc:
+        with SessionLocal() as db:
+            _handle_stream_failed(
+                db,
+                audio_episode_id=audio_episode_id,
+                partial_path=partial_path,
+                error_message=str(exc),
+            )
+        logger.exception(
+            "Audio episode stream failed",
+            extra={
+                "component": "audio_episodes",
+                "operation": "stream",
+                "item_id": audio_episode_id,
+                "context_data": {
+                    "user_id": user_id,
+                    "error": str(exc),
+                    "chunk_count": chunk_count,
+                    "audio_bytes": audio_bytes,
+                },
+            },
+        )
+        raise
 
 
 def _create_or_reuse_episode(
@@ -424,6 +614,59 @@ def _source_snapshot_hash(source_snapshot: dict[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _prepare_audio_episode_script(db: Session, episode: AudioEpisode) -> AudioEpisodeScript:
+    """Generate or reuse the structured script for an audio episode."""
+
+    script = _script_from_episode(episode)
+    if script is None:
+        script = _generate_script(episode)
+    return _persist_audio_episode_script(db, episode, script)
+
+
+def _persist_audio_episode_script(
+    db: Session,
+    episode: AudioEpisode,
+    script: AudioEpisodeScript,
+) -> AudioEpisodeScript:
+    """Persist a generated script and its rendered text on an episode row."""
+
+    script = _fit_script_to_dialogue_limit(script)
+    script_text = _render_script_text(script)
+    fallback_title = _required_str(episode.title, "audio episode title")
+    episode.title = (script.title.strip() or fallback_title)[:255]
+    episode.script = script.model_dump(mode="json")
+    episode.script_text = script_text
+    episode.model = AUDIO_EPISODE_MODEL
+    episode.duration_seconds = _estimate_duration_seconds(script_text)
+    db.flush()
+    return script
+
+
+def _script_from_episode(episode: AudioEpisode) -> AudioEpisodeScript | None:
+    payload = episode.script
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return AudioEpisodeScript.model_validate(payload)
+    except ValidationError:
+        return None
+
+
+def _copy_episode_for_script_generation(episode: AudioEpisode) -> AudioEpisode:
+    return AudioEpisode(
+        id=episode.id,
+        user_id=episode.user_id,
+        kind=episode.kind,
+        status=episode.status,
+        title=episode.title,
+        source_content_id=episode.source_content_id,
+        input_hash=episode.input_hash,
+        source_item_ids=episode.source_item_ids,
+        source_snapshot=episode.source_snapshot,
+        prompt_version=episode.prompt_version,
+    )
+
+
 def _generate_script(episode: AudioEpisode) -> AudioEpisodeScript:
     user_message = _build_script_prompt(episode)
     agent = get_basic_agent(AUDIO_EPISODE_MODEL, AudioEpisodeScript, SCRIPT_SYSTEM_PROMPT)
@@ -559,12 +802,65 @@ def _estimate_duration_seconds(script_text: str) -> int:
 
 
 def _write_audio_episode_file(audio_episode_id: int, audio_bytes: bytes) -> Path:
-    settings = get_settings()
-    directory = settings.media_base_dir / "audio_episodes"
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"audio-episode-{audio_episode_id}.mp3"
+    path = _audio_episode_final_file_path(audio_episode_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(audio_bytes)
     return path
+
+
+def _audio_episode_final_file_path(audio_episode_id: int) -> Path:
+    settings = get_settings()
+    return settings.media_base_dir / "audio_episodes" / f"audio-episode-{audio_episode_id}.mp3"
+
+
+def _audio_episode_partial_file_path(audio_episode_id: int) -> Path:
+    return _audio_episode_final_file_path(audio_episode_id).with_suffix(".mp3.part")
+
+
+def _read_audio_episode_file(path: Path) -> Iterator[bytes]:
+    with path.open("rb") as audio_file:
+        while chunk := audio_file.read(AUDIO_EPISODE_FILE_CHUNK_SIZE):
+            yield chunk
+
+
+def _handle_stream_cancelled(
+    db: Session,
+    *,
+    audio_episode_id: int,
+    partial_path: Path | None,
+) -> None:
+    if partial_path is not None:
+        partial_path.unlink(missing_ok=True)
+
+    episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).first()
+    if episode is None or episode.status != "processing":
+        return
+    episode.status = "pending"
+    episode.error_message = None
+    episode.audio_storage_path = None
+    episode.started_at = None
+    episode.completed_at = None
+    db.commit()
+
+
+def _handle_stream_failed(
+    db: Session,
+    *,
+    audio_episode_id: int,
+    partial_path: Path | None,
+    error_message: str,
+) -> None:
+    if partial_path is not None:
+        partial_path.unlink(missing_ok=True)
+
+    episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).first()
+    if episode is None:
+        return
+    episode.status = "failed"
+    episode.error_message = error_message
+    episode.audio_storage_path = None
+    episode.completed_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
 
 
 def _required_int(value: int | None, field_name: str) -> int:

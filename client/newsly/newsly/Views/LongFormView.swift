@@ -271,15 +271,12 @@ struct LongFormView: View {
                 episode = existingEpisode
             } else {
                 episode = try await AudioEpisodeService.shared.createContentCouncilEpisode(
-                    contentId: content.id
+                    contentId: content.id,
+                    delivery: .stream
                 )
             }
             audioEpisodeByContentId[content.id] = episode
-            let completedEpisode = episode.status == "completed"
-                ? episode
-                : try await AudioEpisodeService.shared.waitForCompletedEpisode(episode)
-            audioEpisodeByContentId[content.id] = completedEpisode
-            try await playCompletedAudioDiscussionEpisode(completedEpisode)
+            try await playAudioDiscussionEpisode(episode)
         } catch {
             audioErrorByContentId[content.id] = error.localizedDescription
         }
@@ -288,26 +285,20 @@ struct LongFormView: View {
     @MainActor
     private func playAudioDiscussionEpisode(_ episode: AudioEpisode, contentId: Int) async {
         do {
-            let completedEpisode = episode.status == "completed"
-                ? episode
-                : try await AudioEpisodeService.shared.waitForCompletedEpisode(episode)
-            audioEpisodeByContentId[contentId] = completedEpisode
-            try await playCompletedAudioDiscussionEpisode(completedEpisode)
+            audioEpisodeByContentId[contentId] = episode
+            try await playAudioDiscussionEpisode(episode)
         } catch {
             audioErrorByContentId[contentId] = error.localizedDescription
         }
     }
 
     @MainActor
-    private func playCompletedAudioDiscussionEpisode(_ episode: AudioEpisode) async throws {
+    private func playAudioDiscussionEpisode(_ episode: AudioEpisode) async throws {
         let target = NarrationTarget.audioEpisode(episode.id)
-        try await narrationPlaybackService.playNarration(
+        try await narrationPlaybackService.playStreamingNarration(
             for: target,
-            fetchAudio: {
-                try await AudioEpisodeService.shared.fetchEpisodeAudio(id: episode.id)
-            },
-            fetchNarrationText: {
-                episode.scriptText ?? episode.title
+            fetchStreamResource: {
+                try await AudioEpisodeService.shared.streamResource(for: episode)
             }
         )
     }
