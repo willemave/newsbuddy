@@ -41,14 +41,7 @@ struct LongFormView: View {
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 0) {
-                                // Editorial header
-                                Text("Long read")
-                                    .font(.terracottaDisplayLarge)
-                                    .foregroundStyle(Color.onSurface)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, Spacing.screenHorizontal)
-                                    .padding(.top, 16)
-                                    .padding(.bottom, 24)
+                                EditorialMastheadHeader(title: "Long Read")
 
                                 let items = viewModel.currentItems()
                                 VStack(spacing: CardMetrics.cardSpacing) {
@@ -436,11 +429,8 @@ struct LongFormView: View {
     private var longFormBootstrapState: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Long read")
-                    .font(.terracottaDisplayLarge)
-                    .foregroundStyle(Color.onSurface)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 16)
+                EditorialMastheadHeader(title: "Long Read")
+                    .padding(.horizontal, -Spacing.screenHorizontal)
 
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {

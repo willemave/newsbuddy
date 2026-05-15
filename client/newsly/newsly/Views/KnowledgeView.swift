@@ -93,13 +93,7 @@ struct KnowledgeView: View {
     // MARK: - Header
 
     private var headerSection: some View {
-        Text("Knowledge")
-            .font(.terracottaDisplayLarge)
-            .foregroundStyle(Color.onSurface)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Spacing.screenHorizontal)
-            .padding(.top, 16)
-            .padding(.bottom, 24)
+        EditorialMastheadHeader(title: "Knowledge")
     }
 
     // MARK: - Search Field

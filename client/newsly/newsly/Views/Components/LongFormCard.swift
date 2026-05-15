@@ -106,6 +106,13 @@ struct LongFormCard: View {
                     .padding(.bottom, 12)
                 }
 
+                if variant == .hero, let chipText = aiInsightChipText {
+                    AIInsightChip(text: chipText)
+                        .padding(.bottom, 12)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onOpen?() }
+                }
+
                 // Footer: source + actions (hero variant only)
                 if variant == .hero {
                     HStack {
@@ -277,6 +284,18 @@ struct LongFormCard: View {
         return UIFont(name: "Inter", size: size) ?? .systemFont(ofSize: size, weight: .regular)
     }
 
+    private var aiInsightChipText: String? {
+        if let bullets = content.previewBullets, !bullets.isEmpty {
+            let label = bullets.count == 1 ? "key insight" : "key insights"
+            return "\(bullets.count) \(label)"
+        }
+        if let points = content.newsKeyPoints, !points.isEmpty {
+            let label = points.count == 1 ? "key point" : "key points"
+            return "\(points.count) \(label)"
+        }
+        return nil
+    }
+
     private var sourceLabel: String {
         if let source = content.source, !source.isEmpty {
             return source.uppercased()
@@ -308,5 +327,28 @@ struct LongFormCard: View {
         let baseURL = AppSettings.shared.baseURL
         let fullURL = urlString.hasPrefix("/") ? baseURL + urlString : baseURL + "/" + urlString
         return URL(string: fullURL)
+    }
+}
+
+private struct AIInsightChip: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 10, weight: .semibold))
+            Text(text)
+                .font(.terracottaCategoryPill)
+                .tracking(0.4)
+        }
+        .foregroundStyle(Color.terracottaPrimary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule().fill(Color.terracottaPrimary.opacity(0.10))
+        )
+        .overlay(
+            Capsule().stroke(Color.terracottaPrimary.opacity(0.18), lineWidth: 0.5)
+        )
     }
 }
