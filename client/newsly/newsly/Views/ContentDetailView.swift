@@ -535,7 +535,7 @@ struct ContentDetailView: View {
             case .chat:
                 if let content = viewModel.content {
                     chatSheet(content: content)
-                        .presentationDetents([.height(380)])
+                        .presentationDetents([.medium, .large])
                         .presentationDragIndicator(.hidden)
                         .presentationCornerRadius(24)
                 }
@@ -1541,7 +1541,8 @@ struct ContentDetailView: View {
         VStack(spacing: 0) {
             sheetHeader(title: "AI Chat") { activeSheet = nil }
 
-            VStack(spacing: 8) {
+            ScrollView {
+                VStack(spacing: 8) {
                 if let chatError {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.circle.fill")
@@ -1630,19 +1631,16 @@ struct ContentDetailView: View {
                         Task { await startDeepResearchWithPrompt(deepResearchPrompt(for: content), content: content) }
                     }
                 )
-            }
-            .padding(.horizontal, 20)
-
-            Divider()
+                }
                 .padding(.horizontal, 20)
-                .padding(.vertical, 12)
 
-            if supportsPodcastAudio(for: content) {
-                audioPromptCard(for: content)
-                    .padding(.horizontal, 20)
+                if supportsPodcastAudio(for: content) {
+                    audioPromptCard(for: content)
+                        .padding(.horizontal, 20)
+                }
+
+                Spacer(minLength: 16)
             }
-
-            Spacer(minLength: 0)
         }
         .background(Color.surfacePrimary)
     }

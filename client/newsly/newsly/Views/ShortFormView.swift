@@ -46,13 +46,7 @@ struct ShortFormView: View {
                 } else if isEmpty {
                     shortFormEmptyState
                 } else {
-                    Text("Fast read")
-                        .font(.terracottaDisplayLarge)
-                        .foregroundStyle(Color.onSurface)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, Spacing.screenHorizontal)
-                        .padding(.top, 16)
-                        .padding(.bottom, 24)
+                    EditorialMastheadHeader(title: "Fast Read")
 
                     shortNewsQuickActions(items: items)
                         .padding(.bottom, shouldShowFastNewsAudioControls ? 8 : 20)
@@ -484,19 +478,17 @@ private struct ShortNewsRow: View, Equatable {
         .systemFont(ofSize: 18, weight: .regular)
     }
 
-    private var hasPlatform: Bool {
-        item.platform?.isEmpty == false
+    private var platformPillText: String? {
+        guard let platform = item.platform, !platform.isEmpty else { return nil }
+        return platform.uppercased()
     }
 
-    /// Text-only metadata parts (platform, source, time) joined by " · ".
-    private var metadataTextParts: [String] {
+    /// Secondary meta after the platform pill (source if distinct, then time).
+    private var secondaryMetaParts: [String] {
         var parts: [String] = []
-        if let platform = item.platform, !platform.isEmpty {
-            parts.append(platform.uppercased())
-        }
         if let source = item.source, !source.isEmpty,
            source.caseInsensitiveCompare(item.platform ?? "") != .orderedSame {
-            parts.append(source.uppercased())
+            parts.append(source.lowercased())
         }
         if let time = item.relativeTimeDisplay {
             parts.append(time.uppercased())
@@ -518,24 +510,28 @@ private struct ShortNewsRow: View, Equatable {
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
 
-            // Platform · source · comments · time metadata below headline
-            let textParts = metadataTextParts
-            if !textParts.isEmpty || item.commentCountDisplay != nil {
-                HStack(spacing: 6) {
-                    Text(textParts.joined(separator: " · "))
-                        .font(.feedMeta)
-                        .tracking(0.4)
-                        .foregroundStyle(hasPlatform ? Color.platformLabel : Color.onSurfaceSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+            let secondary = secondaryMetaParts
+            if platformPillText != nil || !secondary.isEmpty || item.commentCountDisplay != nil {
+                HStack(spacing: 8) {
+                    if let pillText = platformPillText {
+                        SourcePill(text: pillText)
+                    }
+
+                    if !secondary.isEmpty {
+                        Text(secondary.joined(separator: " · "))
+                            .font(.feedMeta)
+                            .tracking(0.4)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+
+                    Spacer(minLength: 0)
 
                     if let comments = item.commentCountDisplay {
-                        HStack(spacing: 3) {
-                            Text("·")
-                                .font(.feedMeta)
-                                .foregroundStyle(Color.onSurfaceSecondary)
+                        HStack(spacing: 4) {
                             Image(systemName: "bubble.left")
-                                .font(.system(size: 9, weight: .medium))
+                                .font(.system(size: 10, weight: .medium))
                             Text(comments)
                                 .font(.feedMeta)
                                 .tracking(0.4)
@@ -555,6 +551,30 @@ private struct ShortNewsRow: View, Equatable {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("short.row.\(item.id)")
+    }
+}
+
+// MARK: - Source Pill
+
+private struct SourcePill: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.terracottaCategoryPill)
+            .tracking(0.8)
+            .foregroundStyle(Color.onSurface.opacity(0.85))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.surfaceContainer)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(Color.outlineVariant.opacity(0.4), lineWidth: 0.5)
+            )
+            .fixedSize()
     }
 }
 
