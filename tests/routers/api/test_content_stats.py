@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.constants import AGGREGATOR_FEED_URL_PREFIX, AGGREGATOR_SCRAPER_TYPE
 from app.models.contracts import ContentStatus, ContentType
+from app.models.db import UserScraperConfig
 
 
 def _now() -> datetime:
@@ -185,7 +187,47 @@ def test_processing_count_includes_news_and_new_status(
 
     assert payload["long_form_count"] == 3
     assert payload["news_count"] == 1
+    assert payload["news_crawl_count"] == 0
     assert payload["processing_count"] == 4
+
+
+def test_processing_count_includes_selected_news_source_crawls(
+    client,
+    db_session,
+    test_user,
+    processing_task_factory,
+) -> None:
+    db_session.add_all(
+        [
+            UserScraperConfig(
+                user_id=test_user.id,
+                scraper_type=AGGREGATOR_SCRAPER_TYPE,
+                display_name="SciURLs",
+                feed_url=f"{AGGREGATOR_FEED_URL_PREFIX}sciurls",
+                config={"key": "sciurls"},
+            ),
+            UserScraperConfig(
+                user_id=test_user.id,
+                scraper_type="reddit",
+                display_name="MachineLearning",
+                feed_url="https://www.reddit.com/r/MachineLearning/",
+                config={"subreddit": "MachineLearning"},
+            ),
+        ]
+    )
+    processing_task_factory(
+        task_type="scrape",
+        payload={"sources": ["sciurls", "Reddit", "techmeme"]},
+        status="pending",
+    )
+    db_session.commit()
+
+    response = client.get("/api/content/stats/processing-count")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["news_crawl_count"] == 2
+    assert payload["news_count"] == 0
 
 
 def test_processing_count_excludes_orphaned_stale_rows(
@@ -332,7 +374,21 @@ def test_long_form_stats_count_completed_long_form_without_generated_artwork_met
     assert payload["unread_count"] == 2
 
 
-def test_unread_counts_use_visible_news_items(client, news_item_factory) -> None:
+def test_unread_counts_use_visible_news_items(
+    client,
+    db_session,
+    test_user,
+    news_item_factory,
+) -> None:
+    db_session.add(
+        UserScraperConfig(
+            user_id=test_user.id,
+            scraper_type=AGGREGATOR_SCRAPER_TYPE,
+            display_name="Hacker News",
+            feed_url=f"{AGGREGATOR_FEED_URL_PREFIX}hackernews",
+            config={"key": "hackernews"},
+        )
+    )
     news_item_factory(
         ingest_key="news-unread",
         status="ready",
@@ -341,6 +397,7 @@ def test_unread_counts_use_visible_news_items(client, news_item_factory) -> None
         summary_text="Summary",
         ingested_at=_now(),
     )
+    db_session.commit()
 
     response = client.get("/api/content/stats/unread-counts")
     assert response.status_code == 200

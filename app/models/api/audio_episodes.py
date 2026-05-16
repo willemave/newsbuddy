@@ -10,7 +10,7 @@ AudioEpisodeKind = Literal[
     "content_council_discussion",
     "news_item_discussion",
 ]
-AudioEpisodeDelivery = Literal["background", "stream"]
+AudioEpisodeDelivery = Literal["background", "stream", "inline"]
 AudioEpisodeStatus = Literal["pending", "processing", "completed", "failed"]
 
 

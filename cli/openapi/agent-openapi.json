@@ -648,6 +648,95 @@
         "title": "AssistantTurnResponse",
         "type": "object"
       },
+      "AudioEpisodeResponse": {
+        "description": "Client-visible state for one generated audio episode.",
+        "properties": {
+          "audio_url": {
+            "nullable": true,
+            "title": "Audio Url",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "nullable": true,
+            "title": "Duration Seconds",
+            "type": "integer"
+          },
+          "error_message": {
+            "nullable": true,
+            "title": "Error Message",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "fast_news_digest",
+              "content_council_discussion",
+              "news_item_discussion"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "script_text": {
+            "nullable": true,
+            "title": "Script Text",
+            "type": "string"
+          },
+          "source_content_id": {
+            "nullable": true,
+            "title": "Source Content Id",
+            "type": "integer"
+          },
+          "source_item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Source Item Ids",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stream_url": {
+            "nullable": true,
+            "title": "Stream Url",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "title",
+          "created_at"
+        ],
+        "title": "AudioEpisodeResponse",
+        "type": "object"
+      },
       "AudioTranscriptionHealthResponse": {
         "description": "Dependency readiness for uploaded-audio transcription.",
         "properties": {
@@ -1932,6 +2021,7 @@
           "primary_topic": "AI",
           "processed_at": "2025-06-19T10:35:00Z",
           "publication_date": "2025-06-18T12:00:00Z",
+          "saved_source": "knowledge",
           "short_summary": "This article explores the latest developments in AI...",
           "source": "Tech Blog",
           "status": "completed",
@@ -2070,6 +2160,16 @@
             "description": "Feed-preview reason explaining why the item is worth opening",
             "nullable": true,
             "title": "Reason To Read",
+            "type": "string"
+          },
+          "saved_source": {
+            "description": "Saved-library source for this content when it appears in saved views",
+            "enum": [
+              "knowledge",
+              "x_bookmark"
+            ],
+            "nullable": true,
+            "title": "Saved Source",
             "type": "string"
           },
           "short_summary": {
@@ -4082,6 +4182,11 @@
             "title": "News Count",
             "type": "integer"
           },
+          "news_crawl_count": {
+            "description": "Number of selected short-form news sources currently being crawled",
+            "title": "News Crawl Count",
+            "type": "integer"
+          },
           "processing_count": {
             "description": "Total number of inbox items queued, pending, or processing for the user",
             "title": "Processing Count",
@@ -4091,7 +4196,8 @@
         "required": [
           "processing_count",
           "long_form_count",
-          "news_count"
+          "news_count",
+          "news_crawl_count"
         ],
         "title": "ProcessingCountResponse",
         "type": "object"

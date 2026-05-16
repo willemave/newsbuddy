@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.constants import AGGREGATOR_SCRAPER_TYPE
 from app.core.settings import get_settings
-from app.models.contracts import ContentStatus, ContentType, TaskType
+from app.models.contracts import ContentStatus, ContentType, NewsItemStatus, TaskType
 from app.models.db import (
     Content,
     ContentReadStatus,
     ContentStatusEntry,
     NewsItem,
     ProcessingTask,
+    UserScraperConfig,
 )
 from app.repositories.content_repository import apply_visibility_filters, build_visibility_context
 from app.services.news_feed import build_visible_news_item_filter, count_unread_news_items
@@ -56,6 +59,66 @@ def _build_active_generate_image_filter() -> ColumnElement[bool]:
             ),
         )
     )
+
+
+def _normalize_scrape_source(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _active_short_news_source_keys(db: Session, *, user_id: int) -> set[str]:
+    rows = (
+        db.query(UserScraperConfig.scraper_type, UserScraperConfig.config)
+        .filter(UserScraperConfig.user_id == user_id)
+        .filter(UserScraperConfig.is_active.is_(True))
+        .filter(UserScraperConfig.scraper_type.in_([AGGREGATOR_SCRAPER_TYPE, "reddit"]))
+        .all()
+    )
+    source_keys: set[str] = set()
+    for scraper_type, config in rows:
+        if scraper_type == "reddit":
+            source_keys.add("reddit")
+            continue
+        if not isinstance(config, dict):
+            continue
+        source_key = _normalize_scrape_source(config.get("key"))
+        if source_key:
+            source_keys.add(source_key)
+    return source_keys
+
+
+def _active_short_news_crawl_count(db: Session, *, user_id: int) -> int:
+    active_sources = _active_short_news_source_keys(db, user_id=user_id)
+    if not active_sources:
+        return 0
+
+    rows = (
+        db.query(ProcessingTask.payload)
+        .filter(ProcessingTask.task_type == TaskType.SCRAPE.value)
+        .filter(
+            ProcessingTask.status.in_(
+                [
+                    ContentStatus.PENDING.value,
+                    ContentStatus.PROCESSING.value,
+                ]
+            )
+        )
+        .all()
+    )
+    matched_sources: set[str] = set()
+    for (payload,) in rows:
+        sources = ["all"]
+        if isinstance(payload, dict) and isinstance(payload.get("sources"), list):
+            sources = payload["sources"]
+        normalized_sources = {
+            normalized for source in sources if (normalized := _normalize_scrape_source(source))
+        }
+        if "all" in normalized_sources:
+            matched_sources.update(active_sources)
+        else:
+            matched_sources.update(active_sources.intersection(normalized_sources))
+    return len(matched_sources)
 
 
 def get_unread_counts(db: Session, *, user_id: int) -> dict[str, int]:
@@ -118,8 +181,8 @@ def get_processing_count(db: Session, *, user_id: int) -> dict[str, int]:
         .filter(
             NewsItem.status.in_(
                 [
-                    "new",
-                    "processing",
+                    NewsItemStatus.NEW.value,
+                    NewsItemStatus.PROCESSING.value,
                 ]
             )
         )
@@ -127,11 +190,13 @@ def get_processing_count(db: Session, *, user_id: int) -> dict[str, int]:
         .scalar()
         or 0
     )
+    news_crawl_count = _active_short_news_crawl_count(db, user_id=user_id)
 
     return {
         "processing_count": long_form_count + news_count,
         "long_form_count": long_form_count,
         "news_count": news_count,
+        "news_crawl_count": news_crawl_count,
     }
 
 

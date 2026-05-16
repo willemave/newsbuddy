@@ -94,6 +94,50 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     assert test_user.has_completed_onboarding is True
 
 
+def test_onboarding_complete_queues_selected_aggregator_scrapes(
+    client,
+    db_session,
+    monkeypatch,
+    test_user,
+) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    class FakeQueueGateway:
+        def enqueue(self, task_type, content_id=None, payload=None, queue_name=None, dedupe=None):
+            del content_id, queue_name, dedupe
+            calls.append((task_type.value, payload or {}))
+            return 43
+
+    monkeypatch.setattr(
+        "app.services.onboarding.get_task_queue_gateway",
+        lambda: FakeQueueGateway(),
+    )
+    monkeypatch.setattr("app.services.onboarding._load_curated_defaults", lambda: {})
+
+    response = client.post(
+        "/api/onboarding/complete",
+        json={
+            "selected_aggregators": [
+                {"key": "sciurls", "title": "SciURLs"},
+                {"key": "finurls", "title": "FinURLs"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["configured_source_count"] == 2
+
+    configs = (
+        db_session.query(UserScraperConfig)
+        .filter(UserScraperConfig.user_id == test_user.id)
+        .filter(UserScraperConfig.scraper_type == "aggregator")
+        .all()
+    )
+    assert {config.config["key"] for config in configs} == {"sciurls", "finurls"}
+    assert (TaskType.SCRAPE.value, {"sources": ["sciurls", "finurls"]}) in calls
+
+
 def test_onboarding_complete_rejects_invalid_twitter_username(client):
     response = client.post(
         "/api/onboarding/complete",

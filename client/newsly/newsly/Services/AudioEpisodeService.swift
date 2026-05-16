@@ -4,10 +4,18 @@
 //
 
 import Foundation
+import os.log
+
+private let audioEpisodeLogger = Logger(subsystem: "com.newsly", category: "AudioEpisode")
+
+private func elapsedMilliseconds(since start: Date) -> Int {
+    Int(Date().timeIntervalSince(start) * 1000)
+}
 
 enum AudioEpisodeDelivery: String {
     case background
     case stream
+    case inline
 }
 
 final class AudioEpisodeService {
@@ -20,55 +28,128 @@ final class AudioEpisodeService {
     func createFastNewsEpisode(
         delivery: AudioEpisodeDelivery = .background
     ) async throws -> AudioEpisode {
-        try await client.request(
-            APIEndpoints.fastNewsAudioEpisode,
-            method: "POST",
-            queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+        let startedAt = Date()
+        audioEpisodeLogger.info(
+            "Create episode started | kind=fast_news_digest delivery=\(delivery.rawValue, privacy: .public)"
         )
+        do {
+            let episode: AudioEpisode = try await client.request(
+                APIEndpoints.fastNewsAudioEpisode,
+                method: "POST",
+                queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+            )
+            audioEpisodeLogger.info(
+                "Create episode completed | kind=fast_news_digest episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
+            )
+            return episode
+        } catch {
+            audioEpisodeLogger.error(
+                "Create episode failed | kind=fast_news_digest elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
     }
 
     func createContentCouncilEpisode(
         contentId: Int,
         delivery: AudioEpisodeDelivery = .background
     ) async throws -> AudioEpisode {
-        try await client.request(
-            APIEndpoints.contentCouncilAudioEpisode(id: contentId),
-            method: "POST",
-            queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+        let startedAt = Date()
+        audioEpisodeLogger.info(
+            "Create episode started | kind=content_council_discussion contentId=\(contentId) delivery=\(delivery.rawValue, privacy: .public)"
         )
+        do {
+            let episode: AudioEpisode = try await client.request(
+                APIEndpoints.contentCouncilAudioEpisode(id: contentId),
+                method: "POST",
+                queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+            )
+            audioEpisodeLogger.info(
+                "Create episode completed | kind=content_council_discussion contentId=\(contentId) episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
+            )
+            return episode
+        } catch {
+            audioEpisodeLogger.error(
+                "Create episode failed | kind=content_council_discussion contentId=\(contentId) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
     }
 
     func createNewsItemDiscussionEpisode(
         newsItemId: Int,
         delivery: AudioEpisodeDelivery = .background
     ) async throws -> AudioEpisode {
-        try await client.request(
-            APIEndpoints.newsItemAudioEpisode(id: newsItemId),
-            method: "POST",
-            queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+        let startedAt = Date()
+        audioEpisodeLogger.info(
+            "Create episode started | kind=news_item_discussion newsItemId=\(newsItemId) delivery=\(delivery.rawValue, privacy: .public)"
         )
+        do {
+            let episode: AudioEpisode = try await client.request(
+                APIEndpoints.newsItemAudioEpisode(id: newsItemId),
+                method: "POST",
+                queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+            )
+            audioEpisodeLogger.info(
+                "Create episode completed | kind=news_item_discussion newsItemId=\(newsItemId) episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
+            )
+            return episode
+        } catch {
+            audioEpisodeLogger.error(
+                "Create episode failed | kind=news_item_discussion newsItemId=\(newsItemId) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
     }
 
     func fetchEpisode(id: Int) async throws -> AudioEpisode {
-        try await client.request(APIEndpoints.audioEpisode(id: id))
+        let startedAt = Date()
+        let episode: AudioEpisode = try await client.request(APIEndpoints.audioEpisode(id: id))
+        audioEpisodeLogger.info(
+            "Fetch episode completed | episodeId=\(id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
+        )
+        return episode
     }
 
     func fetchEpisodeAudio(id: Int) async throws -> Data {
-        try await client.requestData(
+        let startedAt = Date()
+        let data = try await client.requestData(
             APIEndpoints.audioEpisodeAudio(id: id),
             accept: "audio/mpeg"
         )
+        audioEpisodeLogger.info(
+            "Fetch episode audio completed | episodeId=\(id) bytes=\(data.count) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
+        )
+        return data
     }
 
     func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource {
-        guard let endpoint = episode.streamUrl ?? episode.audioUrl else {
+        let startedAt = Date()
+        guard let endpoint = episode.audioUrl ?? episode.streamUrl else {
+            audioEpisodeLogger.error(
+                "Stream resource missing | episodeId=\(episode.id) status=\(episode.status, privacy: .public)"
+            )
             throw NSError(
                 domain: "AudioEpisodeService",
                 code: 3,
                 userInfo: [NSLocalizedDescriptionKey: "No audio stream is available."]
             )
         }
-        return try await client.authorizedMediaResource(endpoint, accept: "audio/mpeg")
+        audioEpisodeLogger.info(
+            "Stream resource started | episodeId=\(episode.id) endpoint=\(endpoint, privacy: .public)"
+        )
+        do {
+            let resource = try await client.authorizedMediaResource(endpoint, accept: "audio/mpeg")
+            audioEpisodeLogger.info(
+                "Stream resource ready | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasAuthHeaders=\(!resource.headers.isEmpty)"
+            )
+            return resource
+        } catch {
+            audioEpisodeLogger.error(
+                "Stream resource failed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
     }
 
     func waitForCompletedEpisode(
@@ -76,12 +157,22 @@ final class AudioEpisodeService {
         pollIntervalNanoseconds: UInt64 = 1_500_000_000,
         maxAttempts: Int = 120
     ) async throws -> AudioEpisode {
+        let startedAt = Date()
         var current = episode
+        audioEpisodeLogger.info(
+            "Wait episode started | episodeId=\(episode.id) status=\(episode.status, privacy: .public) maxAttempts=\(maxAttempts)"
+        )
         for _ in 0..<maxAttempts {
             if current.status == "completed" {
+                audioEpisodeLogger.info(
+                    "Wait episode completed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
+                )
                 return current
             }
             if current.status == "failed" {
+                audioEpisodeLogger.error(
+                    "Wait episode failed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(current.errorMessage ?? "unknown", privacy: .public)"
+                )
                 throw NSError(
                     domain: "AudioEpisodeService",
                     code: 1,
@@ -94,6 +185,9 @@ final class AudioEpisodeService {
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
             current = try await fetchEpisode(id: current.id)
         }
+        audioEpisodeLogger.error(
+            "Wait episode timed out | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) attempts=\(maxAttempts)"
+        )
         throw NSError(
             domain: "AudioEpisodeService",
             code: 2,

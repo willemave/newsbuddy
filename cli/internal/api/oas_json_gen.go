@@ -4287,6 +4287,12 @@ func (s *ContentSummaryResponse) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.SavedSource.Set {
+			e.FieldStart("saved_source")
+			s.SavedSource.Encode(e)
+		}
+	}
+	{
 		if s.ShortSummary.Set {
 			e.FieldStart("short_summary")
 			s.ShortSummary.Encode(e)
@@ -4338,7 +4344,7 @@ func (s *ContentSummaryResponse) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfContentSummaryResponse = [30]string{
+var jsonFieldsNameOfContentSummaryResponse = [31]string{
 	0:  "artifact_type",
 	1:  "classification",
 	2:  "comment_count",
@@ -4360,15 +4366,16 @@ var jsonFieldsNameOfContentSummaryResponse = [30]string{
 	18: "processed_at",
 	19: "publication_date",
 	20: "reason_to_read",
-	21: "short_summary",
-	22: "source",
-	23: "source_url",
-	24: "status",
-	25: "thumbnail_url",
-	26: "title",
-	27: "top_comment",
-	28: "url",
-	29: "user_status",
+	21: "saved_source",
+	22: "short_summary",
+	23: "source",
+	24: "source_url",
+	25: "status",
+	26: "thumbnail_url",
+	27: "title",
+	28: "top_comment",
+	29: "url",
+	30: "user_status",
 }
 
 // Decode decodes ContentSummaryResponse from json.
@@ -4595,6 +4602,16 @@ func (s *ContentSummaryResponse) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"reason_to_read\"")
 			}
+		case "saved_source":
+			if err := func() error {
+				s.SavedSource.Reset()
+				if err := s.SavedSource.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"saved_source\"")
+			}
 		case "short_summary":
 			if err := func() error {
 				s.ShortSummary.Reset()
@@ -4626,7 +4643,7 @@ func (s *ContentSummaryResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"source_url\"")
 			}
 		case "status":
-			requiredBitSet[3] |= 1 << 0
+			requiredBitSet[3] |= 1 << 1
 			if err := func() error {
 				if err := s.Status.Decode(d); err != nil {
 					return err
@@ -4666,7 +4683,7 @@ func (s *ContentSummaryResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"top_comment\"")
 			}
 		case "url":
-			requiredBitSet[3] |= 1 << 4
+			requiredBitSet[3] |= 1 << 5
 			if err := func() error {
 				v, err := d.Str()
 				s.URL = string(v)
@@ -4700,7 +4717,7 @@ func (s *ContentSummaryResponse) Decode(d *jx.Decoder) error {
 		0b10011000,
 		0b00000000,
 		0b00000000,
-		0b00010001,
+		0b00100010,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -4800,6 +4817,46 @@ func (s ContentSummaryResponseFeedPreview) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *ContentSummaryResponseFeedPreview) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ContentSummaryResponseSavedSource as json.
+func (s ContentSummaryResponseSavedSource) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes ContentSummaryResponseSavedSource from json.
+func (s *ContentSummaryResponseSavedSource) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ContentSummaryResponseSavedSource to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch ContentSummaryResponseSavedSource(v) {
+	case ContentSummaryResponseSavedSourceKnowledge:
+		*s = ContentSummaryResponseSavedSourceKnowledge
+	case ContentSummaryResponseSavedSourceXBookmark:
+		*s = ContentSummaryResponseSavedSourceXBookmark
+	default:
+		*s = ContentSummaryResponseSavedSource(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ContentSummaryResponseSavedSource) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ContentSummaryResponseSavedSource) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -7166,6 +7223,55 @@ func (s OptNilContentSummaryResponseFeedPreview) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptNilContentSummaryResponseFeedPreview) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ContentSummaryResponseSavedSource as json.
+func (o OptNilContentSummaryResponseSavedSource) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	if o.Null {
+		e.Null()
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes ContentSummaryResponseSavedSource from json.
+func (o *OptNilContentSummaryResponseSavedSource) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptNilContentSummaryResponseSavedSource to nil")
+	}
+	if d.Next() == jx.Null {
+		if err := d.Null(); err != nil {
+			return err
+		}
+
+		var v ContentSummaryResponseSavedSource
+		o.Value = v
+		o.Set = true
+		o.Null = true
+		return nil
+	}
+	o.Set = true
+	o.Null = false
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptNilContentSummaryResponseSavedSource) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptNilContentSummaryResponseSavedSource) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

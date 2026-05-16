@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,10 @@ except ImportError:  # pragma: no cover
     yt_dlp = None
 
 logger = get_logger(__name__)
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 2)
 
 
 class _YtDlpLogger:
@@ -63,9 +68,24 @@ def download_audio_via_ytdlp(
     if yt_dlp is None:  # pragma: no cover - runtime safeguard when dependency missing
         raise RuntimeError("yt-dlp is required to download audio")
 
+    started_at = time.perf_counter()
     out_dir.mkdir(parents=True, exist_ok=True)
     existing = next(out_dir.glob(f"{output_stem}.*"), None)
     if existing and existing.stat().st_size > 0:
+        logger.info(
+            "Audio download reused existing file",
+            extra={
+                "component": "audio_pipeline",
+                "operation": "download_audio",
+                "status": "cached",
+                "duration_ms": _duration_ms(started_at),
+                "context_data": {
+                    "output_stem": output_stem,
+                    "audio_size_bytes": existing.stat().st_size,
+                    "use_youtube_config": use_youtube_config,
+                },
+            },
+        )
         return existing
 
     ydl_opts: dict[str, Any] = {
@@ -98,6 +118,18 @@ def download_audio_via_ytdlp(
         if extractor_args:
             ydl_opts["extractor_args"] = extractor_args
 
+    logger.info(
+        "Audio download started",
+        extra={
+            "component": "audio_pipeline",
+            "operation": "download_audio",
+            "status": "started",
+            "context_data": {
+                "output_stem": output_stem,
+                "use_youtube_config": use_youtube_config,
+            },
+        },
+    )
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         if info is None:
@@ -107,17 +139,74 @@ def download_audio_via_ytdlp(
     if not file_path.exists():
         match = next(out_dir.glob(f"{output_stem}.*"), None)
         if match and match.exists():
+            logger.info(
+                "Audio download completed via matched output",
+                extra={
+                    "component": "audio_pipeline",
+                    "operation": "download_audio",
+                    "status": "completed",
+                    "duration_ms": _duration_ms(started_at),
+                    "context_data": {
+                        "output_stem": output_stem,
+                        "audio_size_bytes": match.stat().st_size,
+                        "use_youtube_config": use_youtube_config,
+                    },
+                },
+            )
             return match
         raise FileNotFoundError(f"Downloaded audio not found at {file_path}")
 
+    logger.info(
+        "Audio download completed",
+        extra={
+            "component": "audio_pipeline",
+            "operation": "download_audio",
+            "status": "completed",
+            "duration_ms": _duration_ms(started_at),
+            "context_data": {
+                "output_stem": output_stem,
+                "audio_size_bytes": file_path.stat().st_size,
+                "use_youtube_config": use_youtube_config,
+            },
+        },
+    )
     return file_path
 
 
 def transcribe_audio_file_with_metadata(path: Path) -> tuple[str, str | None]:
     """Transcribe an audio file and return transcript text plus detected language."""
+    started_at = time.perf_counter()
+    logger.info(
+        "Audio file transcription started",
+        extra={
+            "component": "audio_pipeline",
+            "operation": "transcribe_audio_file",
+            "status": "started",
+            "context_data": {
+                "file_name": path.name,
+                "audio_size_bytes": path.stat().st_size if path.exists() else None,
+            },
+        },
+    )
     service = get_whisper_local_service()
     transcript_text, detected_language = service.transcribe_audio(path)
-    return transcript_text.strip(), detected_language
+    stripped = transcript_text.strip()
+    logger.info(
+        "Audio file transcription completed",
+        extra={
+            "component": "audio_pipeline",
+            "operation": "transcribe_audio_file",
+            "status": "completed",
+            "duration_ms": _duration_ms(started_at),
+            "context_data": {
+                "file_name": path.name,
+                "audio_size_bytes": path.stat().st_size if path.exists() else None,
+                "language": detected_language,
+                "transcript_chars": len(stripped),
+            },
+        },
+    )
+    return stripped, detected_language
 
 
 def transcribe_audio_file(path: Path) -> str:

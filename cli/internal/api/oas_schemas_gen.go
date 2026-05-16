@@ -1881,6 +1881,8 @@ type ContentSummaryResponse struct {
 	PublicationDate OptNilString `json:"publication_date"`
 	// Feed-preview reason explaining why the item is worth opening.
 	ReasonToRead OptNilString `json:"reason_to_read"`
+	// Saved-library source for this content when it appears in saved views.
+	SavedSource OptNilContentSummaryResponseSavedSource `json:"saved_source"`
 	// Short summary for display; for news items this returns the excerpt or first item text.
 	ShortSummary OptNilString `json:"short_summary"`
 	// Content source (e.g., substack name, podcast name).
@@ -2004,6 +2006,11 @@ func (s *ContentSummaryResponse) GetPublicationDate() OptNilString {
 // GetReasonToRead returns the value of ReasonToRead.
 func (s *ContentSummaryResponse) GetReasonToRead() OptNilString {
 	return s.ReasonToRead
+}
+
+// GetSavedSource returns the value of SavedSource.
+func (s *ContentSummaryResponse) GetSavedSource() OptNilContentSummaryResponseSavedSource {
+	return s.SavedSource
 }
 
 // GetShortSummary returns the value of ShortSummary.
@@ -2156,6 +2163,11 @@ func (s *ContentSummaryResponse) SetReasonToRead(val OptNilString) {
 	s.ReasonToRead = val
 }
 
+// SetSavedSource sets the value of SavedSource.
+func (s *ContentSummaryResponse) SetSavedSource(val OptNilContentSummaryResponseSavedSource) {
+	s.SavedSource = val
+}
+
 // SetShortSummary sets the value of ShortSummary.
 func (s *ContentSummaryResponse) SetShortSummary(val OptNilString) {
 	s.ShortSummary = val
@@ -2211,6 +2223,48 @@ func (s *ContentSummaryResponseFeedPreview) init() ContentSummaryResponseFeedPre
 		*s = m
 	}
 	return m
+}
+
+// Saved-library source for this content when it appears in saved views.
+type ContentSummaryResponseSavedSource string
+
+const (
+	ContentSummaryResponseSavedSourceKnowledge ContentSummaryResponseSavedSource = "knowledge"
+	ContentSummaryResponseSavedSourceXBookmark ContentSummaryResponseSavedSource = "x_bookmark"
+)
+
+// AllValues returns all ContentSummaryResponseSavedSource values.
+func (ContentSummaryResponseSavedSource) AllValues() []ContentSummaryResponseSavedSource {
+	return []ContentSummaryResponseSavedSource{
+		ContentSummaryResponseSavedSourceKnowledge,
+		ContentSummaryResponseSavedSourceXBookmark,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ContentSummaryResponseSavedSource) MarshalText() ([]byte, error) {
+	switch s {
+	case ContentSummaryResponseSavedSourceKnowledge:
+		return []byte(s), nil
+	case ContentSummaryResponseSavedSourceXBookmark:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ContentSummaryResponseSavedSource) UnmarshalText(data []byte) error {
+	switch ContentSummaryResponseSavedSource(data) {
+	case ContentSummaryResponseSavedSourceKnowledge:
+		*s = ContentSummaryResponseSavedSourceKnowledge
+		return nil
+	case ContentSummaryResponseSavedSourceXBookmark:
+		*s = ContentSummaryResponseSavedSourceXBookmark
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // First discussion comment {author, text} for preview.
@@ -3643,6 +3697,69 @@ func (o OptNilContentSummaryResponseFeedPreview) Get() (v ContentSummaryResponse
 
 // Or returns value if set, or given parameter if does not.
 func (o OptNilContentSummaryResponseFeedPreview) Or(d ContentSummaryResponseFeedPreview) ContentSummaryResponseFeedPreview {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptNilContentSummaryResponseSavedSource returns new OptNilContentSummaryResponseSavedSource with value set to v.
+func NewOptNilContentSummaryResponseSavedSource(v ContentSummaryResponseSavedSource) OptNilContentSummaryResponseSavedSource {
+	return OptNilContentSummaryResponseSavedSource{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilContentSummaryResponseSavedSource is optional nullable ContentSummaryResponseSavedSource.
+type OptNilContentSummaryResponseSavedSource struct {
+	Value ContentSummaryResponseSavedSource
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilContentSummaryResponseSavedSource was set.
+func (o OptNilContentSummaryResponseSavedSource) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilContentSummaryResponseSavedSource) Reset() {
+	var v ContentSummaryResponseSavedSource
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilContentSummaryResponseSavedSource) SetTo(v ContentSummaryResponseSavedSource) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilContentSummaryResponseSavedSource) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilContentSummaryResponseSavedSource) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v ContentSummaryResponseSavedSource
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilContentSummaryResponseSavedSource) Get() (v ContentSummaryResponseSavedSource, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilContentSummaryResponseSavedSource) Or(d ContentSummaryResponseSavedSource) ContentSummaryResponseSavedSource {
 	if v, ok := o.Get(); ok {
 		return v
 	}

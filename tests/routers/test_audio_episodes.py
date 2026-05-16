@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.models.contracts import TaskType
 from app.models.db import AudioEpisode, ProcessingTask
 from tests.support.builders import create_news_item_row
@@ -53,6 +55,44 @@ def test_create_fast_news_stream_delivery_does_not_enqueue_generation(
     payload = response.json()
     assert payload["status"] == "pending"
     assert payload["stream_url"] == f"/api/content/audio-episodes/{payload['id']}/stream"
+    assert db_session.query(AudioEpisode).count() == 1
+    assert db_session.query(ProcessingTask).count() == 0
+
+
+def test_create_fast_news_inline_delivery_generates_before_response(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    create_news_item_row(
+        db_session,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        summary_title="Inline audio ships",
+        summary_text="Inline delivery should return a completed file-backed episode.",
+    )
+
+    def fake_generate_audio_episode(db, *, audio_episode_id: int):
+        episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).one()
+        episode.status = "completed"
+        episode.audio_storage_path = "/tmp/audio-episode-test.mp3"
+        episode.audio_content_type = "audio/mpeg"
+        episode.duration_seconds = 90
+        return episode
+
+    monkeypatch.setattr(
+        "app.services.audio_episodes.generate_audio_episode",
+        fake_generate_audio_episode,
+    )
+
+    response = client.post("/api/content/audio-episodes/fast-news?delivery=inline")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["audio_url"] == f"/api/content/audio-episodes/{payload['id']}/audio"
+    assert payload["duration_seconds"] == 90
     assert db_session.query(AudioEpisode).count() == 1
     assert db_session.query(ProcessingTask).count() == 0
 
@@ -118,3 +158,41 @@ def test_stream_audio_episode_returns_generated_chunks(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("audio/mpeg")
     assert response.content == b"abcdef"
+
+
+def test_stream_audio_episode_follows_active_generation(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    episode = AudioEpisode(
+        user_id=test_user.id,
+        kind="fast_news_digest",
+        status="processing",
+        title="Fast Reads Brief",
+        input_hash="active",
+        source_item_ids=[1],
+        source_snapshot={"kind": "fast_news_digest", "items": []},
+        prompt_version=1,
+        started_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(episode)
+    db_session.commit()
+    db_session.refresh(episode)
+
+    def fake_follow_audio_episode_stream_chunks(*, audio_episode_id: int, user_id: int):
+        assert audio_episode_id == episode.id
+        assert user_id == test_user.id
+        yield b"cached"
+
+    monkeypatch.setattr(
+        "app.routers.api.audio_episodes.follow_audio_episode_stream_chunks",
+        fake_follow_audio_episode_stream_chunks,
+    )
+
+    response = client.get(f"/api/content/audio-episodes/{episode.id}/stream")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("audio/mpeg")
+    assert response.content == b"cached"

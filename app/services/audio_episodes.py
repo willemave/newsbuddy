@@ -7,6 +7,7 @@ import json
 import math
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
-from app.core.model_defaults import SMART_MODEL_SPEC
+from app.core.model_defaults import ARTICLE_PODCAST_SUMMARY_MODEL_SPEC
 from app.core.settings import get_settings
 from app.models.api.audio_episodes import (
     AudioEpisodeDelivery,
@@ -48,14 +49,19 @@ CONTENT_COUNCIL_DISCUSSION_KIND: Literal["content_council_discussion"] = (
     "content_council_discussion"
 )
 NEWS_ITEM_DISCUSSION_KIND: Literal["news_item_discussion"] = "news_item_discussion"
-PROMPT_VERSION = 1
+PROMPT_VERSION = 4
 FAST_NEWS_LIMIT = 200
-LONGFORM_BODY_MAX_CHARS = 120_000
-AUDIO_EPISODE_MODEL = SMART_MODEL_SPEC
+LONGFORM_BODY_MAX_CHARS = 16_000
+LONGFORM_BODY_HEAD_CHARS = 7_000
+LONGFORM_BODY_MIDDLE_CHARS = 4_000
+LONGFORM_BODY_TAIL_CHARS = 5_000
+AUDIO_EPISODE_MODEL = ARTICLE_PODCAST_SUMMARY_MODEL_SPEC
 SCRIPT_TIMEOUT_SECONDS = 180
-DIALOGUE_TEXT_CHAR_LIMIT = 4_600
+DIALOGUE_TEXT_CHAR_LIMIT = 1_100
 AUDIO_EPISODE_PROCESSING_STALE_AFTER = timedelta(minutes=15)
 AUDIO_EPISODE_FILE_CHUNK_SIZE = 1024 * 256
+AUDIO_EPISODE_FOLLOW_POLL_SECONDS = 0.25
+AUDIO_EPISODE_FOLLOW_TIMEOUT_SECONDS = 180
 
 SCRIPT_SYSTEM_PROMPT = """You write concise, natural podcast scripts for Newsly.
 Create spoken dialogue, not an essay. The format should feel like a smart tech/business
@@ -72,30 +78,66 @@ class AudioEpisodeTurn(BaseModel):
         ...,
         description="Speaker role for this turn.",
     )
-    text: str = Field(..., min_length=1, max_length=900)
+    text: str = Field(..., min_length=1, max_length=260)
 
 
 class AudioEpisodeScript(BaseModel):
     """Structured output for one generated audio episode."""
 
     title: str = Field(..., min_length=1, max_length=120)
-    estimated_duration_seconds: int = Field(..., ge=180, le=420)
-    turns: list[AudioEpisodeTurn] = Field(..., min_length=6, max_length=18)
+    estimated_duration_seconds: int = Field(..., ge=30, le=90)
+    turns: list[AudioEpisodeTurn] = Field(..., min_length=6, max_length=8)
 
 
 class AudioEpisodeAlreadyProcessingError(RuntimeError):
     """Raised when a live generator is already producing the episode."""
 
 
+@dataclass(frozen=True)
+class AudioEpisodeScriptGeneration:
+    """Structured script plus the model that produced it."""
+
+    script: AudioEpisodeScript
+    model: str
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 2)
+
+
 def create_fast_news_digest_episode(db: Session, *, user_id: int) -> AudioEpisode:
     """Create or reuse an on-demand digest for the user's unread Fast Reads."""
 
+    started_at = time.perf_counter()
+    logger.info(
+        "Audio episode create started",
+        extra={
+            "component": "audio_episodes",
+            "operation": "create",
+            "user_id": user_id,
+            "context_data": {"kind": FAST_NEWS_DIGEST_KIND},
+        },
+    )
     items, total_unread = list_unread_visible_news_items(
         db,
         user_id=user_id,
         limit=FAST_NEWS_LIMIT,
     )
     if not items:
+        logger.info(
+            "Audio episode create rejected",
+            extra={
+                "component": "audio_episodes",
+                "operation": "create",
+                "status": "rejected",
+                "duration_ms": _duration_ms(started_at),
+                "user_id": user_id,
+                "context_data": {
+                    "kind": FAST_NEWS_DIGEST_KIND,
+                    "reason": "no_unread_fast_reads",
+                },
+            },
+        )
         raise HTTPException(status_code=400, detail="No unread Fast Reads are available")
 
     source_items = [_news_item_source_snapshot(item) for item in items]
@@ -106,7 +148,7 @@ def create_fast_news_digest_episode(db: Session, *, user_id: int) -> AudioEpisod
         "items": source_items,
     }
     title = "Fast Reads Brief"
-    return _create_or_reuse_episode(
+    episode = _create_or_reuse_episode(
         db,
         user_id=user_id,
         kind=FAST_NEWS_DIGEST_KIND,
@@ -115,6 +157,24 @@ def create_fast_news_digest_episode(db: Session, *, user_id: int) -> AudioEpisod
         source_item_ids=[int(item.id) for item in items if item.id is not None],
         source_snapshot=source_snapshot,
     )
+    logger.info(
+        "Audio episode create prepared",
+        extra={
+            "component": "audio_episodes",
+            "operation": "create",
+            "status": "prepared",
+            "duration_ms": _duration_ms(started_at),
+            "item_id": episode.id,
+            "user_id": user_id,
+            "context_data": {
+                "kind": FAST_NEWS_DIGEST_KIND,
+                "episode_status": episode.status,
+                "included_count": len(source_items),
+                "total_unread": total_unread,
+            },
+        },
+    )
+    return episode
 
 
 def create_content_council_episode(
@@ -125,21 +185,79 @@ def create_content_council_episode(
 ) -> AudioEpisode:
     """Create or reuse a council-style discussion episode for one long-form item."""
 
+    started_at = time.perf_counter()
+    logger.info(
+        "Audio episode create started",
+        extra={
+            "component": "audio_episodes",
+            "operation": "create",
+            "content_id": content_id,
+            "user_id": user_id,
+            "context_data": {"kind": CONTENT_COUNCIL_DISCUSSION_KIND},
+        },
+    )
     content = get_visible_content(db, user_id=user_id, content_id=content_id)
     if content is None:
+        logger.info(
+            "Audio episode create rejected",
+            extra={
+                "component": "audio_episodes",
+                "operation": "create",
+                "status": "rejected",
+                "duration_ms": _duration_ms(started_at),
+                "content_id": content_id,
+                "user_id": user_id,
+                "context_data": {
+                    "kind": CONTENT_COUNCIL_DISCUSSION_KIND,
+                    "reason": "content_not_found",
+                },
+            },
+        )
         raise HTTPException(status_code=404, detail="Content not found")
 
     content_type = str(content.content_type or "")
     if content_type not in {ContentType.ARTICLE.value, ContentType.PODCAST.value}:
+        logger.info(
+            "Audio episode create rejected",
+            extra={
+                "component": "audio_episodes",
+                "operation": "create",
+                "status": "rejected",
+                "duration_ms": _duration_ms(started_at),
+                "content_id": content_id,
+                "user_id": user_id,
+                "context_data": {
+                    "kind": CONTENT_COUNCIL_DISCUSSION_KIND,
+                    "reason": "unsupported_content_type",
+                    "content_type": content_type,
+                },
+            },
+        )
         raise HTTPException(status_code=400, detail="Audio discussions are only for long form")
 
     body_text = get_content_body_resolver().resolve_text(db, content=content)
     if not body_text:
+        logger.info(
+            "Audio episode create rejected",
+            extra={
+                "component": "audio_episodes",
+                "operation": "create",
+                "status": "rejected",
+                "duration_ms": _duration_ms(started_at),
+                "content_id": content_id,
+                "user_id": user_id,
+                "context_data": {
+                    "kind": CONTENT_COUNCIL_DISCUSSION_KIND,
+                    "reason": "missing_body_text",
+                    "content_type": content_type,
+                },
+            },
+        )
         raise HTTPException(status_code=400, detail="No article or transcript text is available")
 
     source_snapshot = _content_source_snapshot(content, body_text=body_text)
     title = f"Expert discussion: {source_snapshot['title']}"
-    return _create_or_reuse_episode(
+    episode = _create_or_reuse_episode(
         db,
         user_id=user_id,
         kind=CONTENT_COUNCIL_DISCUSSION_KIND,
@@ -148,6 +266,26 @@ def create_content_council_episode(
         source_item_ids=[],
         source_snapshot=source_snapshot,
     )
+    logger.info(
+        "Audio episode create prepared",
+        extra={
+            "component": "audio_episodes",
+            "operation": "create",
+            "status": "prepared",
+            "duration_ms": _duration_ms(started_at),
+            "item_id": episode.id,
+            "content_id": content_id,
+            "user_id": user_id,
+            "context_data": {
+                "kind": CONTENT_COUNCIL_DISCUSSION_KIND,
+                "episode_status": episode.status,
+                "content_type": content_type,
+                "body_chars": len(body_text),
+                "body_truncated": source_snapshot["source_text_truncated"],
+            },
+        },
+    )
+    return episode
 
 
 def create_news_item_discussion_episode(
@@ -158,12 +296,53 @@ def create_news_item_discussion_episode(
 ) -> AudioEpisode:
     """Create or reuse a podcast-style discussion episode for one Fast Read item."""
 
+    started_at = time.perf_counter()
+    logger.info(
+        "Audio episode create started",
+        extra={
+            "component": "audio_episodes",
+            "operation": "create",
+            "item_id": news_item_id,
+            "user_id": user_id,
+            "context_data": {"kind": NEWS_ITEM_DISCUSSION_KIND},
+        },
+    )
     item = get_visible_news_item(db, user_id=user_id, news_item_id=news_item_id)
     if item is None:
+        logger.info(
+            "Audio episode create rejected",
+            extra={
+                "component": "audio_episodes",
+                "operation": "create",
+                "status": "rejected",
+                "duration_ms": _duration_ms(started_at),
+                "item_id": news_item_id,
+                "user_id": user_id,
+                "context_data": {
+                    "kind": NEWS_ITEM_DISCUSSION_KIND,
+                    "reason": "news_item_not_found",
+                },
+            },
+        )
         raise HTTPException(status_code=404, detail="News item not found")
 
     source_item = _news_item_source_snapshot(item)
     if not source_item.get("summary") and not source_item.get("key_points"):
+        logger.info(
+            "Audio episode create rejected",
+            extra={
+                "component": "audio_episodes",
+                "operation": "create",
+                "status": "rejected",
+                "duration_ms": _duration_ms(started_at),
+                "item_id": news_item_id,
+                "user_id": user_id,
+                "context_data": {
+                    "kind": NEWS_ITEM_DISCUSSION_KIND,
+                    "reason": "missing_fast_read_summary",
+                },
+            },
+        )
         raise HTTPException(status_code=400, detail="No Fast Read summary is available")
 
     source_snapshot = {
@@ -171,7 +350,7 @@ def create_news_item_discussion_episode(
         "item": source_item,
     }
     title = f"News discussion: {source_item['title']}"
-    return _create_or_reuse_episode(
+    episode = _create_or_reuse_episode(
         db,
         user_id=user_id,
         kind=NEWS_ITEM_DISCUSSION_KIND,
@@ -180,16 +359,48 @@ def create_news_item_discussion_episode(
         source_item_ids=[_required_int(item.id, "news item id")],
         source_snapshot=source_snapshot,
     )
+    logger.info(
+        "Audio episode create prepared",
+        extra={
+            "component": "audio_episodes",
+            "operation": "create",
+            "status": "prepared",
+            "duration_ms": _duration_ms(started_at),
+            "item_id": episode.id,
+            "user_id": user_id,
+            "context_data": {
+                "kind": NEWS_ITEM_DISCUSSION_KIND,
+                "episode_status": episode.status,
+                "news_item_id": news_item_id,
+                "summary_chars": len(str(source_item.get("summary") or "")),
+                "key_point_count": len(source_item.get("key_points") or []),
+            },
+        },
+    )
+    return episode
 
 
 def enqueue_audio_episode_generation(audio_episode_id: int) -> int:
     """Enqueue background generation for an audio episode."""
 
-    return get_queue_service().enqueue(
+    started_at = time.perf_counter()
+    task_id = get_queue_service().enqueue(
         TaskType.GENERATE_AUDIO_EPISODE,
         payload={"audio_episode_id": audio_episode_id},
         dedupe_key=f"audio_episode:{audio_episode_id}",
     )
+    logger.info(
+        "Audio episode generation enqueued",
+        extra={
+            "component": "audio_episodes",
+            "operation": "enqueue_generation",
+            "duration_ms": _duration_ms(started_at),
+            "item_id": audio_episode_id,
+            "task_id": task_id,
+            "task_type": TaskType.GENERATE_AUDIO_EPISODE.value,
+        },
+    )
+    return task_id
 
 
 def get_user_audio_episode(
@@ -241,13 +452,40 @@ def commit_audio_episode_delivery(
 ) -> AudioEpisodeResponse:
     """Commit an episode, enqueue background work when requested, and return it."""
 
+    started_at = time.perf_counter()
+    task_id: int | None = None
+    episode_id_before_commit = episode.id
     db.commit()
     db.refresh(episode)
     if delivery == "background" and episode.status != "completed":
         episode_id = episode.id
         if episode_id is None:
             raise RuntimeError("Audio episode must be persisted before enqueue")
-        enqueue_audio_episode_generation(episode_id)
+        task_id = enqueue_audio_episode_generation(episode_id)
+    elif delivery == "inline" and episode.status != "completed":
+        episode_id = episode.id
+        if episode_id is None:
+            raise RuntimeError("Audio episode must be persisted before inline generation")
+        episode = generate_audio_episode(db, audio_episode_id=episode_id)
+        db.commit()
+        db.refresh(episode)
+    logger.info(
+        "Audio episode delivery committed",
+        extra={
+            "component": "audio_episodes",
+            "operation": "commit_delivery",
+            "status": episode.status,
+            "duration_ms": _duration_ms(started_at),
+            "item_id": episode.id or episode_id_before_commit,
+            "task_id": task_id,
+            "user_id": episode.user_id,
+            "context_data": {
+                "delivery": delivery,
+                "kind": episode.kind,
+                "has_audio": bool(episode.audio_storage_path),
+            },
+        },
+    )
     return present_audio_episode(episode)
 
 
@@ -263,12 +501,45 @@ def audio_episode_file_path(episode: AudioEpisode) -> Path | None:
 def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisode:
     """Generate script and audio for one persisted audio episode."""
 
+    started_at = time.perf_counter()
+    logger.info(
+        "Audio episode generation started",
+        extra={
+            "component": "audio_episodes",
+            "operation": "generate",
+            "item_id": audio_episode_id,
+        },
+    )
     episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).first()
     if episode is None:
         raise ValueError(f"Audio episode {audio_episode_id} not found")
     if episode.status == "completed" and episode.audio_storage_path:
+        logger.info(
+            "Audio episode generation skipped",
+            extra={
+                "component": "audio_episodes",
+                "operation": "generate",
+                "status": "completed",
+                "duration_ms": _duration_ms(started_at),
+                "item_id": audio_episode_id,
+                "user_id": episode.user_id,
+                "context_data": {"kind": episode.kind, "reason": "already_completed"},
+            },
+        )
         return episode
     if episode.status == "processing" and not is_audio_episode_processing_stale(episode):
+        logger.info(
+            "Audio episode generation skipped",
+            extra={
+                "component": "audio_episodes",
+                "operation": "generate",
+                "status": "processing",
+                "duration_ms": _duration_ms(started_at),
+                "item_id": audio_episode_id,
+                "user_id": episode.user_id,
+                "context_data": {"kind": episode.kind, "reason": "already_processing"},
+            },
+        )
         return episode
 
     episode_id = _required_int(episode.id, "audio episode id")
@@ -279,15 +550,26 @@ def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisod
     episode.started_at = now
     db.flush()
 
+    script_duration_ms = 0.0
+    tts_duration_ms = 0.0
+    write_duration_ms = 0.0
+    audio_bytes_length = 0
     try:
+        script_started_at = time.perf_counter()
         script = _prepare_audio_episode_script(db, episode)
+        script_duration_ms = _duration_ms(script_started_at)
         script_text = _required_str(episode.script_text, "audio episode script_text")
+        tts_started_at = time.perf_counter()
         audio_bytes = get_content_narration_tts_service().synthesize_dialogue_mp3(
             turns=[turn.model_dump(mode="json") for turn in script.turns],
             item_id=episode_id,
             user_id=user_id,
         )
+        tts_duration_ms = _duration_ms(tts_started_at)
+        audio_bytes_length = len(audio_bytes)
+        write_started_at = time.perf_counter()
         audio_path = _write_audio_episode_file(episode_id, audio_bytes)
+        write_duration_ms = _duration_ms(write_started_at)
     except Exception as exc:  # noqa: BLE001
         episode.status = "failed"
         episode.error_message = str(exc)
@@ -298,11 +580,16 @@ def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisod
             extra={
                 "component": "audio_episodes",
                 "operation": "generate",
+                "duration_ms": _duration_ms(started_at),
                 "item_id": audio_episode_id,
+                "user_id": episode.user_id,
                 "context_data": {
                     "kind": episode.kind,
-                    "user_id": episode.user_id,
                     "error": str(exc),
+                    "script_duration_ms": script_duration_ms,
+                    "tts_duration_ms": tts_duration_ms,
+                    "write_duration_ms": write_duration_ms,
+                    "audio_bytes": audio_bytes_length,
                 },
             },
         )
@@ -315,6 +602,26 @@ def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisod
     episode.error_message = None
     episode.completed_at = datetime.now(UTC).replace(tzinfo=None)
     db.flush()
+    logger.info(
+        "Audio episode generation completed",
+        extra={
+            "component": "audio_episodes",
+            "operation": "generate",
+            "status": "completed",
+            "duration_ms": _duration_ms(started_at),
+            "item_id": audio_episode_id,
+            "user_id": user_id,
+            "context_data": {
+                "kind": episode.kind,
+                "script_duration_ms": script_duration_ms,
+                "tts_duration_ms": tts_duration_ms,
+                "write_duration_ms": write_duration_ms,
+                "audio_bytes": audio_bytes_length,
+                "turn_count": len(script.turns),
+                "duration_seconds": episode.duration_seconds,
+            },
+        },
+    )
     return episode
 
 
@@ -345,6 +652,17 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
     cached_path: Path | None = None
     script: AudioEpisodeScript | None = None
     script_input: AudioEpisode | None = None
+    script_model = AUDIO_EPISODE_MODEL
+    logger.info(
+        "Audio episode stream generator started",
+        extra={
+            "component": "audio_episodes",
+            "operation": "stream",
+            "status": "started",
+            "item_id": audio_episode_id,
+            "user_id": user_id,
+        },
+    )
     try:
         with SessionLocal() as db:
             episode = get_user_audio_episode(
@@ -355,6 +673,7 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
             if episode is None:
                 raise ValueError(f"Audio episode {audio_episode_id} not found")
 
+            episode_kind = str(episode.kind or "")
             completed_path = audio_episode_file_path(episode)
             if (
                 episode.status == "completed"
@@ -369,6 +688,18 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
                     and not is_audio_episode_processing_stale(episode)
                 )
                 if is_active_processing:
+                    logger.info(
+                        "Audio episode stream rejected",
+                        extra={
+                            "component": "audio_episodes",
+                            "operation": "stream",
+                            "status": "already_processing",
+                            "duration_ms": _duration_ms(stream_started_at),
+                            "item_id": audio_episode_id,
+                            "user_id": user_id,
+                            "context_data": {"kind": episode_kind},
+                        },
+                    )
                     raise AudioEpisodeAlreadyProcessingError(
                         "Audio episode is already being generated"
                     )
@@ -380,26 +711,112 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
                 if not completed_path or not completed_path.exists():
                     episode.audio_storage_path = None
                 script = _script_from_episode(episode)
+                script_model = str(episode.model or AUDIO_EPISODE_MODEL)
                 if script is None:
                     script_input = _copy_episode_for_script_generation(episode)
                 db.commit()
 
+            logger.info(
+                "Audio episode stream resolved",
+                extra={
+                    "component": "audio_episodes",
+                    "operation": "stream",
+                    "status": "resolved",
+                    "duration_ms": _duration_ms(stream_started_at),
+                    "item_id": audio_episode_id,
+                    "user_id": user_id,
+                    "context_data": {
+                        "kind": episode_kind,
+                        "episode_status": episode.status,
+                        "cached": cached_path is not None,
+                        "has_script": script is not None,
+                        "will_generate_script": script is None and script_input is not None,
+                    },
+                },
+            )
+
         if cached_path is not None:
-            yield from _read_audio_episode_file(cached_path)
+            for chunk in _read_audio_episode_file(cached_path):
+                if first_chunk_ms is None:
+                    first_chunk_ms = _duration_ms(stream_started_at)
+                    logger.info(
+                        "Audio episode stream first chunk",
+                        extra={
+                            "component": "audio_episodes",
+                            "operation": "stream",
+                            "status": "first_chunk",
+                            "duration_ms": first_chunk_ms,
+                            "item_id": audio_episode_id,
+                            "user_id": user_id,
+                            "context_data": {"kind": episode_kind, "cached": True},
+                        },
+                    )
+                audio_bytes += len(chunk)
+                chunk_count += 1
+                yield chunk
+            logger.info(
+                "Audio episode cached stream completed",
+                extra={
+                    "component": "audio_episodes",
+                    "operation": "stream",
+                    "status": "completed",
+                    "duration_ms": _duration_ms(stream_started_at),
+                    "item_id": audio_episode_id,
+                    "user_id": user_id,
+                    "context_data": {
+                        "kind": episode_kind,
+                        "cached": True,
+                        "stream_chunk_count": chunk_count,
+                        "audio_bytes": audio_bytes,
+                        "time_to_first_chunk_ms": first_chunk_ms or 0,
+                    },
+                },
+            )
             return
 
         if script is None:
             if script_input is None:
                 raise RuntimeError("Audio episode script input was not prepared")
+            logger.info(
+                "Audio episode stream script generation started",
+                extra={
+                    "component": "audio_episodes",
+                    "operation": "stream",
+                    "status": "script_started",
+                    "duration_ms": _duration_ms(stream_started_at),
+                    "item_id": audio_episode_id,
+                    "user_id": user_id,
+                    "context_data": {"kind": episode_kind},
+                },
+            )
             script_started_at = time.perf_counter()
-            script = _generate_script(script_input)
+            script_generation = _generate_script(script_input)
+            script = script_generation.script
+            script_model = script_generation.model
             script_duration_ms = (time.perf_counter() - script_started_at) * 1000
+            logger.info(
+                "Audio episode stream script generation completed",
+                extra={
+                    "component": "audio_episodes",
+                    "operation": "stream",
+                    "status": "script_completed",
+                    "duration_ms": _duration_ms(stream_started_at),
+                    "item_id": audio_episode_id,
+                    "user_id": user_id,
+                    "context_data": {
+                        "kind": episode_kind,
+                        "model": script_model,
+                        "script_duration_ms": round(script_duration_ms, 2),
+                        "turn_count": len(script.turns),
+                    },
+                },
+            )
 
         with SessionLocal() as db:
             episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).first()
             if episode is None:
                 raise ValueError(f"Audio episode {audio_episode_id} not found")
-            script = _persist_audio_episode_script(db, episode, script)
+            script = _persist_audio_episode_script(db, episode, script, model=script_model)
             script_text = _required_str(episode.script_text, "audio episode script_text")
             episode_kind = str(episode.kind or "")
             db.commit()
@@ -410,6 +827,18 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
         final_path = _audio_episode_final_file_path(audio_episode_id)
 
         tts_started_at = time.perf_counter()
+        logger.info(
+            "Audio episode TTS stream started",
+            extra={
+                "component": "audio_episodes",
+                "operation": "stream",
+                "status": "tts_started",
+                "duration_ms": _duration_ms(stream_started_at),
+                "item_id": audio_episode_id,
+                "user_id": user_id,
+                "context_data": {"kind": episode_kind, "turn_count": len(script.turns)},
+            },
+        )
         with partial_path.open("wb") as output_file:
             for chunk in get_content_narration_tts_service().stream_dialogue_mp3(
                 turns=[turn.model_dump(mode="json") for turn in script.turns],
@@ -420,6 +849,23 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
                     continue
                 if first_chunk_ms is None:
                     first_chunk_ms = (time.perf_counter() - tts_started_at) * 1000
+                    logger.info(
+                        "Audio episode stream first chunk",
+                        extra={
+                            "component": "audio_episodes",
+                            "operation": "stream",
+                            "status": "first_chunk",
+                            "duration_ms": _duration_ms(stream_started_at),
+                            "item_id": audio_episode_id,
+                            "user_id": user_id,
+                            "context_data": {
+                                "kind": episode_kind,
+                                "cached": False,
+                                "tts_time_to_first_chunk_ms": round(first_chunk_ms, 2),
+                                "script_duration_ms": round(script_duration_ms, 2),
+                            },
+                        },
+                    )
                 output_file.write(chunk)
                 audio_bytes += len(chunk)
                 chunk_count += 1
@@ -450,16 +896,14 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
             extra={
                 "component": "audio_episodes",
                 "operation": "stream",
+                "status": "completed",
+                "duration_ms": _duration_ms(stream_started_at),
                 "item_id": audio_episode_id,
+                "user_id": user_id,
                 "context_data": {
-                    "user_id": user_id,
                     "kind": episode_kind,
                     "script_duration_ms": round(script_duration_ms, 2),
                     "tts_time_to_first_chunk_ms": round(first_chunk_ms or 0, 2),
-                    "stream_total_duration_ms": round(
-                        (time.perf_counter() - stream_started_at) * 1000,
-                        2,
-                    ),
                     "stream_chunk_count": chunk_count,
                     "audio_bytes": audio_bytes,
                 },
@@ -472,6 +916,23 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
                 audio_episode_id=audio_episode_id,
                 partial_path=partial_path,
             )
+        logger.info(
+            "Audio episode stream cancelled",
+            extra={
+                "component": "audio_episodes",
+                "operation": "stream",
+                "status": "cancelled",
+                "duration_ms": _duration_ms(stream_started_at),
+                "item_id": audio_episode_id,
+                "user_id": user_id,
+                "context_data": {
+                    "kind": episode_kind,
+                    "chunk_count": chunk_count,
+                    "audio_bytes": audio_bytes,
+                    "time_to_first_chunk_ms": round(first_chunk_ms or 0, 2),
+                },
+            },
+        )
         raise
     except AudioEpisodeAlreadyProcessingError:
         raise
@@ -488,16 +949,143 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
             extra={
                 "component": "audio_episodes",
                 "operation": "stream",
+                "duration_ms": _duration_ms(stream_started_at),
                 "item_id": audio_episode_id,
+                "user_id": user_id,
                 "context_data": {
-                    "user_id": user_id,
+                    "kind": episode_kind,
                     "error": str(exc),
                     "chunk_count": chunk_count,
                     "audio_bytes": audio_bytes,
+                    "time_to_first_chunk_ms": round(first_chunk_ms or 0, 2),
                 },
             },
         )
         raise
+
+
+def follow_audio_episode_stream_chunks(*, audio_episode_id: int, user_id: int) -> Iterator[bytes]:
+    """Wait for an active generator to cache audio, then stream the completed MP3.
+
+    AVPlayer/CoreMedia may open a second request while the first streaming generator is
+    still producing audio. Returning 409 for that duplicate request can make playback
+    fail even though the original generator is healthy, so duplicate callers wait for
+    the completed cached file instead.
+    """
+
+    SessionLocal = get_session_factory()
+    started_at = time.perf_counter()
+    first_chunk_ms: float | None = None
+    chunk_count = 0
+    audio_bytes = 0
+    episode_kind: str | None = None
+    logger.info(
+        "Audio episode stream follower started",
+        extra={
+            "component": "audio_episodes",
+            "operation": "stream_follow",
+            "status": "started",
+            "item_id": audio_episode_id,
+            "user_id": user_id,
+        },
+    )
+    deadline = started_at + AUDIO_EPISODE_FOLLOW_TIMEOUT_SECONDS
+    while time.perf_counter() < deadline:
+        should_take_over_generation = False
+        with SessionLocal() as db:
+            episode = get_user_audio_episode(
+                db,
+                user_id=user_id,
+                audio_episode_id=audio_episode_id,
+            )
+            if episode is None:
+                raise ValueError(f"Audio episode {audio_episode_id} not found")
+
+            episode_kind = str(episode.kind or "")
+            path = audio_episode_file_path(episode)
+            if episode.status == "completed" and path is not None and path.exists():
+                for chunk in _read_audio_episode_file(path):
+                    if first_chunk_ms is None:
+                        first_chunk_ms = _duration_ms(started_at)
+                        logger.info(
+                            "Audio episode stream follower first chunk",
+                            extra={
+                                "component": "audio_episodes",
+                                "operation": "stream_follow",
+                                "status": "first_chunk",
+                                "duration_ms": first_chunk_ms,
+                                "item_id": audio_episode_id,
+                                "user_id": user_id,
+                                "context_data": {"kind": episode_kind},
+                            },
+                        )
+                    audio_bytes += len(chunk)
+                    chunk_count += 1
+                    yield chunk
+
+                logger.info(
+                    "Audio episode stream follower completed",
+                    extra={
+                        "component": "audio_episodes",
+                        "operation": "stream_follow",
+                        "status": "completed",
+                        "duration_ms": _duration_ms(started_at),
+                        "item_id": audio_episode_id,
+                        "user_id": user_id,
+                        "context_data": {
+                            "kind": episode_kind,
+                            "stream_chunk_count": chunk_count,
+                            "audio_bytes": audio_bytes,
+                            "time_to_first_chunk_ms": first_chunk_ms or 0,
+                        },
+                    },
+                )
+                return
+
+            if episode.status == "failed":
+                raise RuntimeError(episode.error_message or "Audio episode generation failed")
+            if episode.status != "processing":
+                if episode.status == "pending" and _script_from_episode(episode) is not None:
+                    should_take_over_generation = True
+                else:
+                    raise AudioEpisodeAlreadyProcessingError(
+                        "Audio episode is not actively generating"
+                    )
+
+        if should_take_over_generation:
+            logger.info(
+                "Audio episode stream follower taking over generation",
+                extra={
+                    "component": "audio_episodes",
+                    "operation": "stream_follow",
+                    "status": "taking_over_generation",
+                    "duration_ms": _duration_ms(started_at),
+                    "item_id": audio_episode_id,
+                    "user_id": user_id,
+                    "context_data": {"kind": episode_kind},
+                },
+            )
+            yield from stream_audio_episode_chunks(
+                audio_episode_id=audio_episode_id,
+                user_id=user_id,
+            )
+            return
+
+        time.sleep(AUDIO_EPISODE_FOLLOW_POLL_SECONDS)
+
+    logger.info(
+        "Audio episode stream follower timed out",
+        extra={
+            "component": "audio_episodes",
+            "operation": "stream_follow",
+            "status": "timed_out",
+            "duration_ms": _duration_ms(started_at),
+            "item_id": audio_episode_id,
+            "user_id": user_id,
+            "context_data": {"kind": episode_kind},
+        },
+    )
+    raise AudioEpisodeAlreadyProcessingError("Audio episode is still generating")
 
 
 def _create_or_reuse_episode(
@@ -583,6 +1171,7 @@ def _news_item_source_snapshot(item: NewsItem) -> dict[str, Any]:
 def _content_source_snapshot(content: Content, *, body_text: str) -> dict[str, Any]:
     metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
     title = _content_display_title(content)
+    source_text, excerpt_strategy = _excerpt_longform_source_text(body_text)
     return {
         "kind": CONTENT_COUNCIL_DISCUSSION_KIND,
         "content_id": _required_int(content.id, "content id"),
@@ -595,9 +1184,32 @@ def _content_source_snapshot(content: Content, *, body_text: str) -> dict[str, A
         if content.publication_date
         else None,
         "summary": _extract_content_summary(metadata, content=content),
-        "source_text": _truncate_text(body_text, LONGFORM_BODY_MAX_CHARS),
+        "source_text": source_text,
+        "source_text_excerpt_strategy": excerpt_strategy,
         "source_text_truncated": len(body_text) > LONGFORM_BODY_MAX_CHARS,
     }
+
+
+def _excerpt_longform_source_text(body_text: str) -> tuple[str, str]:
+    """Keep long-form script prompts bounded while preserving source coverage."""
+
+    normalized = body_text.strip()
+    if len(normalized) <= LONGFORM_BODY_MAX_CHARS:
+        return normalized, "full"
+
+    head = normalized[:LONGFORM_BODY_HEAD_CHARS].rstrip()
+    middle_start = max((len(normalized) - LONGFORM_BODY_MIDDLE_CHARS) // 2, 0)
+    middle = normalized[middle_start : middle_start + LONGFORM_BODY_MIDDLE_CHARS].strip()
+    tail = normalized[-LONGFORM_BODY_TAIL_CHARS:].lstrip()
+    return (
+        "\n\n[Source opening excerpt]\n"
+        f"{head}"
+        "\n\n[Source middle excerpt]\n"
+        f"{middle}"
+        "\n\n[Source closing excerpt]\n"
+        f"{tail}",
+        "head_middle_tail",
+    )
 
 
 def _content_display_title(content: Content) -> str:
@@ -673,15 +1285,20 @@ def _prepare_audio_episode_script(db: Session, episode: AudioEpisode) -> AudioEp
     """Generate or reuse the structured script for an audio episode."""
 
     script = _script_from_episode(episode)
+    model_spec = str(episode.model or AUDIO_EPISODE_MODEL)
     if script is None:
-        script = _generate_script(episode)
-    return _persist_audio_episode_script(db, episode, script)
+        generated = _generate_script(episode)
+        script = generated.script
+        model_spec = generated.model
+    return _persist_audio_episode_script(db, episode, script, model=model_spec)
 
 
 def _persist_audio_episode_script(
     db: Session,
     episode: AudioEpisode,
     script: AudioEpisodeScript,
+    *,
+    model: str,
 ) -> AudioEpisodeScript:
     """Persist a generated script and its rendered text on an episode row."""
 
@@ -691,7 +1308,7 @@ def _persist_audio_episode_script(
     episode.title = (script.title.strip() or fallback_title)[:255]
     episode.script = script.model_dump(mode="json")
     episode.script_text = script_text
-    episode.model = AUDIO_EPISODE_MODEL
+    episode.model = model
     episode.duration_seconds = _estimate_duration_seconds(script_text)
     db.flush()
     return script
@@ -722,9 +1339,81 @@ def _copy_episode_for_script_generation(episode: AudioEpisode) -> AudioEpisode:
     )
 
 
-def _generate_script(episode: AudioEpisode) -> AudioEpisodeScript:
+def _generate_script(episode: AudioEpisode) -> AudioEpisodeScriptGeneration:
     user_message = _build_script_prompt(episode)
-    agent = get_basic_agent(AUDIO_EPISODE_MODEL, AudioEpisodeScript, SCRIPT_SYSTEM_PROMPT)
+    last_error: Exception | None = None
+    for attempt, model_spec in enumerate(_script_model_candidates(), start=1):
+        attempt_started_at = time.perf_counter()
+        logger.info(
+            "Audio episode script generation started",
+            extra={
+                "component": "audio_episodes",
+                "operation": "generate_script",
+                "status": "started",
+                "item_id": episode.id,
+                "user_id": episode.user_id,
+                "context_data": {
+                    "kind": episode.kind,
+                    "model": model_spec,
+                    "attempt": attempt,
+                },
+            },
+        )
+        try:
+            script = _generate_script_with_model(episode, user_message, model_spec)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.warning(
+                "Audio episode script generation failed",
+                extra={
+                    "component": "audio_episodes",
+                    "operation": "generate_script",
+                    "status": "failed",
+                    "duration_ms": _duration_ms(attempt_started_at),
+                    "item_id": episode.id,
+                    "user_id": episode.user_id,
+                    "context_data": {
+                        "kind": episode.kind,
+                        "model": model_spec,
+                        "attempt": attempt,
+                        "error": str(exc),
+                    },
+                },
+            )
+            continue
+
+        logger.info(
+            "Audio episode script generation completed",
+            extra={
+                "component": "audio_episodes",
+                "operation": "generate_script",
+                "status": "completed",
+                "duration_ms": _duration_ms(attempt_started_at),
+                "item_id": episode.id,
+                "user_id": episode.user_id,
+                "context_data": {
+                    "kind": episode.kind,
+                    "model": model_spec,
+                    "attempt": attempt,
+                    "turn_count": len(script.turns),
+                    "text_chars": sum(len(turn.text) for turn in script.turns),
+                    "estimated_duration_seconds": script.estimated_duration_seconds,
+                },
+            },
+        )
+        return AudioEpisodeScriptGeneration(script=script, model=model_spec)
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("No audio episode script generation models are configured")
+
+
+def _generate_script_with_model(
+    episode: AudioEpisode,
+    user_message: str,
+    model_spec: str,
+) -> AudioEpisodeScript:
+    agent = get_basic_agent(model_spec, AudioEpisodeScript, SCRIPT_SYSTEM_PROMPT)
     result = agent.run_sync(
         user_message,
         model_settings={"timeout": SCRIPT_TIMEOUT_SECONDS},
@@ -733,7 +1422,7 @@ def _generate_script(episode: AudioEpisode) -> AudioEpisodeScript:
     if usage:
         record_vendor_usage_out_of_band(
             provider=None,
-            model=AUDIO_EPISODE_MODEL,
+            model=model_spec,
             feature="audio_episode_script",
             operation="audio_episodes.generate_script",
             source="task",
@@ -749,6 +1438,10 @@ def _generate_script(episode: AudioEpisode) -> AudioEpisodeScript:
     return result.output
 
 
+def _script_model_candidates() -> tuple[str, ...]:
+    return (AUDIO_EPISODE_MODEL,)
+
+
 def _build_script_prompt(episode: AudioEpisode) -> str:
     if episode.kind == FAST_NEWS_DIGEST_KIND:
         return _build_fast_news_prompt(episode.source_snapshot or {})
@@ -760,7 +1453,7 @@ def _build_script_prompt(episode: AudioEpisode) -> str:
 
 
 def _build_fast_news_prompt(source_snapshot: dict[str, Any]) -> str:
-    return f"""Create a roughly 5 minute quick-hit episode from these unread Fast Reads.
+    return f"""Create a roughly 60 second quick-hit episode from these unread Fast Reads.
 
 Goal:
 - Curate the highest-signal highlights across the list, not a rote item-by-item readout.
@@ -770,9 +1463,9 @@ Goal:
 - Keep it brisk, conversational, and useful for someone catching up while walking.
 
 Shape:
-- 560-700 spoken words.
+- 110-150 spoken words.
 - Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 8-14 turns.
+- 6-8 turns.
 - Start with the top 2-3 headlines and why they matter.
 - End with one short "what to watch next" close.
 
@@ -783,7 +1476,7 @@ Unread Fast Reads JSON:
 
 def _build_content_council_prompt(source_snapshot: dict[str, Any]) -> str:
     source_label = "transcript" if source_snapshot.get("content_type") == "podcast" else "article"
-    return f"""Create a roughly 5 minute council-of-experts discussion about this
+    return f"""Create a roughly 60 second council-of-experts discussion about this
 long-form {source_label}.
 
 Goal:
@@ -793,9 +1486,9 @@ Goal:
 - Keep the discussion grounded: if a point is not in the source, do not include it.
 
 Shape:
-- 560-700 spoken words.
+- 110-150 spoken words.
 - Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 8-16 turns.
+- 6-8 turns.
 - Use speaker='host' for framing, speaker='cohost' for synthesis, and
   speaker='expert' for sharper analysis.
 - End with a concise takeaway and why the piece is worth remembering.
@@ -806,7 +1499,7 @@ Long-form source JSON:
 
 
 def _build_news_item_discussion_prompt(source_snapshot: dict[str, Any]) -> str:
-    return f"""Create a roughly 5 minute podcast-style discussion about this single Fast Read.
+    return f"""Create a roughly 60 second podcast-style discussion about this single Fast Read.
 
 Goal:
 - Use only the supplied summary, key points, and links metadata.
@@ -815,9 +1508,9 @@ Goal:
 - Do not invent extra facts beyond the source material.
 
 Shape:
-- 520-660 spoken words.
+- 110-150 spoken words.
 - Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 8-14 turns.
+- 6-8 turns.
 - Use speaker='host' for framing, speaker='cohost' for synthesis, and
   speaker='expert' for sharper analysis.
 - End with a concise takeaway.

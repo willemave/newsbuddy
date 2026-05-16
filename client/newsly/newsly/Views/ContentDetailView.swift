@@ -53,7 +53,7 @@ private enum DetailDesign {
 
     // Hero
     static let heroHeight: CGFloat = 220
-    static let parallaxHeroHeight: CGFloat = 280
+    static let parallaxHeroHeight: CGFloat = 360
     static let parallaxRate: CGFloat = 0.25
 }
 
@@ -84,6 +84,7 @@ struct ContentDetailView: View {
     @State private var loadingAudioEpisodeContentIds: Set<Int> = []
     @State private var audioEpisodeByContentId: [Int: AudioEpisode] = [:]
     @State private var activeAlert: ViewAlert?
+    @State private var activeReaderContent: ContentDetail?
     // Full image viewer
     @State private var selectedImageAsset: DetailImageAsset?
     // Discussion sheet
@@ -359,6 +360,16 @@ struct ContentDetailView: View {
                 swipeIndicator(direction: .next, progress: min(1.0, abs(dragAmount) / 100))
             }
         }
+        .overlay(alignment: .topLeading) {
+            GeometryReader { proxy in
+                VStack(alignment: .leading, spacing: 0) {
+                    floatingBackButton
+                        .padding(.leading, 16)
+                        .padding(.top, floatingBackTopPadding(for: proxy))
+                    Spacer(minLength: 0)
+                }
+            }
+        }
         .offset(x: dragAmount)
         .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragAmount)
         .simultaneousGesture(
@@ -441,9 +452,11 @@ struct ContentDetailView: View {
                     }
                 }
         )
+        .ignoresSafeArea(edges: hasHeroImage ? .top : [])
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         // Hide the main tab bar while viewing details
         .toolbar(.hidden, for: .tabBar)
         .task {
@@ -539,6 +552,24 @@ struct ContentDetailView: View {
                         .presentationDragIndicator(.hidden)
                         .presentationCornerRadius(24)
                 }
+            }
+        }
+        .fullScreenCover(item: $activeReaderContent) { content in
+            ArticleReaderView(
+                content: content,
+                articleBody: viewModel.readerBody,
+                isLoading: viewModel.isLoadingReaderBody,
+                errorMessage: viewModel.readerErrorMessage,
+                onRetry: {
+                    Task { await viewModel.loadReaderBody(for: content, force: true) }
+                },
+                onDigDeeper: { selectedText in
+                    activeReaderContent = nil
+                    handleReaderDigDeeper(selectedText: selectedText, content: content)
+                }
+            )
+            .task(id: content.id) {
+                await viewModel.loadReaderBody(for: content)
             }
         }
     }
@@ -664,12 +695,33 @@ struct ContentDetailView: View {
         "Dig deeper into the key points of \(content.displayTitle). For each main point, explain reasoning, supporting evidence, and include a bit more detail explaining the point. Also pull out key ideas from the discussion context when available, and add more insights from the discussion, including notable agreements and disagreements. Keep answers concise and numbered."
     }
 
-    private func councilPrompt(for content: ContentDetail) -> String {
-        "Give me your perspective on \(content.displayTitle). Keep it short: 2-4 concise bullets on what matters most, what is weak or missing, and what actions or implications follow."
+    private func handleReaderDigDeeper(selectedText: String, content: ContentDetail) {
+        let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        Task { @MainActor in
+            do {
+                let response = try await ChatService.shared.createAssistantTurn(
+                    message: "Dig deeper into this selected text from \(content.displayTitle): \"\(trimmed)\"",
+                    screenContext: AssistantScreenContext(
+                        screenType: "article_reader",
+                        screenTitle: "Article Reader",
+                        contentId: content.id,
+                        visibleContentIds: allContentIds,
+                        selectedTopic: trimmed,
+                        query: trimmed,
+                        note: "The user selected text from the full article reader. Use the article body and selected passage as primary context."
+                    )
+                )
+                ChatNavigationCoordinator.shared.openAssistantTurn(response)
+            } catch {
+                ToastService.shared.showError("Failed to dig deeper: \(error.localizedDescription)")
+            }
+        }
     }
 
-    private func corroboratePrompt(for content: ContentDetail) -> String {
-        "Corroborate the main claims in \(content.displayTitle) using recent, reputable sources. For each claim, list 2-3 supporting or conflicting sources with URLs, note disagreements, and flag gaps or weak evidence."
+    private func councilPrompt(for content: ContentDetail) -> String {
+        "Give me your perspective on \(content.displayTitle). Keep it short: 2-4 concise bullets on what matters most, what is weak or missing, and what actions or implications follow."
     }
 
     private func deepResearchPrompt(for content: ContentDetail) -> String {
@@ -896,7 +948,7 @@ struct ContentDetailView: View {
         if isPodcastAudioActive(for: content) {
             return "Playing at \(narrationPlaybackService.playbackSpeedTitle)"
         }
-        return "5-minute podcast-style discussion"
+        return "1-minute podcast-style discussion"
     }
 
     @MainActor
@@ -904,6 +956,7 @@ struct ContentDetailView: View {
         for content: ContentDetail,
         rate: Float? = nil
     ) async {
+        let startedAt = Date()
         let playbackRate = rate ?? narrationPlaybackService.playbackRate
         if isPodcastAudioActive(for: content) {
             if abs(narrationPlaybackService.playbackRate - playbackRate) < 0.001 {
@@ -915,6 +968,9 @@ struct ContentDetailView: View {
         }
         guard supportsPodcastAudio(for: content) else { return }
         guard !isPodcastAudioLoading(for: content) else { return }
+        detailLogger.info(
+            "[PodcastAudio] flow started | contentId=\(content.id) type=\(content.contentType, privacy: .public) rate=\(playbackRate)"
+        )
 
         loadingAudioEpisodeContentIds.insert(content.id)
         defer { loadingAudioEpisodeContentIds.remove(content.id) }
@@ -923,8 +979,14 @@ struct ContentDetailView: View {
             let episode: AudioEpisode
             if let existingEpisode = audioEpisodeByContentId[content.id] {
                 episode = existingEpisode
+                detailLogger.info(
+                    "[PodcastAudio] reusing episode | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status, privacy: .public)"
+                )
             } else {
                 episode = try await createPodcastAudioEpisode(for: content)
+                detailLogger.info(
+                    "[PodcastAudio] episode created | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+                )
             }
             audioEpisodeByContentId[content.id] = episode
             guard viewModel.content?.id == content.id else { return }
@@ -936,7 +998,13 @@ struct ContentDetailView: View {
                     try await AudioEpisodeService.shared.streamResource(for: episode)
                 }
             )
+            detailLogger.info(
+                "[PodcastAudio] playback requested | contentId=\(content.id) episodeId=\(episode.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+            )
         } catch {
+            detailLogger.error(
+                "[PodcastAudio] flow failed | contentId=\(content.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
+            )
             activeAlert = ViewAlert(
                 title: "Audio",
                 message: "Failed to load podcast audio: \(error.localizedDescription)"
@@ -949,12 +1017,12 @@ struct ContentDetailView: View {
         case .article, .podcast:
             return try await AudioEpisodeService.shared.createContentCouncilEpisode(
                 contentId: content.id,
-                delivery: .stream
+                delivery: .inline
             )
         case .news:
             return try await AudioEpisodeService.shared.createNewsItemDiscussionEpisode(
                 newsItemId: content.id,
-                delivery: .stream
+                delivery: .inline
             )
         case .none:
             throw NSError(
@@ -1159,6 +1227,38 @@ struct ContentDetailView: View {
         }
     }
 
+    private var floatingBackButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(
+                    Circle()
+                        .fill(Color(red: 0.07, green: 0.06, blue: 0.05).opacity(0.42))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                )
+                .shadow(
+                    color: Color(red: 0.05, green: 0.045, blue: 0.04).opacity(0.28),
+                    radius: 12,
+                    x: 0,
+                    y: 8
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back")
+    }
+
+    private func floatingBackTopPadding(for proxy: GeometryProxy) -> CGFloat {
+        let fallbackTopInset: CGFloat = hasHeroImage ? 56 : 0
+        return max(proxy.safeAreaInsets.top, fallbackTopInset) + 8
+    }
+
     @ViewBuilder
     private func heroPlaceholder(content: ContentDetail) -> some View {
         Rectangle()
@@ -1208,6 +1308,24 @@ struct ContentDetailView: View {
                 minimalActionIcon("square.and.arrow.up", overlaid: overlaid)
             }
             .accessibilityIdentifier("content.action.share")
+
+            if viewModel.canShowReader(for: content) {
+                Spacer()
+
+                Button {
+                    activeReaderContent = content
+                } label: {
+                    if viewModel.isLoadingReaderBody {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .frame(width: 44, height: 44)
+                    } else {
+                        minimalActionIcon("doc.richtext", overlaid: overlaid)
+                    }
+                }
+                .accessibilityIdentifier("content.action.reader")
+                .accessibilityLabel("Read full article")
+            }
 
             // Download more from series (article/podcast only)
             if content.contentTypeEnum == .article || content.contentTypeEnum == .podcast {
@@ -1600,22 +1718,6 @@ struct ContentDetailView: View {
                                 councilPrompt(for: content),
                                 content: content,
                                 provider: .openai
-                            )
-                        }
-                    }
-                )
-                sheetOptionRow(
-                    icon: "checkmark.shield",
-                    iconColor: .green,
-                    title: "Corroborate",
-                    subtitle: "Verify claims with sources",
-                    disabled: isStartingChat,
-                    action: {
-                        Task {
-                            await startChat(
-                                content: content,
-                                provider: .openai,
-                                prompt: corroboratePrompt(for: content)
                             )
                         }
                     }

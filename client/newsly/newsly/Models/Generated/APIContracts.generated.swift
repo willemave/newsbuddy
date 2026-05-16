@@ -40,12 +40,14 @@ enum APITaskType: String, Codable, CaseIterable {
     case transcribe_tweet_video = "transcribe_tweet_video"
     case summarize = "summarize"
     case fetch_discussion = "fetch_discussion"
+    case fetch_news_item_discussion = "fetch_news_item_discussion"
     case generate_image = "generate_image"
     case discover_feeds = "discover_feeds"
     case onboarding_discover = "onboarding_discover"
     case dig_deeper = "dig_deeper"
     case sync_integration = "sync_integration"
     case generate_insight_report = "generate_insight_report"
+    case generate_audio_episode = "generate_audio_episode"
 }
 
 enum APITaskStatus: String, Codable, CaseIterable {

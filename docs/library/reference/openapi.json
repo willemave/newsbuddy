@@ -792,6 +792,137 @@
         "title": "AssistantTurnResponse",
         "type": "object"
       },
+      "AudioEpisodeResponse": {
+        "description": "Client-visible state for one generated audio episode.",
+        "properties": {
+          "audio_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Url"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "fast_news_digest",
+              "content_council_discussion",
+              "news_item_discussion"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "script_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Script Text"
+          },
+          "source_content_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Content Id"
+          },
+          "source_item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Source Item Ids",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stream_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Url"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "title",
+          "created_at"
+        ],
+        "title": "AudioEpisodeResponse",
+        "type": "object"
+      },
       "AudioTranscriptionHealthResponse": {
         "description": "Dependency readiness for uploaded-audio transcription.",
         "properties": {
@@ -2460,6 +2591,7 @@
           "primary_topic": "AI",
           "processed_at": "2025-06-19T10:35:00Z",
           "publication_date": "2025-06-18T12:00:00Z",
+          "saved_source": "knowledge",
           "short_summary": "This article explores the latest developments in AI...",
           "source": "Tech Blog",
           "status": "completed",
@@ -2695,6 +2827,22 @@
             ],
             "description": "Feed-preview reason explaining why the item is worth opening",
             "title": "Reason To Read"
+          },
+          "saved_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "knowledge",
+                  "x_bookmark"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Saved-library source for this content when it appears in saved views",
+            "title": "Saved Source"
           },
           "short_summary": {
             "anyOf": [
@@ -5204,6 +5352,11 @@
             "title": "News Count",
             "type": "integer"
           },
+          "news_crawl_count": {
+            "description": "Number of selected short-form news sources currently being crawled",
+            "title": "News Crawl Count",
+            "type": "integer"
+          },
           "processing_count": {
             "description": "Total number of inbox items queued, pending, or processing for the user",
             "title": "Processing Count",
@@ -5213,7 +5366,8 @@
         "required": [
           "processing_count",
           "long_form_count",
-          "news_count"
+          "news_count",
+          "news_crawl_count"
         ],
         "title": "ProcessingCountResponse",
         "type": "object"
@@ -6727,35 +6881,9 @@
   "paths": {
     "/admin/": {
       "get": {
-        "description": "Admin dashboard with system statistics and event logs.",
+        "description": "Admin dashboard with system statistics and operational readouts.",
         "operationId": "adminDashboard",
         "parameters": [
-          {
-            "in": "query",
-            "name": "event_type",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Event Type"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
           {
             "in": "query",
             "name": "stats_range",
@@ -6801,6 +6929,7 @@
         },
         "summary": "Admin Dashboard",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -6823,6 +6952,7 @@
         },
         "summary": "Admin Api Keys Page",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -6865,6 +6995,7 @@
         },
         "summary": "Admin Api Keys Create",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -6906,6 +7037,7 @@
         },
         "summary": "Admin Api Keys Revoke",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -6974,7 +7106,11 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Errors Dashboard"
+        "summary": "Errors Dashboard",
+        "tags": [
+          "admin",
+          "admin"
+        ]
       }
     },
     "/admin/errors/reset": {
@@ -6991,7 +7127,11 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Reset Error Logs"
+        "summary": "Reset Error Logs",
+        "tags": [
+          "admin",
+          "admin"
+        ]
       }
     },
     "/admin/evals/summaries": {
@@ -7012,6 +7152,7 @@
         },
         "summary": "Admin Eval Summaries Page",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -7056,6 +7197,7 @@
         },
         "summary": "Admin Eval Summaries Run",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -7078,6 +7220,7 @@
         },
         "summary": "Admin Feedback Page",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -7100,6 +7243,7 @@
         },
         "summary": "Admin Insight Reports Page",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -7140,6 +7284,7 @@
         },
         "summary": "Admin Insight Reports Trigger",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -7160,7 +7305,11 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Legacy Llm Usage Redirect"
+        "summary": "Legacy Llm Usage Redirect",
+        "tags": [
+          "admin",
+          "admin"
+        ]
       }
     },
     "/admin/logs": {
@@ -7179,7 +7328,11 @@
             "description": "Successful Response"
           }
         },
-        "summary": "List Logs"
+        "summary": "List Logs",
+        "tags": [
+          "admin",
+          "admin"
+        ]
       }
     },
     "/admin/logs/{filename}": {
@@ -7219,7 +7372,11 @@
             "description": "Validation Error"
           }
         },
-        "summary": "View Log"
+        "summary": "View Log",
+        "tags": [
+          "admin",
+          "admin"
+        ]
       }
     },
     "/admin/logs/{filename}/download": {
@@ -7257,7 +7414,11 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Download Log"
+        "summary": "Download Log",
+        "tags": [
+          "admin",
+          "admin"
+        ]
       }
     },
     "/admin/onboarding/lane-preview": {
@@ -7278,6 +7439,7 @@
         },
         "summary": "Onboarding Lane Preview Page",
         "tags": [
+          "admin",
           "admin"
         ]
       },
@@ -7318,6 +7480,7 @@
         },
         "summary": "Onboarding Lane Preview",
         "tags": [
+          "admin",
           "admin"
         ]
       }
@@ -7338,7 +7501,11 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Vendor Usage Dashboard"
+        "summary": "Vendor Usage Dashboard",
+        "tags": [
+          "admin",
+          "admin"
+        ]
       }
     },
     "/api/agent/cli/link/start": {
@@ -7991,6 +8158,217 @@
           }
         ],
         "summary": "List content items",
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/api/content/audio-episodes/fast-news": {
+      "post": {
+        "description": "Create or reuse a Fast Reads digest and enqueue generation.",
+        "operationId": "createContentFastNewsAudioEpisode",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "delivery",
+            "required": false,
+            "schema": {
+              "default": "background",
+              "enum": [
+                "background",
+                "stream",
+                "inline"
+              ],
+              "title": "Delivery",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEpisodeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create an on-demand Fast Reads podcast episode",
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/api/content/audio-episodes/{audio_episode_id}": {
+      "get": {
+        "description": "Return one audio episode for polling.",
+        "operationId": "getContentAudioEpisode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audio_episode_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Audio Episode Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEpisodeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get audio episode generation status",
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/api/content/audio-episodes/{audio_episode_id}/audio": {
+      "get": {
+        "description": "Return generated MP3 audio bytes for one completed episode.",
+        "operationId": "getContentAudioEpisodeAudio",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audio_episode_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Audio Episode Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "audio/mpeg": {}
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Stream generated audio episode MP3",
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/api/content/audio-episodes/{audio_episode_id}/stream": {
+      "get": {
+        "description": "Stream cached audio or generate the episode inline for low-latency playback.",
+        "operationId": "streamContentAudioEpisode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audio_episode_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Audio Episode Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "audio/mpeg": {}
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Stream or generate an audio episode MP3",
         "tags": [
           "content"
         ]
@@ -9939,6 +10317,73 @@
         ]
       }
     },
+    "/api/content/{content_id}/audio-episodes/council": {
+      "post": {
+        "description": "Create or reuse a long-form expert discussion and enqueue generation.",
+        "operationId": "createContentCouncilAudioEpisode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delivery",
+            "required": false,
+            "schema": {
+              "default": "background",
+              "enum": [
+                "background",
+                "stream",
+                "inline"
+              ],
+              "title": "Delivery",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEpisodeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create an on-demand long-form discussion podcast episode",
+        "tags": [
+          "content"
+        ]
+      }
+    },
     "/api/content/{content_id}/body": {
       "get": {
         "description": "Retrieve the canonical body text for a content item via the backend proxy.",
@@ -11552,6 +11997,73 @@
         ]
       }
     },
+    "/api/news/items/{news_item_id}/audio-episodes/discussion": {
+      "post": {
+        "description": "Create or reuse a single-item Fast Read discussion and enqueue generation.",
+        "operationId": "createDiscussionNewsItemAudioEpisode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "news_item_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "News Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delivery",
+            "required": false,
+            "schema": {
+              "default": "background",
+              "enum": [
+                "background",
+                "stream",
+                "inline"
+              ],
+              "title": "Delivery",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEpisodeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create an on-demand Fast Read discussion podcast episode",
+        "tags": [
+          "news"
+        ]
+      }
+    },
     "/api/news/items/{news_item_id}/convert-to-article": {
       "post": {
         "description": "Convert one representative news item into saved article content.",
@@ -12358,7 +12870,7 @@
     },
     "/auth/admin/login": {
       "get": {
-        "description": "Render admin login page.\n\nArgs:\n    request: FastAPI request object\n\nReturns:\n    HTML login page",
+        "description": "Render admin login page.",
         "operationId": "adminLoginPage",
         "responses": {
           "200": {
@@ -12378,7 +12890,7 @@
         ]
       },
       "post": {
-        "description": "Admin login with password.\n\nArgs:\n    request: Admin login request with password\n    response: FastAPI response to set cookie\n\nReturns:\n    Success message\n\nRaises:\n    HTTPException: 401 if password is incorrect",
+        "description": "Admin login with password.",
         "operationId": "adminLogin",
         "requestBody": {
           "content": {
@@ -12420,7 +12932,7 @@
     },
     "/auth/admin/logout": {
       "post": {
-        "description": "Admin logout.\n\nArgs:\n    response: FastAPI response to delete cookie\n\nReturns:\n    Success message",
+        "description": "Admin logout.",
         "operationId": "adminLogout",
         "responses": {
           "200": {

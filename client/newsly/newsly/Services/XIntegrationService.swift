@@ -9,18 +9,12 @@ import UIKit
 
 protocol XIntegrationAPIClientProtocol {
     func fetchConnection() async throws -> XConnectionResponse
-    func startOAuth(twitterUsername: String?) async throws -> XOAuthStartResponse
+    func startOAuth() async throws -> XOAuthStartResponse
     func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse
     func disconnect() async throws
 }
 
-struct XOAuthStartRequest: Codable {
-    let twitterUsername: String?
-
-    enum CodingKeys: String, CodingKey {
-        case twitterUsername = "twitter_username"
-    }
-}
+struct XOAuthStartRequest: Codable {}
 
 struct XOAuthStartResponse: Codable {
     let authorizeURL: String
@@ -49,7 +43,6 @@ struct XConnectionResponse: Codable {
     let lastSyncedAt: String?
     let lastStatus: String?
     let lastError: String?
-    let twitterUsername: String?
 
     enum CodingKeys: String, CodingKey {
         case provider
@@ -61,7 +54,6 @@ struct XConnectionResponse: Codable {
         case lastSyncedAt = "last_synced_at"
         case lastStatus = "last_status"
         case lastError = "last_error"
-        case twitterUsername = "twitter_username"
     }
 }
 
@@ -133,9 +125,9 @@ extension XConnectionResponse {
 
     var connectActionSubtitle: String {
         if needsAttention {
-            return "Reconnect bookmarks, follows, and lists from your X account"
+            return "Reconnect bookmark sync from your X account"
         }
-        return "Authorize bookmarks, follows, and lists from your X account"
+        return "Authorize bookmark sync from your X account"
     }
 
     private var isReauthRequired: Bool {
@@ -212,10 +204,8 @@ final class XIntegrationService {
         try await client.fetchConnection()
     }
 
-    func startOAuth(twitterUsername: String?) async throws -> XOAuthStartResponse {
-        try await client.startOAuth(
-            twitterUsername: normalizedUsername(twitterUsername)
-        )
+    func startOAuth() async throws -> XOAuthStartResponse {
+        try await client.startOAuth()
     }
 
     func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse {
@@ -227,8 +217,8 @@ final class XIntegrationService {
     }
 
     @MainActor
-    func connectViaOAuth(twitterUsername: String?) async throws -> XConnectionResponse {
-        let start = try await startOAuth(twitterUsername: twitterUsername)
+    func connectViaOAuth() async throws -> XConnectionResponse {
+        let start = try await startOAuth()
         guard let authorizeURL = URL(string: start.authorizeURL) else {
             throw XIntegrationError.invalidAuthorizeURL
         }
@@ -296,12 +286,6 @@ final class XIntegrationService {
         }
     }
 
-    private func normalizedUsername(_ username: String?) -> String? {
-        guard let username else { return nil }
-        let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
-    }
 }
 
 private struct LiveXIntegrationAPIClient: XIntegrationAPIClientProtocol {
@@ -315,10 +299,8 @@ private struct LiveXIntegrationAPIClient: XIntegrationAPIClientProtocol {
         try await client.request(APIEndpoints.xIntegrationConnection)
     }
 
-    func startOAuth(twitterUsername: String?) async throws -> XOAuthStartResponse {
-        let body = try JSONEncoder().encode(
-            XOAuthStartRequest(twitterUsername: twitterUsername)
-        )
+    func startOAuth() async throws -> XOAuthStartResponse {
+        let body = try JSONEncoder().encode(XOAuthStartRequest())
         return try await client.request(
             APIEndpoints.xIntegrationOAuthStart,
             method: "POST",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session, get_readonly_db_session, get_session_factory
 from app.core.deps import get_current_user, require_user_id
+from app.core.logging import get_logger
 from app.models.api.audio_episodes import (
     AudioEpisodeDelivery,
     AudioEpisodeResponse,
@@ -20,6 +22,7 @@ from app.services.audio_episodes import (
     commit_audio_episode_delivery,
     create_content_council_episode,
     create_fast_news_digest_episode,
+    follow_audio_episode_stream_chunks,
     get_user_audio_episode,
     is_audio_episode_processing_stale,
     present_audio_episode,
@@ -27,6 +30,11 @@ from app.services.audio_episodes import (
 )
 
 router = APIRouter()
+logger = get_logger(__name__)
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 2)
 
 
 @router.post(
@@ -95,6 +103,7 @@ def get_audio_episode_audio(
 ) -> FileResponse:
     """Return generated MP3 audio bytes for one completed episode."""
 
+    started_at = time.perf_counter()
     user_id = require_user_id(current_user)
     episode = get_user_audio_episode(db, user_id=user_id, audio_episode_id=audio_episode_id)
     if episode is None:
@@ -106,6 +115,21 @@ def get_audio_episode_audio(
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
 
+    logger.info(
+        "Audio episode file response ready",
+        extra={
+            "component": "audio_episodes",
+            "operation": "audio_file",
+            "status": "ready",
+            "duration_ms": _duration_ms(started_at),
+            "item_id": audio_episode_id,
+            "user_id": user_id,
+            "context_data": {
+                "kind": episode.kind,
+                "audio_bytes": path.stat().st_size if path.exists() else None,
+            },
+        },
+    )
     return FileResponse(
         path,
         media_type=episode.audio_content_type or "audio/mpeg",
@@ -125,7 +149,18 @@ def stream_audio_episode(
 ) -> Response:
     """Stream cached audio or generate the episode inline for low-latency playback."""
 
+    started_at = time.perf_counter()
     user_id = require_user_id(current_user)
+    logger.info(
+        "Audio episode stream requested",
+        extra={
+            "component": "audio_episodes",
+            "operation": "stream_route",
+            "status": "requested",
+            "item_id": audio_episode_id,
+            "user_id": user_id,
+        },
+    )
     SessionLocal = get_session_factory()
     with SessionLocal() as db:
         episode = get_user_audio_episode(db, user_id=user_id, audio_episode_id=audio_episode_id)
@@ -134,6 +169,21 @@ def stream_audio_episode(
 
         path = audio_episode_file_path(episode)
         if episode.status == "completed" and path is not None and path.exists():
+            logger.info(
+                "Audio episode stream serving cached file",
+                extra={
+                    "component": "audio_episodes",
+                    "operation": "stream_route",
+                    "status": "cached",
+                    "duration_ms": _duration_ms(started_at),
+                    "item_id": audio_episode_id,
+                    "user_id": user_id,
+                    "context_data": {
+                        "kind": episode.kind,
+                        "audio_bytes": path.stat().st_size,
+                    },
+                },
+            )
             return FileResponse(
                 path,
                 media_type=episode.audio_content_type or "audio/mpeg",
@@ -142,8 +192,41 @@ def stream_audio_episode(
             )
 
         if episode.status == "processing" and not is_audio_episode_processing_stale(episode):
-            raise HTTPException(status_code=409, detail="Audio episode is already generating")
+            logger.info(
+                "Audio episode stream following active generator",
+                extra={
+                    "component": "audio_episodes",
+                    "operation": "stream_route",
+                    "status": "following_active_generator",
+                    "duration_ms": _duration_ms(started_at),
+                    "item_id": audio_episode_id,
+                    "user_id": user_id,
+                    "context_data": {"kind": episode.kind},
+                },
+            )
+            return StreamingResponse(
+                follow_audio_episode_stream_chunks(
+                    audio_episode_id=audio_episode_id,
+                    user_id=user_id,
+                ),
+                media_type="audio/mpeg",
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
 
+    logger.info(
+        "Audio episode streaming response opened",
+        extra={
+            "component": "audio_episodes",
+            "operation": "stream_route",
+            "status": "streaming_response",
+            "duration_ms": _duration_ms(started_at),
+            "item_id": audio_episode_id,
+            "user_id": user_id,
+        },
+    )
     return StreamingResponse(
         stream_audio_episode_chunks(audio_episode_id=audio_episode_id, user_id=user_id),
         media_type="audio/mpeg",

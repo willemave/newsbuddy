@@ -14,6 +14,10 @@ import UIKit
 private let logger = Logger(subsystem: "com.newsly", category: "VoiceDictation")
 private let voicePerfSignposter = OSSignposter(subsystem: "com.newsly.chat", category: "perf")
 
+private func voiceElapsedMilliseconds(since start: Date) -> Int {
+    Int(Date().timeIntervalSince(start) * 1000)
+}
+
 private enum SilenceDetectionConfig {
     static let meteringIntervalSeconds: TimeInterval = 0.1
     static let calibrationWindowSeconds: TimeInterval = 0.3
@@ -116,8 +120,12 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
 
     /// Request microphone permission.
     func requestMicrophonePermission() async -> Bool {
-        await withCheckedContinuation { continuation in
+        let startedAt = Date()
+        return await withCheckedContinuation { continuation in
             AVAudioApplication.requestRecordPermission { granted in
+                logger.info(
+                    "Microphone permission resolved | granted=\(granted) elapsedMs=\(voiceElapsedMilliseconds(since: startedAt))"
+                )
                 continuation.resume(returning: granted)
             }
         }
@@ -161,23 +169,37 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
 
     /// Start recording audio.
     func startRecording() async throws {
+        let startedAt = Date()
         if !isAvailable {
             _ = await openAIService.refreshTranscriptionAvailability()
         }
         guard isAvailable else {
+            logger.error(
+                "Voice recording unavailable | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt))"
+            )
             throw VoiceDictationError.notAuthenticated
         }
 
         let hasPermission = await requestMicrophonePermission()
         guard hasPermission else {
+            logger.error(
+                "Voice recording missing microphone permission | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt))"
+            )
             throw VoiceDictationError.noMicrophoneAccess
         }
 
         do {
+            let audioSessionStartedAt = Date()
             try audioSessionLease.activate()
+            logger.info(
+                "Voice recording audio session active | elapsedMs=\(voiceElapsedMilliseconds(since: audioSessionStartedAt)) totalElapsedMs=\(voiceElapsedMilliseconds(since: startedAt))"
+            )
             observeAudioNotifications()
         } catch {
             audioSessionLease.deactivate()
+            logger.error(
+                "Voice recording audio session failed | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             throw VoiceDictationError.audioSessionError(error)
         }
 
@@ -211,10 +233,15 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
             startMetering()
             isRecording = true
             playRecordingStartHaptic()
-            logger.info("Started recording")
+            logger.info(
+                "Started recording | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) sampleRate=16000 channels=1"
+            )
         } catch {
             audioSessionLease.deactivate()
             removeAudioNotificationObservers()
+            logger.error(
+                "Voice recording start failed | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             throw VoiceDictationError.recordingFailed
         }
     }
@@ -230,6 +257,7 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
     }
 
     private func cancelRecording(notifyStopReason: Bool) {
+        let startedAt = Date()
         let wasActive = isRecording || isTranscribing || recordingURL != nil
         stopMetering()
         autoStopTask?.cancel()
@@ -253,6 +281,11 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
         if wasActive, notifyStopReason {
             onStopReason?(.cancel)
         }
+        if wasActive {
+            logger.info(
+                "Voice recording cancelled | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) notifyStopReason=\(notifyStopReason)"
+            )
+        }
     }
 
     // MARK: - Private
@@ -268,6 +301,7 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
     }
 
     private func finalizeRecordingAndTranscribe(stopReason: SpeechStopReason) async throws -> String {
+        let finalizeStartedAt = Date()
         guard isRecording, let recorder = audioRecorder else {
             throw VoiceDictationError.recordingFailed
         }
@@ -276,6 +310,7 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
         }
 
         isFinalizing = true
+        let recordingDurationMs = recordingStartedAt.map { voiceElapsedMilliseconds(since: $0) } ?? 0
         stopMetering()
         recorder.stop()
         audioRecorder = nil
@@ -283,12 +318,18 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
         removeAudioNotificationObservers()
         isRecording = false
         playRecordingStopHaptic()
-        logger.info("Stopped recording")
+        logger.info(
+            "Stopped recording | stopReason=\(String(describing: stopReason), privacy: .public) finalizeElapsedMs=\(voiceElapsedMilliseconds(since: finalizeStartedAt)) recordingDurationMs=\(recordingDurationMs)"
+        )
 
         guard let url = recordingURL else {
             isFinalizing = false
             throw VoiceDictationError.recordingFailed
         }
+        let audioSizeBytes = fileSizeBytes(at: url)
+        logger.info(
+            "Voice recording ready for transcription | stopReason=\(String(describing: stopReason), privacy: .public) bytes=\(audioSizeBytes) recordingDurationMs=\(recordingDurationMs)"
+        )
 
         isTranscribing = true
         defer {
@@ -306,9 +347,15 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
             let transcript = try await transcribeAudio(fileURL: url)
             onTranscriptFinal?(transcript)
             onStopReason?(stopReason)
+            logger.info(
+                "Voice recording finalized | stopReason=\(String(describing: stopReason), privacy: .public) totalElapsedMs=\(voiceElapsedMilliseconds(since: finalizeStartedAt)) transcriptChars=\(transcript.count)"
+            )
             return transcript
         } catch {
             onStopReason?(.failure)
+            logger.error(
+                "Voice recording finalize failed | stopReason=\(String(describing: stopReason), privacy: .public) totalElapsedMs=\(voiceElapsedMilliseconds(since: finalizeStartedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             throw error
         }
     }
@@ -380,7 +427,10 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
 
     private func triggerSilenceAutoStop() {
         guard isRecording, autoStopTask == nil, !isFinalizing else { return }
-        logger.info("Detected silence; auto-stopping recording")
+        let recordingDurationMs = recordingStartedAt.map { voiceElapsedMilliseconds(since: $0) } ?? 0
+        logger.info(
+            "Detected silence; auto-stopping recording | recordingDurationMs=\(recordingDurationMs)"
+        )
 
         autoStopTask = Task { [weak self] in
             guard let self else { return }
@@ -403,15 +453,28 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
     }
 
     private func transcribeAudio(fileURL: URL) async throws -> String {
+        let startedAt = Date()
+        let audioSizeBytes = fileSizeBytes(at: fileURL)
+        logger.info(
+            "Voice transcription request started | bytes=\(audioSizeBytes)"
+        )
         do {
             let transcriptionResponse = try await withTranscriptionDeadline(seconds: 60) {
                 try await self.openAIService.transcribeAudio(fileURL: fileURL)
             }
-            logger.info("Transcription successful: \(transcriptionResponse.text.prefix(50))...")
+            logger.info(
+                "Voice transcription request completed | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) transcriptChars=\(transcriptionResponse.text.count)"
+            )
             return transcriptionResponse.text
         } catch VoiceDictationError.transcriptionTimedOut {
+            logger.error(
+                "Voice transcription request timed out | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) bytes=\(audioSizeBytes)"
+            )
             throw VoiceDictationError.transcriptionTimedOut
         } catch let error as OpenAIServiceError {
+            logger.error(
+                "Voice transcription OpenAI service error | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) bytes=\(audioSizeBytes) error=\(error.localizedDescription, privacy: .public)"
+            )
             switch error {
             case .notAuthenticated:
                 throw VoiceDictationError.notAuthenticated
@@ -419,10 +482,24 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
                 throw VoiceDictationError.transcriptionFailed(error.localizedDescription)
             }
         } catch let apiError as APIError {
+            logger.error(
+                "Voice transcription API error | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) bytes=\(audioSizeBytes) error=\(apiError.localizedDescription, privacy: .public)"
+            )
             throw VoiceDictationError.transcriptionFailed(apiError.localizedDescription)
         } catch {
+            logger.error(
+                "Voice transcription unexpected error | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) bytes=\(audioSizeBytes) error=\(error.localizedDescription, privacy: .public)"
+            )
             throw VoiceDictationError.transcriptionFailed(error.localizedDescription)
         }
+    }
+
+    private func fileSizeBytes(at url: URL) -> Int {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber else {
+            return 0
+        }
+        return size.intValue
     }
 
     private func observeAudioNotifications() {

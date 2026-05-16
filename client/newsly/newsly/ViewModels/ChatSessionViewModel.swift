@@ -73,6 +73,8 @@ final class ChatSessionViewModel {
     private var digDeeperTask: Task<Void, Never>?
     @ObservationIgnored
     private var voiceActionTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var voiceRecordingStartedAt: Date?
 
     init(
         route: ChatSessionRoute,
@@ -764,20 +766,32 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     /// Start voice recording for chat message.
     func startVoiceRecording() async {
         guard !isRecording, !isTranscribing else { return }
+        let startedAt = Date()
+        voiceRecordingStartedAt = startedAt
         hasAppliedVoiceTranscript = false
         if !voiceDictationAvailable {
             await checkAndRefreshVoiceDictation()
         }
         guard voiceDictationAvailable else {
+            logger.error(
+                "[ViewModel] Voice recording unavailable | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+            )
             errorMessage = "Microphone is unavailable right now. Try again in a moment."
             return
         }
         errorMessage = nil
         configureTranscriptionCallbacks()
+        logger.info("[ViewModel] Starting voice recording")
         do {
             try await transcriptionService.start()
             isRecording = true
+            logger.info(
+                "[ViewModel] Voice recording started | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) sessionId=\(self.sessionId)"
+            )
         } catch {
+            logger.error(
+                "[ViewModel] Voice recording start failed | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
+            )
             errorMessage = error.localizedDescription
         }
     }
@@ -785,21 +799,30 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     /// Stop recording and transcribe into the input box.
     func stopVoiceRecording() async {
         guard isRecording else { return }
-        logger.info("[ViewModel] Stopping voice recording")
+        let startedAt = Date()
+        logger.info(
+            "[ViewModel] Stopping voice recording | captureElapsedMs=\(self.voiceRecordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? 0)"
+        )
 
         do {
             let trimmedTranscription = try await transcriptionService.stop().trimmingCharacters(
                 in: .whitespacesAndNewlines
             )
-            logger.info("[ViewModel] Transcription complete | length=\(trimmedTranscription.count)")
+            logger.info(
+                "[ViewModel] Transcription complete | length=\(trimmedTranscription.count) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+            )
             isRecording = false
             isTranscribing = false
+            voiceRecordingStartedAt = nil
             applyVoiceTranscript(trimmedTranscription)
         } catch {
-            logger.error("[ViewModel] Voice transcription error: \(error.localizedDescription)")
+            logger.error(
+                "[ViewModel] Voice transcription error | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
+            )
             errorMessage = error.localizedDescription
             isRecording = false
             isTranscribing = false
+            voiceRecordingStartedAt = nil
         }
     }
 
@@ -822,6 +845,12 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         isRecording = false
         isTranscribing = false
         isVoiceActionInFlight = false
+        if let voiceRecordingStartedAt {
+            logger.info(
+                "[ViewModel] Voice recording cancelled | captureElapsedMs=\(Int(Date().timeIntervalSince(voiceRecordingStartedAt) * 1000))"
+            )
+        }
+        voiceRecordingStartedAt = nil
     }
 
     private var hasVoiceAuthToken: Bool {

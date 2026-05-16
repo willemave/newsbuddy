@@ -91,6 +91,10 @@ class ProcessingCountResponse(BaseModel):
         ...,
         description="Number of short-form news inbox items queued, pending, or processing",
     )
+    news_crawl_count: int = Field(
+        ...,
+        description="Number of selected short-form news sources currently being crawled",
+    )
 
 
 class LongFormStatsResponse(BaseModel):

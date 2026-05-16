@@ -13,8 +13,7 @@ final class XIntegrationServiceTests: XCTestCase {
             scopes: ["tweet.read", "users.read", "bookmark.read", "offline.access"],
             lastSyncedAt: nil,
             lastStatus: "failed",
-            lastError: "X API 400: invalid_request",
-            twitterUsername: "willemaw"
+            lastError: "X API 400: invalid_request"
         )
 
         XCTAssertTrue(response.needsAttention)
@@ -37,8 +36,7 @@ final class XIntegrationServiceTests: XCTestCase {
             scopes: ["tweet.read", "users.read", "bookmark.read", "offline.access"],
             lastSyncedAt: nil,
             lastStatus: "success",
-            lastError: nil,
-            twitterUsername: "willemaw"
+            lastError: nil
         )
 
         XCTAssertFalse(response.needsAttention)
@@ -46,19 +44,19 @@ final class XIntegrationServiceTests: XCTestCase {
         XCTAssertEqual(response.connectActionTitle, "Connect X")
     }
 
-    func testStartOAuthNormalizesUsernameBeforeSending() async throws {
+    func testStartOAuthStartsWithoutUserEnteredUsername() async throws {
         let client = MockXIntegrationAPIClient()
         client.startResponse = XOAuthStartResponse(
             authorizeURL: "https://x.com/i/oauth2/authorize?state=test",
             state: "test",
-            scopes: ["tweet.read", "users.read", "bookmark.read", "follows.read", "list.read"]
+            scopes: ["tweet.read", "users.read", "bookmark.read"]
         )
         let service = XIntegrationService(client: client)
 
-        let response = try await service.startOAuth(twitterUsername: "@willem_aw")
+        let response = try await service.startOAuth()
 
         XCTAssertEqual(response.state, "test")
-        XCTAssertEqual(client.recordedStartUsernames, ["willem_aw"])
+        XCTAssertEqual(client.startOAuthCallCount, 1)
     }
 
     @MainActor
@@ -78,8 +76,7 @@ final class XIntegrationServiceTests: XCTestCase {
             scopes: ["tweet.read", "users.read"],
             lastSyncedAt: nil,
             lastStatus: "connected",
-            lastError: nil,
-            twitterUsername: "willemaw"
+            lastError: nil
         )
         let service = XIntegrationService(
             client: client,
@@ -94,10 +91,10 @@ final class XIntegrationServiceTests: XCTestCase {
             }
         )
 
-        let response = try await service.connectViaOAuth(twitterUsername: "willem_aw")
+        let response = try await service.connectViaOAuth()
 
         XCTAssertTrue(response.connected)
-        XCTAssertEqual(client.recordedStartUsernames, ["willem_aw"])
+        XCTAssertEqual(client.startOAuthCallCount, 1)
         XCTAssertEqual(client.recordedExchangeCode, "oauth-code")
         XCTAssertEqual(client.recordedExchangeState, "oauth-state")
     }
@@ -122,7 +119,7 @@ final class XIntegrationServiceTests: XCTestCase {
         )
 
         do {
-            _ = try await service.connectViaOAuth(twitterUsername: nil)
+            _ = try await service.connectViaOAuth()
             XCTFail("Expected oauth failure")
         } catch let error as XIntegrationError {
             XCTAssertEqual(error.localizedDescription, "OAuth failed: User denied")
@@ -145,7 +142,7 @@ final class XIntegrationServiceTests: XCTestCase {
         )
 
         do {
-            _ = try await service.connectViaOAuth(twitterUsername: nil)
+            _ = try await service.connectViaOAuth()
             XCTFail("Expected missing callback code failure")
         } catch let error as XIntegrationError {
             XCTAssertEqual(error.localizedDescription, "OAuth callback missing code")
@@ -168,7 +165,7 @@ final class XIntegrationServiceTests: XCTestCase {
         )
 
         do {
-            _ = try await service.connectViaOAuth(twitterUsername: nil)
+            _ = try await service.connectViaOAuth()
             XCTFail("Expected missing callback state failure")
         } catch let error as XIntegrationError {
             XCTAssertEqual(error.localizedDescription, "OAuth callback missing state")
@@ -186,7 +183,7 @@ final class XIntegrationServiceTests: XCTestCase {
         let service = XIntegrationService(client: client)
 
         do {
-            _ = try await service.connectViaOAuth(twitterUsername: nil)
+            _ = try await service.connectViaOAuth()
             XCTFail("Expected invalid authorize URL failure")
         } catch let error as XIntegrationError {
             XCTAssertEqual(error.localizedDescription, "Invalid OAuth authorize URL")
@@ -197,7 +194,7 @@ final class XIntegrationServiceTests: XCTestCase {
 private final class MockXIntegrationAPIClient: XIntegrationAPIClientProtocol {
     var startResponse: XOAuthStartResponse?
     var exchangeResponse: XConnectionResponse?
-    private(set) var recordedStartUsernames: [String?] = []
+    private(set) var startOAuthCallCount = 0
     private(set) var recordedExchangeCode: String?
     private(set) var recordedExchangeState: String?
 
@@ -205,8 +202,8 @@ private final class MockXIntegrationAPIClient: XIntegrationAPIClientProtocol {
         throw XIntegrationError.callbackParsingFailed
     }
 
-    func startOAuth(twitterUsername: String?) async throws -> XOAuthStartResponse {
-        recordedStartUsernames.append(twitterUsername)
+    func startOAuth() async throws -> XOAuthStartResponse {
+        startOAuthCallCount += 1
         return try XCTUnwrap(startResponse)
     }
 

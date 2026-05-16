@@ -205,16 +205,16 @@ struct KnowledgeView: View {
     // MARK: - Actions
 
     private var actionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Actions")
                 .font(.terracottaHeadlineSmall)
                 .foregroundStyle(Color.onSurface)
                 .padding(.horizontal, Spacing.screenHorizontal)
 
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 primaryActionButton(primaryAction)
 
-                LazyVGrid(columns: actionGridColumns, spacing: 12) {
+                LazyVGrid(columns: actionGridColumns, spacing: 10) {
                     ForEach(secondaryActions) { action in
                         compactActionButton(action)
                     }
@@ -222,13 +222,13 @@ struct KnowledgeView: View {
             }
             .padding(.horizontal, Spacing.screenHorizontal)
         }
-        .padding(.bottom, 28)
+        .padding(.bottom, 22)
     }
 
     private var actionGridColumns: [GridItem] {
         [
-            GridItem(.flexible(), spacing: 12),
-            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
         ]
     }
 
@@ -236,10 +236,10 @@ struct KnowledgeView: View {
         Button {
             startAction(action)
         } label: {
-            HStack(spacing: 14) {
-                actionIcon(action.icon, size: 44, iconSize: 20)
+            HStack(spacing: 12) {
+                actionIcon(action.icon, size: 40, iconSize: 18, cornerRadius: 11)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(action.title)
                         .font(.terracottaHeadlineSmall)
                         .foregroundColor(.onSurface)
@@ -251,14 +251,15 @@ struct KnowledgeView: View {
                         .lineLimit(2)
                 }
 
-                Spacer(minLength: 12)
+                Spacer(minLength: 10)
 
                 Image(systemName: "arrow.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.onSurfaceSecondary)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
             .background(Color.surfaceSecondary)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(
@@ -274,12 +275,12 @@ struct KnowledgeView: View {
         Button {
             startAction(action)
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 8) {
-                    actionIcon(action.icon, size: 30, iconSize: 14)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 7) {
+                    actionIcon(action.icon, size: 28, iconSize: 13, cornerRadius: 9)
 
                     Text(action.title)
-                        .font(.terracottaHeadlineSmall)
+                        .font(.terracottaBodyLarge.weight(.semibold))
                         .foregroundColor(.onSurface)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -293,8 +294,9 @@ struct KnowledgeView: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 90, alignment: .topLeading)
             .background(Color.surfaceSecondary)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(
@@ -306,13 +308,18 @@ struct KnowledgeView: View {
         .disabled(viewModel.isCreatingSession)
     }
 
-    private func actionIcon(_ systemName: String, size: CGFloat, iconSize: CGFloat) -> some View {
+    private func actionIcon(
+        _ systemName: String,
+        size: CGFloat,
+        iconSize: CGFloat,
+        cornerRadius: CGFloat
+    ) -> some View {
         Image(systemName: systemName)
             .font(.system(size: iconSize, weight: .semibold))
             .foregroundColor(.terracottaPrimary)
             .frame(width: size, height: size)
             .background(Color.terracottaPrimary.opacity(0.14))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 
     private func startAction(_ action: HubAction) {

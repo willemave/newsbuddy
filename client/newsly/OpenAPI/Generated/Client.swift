@@ -40,7 +40,7 @@ internal struct Client: APIProtocol {
     }
     /// Admin Dashboard
     ///
-    /// Admin dashboard with system statistics and event logs.
+    /// Admin dashboard with system statistics and operational readouts.
     ///
     /// - Remark: HTTP `GET /admin/`.
     /// - Remark: Generated from `#/paths//admin//get(adminDashboard)`.
@@ -58,13 +58,6 @@ internal struct Client: APIProtocol {
                     method: .get
                 )
                 suppressMutabilityWarning(&request)
-                try converter.setQueryItemAsURI(
-                    in: &request,
-                    style: .form,
-                    explode: true,
-                    name: "limit",
-                    value: input.query.limit
-                )
                 try converter.setQueryItemAsURI(
                     in: &request,
                     style: .form,
@@ -2429,6 +2422,381 @@ internal struct Client: APIProtocol {
                 case 422:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Operations.ListContents.Output.UnprocessableContent.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.HTTPValidationError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unprocessableContent(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// Create an on-demand Fast Reads podcast episode
+    ///
+    /// Create or reuse a Fast Reads digest and enqueue generation.
+    ///
+    /// - Remark: HTTP `POST /api/content/audio-episodes/fast-news`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/fast-news/post(createContentFastNewsAudioEpisode)`.
+    internal func createContentFastNewsAudioEpisode(_ input: Operations.CreateContentFastNewsAudioEpisode.Input) async throws -> Operations.CreateContentFastNewsAudioEpisode.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.CreateContentFastNewsAudioEpisode.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/content/audio-episodes/fast-news",
+                    parameters: []
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .post
+                )
+                suppressMutabilityWarning(&request)
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: true,
+                    name: "delivery",
+                    value: input.query.delivery
+                )
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.CreateContentFastNewsAudioEpisode.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.AudioEpisodeResponse.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                case 422:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.CreateContentFastNewsAudioEpisode.Output.UnprocessableContent.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.HTTPValidationError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unprocessableContent(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// Get audio episode generation status
+    ///
+    /// Return one audio episode for polling.
+    ///
+    /// - Remark: HTTP `GET /api/content/audio-episodes/{audio_episode_id}`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/get(getContentAudioEpisode)`.
+    internal func getContentAudioEpisode(_ input: Operations.GetContentAudioEpisode.Input) async throws -> Operations.GetContentAudioEpisode.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.GetContentAudioEpisode.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/content/audio-episodes/{}",
+                    parameters: [
+                        input.path.audioEpisodeId
+                    ]
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.GetContentAudioEpisode.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.AudioEpisodeResponse.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                case 422:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.GetContentAudioEpisode.Output.UnprocessableContent.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.HTTPValidationError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unprocessableContent(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// Stream generated audio episode MP3
+    ///
+    /// Return generated MP3 audio bytes for one completed episode.
+    ///
+    /// - Remark: HTTP `GET /api/content/audio-episodes/{audio_episode_id}/audio`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/audio/get(getContentAudioEpisodeAudio)`.
+    internal func getContentAudioEpisodeAudio(_ input: Operations.GetContentAudioEpisodeAudio.Input) async throws -> Operations.GetContentAudioEpisodeAudio.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.GetContentAudioEpisodeAudio.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/content/audio-episodes/{}/audio",
+                    parameters: [
+                        input.path.audioEpisodeId
+                    ]
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.GetContentAudioEpisodeAudio.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json",
+                            "audio/mpeg"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            OpenAPIRuntime.OpenAPIValueContainer.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    case "audio/mpeg":
+                        body = try converter.getResponseBodyAsBinary(
+                            OpenAPIRuntime.HTTPBody.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .audioMpeg(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                case 422:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.GetContentAudioEpisodeAudio.Output.UnprocessableContent.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.HTTPValidationError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unprocessableContent(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
+    /// Stream or generate an audio episode MP3
+    ///
+    /// Stream cached audio or generate the episode inline for low-latency playback.
+    ///
+    /// - Remark: HTTP `GET /api/content/audio-episodes/{audio_episode_id}/stream`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/stream/get(streamContentAudioEpisode)`.
+    internal func streamContentAudioEpisode(_ input: Operations.StreamContentAudioEpisode.Input) async throws -> Operations.StreamContentAudioEpisode.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.StreamContentAudioEpisode.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/content/audio-episodes/{}/stream",
+                    parameters: [
+                        input.path.audioEpisodeId
+                    ]
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .get
+                )
+                suppressMutabilityWarning(&request)
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.StreamContentAudioEpisode.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json",
+                            "audio/mpeg"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            OpenAPIRuntime.OpenAPIValueContainer.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    case "audio/mpeg":
+                        body = try converter.getResponseBodyAsBinary(
+                            OpenAPIRuntime.HTTPBody.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .audioMpeg(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                case 422:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.StreamContentAudioEpisode.Output.UnprocessableContent.Body
                     let chosenContentType = try converter.bestContentType(
                         received: contentType,
                         options: [
@@ -5307,6 +5675,101 @@ internal struct Client: APIProtocol {
             }
         )
     }
+    /// Create an on-demand long-form discussion podcast episode
+    ///
+    /// Create or reuse a long-form expert discussion and enqueue generation.
+    ///
+    /// - Remark: HTTP `POST /api/content/{content_id}/audio-episodes/council`.
+    /// - Remark: Generated from `#/paths//api/content/{content_id}/audio-episodes/council/post(createContentCouncilAudioEpisode)`.
+    internal func createContentCouncilAudioEpisode(_ input: Operations.CreateContentCouncilAudioEpisode.Input) async throws -> Operations.CreateContentCouncilAudioEpisode.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.CreateContentCouncilAudioEpisode.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/content/{}/audio-episodes/council",
+                    parameters: [
+                        input.path.contentId
+                    ]
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .post
+                )
+                suppressMutabilityWarning(&request)
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: true,
+                    name: "delivery",
+                    value: input.query.delivery
+                )
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.CreateContentCouncilAudioEpisode.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.AudioEpisodeResponse.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                case 422:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.CreateContentCouncilAudioEpisode.Output.UnprocessableContent.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.HTTPValidationError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unprocessableContent(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
     /// Get canonical content body
     ///
     /// Retrieve the canonical body text for a content item via the backend proxy.
@@ -8097,6 +8560,101 @@ internal struct Client: APIProtocol {
             }
         )
     }
+    /// Create an on-demand Fast Read discussion podcast episode
+    ///
+    /// Create or reuse a single-item Fast Read discussion and enqueue generation.
+    ///
+    /// - Remark: HTTP `POST /api/news/items/{news_item_id}/audio-episodes/discussion`.
+    /// - Remark: Generated from `#/paths//api/news/items/{news_item_id}/audio-episodes/discussion/post(createDiscussionNewsItemAudioEpisode)`.
+    internal func createDiscussionNewsItemAudioEpisode(_ input: Operations.CreateDiscussionNewsItemAudioEpisode.Input) async throws -> Operations.CreateDiscussionNewsItemAudioEpisode.Output {
+        try await client.send(
+            input: input,
+            forOperation: Operations.CreateDiscussionNewsItemAudioEpisode.id,
+            serializer: { input in
+                let path = try converter.renderedPath(
+                    template: "/api/news/items/{}/audio-episodes/discussion",
+                    parameters: [
+                        input.path.newsItemId
+                    ]
+                )
+                var request: HTTPTypes.HTTPRequest = .init(
+                    soar_path: path,
+                    method: .post
+                )
+                suppressMutabilityWarning(&request)
+                try converter.setQueryItemAsURI(
+                    in: &request,
+                    style: .form,
+                    explode: true,
+                    name: "delivery",
+                    value: input.query.delivery
+                )
+                converter.setAcceptHeader(
+                    in: &request.headerFields,
+                    contentTypes: input.headers.accept
+                )
+                return (request, nil)
+            },
+            deserializer: { response, responseBody in
+                switch response.status.code {
+                case 200:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.CreateDiscussionNewsItemAudioEpisode.Output.Ok.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.AudioEpisodeResponse.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .ok(.init(body: body))
+                case 404:
+                    return .notFound(.init())
+                case 422:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.CreateDiscussionNewsItemAudioEpisode.Output.UnprocessableContent.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.HTTPValidationError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .unprocessableContent(.init(body: body))
+                default:
+                    return .undocumented(
+                        statusCode: response.status.code,
+                        .init(
+                            headerFields: response.headerFields,
+                            body: responseBody
+                        )
+                    )
+                }
+            }
+        )
+    }
     /// Convert one news item into article content
     ///
     /// Convert one representative news item into saved article content.
@@ -9598,12 +10156,6 @@ internal struct Client: APIProtocol {
     ///
     /// Render admin login page.
     ///
-    /// Args:
-    ///     request: FastAPI request object
-    ///
-    /// Returns:
-    ///     HTML login page
-    ///
     /// - Remark: HTTP `GET /auth/admin/login`.
     /// - Remark: Generated from `#/paths//auth/admin/login/get(adminLoginPage)`.
     internal func adminLoginPage(_ input: Operations.AdminLoginPage.Input) async throws -> Operations.AdminLoginPage.Output {
@@ -9665,16 +10217,6 @@ internal struct Client: APIProtocol {
     /// Admin Login
     ///
     /// Admin login with password.
-    ///
-    /// Args:
-    ///     request: Admin login request with password
-    ///     response: FastAPI response to set cookie
-    ///
-    /// Returns:
-    ///     Success message
-    ///
-    /// Raises:
-    ///     HTTPException: 401 if password is incorrect
     ///
     /// - Remark: HTTP `POST /auth/admin/login`.
     /// - Remark: Generated from `#/paths//auth/admin/login/post(adminLogin)`.
@@ -9768,12 +10310,6 @@ internal struct Client: APIProtocol {
     /// Admin Logout
     ///
     /// Admin logout.
-    ///
-    /// Args:
-    ///     response: FastAPI response to delete cookie
-    ///
-    /// Returns:
-    ///     Success message
     ///
     /// - Remark: HTTP `POST /auth/admin/logout`.
     /// - Remark: Generated from `#/paths//auth/admin/logout/post(adminLogout)`.

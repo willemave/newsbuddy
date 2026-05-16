@@ -1,4 +1,11 @@
 import Foundation
+import os.log
+
+private let openAIServiceLogger = Logger(subsystem: "com.newsly", category: "OpenAIService")
+
+private func openAIElapsedMilliseconds(since start: Date) -> Int {
+    Int(Date().timeIntervalSince(start) * 1000)
+}
 
 enum OpenAIServiceError: LocalizedError {
     case notAuthenticated
@@ -25,16 +32,23 @@ final class OpenAIService {
 
     @discardableResult
     func refreshTranscriptionAvailability() async -> Bool {
+        let startedAt = Date()
         do {
             _ = try await fetchAccessToken()
             await MainActor.run {
                 AppSettings.shared.setBackendTranscriptionAvailable(true)
             }
+            openAIServiceLogger.info(
+                "Transcription availability refreshed | available=true elapsedMs=\(openAIElapsedMilliseconds(since: startedAt))"
+            )
             return true
         } catch {
             await MainActor.run {
                 AppSettings.shared.setBackendTranscriptionAvailable(false)
             }
+            openAIServiceLogger.error(
+                "Transcription availability refresh failed | elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             return false
         }
     }
@@ -43,7 +57,11 @@ final class OpenAIService {
         fileURL: URL,
         filename: String = "audio.m4a"
     ) async throws -> AudioTranscriptionResponse {
+        let startedAt = Date()
         let audioData = try Data(contentsOf: fileURL)
+        openAIServiceLogger.info(
+            "Audio transcription file loaded | filename=\(filename, privacy: .public) bytes=\(audioData.count) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt))"
+        )
         return try await uploadAudioTranscription(
             audioData: audioData,
             filename: filename,
@@ -56,17 +74,27 @@ final class OpenAIService {
         filename: String,
         allowRefresh: Bool
     ) async throws -> AudioTranscriptionResponse {
+        let startedAt = Date()
         let accessToken = try await fetchAccessToken()
         let request = try buildTranscriptionRequest(
             accessToken: accessToken,
             audioData: audioData,
             filename: filename
         )
+        openAIServiceLogger.info(
+            "Audio transcription upload started | filename=\(filename, privacy: .public) bytes=\(audioData.count) allowRefresh=\(allowRefresh)"
+        )
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            openAIServiceLogger.error(
+                "Audio transcription upload missing HTTP response | filename=\(filename, privacy: .public) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt))"
+            )
             throw OpenAIServiceError.invalidResponse
         }
+        openAIServiceLogger.info(
+            "Audio transcription upload response | filename=\(filename, privacy: .public) status=\(httpResponse.statusCode) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) responseBytes=\(data.count)"
+        )
 
         if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
             guard allowRefresh else {
@@ -76,8 +104,14 @@ final class OpenAIService {
             do {
                 _ = try await AuthenticationService.shared.refreshAccessToken()
             } catch {
+                openAIServiceLogger.error(
+                    "Audio transcription token refresh failed | filename=\(filename, privacy: .public) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+                )
                 throw OpenAIServiceError.notAuthenticated
             }
+            openAIServiceLogger.info(
+                "Audio transcription retrying after token refresh | filename=\(filename, privacy: .public)"
+            )
             return try await uploadAudioTranscription(
                 audioData: audioData,
                 filename: filename,
@@ -87,6 +121,9 @@ final class OpenAIService {
 
         guard (200...299).contains(httpResponse.statusCode) else {
             let message = String(data: data, encoding: .utf8)
+            openAIServiceLogger.error(
+                "Audio transcription upload HTTP error | filename=\(filename, privacy: .public) status=\(httpResponse.statusCode) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) detail=\(message ?? "nil", privacy: .public)"
+            )
             throw OpenAIServiceError.serverError(
                 statusCode: httpResponse.statusCode,
                 message: message
@@ -94,8 +131,15 @@ final class OpenAIService {
         }
 
         do {
-            return try JSONDecoder().decode(AudioTranscriptionResponse.self, from: data)
+            let decoded = try JSONDecoder().decode(AudioTranscriptionResponse.self, from: data)
+            openAIServiceLogger.info(
+                "Audio transcription decoded | filename=\(filename, privacy: .public) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) transcriptChars=\(decoded.text.count)"
+            )
+            return decoded
         } catch {
+            openAIServiceLogger.error(
+                "Audio transcription decode failed | filename=\(filename, privacy: .public) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             throw OpenAIServiceError.invalidResponse
         }
     }

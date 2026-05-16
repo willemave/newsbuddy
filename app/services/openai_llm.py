@@ -6,6 +6,7 @@ import contextlib
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import BinaryIO
 
@@ -28,6 +29,10 @@ settings = get_settings()
 MAX_FILE_SIZE_MB = 25
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 CHUNK_DURATION_SECONDS = 10 * 60  # 10 minutes in seconds
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 2)
 
 
 class OpenAITranscriptionService:
@@ -213,7 +218,23 @@ class OpenAITranscriptionService:
     def _transcribe_single_file(self, file_path: Path, prompt: str) -> tuple[str, str | None]:
         """Transcribe a single audio file."""
         with open(file_path, "rb") as audio_file:
-            logger.info(f"Sending audio file to OpenAI for transcription: {file_path}")
+            started_at = time.perf_counter()
+            file_size = os.path.getsize(file_path)
+            logger.info(
+                "Sending audio file to OpenAI for transcription",
+                extra={
+                    "component": "openai_transcription",
+                    "operation": "provider_transcribe",
+                    "status": "started",
+                    "provider": "openai",
+                    "model": self.model_name,
+                    "context_data": {
+                        "file_name": file_path.name,
+                        "audio_size_bytes": file_size,
+                        "prompt_chars": len(prompt),
+                    },
+                },
+            )
 
             with langfuse_trace_context(
                 trace_name="queue.transcribe.audio",
@@ -232,8 +253,21 @@ class OpenAITranscriptionService:
             language = getattr(transcription, "language", None)
 
             logger.info(
-                f"Successfully transcribed audio. "
-                f"Length: {len(transcript)} chars, Language: {language}"
+                "Successfully transcribed audio",
+                extra={
+                    "component": "openai_transcription",
+                    "operation": "provider_transcribe",
+                    "status": "completed",
+                    "duration_ms": _duration_ms(started_at),
+                    "provider": "openai",
+                    "model": self.model_name,
+                    "context_data": {
+                        "file_name": file_path.name,
+                        "audio_size_bytes": file_size,
+                        "transcript_chars": len(transcript),
+                        "language": language,
+                    },
+                },
             )
 
             return transcript, language
@@ -245,9 +279,26 @@ class OpenAITranscriptionService:
         user_id: int | None = None,
     ) -> tuple[str, str | None]:
         """Transcribe audio file using OpenAI Whisper API."""
+        started_at = time.perf_counter()
         try:
             prompt = self._get_transcription_prompt(audio_file_path)
-            logger.info(f"Using transcription prompt: {prompt}")
+            audio_size_bytes = os.path.getsize(audio_file_path)
+            logger.info(
+                "OpenAI audio transcription started",
+                extra={
+                    "component": "openai_transcription",
+                    "operation": "transcribe_audio",
+                    "status": "started",
+                    "user_id": user_id,
+                    "provider": "openai",
+                    "model": self.model_name,
+                    "context_data": {
+                        "file_name": audio_file_path.name,
+                        "audio_size_bytes": audio_size_bytes,
+                        "prompt_chars": len(prompt),
+                    },
+                },
+            )
 
             if self._check_file_size(audio_file_path):
                 transcript, language = self._transcribe_single_file(audio_file_path, prompt)
@@ -257,9 +308,43 @@ class OpenAITranscriptionService:
                     prompt=prompt,
                     user_id=user_id,
                 )
+                logger.info(
+                    "OpenAI audio transcription completed",
+                    extra={
+                        "component": "openai_transcription",
+                        "operation": "transcribe_audio",
+                        "status": "completed",
+                        "duration_ms": _duration_ms(started_at),
+                        "user_id": user_id,
+                        "provider": "openai",
+                        "model": self.model_name,
+                        "context_data": {
+                            "file_name": audio_file_path.name,
+                            "audio_size_bytes": audio_size_bytes,
+                            "chunk_count": 1,
+                            "transcript_chars": len(transcript),
+                            "language": language,
+                        },
+                    },
+                )
                 return transcript, language
 
-            logger.info(f"File exceeds {MAX_FILE_SIZE_MB}MB limit, splitting into chunks")
+            logger.info(
+                "Audio file exceeds transcription size limit, splitting into chunks",
+                extra={
+                    "component": "openai_transcription",
+                    "operation": "transcribe_audio",
+                    "status": "splitting",
+                    "user_id": user_id,
+                    "provider": "openai",
+                    "model": self.model_name,
+                    "context_data": {
+                        "file_name": audio_file_path.name,
+                        "audio_size_bytes": audio_size_bytes,
+                        "max_file_size_bytes": MAX_FILE_SIZE_BYTES,
+                    },
+                },
+            )
 
             if not self._check_ffmpeg_available():
                 raise RuntimeError(
@@ -268,14 +353,33 @@ class OpenAITranscriptionService:
                     "or use audio files smaller than 25MB."
                 )
 
+            split_started_at = time.perf_counter()
             chunk_paths = self._split_audio_file_ffmpeg(audio_file_path)
+            split_duration_ms = _duration_ms(split_started_at)
 
             try:
                 transcripts = []
                 detected_language = None
 
                 for i, chunk_path in enumerate(chunk_paths):
-                    logger.info(f"Transcribing chunk {i + 1}/{len(chunk_paths)}")
+                    chunk_started_at = time.perf_counter()
+                    logger.info(
+                        "Transcribing audio chunk",
+                        extra={
+                            "component": "openai_transcription",
+                            "operation": "transcribe_audio_chunk",
+                            "status": "started",
+                            "user_id": user_id,
+                            "provider": "openai",
+                            "model": self.model_name,
+                            "context_data": {
+                                "file_name": audio_file_path.name,
+                                "chunk_index": i + 1,
+                                "chunk_count": len(chunk_paths),
+                                "chunk_size_bytes": os.path.getsize(chunk_path),
+                            },
+                        },
+                    )
 
                     chunk_prompt = prompt
                     if i > 0:
@@ -288,12 +392,47 @@ class OpenAITranscriptionService:
                     transcripts.append(chunk_transcript)
                     if detected_language is None and chunk_language:
                         detected_language = chunk_language
+                    logger.info(
+                        "Transcribed audio chunk",
+                        extra={
+                            "component": "openai_transcription",
+                            "operation": "transcribe_audio_chunk",
+                            "status": "completed",
+                            "duration_ms": _duration_ms(chunk_started_at),
+                            "user_id": user_id,
+                            "provider": "openai",
+                            "model": self.model_name,
+                            "context_data": {
+                                "file_name": audio_file_path.name,
+                                "chunk_index": i + 1,
+                                "chunk_count": len(chunk_paths),
+                                "transcript_chars": len(chunk_transcript),
+                                "language": chunk_language,
+                            },
+                        },
+                    )
 
                 full_transcript = " ".join(transcripts)
 
                 logger.info(
-                    f"Successfully transcribed {len(chunk_paths)} chunks. "
-                    f"Total length: {len(full_transcript)} chars"
+                    "OpenAI chunked audio transcription completed",
+                    extra={
+                        "component": "openai_transcription",
+                        "operation": "transcribe_audio",
+                        "status": "completed",
+                        "duration_ms": _duration_ms(started_at),
+                        "user_id": user_id,
+                        "provider": "openai",
+                        "model": self.model_name,
+                        "context_data": {
+                            "file_name": audio_file_path.name,
+                            "audio_size_bytes": audio_size_bytes,
+                            "chunk_count": len(chunk_paths),
+                            "split_duration_ms": split_duration_ms,
+                            "transcript_chars": len(full_transcript),
+                            "language": detected_language,
+                        },
+                    },
                 )
 
                 self._record_transcription_usage(
@@ -317,7 +456,21 @@ class OpenAITranscriptionService:
                             temp_dir.rmdir()
 
         except Exception as e:  # noqa: BLE001
-            logger.error(f"Error transcribing audio with OpenAI: {e}")
+            logger.error(
+                "Error transcribing audio with OpenAI",
+                extra={
+                    "component": "openai_transcription",
+                    "operation": "transcribe_audio",
+                    "duration_ms": _duration_ms(started_at),
+                    "user_id": user_id,
+                    "provider": "openai",
+                    "model": self.model_name,
+                    "context_data": {
+                        "file_name": audio_file_path.name,
+                        "error": str(e),
+                    },
+                },
+            )
             raise
 
     def transcribe_audio_from_buffer(
@@ -328,21 +481,66 @@ class OpenAITranscriptionService:
         user_id: int | None = None,
     ) -> tuple[str, str | None]:
         """Transcribe audio from a file buffer using OpenAI Whisper API."""
+        started_at = time.perf_counter()
+        tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
                 suffix=Path(filename).suffix, delete=False
             ) as tmp_file:
                 tmp_file.write(audio_buffer.read())
                 tmp_path = Path(tmp_file.name)
+            logger.info(
+                "Audio transcription buffer persisted",
+                extra={
+                    "component": "openai_transcription",
+                    "operation": "transcribe_audio_from_buffer",
+                    "status": "buffer_persisted",
+                    "duration_ms": _duration_ms(started_at),
+                    "user_id": user_id,
+                    "context_data": {
+                        "filename": filename,
+                        "audio_size_bytes": tmp_path.stat().st_size,
+                    },
+                },
+            )
 
             try:
-                return self.transcribe_audio(tmp_path, user_id=user_id)
+                transcript, language = self.transcribe_audio(tmp_path, user_id=user_id)
+                logger.info(
+                    "Audio transcription buffer completed",
+                    extra={
+                        "component": "openai_transcription",
+                        "operation": "transcribe_audio_from_buffer",
+                        "status": "completed",
+                        "duration_ms": _duration_ms(started_at),
+                        "user_id": user_id,
+                        "context_data": {
+                            "filename": filename,
+                            "transcript_chars": len(transcript),
+                            "language": language,
+                        },
+                    },
+                )
+                return transcript, language
             finally:
                 if tmp_path.exists():
                     tmp_path.unlink()
 
         except Exception as e:  # noqa: BLE001
-            logger.error(f"Error transcribing audio buffer with OpenAI: {e}")
+            logger.error(
+                "Error transcribing audio buffer with OpenAI",
+                extra={
+                    "component": "openai_transcription",
+                    "operation": "transcribe_audio_from_buffer",
+                    "duration_ms": _duration_ms(started_at),
+                    "user_id": user_id,
+                    "context_data": {
+                        "filename": filename,
+                        "tmp_path_created": tmp_path is not None,
+                        "error": str(e),
+                    },
+                },
+            )
             raise
 
 

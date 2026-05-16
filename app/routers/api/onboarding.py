@@ -1,5 +1,6 @@
 """Onboarding endpoints."""
 
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session
 from app.core.deps import get_current_user, require_user_id
+from app.core.logging import get_logger
 from app.models.api.onboarding import (
     OnboardingAudioDiscoverRequest,
     OnboardingAudioDiscoverResponse,
@@ -34,6 +36,11 @@ from app.services.onboarding import (
 )
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
+logger = get_logger(__name__)
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 2)
 
 
 @router.post(
@@ -60,8 +67,25 @@ async def parse_voice(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> OnboardingVoiceParseResponse:
     """Parse onboarding transcript into profile fields."""
-    _ = current_user
-    return await run_in_threadpool(parse_onboarding_voice, payload)
+    started_at = time.perf_counter()
+    user_id = require_user_id(current_user)
+    response = await run_in_threadpool(parse_onboarding_voice, payload)
+    logger.info(
+        "Onboarding voice parse response ready",
+        extra={
+            "component": "onboarding",
+            "operation": "parse_voice_route",
+            "status": "completed",
+            "duration_ms": _duration_ms(started_at),
+            "user_id": user_id,
+            "context_data": {
+                "transcript_chars": len(payload.transcript.strip()),
+                "topic_count": len(response.interest_topics),
+                "has_first_name": bool(response.first_name),
+            },
+        },
+    )
+    return response
 
 
 @router.post(
@@ -89,10 +113,39 @@ async def start_audio_discovery_flow(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> OnboardingAudioDiscoverResponse:
     """Start onboarding discovery from an audio transcript."""
+    started_at = time.perf_counter()
+    user_id = require_user_id(current_user)
     try:
-        return await start_audio_discovery(db, require_user_id(current_user), payload)
+        response = await start_audio_discovery(db, user_id, payload)
     except ValueError as exc:
+        logger.info(
+            "Onboarding audio discovery route rejected",
+            extra={
+                "component": "onboarding",
+                "operation": "audio_discover_route",
+                "status": "rejected",
+                "duration_ms": _duration_ms(started_at),
+                "user_id": user_id,
+                "context_data": {"reason": str(exc)},
+            },
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info(
+        "Onboarding audio discovery response ready",
+        extra={
+            "component": "onboarding",
+            "operation": "audio_discover_route",
+            "status": "completed",
+            "duration_ms": _duration_ms(started_at),
+            "user_id": user_id,
+            "context_data": {
+                "run_id": response.run_id,
+                "run_status": response.run_status,
+                "lane_count": len(response.lanes),
+            },
+        },
+    )
+    return response
 
 
 @router.get(

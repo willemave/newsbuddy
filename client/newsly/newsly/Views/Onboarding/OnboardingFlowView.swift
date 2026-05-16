@@ -488,7 +488,7 @@ struct OnboardingFlowView: View {
                         .foregroundColor(.watercolorSlate.opacity(0.65))
                 }
 
-                primaryButton(suggestionsPrimaryTitle) {
+                primaryButton("Continue") {
                     withAnimation(.easeInOut(duration: 0.3)) {
                         viewModel.advanceToFastNews()
                     }
@@ -966,13 +966,6 @@ struct OnboardingFlowView: View {
 
     private var selectedFastNewsCount: Int {
         viewModel.selectedAggregators.count + viewModel.selectedSubreddits.count
-    }
-
-    private var suggestionsPrimaryTitle: String {
-        if !viewModel.isShowingDefaultConfirmation && selectedLongformCount > 0 {
-            return "Continue with \(selectedLongformCount)"
-        }
-        return "Continue"
     }
 
     private var fastNewsPrimaryTitle: String {

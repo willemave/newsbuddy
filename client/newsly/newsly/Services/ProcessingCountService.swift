@@ -12,11 +12,13 @@ struct ProcessingCountResponse: Codable {
     let processingCount: Int
     let longFormCount: Int
     let newsCount: Int
+    let newsCrawlCount: Int
 
     enum CodingKeys: String, CodingKey {
         case processingCount = "processing_count"
         case longFormCount = "long_form_count"
         case newsCount = "news_count"
+        case newsCrawlCount = "news_crawl_count"
     }
 }
 
@@ -27,6 +29,7 @@ final class ProcessingCountService: ObservableObject {
     @Published var processingCount: Int = 0
     @Published var longFormProcessingCount: Int = 0
     @Published var newsProcessingCount: Int = 0
+    @Published var newsCrawlCount: Int = 0
 
     private let client = APIClient.shared
     private var refreshTimer: Timer?
@@ -45,6 +48,7 @@ final class ProcessingCountService: ObservableObject {
             processingCount = response.processingCount
             longFormProcessingCount = response.longFormCount
             newsProcessingCount = response.newsCount
+            newsCrawlCount = response.newsCrawlCount
         } catch {
             print("Failed to fetch processing count: \(error)")
         }

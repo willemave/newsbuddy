@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import cast
 
 from app.models.db import VendorUsageRecord
 from app.services.voice import narration_tts
@@ -105,33 +104,43 @@ def test_content_narration_tts_records_vendor_usage(
     assert row.metadata_json["target_id"] == 42
 
 
-def test_dialogue_tts_uses_text_to_dialogue(monkeypatch) -> None:
-    """Podcast-style audio should use ElevenLabs dialogue input turns."""
+def test_dialogue_tts_parallelizes_turn_synthesis(monkeypatch) -> None:
+    """Podcast-style audio should synthesize turns independently with the fast TTS model."""
 
-    captured_kwargs: dict[str, object] = {}
+    captured_calls: list[dict[str, object]] = []
+    captured_chunks: list[bytes] = []
 
-    class FakeTextToDialogue:
+    class FakeTextToSpeech:
         def convert(self, **kwargs):
-            captured_kwargs.update(kwargs)
-            return iter([b"dialogue"])
+            captured_calls.append(kwargs)
+            return iter([str(kwargs["text"]).encode()])
 
     class FakeElevenLabs:
         def __init__(self, api_key: str | None) -> None:
             self.api_key = api_key
-            self.text_to_dialogue = FakeTextToDialogue()
+            self.text_to_speech = FakeTextToSpeech()
 
-    class FakeDialogueInput:
-        def __init__(self, *, text: str, voice_id: str) -> None:
-            self.text = text
-            self.voice_id = voice_id
+    class FakeVoiceSettings:
+        def __init__(self, *, speed: float) -> None:
+            self.speed = speed
 
     monkeypatch.setattr(narration_tts, "ElevenLabs", FakeElevenLabs)
-    monkeypatch.setattr(narration_tts, "DialogueInput", FakeDialogueInput)
+    monkeypatch.setattr(narration_tts, "VoiceSettings", FakeVoiceSettings)
     monkeypatch.setattr(narration_tts, "find_spec", lambda _name: object())
     monkeypatch.setattr(
         narration_tts,
         "record_vendor_usage_out_of_band",
         lambda **_kwargs: None,
+    )
+
+    def fake_stitch(_self, chunks: list[bytes], **_kwargs) -> tuple[bytes, float]:
+        captured_chunks.extend(chunks)
+        return b"".join(chunks), 0.5
+
+    monkeypatch.setattr(
+        narration_tts.ContentNarrationTtsService,
+        "_stitch_dialogue_turns_mp3",
+        fake_stitch,
     )
     monkeypatch.setattr(
         narration_tts,
@@ -145,6 +154,7 @@ def test_dialogue_tts_uses_text_to_dialogue(monkeypatch) -> None:
             elevenlabs_dialogue_tts_model="eleven_v3",
             elevenlabs_narration_tts_output_format="mp3_44100_128",
             elevenlabs_narration_tts_speed=1.0,
+            elevenlabs_audio_episode_tts_max_workers=2,
         ),
     )
     narration_tts._content_narration_tts_service = None
@@ -156,8 +166,56 @@ def test_dialogue_tts_uses_text_to_dialogue(monkeypatch) -> None:
         ]
     )
 
-    assert audio == b"dialogue"
-    inputs = cast(list[FakeDialogueInput], captured_kwargs["inputs"])
-    assert [input.voice_id for input in inputs] == ["host-voice", "guest-voice"]
-    assert [input.text for input in inputs] == ["Welcome.", "Here is the analysis."]
-    assert captured_kwargs["model_id"] == "eleven_v3"
+    assert audio == b"Welcome.Here is the analysis."
+    assert captured_chunks == [b"Welcome.", b"Here is the analysis."]
+    calls_by_text = {str(call["text"]): call for call in captured_calls}
+    assert calls_by_text["Welcome."]["voice_id"] == "host-voice"
+    assert calls_by_text["Here is the analysis."]["voice_id"] == "guest-voice"
+    assert {call["model_id"] for call in captured_calls} == {"eleven_turbo_v2_5"}
+    assert {call["output_format"] for call in captured_calls} == {"mp3_44100_128"}
+    for call in captured_calls:
+        voice_settings = call["voice_settings"]
+        assert isinstance(voice_settings, FakeVoiceSettings)
+        assert voice_settings.speed == 1.0
+
+
+def test_dialogue_tts_stitches_turns_with_ffmpeg(monkeypatch) -> None:
+    """Parallel dialogue turn audio should be re-encoded into one valid MP3 asset."""
+
+    service = narration_tts.ContentNarrationTtsService.__new__(
+        narration_tts.ContentNarrationTtsService
+    )
+    captured_cmd: dict[str, list[str]] = {}
+
+    def fake_run(cmd, **kwargs):
+        del kwargs
+        captured_cmd["cmd"] = cmd
+        output_path = cmd[-1]
+        with open(output_path, "wb") as output_file:
+            output_file.write(b"stitched-mp3")
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(narration_tts.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(narration_tts.subprocess, "run", fake_run)
+
+    audio, duration_ms = service._stitch_dialogue_turns_mp3(
+        [b"turn-one", b"turn-two"],
+        item_id=42,
+        user_id=7,
+    )
+
+    assert audio == b"stitched-mp3"
+    assert duration_ms >= 0
+    assert captured_cmd["cmd"][:10] == [
+        "/usr/bin/ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+    ]
+    assert captured_cmd["cmd"][-5:-1] == ["-codec:a", "libmp3lame", "-b:a", "128k"]

@@ -6,8 +6,17 @@
 //
 
 import Foundation
+import os.log
 
 private let discoveryPersonalizePollingIntervalNanoseconds: UInt64 = 500_000_000
+private let discoveryPersonalizeVoiceLogger = Logger(
+    subsystem: "com.newsly",
+    category: "DiscoveryPersonalizeVoice"
+)
+
+private func discoveryPersonalizeElapsedMilliseconds(since start: Date) -> Int {
+    Int(Date().timeIntervalSince(start) * 1000)
+}
 
 @MainActor
 final class DiscoveryPersonalizeViewModel: ObservableObject {
@@ -50,6 +59,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
     private var isSubmittingAudioDiscovery = false
     private var didAutoStartRecording = false
     private var didAttemptResume = false
+    private var audioCaptureStartedAt: Date?
 
     init(userId: Int) {
         self.userId = userId
@@ -86,24 +96,43 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
     }
 
     func startAudioCapture() async {
+        let startedAt = Date()
         configureDictationCallbacks()
         errorMessage = nil
         audioState = .recording
+        audioCaptureStartedAt = startedAt
         startAudioTimer()
+        discoveryPersonalizeVoiceLogger.info("Discovery personalize audio capture start requested")
 
         do {
             try await dictationService.start()
+            discoveryPersonalizeVoiceLogger.info(
+                "Discovery personalize audio capture started | elapsedMs=\(discoveryPersonalizeElapsedMilliseconds(since: startedAt))"
+            )
         } catch {
+            discoveryPersonalizeVoiceLogger.error(
+                "Discovery personalize audio capture failed | elapsedMs=\(discoveryPersonalizeElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             handleAudioError(error)
         }
     }
 
     func stopAudioCaptureAndDiscover() async {
+        let startedAt = Date()
         audioState = .transcribing
         stopAudioTimer()
+        discoveryPersonalizeVoiceLogger.info(
+            "Discovery personalize audio capture stop requested | captureElapsedMs=\(self.audioCaptureStartedAt.map { discoveryPersonalizeElapsedMilliseconds(since: $0) } ?? 0)"
+        )
         do {
             _ = try await dictationService.stop()
+            discoveryPersonalizeVoiceLogger.info(
+                "Discovery personalize audio capture stopped | elapsedMs=\(discoveryPersonalizeElapsedMilliseconds(since: startedAt))"
+            )
         } catch {
+            discoveryPersonalizeVoiceLogger.error(
+                "Discovery personalize audio capture stop failed | elapsedMs=\(discoveryPersonalizeElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             handleAudioError(error)
         }
     }
@@ -124,10 +153,17 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
 
     private func beginDiscovery(transcript: String) async {
         guard !isSubmittingAudioDiscovery else { return }
+        let startedAt = Date()
         isSubmittingAudioDiscovery = true
-        defer { isSubmittingAudioDiscovery = false }
+        defer {
+            isSubmittingAudioDiscovery = false
+            audioCaptureStartedAt = nil
+        }
 
         do {
+            discoveryPersonalizeVoiceLogger.info(
+                "Discovery personalize audio discovery begin | transcriptChars=\(transcript.count)"
+            )
             let request = OnboardingAudioDiscoverRequest(
                 transcript: transcript,
                 locale: Locale.current.identifier
@@ -141,7 +177,13 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
             onboardingStateStore.setDiscoveryRun(userId: userId, runId: response.runId)
             step = .loading
             startPolling(runId: response.runId)
+            discoveryPersonalizeVoiceLogger.info(
+                "Discovery personalize audio discovery started | runId=\(response.runId) laneCount=\(response.lanes.count) elapsedMs=\(discoveryPersonalizeElapsedMilliseconds(since: startedAt))"
+            )
         } catch {
+            discoveryPersonalizeVoiceLogger.error(
+                "Discovery personalize audio discovery failed | elapsedMs=\(discoveryPersonalizeElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             errorMessage = error.localizedDescription
             audioState = .error
         }
@@ -319,6 +361,12 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
         dictationService.cancel()
         stopAudioTimer()
         audioState = .idle
+        if let audioCaptureStartedAt {
+            discoveryPersonalizeVoiceLogger.info(
+                "Discovery personalize audio capture cancelled | captureElapsedMs=\(discoveryPersonalizeElapsedMilliseconds(since: audioCaptureStartedAt))"
+            )
+        }
+        audioCaptureStartedAt = nil
     }
 
     private func configureDictationCallbacks() {
@@ -339,6 +387,9 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
 
                 self.audioState = .transcribing
                 self.stopAudioTimer()
+                discoveryPersonalizeVoiceLogger.info(
+                    "Discovery personalize transcript final | transcriptChars=\(trimmed.count) captureElapsedMs=\(self.audioCaptureStartedAt.map { discoveryPersonalizeElapsedMilliseconds(since: $0) } ?? 0)"
+                )
                 await self.beginDiscovery(transcript: trimmed)
             }
         }

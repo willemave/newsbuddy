@@ -873,6 +873,24 @@ func (s *ContentSummaryResponse) Validate() error {
 		})
 	}
 	if err := func() error {
+		if value, ok := s.SavedSource.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "saved_source",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if err := s.Status.Validate(); err != nil {
 			return err
 		}
@@ -887,6 +905,17 @@ func (s *ContentSummaryResponse) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s ContentSummaryResponseSavedSource) Validate() error {
+	switch s {
+	case "knowledge":
+		return nil
+	case "x_bookmark":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s ContentType) Validate() error {

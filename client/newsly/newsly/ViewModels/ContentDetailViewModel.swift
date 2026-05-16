@@ -31,6 +31,9 @@ typealias DiscussionLinkAddState = LinkReadLaterState
 class ContentDetailViewModel: ObservableObject {
     @Published var content: ContentDetail?
     @Published var contentBody: ContentBody?
+    @Published var readerBody: ContentBody?
+    @Published var isLoadingReaderBody = false
+    @Published var readerErrorMessage: String?
     @Published var isLoading = false
     @Published var errorMessage: String?
     // Indicates if the item was already marked as read when it was fetched
@@ -71,6 +74,9 @@ class ContentDetailViewModel: ObservableObject {
         // Clear previous content to show loading state
         self.content = nil
         self.contentBody = nil
+        self.readerBody = nil
+        self.isLoadingReaderBody = false
+        self.readerErrorMessage = nil
         self.errorMessage = nil
         self.isLoading = true
         readLaterLinkStates = [:]
@@ -121,6 +127,35 @@ class ContentDetailViewModel: ObservableObject {
         logger.debug("[ContentDetail] loadContent completed | contentId=\(self.contentId)")
     }
 
+    func canShowReader(for content: ContentDetail) -> Bool {
+        content.contentTypeEnum == .article && content.bodyAvailable
+    }
+
+    func loadReaderBody(for content: ContentDetail, force: Bool = false) async {
+        guard canShowReader(for: content) else { return }
+        guard force || readerBody == nil else { return }
+        guard !isLoadingReaderBody else { return }
+
+        isLoadingReaderBody = true
+        readerErrorMessage = nil
+        defer { isLoadingReaderBody = false }
+
+        do {
+            let body = try await fetchReaderBody(for: content)
+            guard self.contentId == content.id,
+                  self.content?.id == content.id,
+                  self.content?.contentTypeEnum == .article else {
+                logger.debug("[ContentDetail] Ignoring stale reader body | requestedId=\(content.id) currentId=\(self.contentId)")
+                return
+            }
+            readerBody = body
+        } catch {
+            guard self.contentId == content.id else { return }
+            logger.error("[ContentDetail] Failed to fetch reader body | contentId=\(content.id) error=\(error.localizedDescription)")
+            readerErrorMessage = error.localizedDescription
+        }
+    }
+
     private func loadContentBody(for fetched: ContentDetail) async {
         do {
             let body = try await contentService.fetchContentBody(id: fetched.id)
@@ -132,6 +167,22 @@ class ContentDetailViewModel: ObservableObject {
         } catch {
             logger.error("[ContentDetail] Failed to fetch content body | contentId=\(fetched.id) error=\(error.localizedDescription)")
         }
+    }
+
+    private func fetchReaderBody(for content: ContentDetail) async throws -> ContentBody {
+        do {
+            let renderedBody = try await contentService.fetchContentBody(
+                id: content.id,
+                variant: "rendered"
+            )
+            if !renderedBody.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return renderedBody
+            }
+        } catch {
+            logger.debug("[ContentDetail] Rendered reader body unavailable, falling back to source | contentId=\(content.id) error=\(error.localizedDescription)")
+        }
+
+        return try await contentService.fetchContentBody(id: content.id, variant: "source")
     }
 
     private func markFetchedContentAsReadIfNeeded(_ fetched: ContentDetail) async {

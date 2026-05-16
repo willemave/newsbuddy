@@ -37,6 +37,7 @@ final class TweetSuggestionsViewModel: ObservableObject {
     private var contentId: Int?
     private var creativityDebounceTask: Task<Void, Never>?
     private var lastCreativity: Int = 5
+    private var voiceRecordingStartedAt: Date?
 
     // MARK: - Public Methods
 
@@ -179,11 +180,19 @@ final class TweetSuggestionsViewModel: ObservableObject {
 
     /// Start voice recording for tweak message.
     func startVoiceRecording() async {
+        let startedAt = Date()
+        voiceRecordingStartedAt = startedAt
+        logger.info("Tweet suggestion voice recording start requested")
         do {
             try await transcriptionService.start()
             isRecording = true
+            logger.info(
+                "Tweet suggestion voice recording started | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+            )
         } catch {
-            logger.error("Failed to start recording: \(error.localizedDescription)")
+            logger.error(
+                "Failed to start recording | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
+            )
             errorMessage = error.localizedDescription
         }
     }
@@ -192,8 +201,12 @@ final class TweetSuggestionsViewModel: ObservableObject {
     func stopVoiceRecording() async {
         guard isRecording else { return }
 
+        let startedAt = Date()
         isRecording = false
         isTranscribing = true
+        logger.info(
+            "Tweet suggestion voice recording stop requested | captureElapsedMs=\(self.voiceRecordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? 0)"
+        )
 
         do {
             let transcription = try await transcriptionService.stop()
@@ -204,20 +217,33 @@ final class TweetSuggestionsViewModel: ObservableObject {
                 tweakMessage += " " + transcription
             }
             isTranscribing = false
+            logger.info(
+                "Tweet suggestion voice transcription completed | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) transcriptChars=\(transcription.count)"
+            )
 
             // Auto-regenerate with the new tweak message
             await regenerate()
         } catch {
-            logger.error("Failed to transcribe: \(error.localizedDescription)")
+            logger.error(
+                "Failed to transcribe | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
+            )
             errorMessage = error.localizedDescription
             isTranscribing = false
         }
+        voiceRecordingStartedAt = nil
     }
 
     /// Cancel voice recording.
     func cancelVoiceRecording() {
         transcriptionService.cancel()
         isRecording = false
+        isTranscribing = false
+        if let voiceRecordingStartedAt {
+            logger.info(
+                "Tweet suggestion voice recording cancelled | captureElapsedMs=\(Int(Date().timeIntervalSince(voiceRecordingStartedAt) * 1000))"
+            )
+        }
+        voiceRecordingStartedAt = nil
     }
 
     // MARK: - Helpers

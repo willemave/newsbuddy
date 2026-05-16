@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -67,6 +68,11 @@ from app.services.x_integration import normalize_twitter_username
 from app.utils.paths import resolve_config_path
 
 logger = get_logger(__name__)
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 2)
+
 
 SuggestionType = Literal["substack", "atom", "podcast_rss", "reddit"]
 SelectedSuggestionType = Literal["substack", "atom", "podcast_rss"]
@@ -322,8 +328,19 @@ def parse_onboarding_voice(request: OnboardingVoiceParseRequest) -> OnboardingVo
     Returns:
         OnboardingVoiceParseResponse with extracted fields.
     """
+    started_at = time.perf_counter()
     transcript = request.transcript.strip()
     if not transcript:
+        logger.info(
+            "Onboarding voice parse skipped empty transcript",
+            extra={
+                "component": "onboarding",
+                "operation": "voice_parse",
+                "status": "empty",
+                "duration_ms": _duration_ms(started_at),
+                "context_data": {"locale": request.locale},
+            },
+        )
         return OnboardingVoiceParseResponse(
             first_name=None,
             interest_topics=[],
@@ -332,9 +349,23 @@ def parse_onboarding_voice(request: OnboardingVoiceParseRequest) -> OnboardingVo
         )
 
     try:
+        logger.info(
+            "Onboarding voice parse started",
+            extra={
+                "component": "onboarding",
+                "operation": "voice_parse",
+                "status": "started",
+                "context_data": {
+                    "locale": request.locale,
+                    "transcript_chars": len(transcript),
+                },
+            },
+        )
         prompt = _format_voice_parse_prompt(transcript, request.locale)
         agent = get_basic_agent(VOICE_PARSE_MODEL, _VoiceParseOutput, VOICE_PARSE_SYSTEM_PROMPT)
+        llm_started_at = time.perf_counter()
         result = agent.run_sync(prompt, model_settings={"timeout": VOICE_PARSE_TIMEOUT_SECONDS})
+        llm_duration_ms = _duration_ms(llm_started_at)
         output = _get_agent_output(result)
     except Exception as exc:  # noqa: BLE001
         logger.exception(
@@ -342,7 +373,12 @@ def parse_onboarding_voice(request: OnboardingVoiceParseRequest) -> OnboardingVo
             extra={
                 "component": "onboarding",
                 "operation": "voice_parse",
-                "context_data": {"error": str(exc)},
+                "duration_ms": _duration_ms(started_at),
+                "context_data": {
+                    "error": str(exc),
+                    "locale": request.locale,
+                    "transcript_chars": len(transcript),
+                },
             },
         )
         return OnboardingVoiceParseResponse(
@@ -360,6 +396,23 @@ def parse_onboarding_voice(request: OnboardingVoiceParseRequest) -> OnboardingVo
     if not topics:
         missing_fields.append("interest_topics")
 
+    logger.info(
+        "Onboarding voice parse completed",
+        extra={
+            "component": "onboarding",
+            "operation": "voice_parse",
+            "status": "completed",
+            "duration_ms": _duration_ms(started_at),
+            "context_data": {
+                "locale": request.locale,
+                "transcript_chars": len(transcript),
+                "llm_duration_ms": llm_duration_ms,
+                "topic_count": len(topics),
+                "has_first_name": bool(first_name),
+                "missing_fields": missing_fields,
+            },
+        },
+    )
     return OnboardingVoiceParseResponse(
         first_name=first_name,
         interest_topics=topics,
@@ -408,11 +461,27 @@ async def start_audio_discovery(
     Returns:
         OnboardingAudioDiscoverResponse with run and lane status.
     """
+    started_at = time.perf_counter()
     transcript = request.transcript.strip()
     if not transcript:
         raise ValueError("Transcript is required")
 
+    logger.info(
+        "Onboarding audio discovery start requested",
+        extra={
+            "component": "onboarding",
+            "operation": "audio_discover_start",
+            "status": "started",
+            "user_id": user_id,
+            "context_data": {
+                "locale": request.locale,
+                "transcript_chars": len(transcript),
+            },
+        },
+    )
+    plan_started_at = time.perf_counter()
     plan = await _build_audio_lane_plan(transcript, request.locale)
+    plan_duration_ms = _duration_ms(plan_started_at)
 
     run = OnboardingDiscoveryRun(
         user_id=user_id,
@@ -443,9 +512,29 @@ async def start_audio_discovery(
     run_status = _require_run_status(run)
 
     queue_gateway = get_task_queue_gateway()
-    queue_gateway.enqueue(
+    enqueue_started_at = time.perf_counter()
+    task_id = queue_gateway.enqueue(
         TaskType.ONBOARDING_DISCOVER,
         payload={"user_id": user_id, "run_id": run_id},
+    )
+    logger.info(
+        "Onboarding audio discovery queued",
+        extra={
+            "component": "onboarding",
+            "operation": "audio_discover_start",
+            "status": "queued",
+            "duration_ms": _duration_ms(started_at),
+            "task_id": task_id,
+            "task_type": TaskType.ONBOARDING_DISCOVER.value,
+            "user_id": user_id,
+            "context_data": {
+                "run_id": run_id,
+                "lane_count": len(lanes),
+                "inferred_topic_count": len(plan.inferred_topics),
+                "plan_duration_ms": plan_duration_ms,
+                "enqueue_duration_ms": _duration_ms(enqueue_started_at),
+            },
+        },
     )
 
     return OnboardingAudioDiscoverResponse(
@@ -625,6 +714,10 @@ def complete_onboarding(
         )
         backfill_payload = request_payload.model_dump()
     sources_to_scrape = _resolve_scraper_sources(created_types - FEED_SUGGESTION_TYPES)
+    for aggregator_selection in request.selected_aggregators:
+        source = aggregator_selection.key.strip().lower()
+        if source and source not in sources_to_scrape:
+            sources_to_scrape.append(source)
     discovery_payload: dict[str, Any] | None = None
     if request.profile_summary:
         discovery_payload = {
@@ -783,13 +876,36 @@ def run_audio_discovery(db: Session, run_id: int) -> None:
         db: Database session.
         run_id: Onboarding discovery run id.
     """
+    started_at = time.perf_counter()
     run = db.query(OnboardingDiscoveryRun).filter(OnboardingDiscoveryRun.id == run_id).first()
     if not run:
         raise ValueError("Discovery run not found")
     if run.status == "completed":
+        logger.info(
+            "Onboarding audio discovery skipped",
+            extra={
+                "component": "onboarding",
+                "operation": "audio_discover",
+                "status": "completed",
+                "duration_ms": _duration_ms(started_at),
+                "item_id": str(run_id),
+                "user_id": run.user_id,
+                "context_data": {"reason": "already_completed"},
+            },
+        )
         return
 
     try:
+        logger.info(
+            "Onboarding audio discovery started",
+            extra={
+                "component": "onboarding",
+                "operation": "audio_discover",
+                "status": "started",
+                "item_id": str(run_id),
+                "user_id": run.user_id,
+            },
+        )
         run.status = "processing"
         db.commit()
 
@@ -802,32 +918,84 @@ def run_audio_discovery(db: Session, run_id: int) -> None:
 
         results: list[_DiscoveryWebResult] = []
         for lane in lanes:
+            lane_started_at = time.perf_counter()
             lane.status = "processing"
             lane.completed_queries = 0
             lane.query_count = len(lane.queries or [])
             db.commit()
+            logger.info(
+                "Onboarding audio discovery lane started",
+                extra={
+                    "component": "onboarding",
+                    "operation": "audio_discover_lane",
+                    "status": "started",
+                    "item_id": str(run_id),
+                    "user_id": run.user_id,
+                    "context_data": {
+                        "lane_id": lane.id,
+                        "lane_name": lane.lane_name,
+                        "lane_target": lane.target,
+                        "query_count": lane.query_count,
+                    },
+                },
+            )
 
             for idx, query in enumerate(lane.queries or []):
-                results.extend(
-                    _run_discovery_exa_queries(
-                        [query],
-                        num_results=FAST_DISCOVER_EXA_RESULTS,
-                        include_social=(lane.target == "reddit"),
-                        lane_name=lane.lane_name,
-                        lane_target=_normalize_lane_target(lane.target),
-                        telemetry={
-                            "feature": "onboarding",
-                            "operation": "onboarding.audio_discovery.search",
-                            "user_id": run.user_id,
-                            "metadata": {"lane_name": lane.lane_name, "lane_target": lane.target},
-                        },
-                    )
+                query_started_at = time.perf_counter()
+                query_results = _run_discovery_exa_queries(
+                    [query],
+                    num_results=FAST_DISCOVER_EXA_RESULTS,
+                    include_social=(lane.target == "reddit"),
+                    lane_name=lane.lane_name,
+                    lane_target=_normalize_lane_target(lane.target),
+                    telemetry={
+                        "feature": "onboarding",
+                        "operation": "onboarding.audio_discovery.search",
+                        "user_id": run.user_id,
+                        "metadata": {"lane_name": lane.lane_name, "lane_target": lane.target},
+                    },
                 )
+                results.extend(query_results)
                 lane.completed_queries = idx + 1
                 db.commit()
+                logger.info(
+                    "Onboarding audio discovery query completed",
+                    extra={
+                        "component": "onboarding",
+                        "operation": "audio_discover_query",
+                        "status": "completed",
+                        "duration_ms": _duration_ms(query_started_at),
+                        "item_id": str(run_id),
+                        "user_id": run.user_id,
+                        "context_data": {
+                            "lane_id": lane.id,
+                            "lane_name": lane.lane_name,
+                            "query_index": idx + 1,
+                            "query_count": lane.query_count,
+                            "result_count": len(query_results),
+                        },
+                    },
+                )
 
             lane.status = "completed"
             db.commit()
+            logger.info(
+                "Onboarding audio discovery lane completed",
+                extra={
+                    "component": "onboarding",
+                    "operation": "audio_discover_lane",
+                    "status": "completed",
+                    "duration_ms": _duration_ms(lane_started_at),
+                    "item_id": str(run_id),
+                    "user_id": run.user_id,
+                    "context_data": {
+                        "lane_id": lane.id,
+                        "lane_name": lane.lane_name,
+                        "query_count": lane.query_count,
+                        "completed_queries": lane.completed_queries,
+                    },
+                },
+            )
 
         curated = _load_curated_defaults()
         prompt_results = _select_prompt_results(results, lane_balanced=True)
@@ -841,6 +1009,22 @@ def run_audio_discovery(db: Session, run_id: int) -> None:
             run.status = "completed"
             run.completed_at = datetime.now(UTC)
             db.commit()
+            logger.info(
+                "Onboarding audio discovery completed with defaults",
+                extra={
+                    "component": "onboarding",
+                    "operation": "audio_discover",
+                    "status": "completed",
+                    "duration_ms": _duration_ms(started_at),
+                    "item_id": str(run_id),
+                    "user_id": run.user_id,
+                    "context_data": {
+                        "lane_count": len(lanes),
+                        "search_result_count": len(results),
+                        "suggestion_source": "defaults",
+                    },
+                },
+            )
             return
 
         request = OnboardingFastDiscoverRequest(
@@ -850,12 +1034,14 @@ def run_audio_discovery(db: Session, run_id: int) -> None:
         prompt = _format_discovery_prompt(
             request, prompt_results, _curated_fill_in_candidates(curated)
         )
+        suggestions_started_at = time.perf_counter()
         output = _run_discover_output_with_fallback(
             prompt=prompt,
             timeout_seconds=FAST_DISCOVER_TIMEOUT_SECONDS,
             operation="audio_discover_suggestions",
             item_id=str(run_id),
         )
+        suggestions_duration_ms = _duration_ms(suggestions_started_at)
         suggestions = _build_discovery_response(
             output,
             curated,
@@ -866,13 +1052,37 @@ def run_audio_discovery(db: Session, run_id: int) -> None:
         run.status = "completed"
         run.completed_at = datetime.now(UTC)
         db.commit()
+        logger.info(
+            "Onboarding audio discovery completed",
+            extra={
+                "component": "onboarding",
+                "operation": "audio_discover",
+                "status": "completed",
+                "duration_ms": _duration_ms(started_at),
+                "item_id": str(run_id),
+                "user_id": run.user_id,
+                "context_data": {
+                    "lane_count": len(lanes),
+                    "search_result_count": len(results),
+                    "prompt_result_count": len(prompt_results),
+                    "suggestions_duration_ms": suggestions_duration_ms,
+                    "suggestion_count": (
+                        len(suggestions.recommended_pods)
+                        + len(suggestions.recommended_substacks)
+                        + len(suggestions.recommended_subreddits)
+                    ),
+                },
+            },
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "Onboarding audio discovery failed",
             extra={
                 "component": "onboarding",
                 "operation": "audio_discover",
+                "duration_ms": _duration_ms(started_at),
                 "item_id": str(run_id),
+                "user_id": run.user_id,
                 "context_data": {"error": str(exc)},
             },
         )

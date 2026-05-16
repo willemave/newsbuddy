@@ -6,9 +6,15 @@
 //
 
 import Foundation
+import os.log
 
 private let onboardingDiscoveryPollingTimeoutSeconds: TimeInterval = 120
 private let onboardingDiscoveryPollingIntervalNanoseconds: UInt64 = 500_000_000
+private let onboardingVoiceLogger = Logger(subsystem: "com.newsly", category: "OnboardingVoice")
+
+private func onboardingVoiceElapsedMilliseconds(since start: Date) -> Int {
+    Int(Date().timeIntervalSince(start) * 1000)
+}
 
 enum OnboardingStep: Int, Codable {
     case intro
@@ -121,6 +127,7 @@ final class OnboardingViewModel: ObservableObject {
     private var didAutoStartRecording = false
     private var didAttemptResume = false
     private var isSubmittingAudioDiscovery = false
+    private var audioCaptureStartedAt: Date?
 
     init(
         user: User,
@@ -236,26 +243,45 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     func startAudioCapture() async {
+        let startedAt = Date()
         configureDictationCallbacks()
         errorMessage = nil
         hasMicPermissionDenied = false
         hasDictationError = false
         audioState = .recording
+        audioCaptureStartedAt = startedAt
         startAudioTimer()
+        onboardingVoiceLogger.info("Onboarding audio capture start requested")
 
         do {
             try await dictationService.start()
+            onboardingVoiceLogger.info(
+                "Onboarding audio capture started | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt))"
+            )
         } catch {
+            onboardingVoiceLogger.error(
+                "Onboarding audio capture failed | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             handleAudioError(error)
         }
     }
 
     func stopAudioCaptureAndDiscover() async {
+        let startedAt = Date()
         audioState = .transcribing
         stopAudioTimer()
+        onboardingVoiceLogger.info(
+            "Onboarding audio capture stop requested | captureElapsedMs=\(self.audioCaptureStartedAt.map { onboardingVoiceElapsedMilliseconds(since: $0) } ?? 0)"
+        )
         do {
             _ = try await dictationService.stop()
+            onboardingVoiceLogger.info(
+                "Onboarding audio capture stopped | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt))"
+            )
         } catch {
+            onboardingVoiceLogger.error(
+                "Onboarding audio capture stop failed | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             handleAudioError(error)
         }
     }
@@ -360,10 +386,17 @@ final class OnboardingViewModel: ObservableObject {
 
     private func beginDiscovery(transcript: String) async {
         guard !isSubmittingAudioDiscovery else { return }
+        let startedAt = Date()
         isSubmittingAudioDiscovery = true
-        defer { isSubmittingAudioDiscovery = false }
+        defer {
+            isSubmittingAudioDiscovery = false
+            audioCaptureStartedAt = nil
+        }
 
         do {
+            onboardingVoiceLogger.info(
+                "Onboarding audio discovery begin | transcriptChars=\(transcript.count)"
+            )
             let request = OnboardingAudioDiscoverRequest(
                 transcript: transcript,
                 locale: Locale.current.identifier
@@ -378,7 +411,13 @@ final class OnboardingViewModel: ObservableObject {
             step = .loading
             persistProgress()
             startPolling(runId: response.runId)
+            onboardingVoiceLogger.info(
+                "Onboarding audio discovery started | runId=\(response.runId) laneCount=\(response.lanes.count) elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt))"
+            )
         } catch {
+            onboardingVoiceLogger.error(
+                "Onboarding audio discovery failed | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
             errorMessage = error.localizedDescription
             audioState = .error
             hasDictationError = true
@@ -527,6 +566,12 @@ final class OnboardingViewModel: ObservableObject {
         dictationService.cancel()
         stopAudioTimer()
         audioState = .idle
+        if let audioCaptureStartedAt {
+            onboardingVoiceLogger.info(
+                "Onboarding audio capture cancelled | captureElapsedMs=\(onboardingVoiceElapsedMilliseconds(since: audioCaptureStartedAt))"
+            )
+        }
+        audioCaptureStartedAt = nil
     }
 
     private func configureDictationCallbacks() {
@@ -550,6 +595,9 @@ final class OnboardingViewModel: ObservableObject {
 
                 self.audioState = .transcribing
                 self.stopAudioTimer()
+                onboardingVoiceLogger.info(
+                    "Onboarding transcript final | transcriptChars=\(trimmed.count) captureElapsedMs=\(self.audioCaptureStartedAt.map { onboardingVoiceElapsedMilliseconds(since: $0) } ?? 0)"
+                )
                 await self.beginDiscovery(transcript: trimmed)
             }
         }

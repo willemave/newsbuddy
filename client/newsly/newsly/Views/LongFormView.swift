@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+import os.log
+
+private let longFormAudioLogger = Logger(subsystem: "com.newsly", category: "LongFormAudio")
 
 struct LongFormView: View {
     @ObservedObject var viewModel: LongContentListViewModel
@@ -249,10 +252,17 @@ struct LongFormView: View {
         }
         guard supportsAudioDiscussion(for: content) else { return }
         guard !isAudioPreparing(for: content) else { return }
+        let startedAt = Date()
+        longFormAudioLogger.info(
+            "Long-form audio flow started | contentId=\(content.id) type=\(content.contentType, privacy: .public)"
+        )
 
         if isAudioCurrent(for: content),
            let episode = audioEpisodeByContentId[content.id] {
             await playAudioDiscussionEpisode(episode, contentId: content.id)
+            longFormAudioLogger.info(
+                "Long-form audio resumed existing episode | contentId=\(content.id) episodeId=\(episode.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+            )
             return
         }
 
@@ -264,15 +274,27 @@ struct LongFormView: View {
             let episode: AudioEpisode
             if let existingEpisode = audioEpisodeByContentId[content.id] {
                 episode = existingEpisode
+                longFormAudioLogger.info(
+                    "Long-form audio reusing episode | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status, privacy: .public)"
+                )
             } else {
                 episode = try await AudioEpisodeService.shared.createContentCouncilEpisode(
                     contentId: content.id,
-                    delivery: .stream
+                    delivery: .inline
+                )
+                longFormAudioLogger.info(
+                    "Long-form audio episode created | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
                 )
             }
             audioEpisodeByContentId[content.id] = episode
             try await playAudioDiscussionEpisode(episode)
+            longFormAudioLogger.info(
+                "Long-form audio playback requested | contentId=\(content.id) episodeId=\(episode.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+            )
         } catch {
+            longFormAudioLogger.error(
+                "Long-form audio flow failed | contentId=\(content.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
+            )
             audioErrorByContentId[content.id] = error.localizedDescription
         }
     }

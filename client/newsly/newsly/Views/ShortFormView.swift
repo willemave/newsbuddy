@@ -184,15 +184,23 @@ struct ShortFormView: View {
         fastNewsAudioErrorMessage = nil
 
         Task { @MainActor in
+            let startedAt = Date()
+            logger.info("[FastNewsAudio] flow started")
             defer { isPreparingFastNewsAudio = false }
 
             do {
                 let episode: AudioEpisode
                 if let existingEpisode = fastNewsAudioEpisode {
                     episode = existingEpisode
+                    logger.info(
+                        "[FastNewsAudio] reusing episode | episodeId=\(episode.id) status=\(episode.status, privacy: .public)"
+                    )
                 } else {
                     episode = try await AudioEpisodeService.shared.createFastNewsEpisode(
-                        delivery: .stream
+                        delivery: .inline
+                    )
+                    logger.info(
+                        "[FastNewsAudio] episode created | episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
                     )
                 }
                 fastNewsAudioEpisode = episode
@@ -203,7 +211,13 @@ struct ShortFormView: View {
                         try await AudioEpisodeService.shared.streamResource(for: episode)
                     }
                 )
+                logger.info(
+                    "[FastNewsAudio] playback requested | episodeId=\(episode.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+                )
             } catch {
+                logger.error(
+                    "[FastNewsAudio] flow failed | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
+                )
                 fastNewsAudioErrorMessage = error.localizedDescription
             }
         }
@@ -367,24 +381,66 @@ struct ShortFormView: View {
 
     @ViewBuilder
     private var shortFormEmptyState: some View {
-        if processingCountService.newsProcessingCount > 0 {
-            VStack(spacing: 16) {
-                ProgressView()
-                Text("Preparing \(processingCountService.newsProcessingCount) short-form items")
-                    .font(.listSubtitle)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-            }
+        if processingCountService.newsProcessingCount > 0 || processingCountService.newsCrawlCount > 0 {
+            ShortFormSetupEmptyState(
+                processingCount: processingCountService.newsProcessingCount,
+                crawlingSourceCount: processingCountService.newsCrawlCount
+            )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .containerRelativeFrame(.vertical)
         } else {
             EmptyStateView(
                 icon: "bolt.fill",
-                title: "No Short-Form Content",
-                subtitle: "News items will appear here once processed"
+                title: "No Fast Reads Yet",
+                subtitle: "Fresh items from your selected news sources will appear here once processed"
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .containerRelativeFrame(.vertical)
         }
+    }
+}
+
+private struct ShortFormSetupEmptyState: View {
+    let processingCount: Int
+    let crawlingSourceCount: Int
+
+    private var title: String {
+        if processingCount > 0 {
+            return "Preparing \(processingCount) Fast \(processingCount == 1 ? "Read" : "Reads")"
+        }
+        return "Crawling \(crawlingSourceCount) \(crawlingSourceCount == 1 ? "Source" : "Sources")"
+    }
+
+    private var subtitle: String {
+        if processingCount > 0 && crawlingSourceCount > 0 {
+            return "We're checking your sources and summarizing new items as they arrive."
+        }
+        if processingCount > 0 {
+            return "Summaries will appear here as soon as processing finishes."
+        }
+        return "We're checking your selected sources now. Fast Reads will appear as soon as the first item is ready."
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .controlSize(.regular)
+
+            VStack(spacing: 4) {
+                Text(title)
+                    .font(.listTitle.weight(.semibold))
+                    .foregroundStyle(Color.onSurface)
+                    .multilineTextAlignment(.center)
+
+                Text(subtitle)
+                    .font(.listSubtitle)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 280)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.surfacePrimary)
     }
 }
 
