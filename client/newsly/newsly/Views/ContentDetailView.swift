@@ -55,6 +55,8 @@ private enum DetailDesign {
     static let heroHeight: CGFloat = 220
     static let parallaxHeroHeight: CGFloat = 360
     static let parallaxRate: CGFloat = 0.25
+    static let floatingBackButtonSize: CGFloat = 44
+    static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
 }
 
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
@@ -1169,7 +1171,8 @@ struct ContentDetailView: View {
         } else {
             // No image fallback — standard layout
             VStack(alignment: .leading, spacing: 0) {
-                Spacer().frame(height: 8)
+                Spacer()
+                    .frame(height: textOnlyHeaderTopSpacer(for: content))
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(content.displayTitle)
@@ -1227,6 +1230,10 @@ struct ContentDetailView: View {
         }
     }
 
+    private func textOnlyHeaderTopSpacer(for content: ContentDetail) -> CGFloat {
+        content.contentTypeEnum == .news ? DetailDesign.textOnlyNewsHeaderTopSpacer : 8
+    }
+
     private var floatingBackButton: some View {
         Button {
             dismiss()
@@ -1234,7 +1241,10 @@ struct ContentDetailView: View {
             Image(systemName: "chevron.left")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
+                .frame(
+                    width: DetailDesign.floatingBackButtonSize,
+                    height: DetailDesign.floatingBackButtonSize
+                )
                 .background(
                     Circle()
                         .fill(Color(red: 0.07, green: 0.06, blue: 0.05).opacity(0.42))
