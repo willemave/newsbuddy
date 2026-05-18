@@ -175,6 +175,8 @@ def present_news_item_detail(
     *,
     is_read: bool,
     discussion_summary: dict[str, Any] | None = None,
+    body_available: bool = False,
+    body_format: str | None = None,
 ) -> ContentDetailResponse:
     """Emit a legacy content detail response directly from a canonical news item."""
     metadata = dict(item.raw_metadata or {})
@@ -237,9 +239,9 @@ def present_news_item_detail(
         checked_out_by=None,
         checked_out_at=None,
         publication_date=item.published_at.isoformat() if item.published_at else None,
-        body_available=False,
-        body_kind=None,
-        body_format=None,
+        body_available=body_available,
+        body_kind="article" if body_available else None,
+        body_format=body_format if body_available else None,
         is_read=is_read,
         is_saved_to_knowledge=False,
         summary=item.summary_text,

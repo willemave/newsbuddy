@@ -141,11 +141,6 @@ struct KnowledgeLibraryView: View {
                     }
                     .tint(.red)
                 }
-                .onAppear {
-                    if content.id == displayedContents.last?.id {
-                        Task { await viewModel.loadMoreContent() }
-                    }
-                }
             }
 
             if viewModel.isLoadingMore {
@@ -155,6 +150,18 @@ struct KnowledgeLibraryView: View {
                         .padding()
                     Spacer()
                 }
+                .appListRow()
+            } else if viewModel.hasMore {
+                Button {
+                    Task { await viewModel.loadMoreContent() }
+                } label: {
+                    Label("Load more", systemImage: "chevron.down")
+                        .font(.terracottaBodyMedium.weight(.semibold))
+                        .foregroundStyle(Color.terracottaPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
                 .appListRow()
             }
         }

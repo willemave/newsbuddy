@@ -15,11 +15,12 @@ from app.commands.convert_news_to_article import (
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.models.api.audio_episodes import AudioEpisodeDelivery, AudioEpisodeResponse
-from app.models.api.content import ContentDetailResponse, ContentListResponse
+from app.models.api.content import ContentBodyResponse, ContentDetailResponse, ContentListResponse
 from app.models.api.content_actions import BulkMarkReadRequest
 from app.models.api.content_discussions import ContentDiscussionResponse
 from app.models.api.news import ConvertNewsItemResponse
 from app.models.db.users import User
+from app.queries import get_news_item_body as get_news_item_body_query
 from app.queries import get_news_item_discussion as get_news_item_discussion_query
 from app.services.audio_episodes import (
     commit_audio_episode_delivery,
@@ -93,6 +94,29 @@ def get_news_item(
     if item is None:
         raise HTTPException(status_code=404, detail="News item not found")
     return item
+
+
+@router.get(
+    "/items/{news_item_id}/body",
+    response_model=ContentBodyResponse,
+    summary="Get one news item article body",
+)
+def get_news_item_body(
+    news_item_id: Annotated[int, Path(..., gt=0)],
+    db: Annotated[Session, Depends(get_readonly_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    variant: Annotated[
+        str,
+        Query(description="Body variant", pattern="^(source|rendered)$"),
+    ] = "source",
+) -> ContentBodyResponse:
+    """Return canonical article body text for a visible short-form news item."""
+    return get_news_item_body_query.execute(
+        db,
+        user_id=require_user_id(current_user),
+        news_item_id=news_item_id,
+        variant=variant,
+    )
 
 
 @router.get(

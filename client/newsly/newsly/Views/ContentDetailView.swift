@@ -96,11 +96,13 @@ struct ContentDetailView: View {
     @State private var discussionUnavailableMessage: String?
     @State private var discussionTab: DiscussionTab = .comments
     @State private var collapsedCommentIDs: Set<String> = Set()
+    @State private var discussionRequestToken = UUID()
     // Swipe haptic feedback
     @State private var didTriggerSwipeHaptic: Bool = false
     // Transcript/Full Article collapsed state
     @State private var isTranscriptExpanded: Bool = false
     @State private var isRelevantLinksExpanded: Bool = true
+    @State private var isDiscussionSummaryExpanded: Bool = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     init(
         contentId: Int,
@@ -294,6 +296,12 @@ struct ContentDetailView: View {
                             }
                         }
 
+                        if let discussion = inlineDiscussionSummaryPayload(for: content) {
+                            communityDiscussionSummarySection(discussion: discussion)
+                                .padding(.horizontal, DetailDesign.horizontalPadding)
+                                .padding(.top, DetailDesign.sectionSpacing)
+                        }
+
                         if content.contentTypeEnum == .news, !relevantLinks.isEmpty {
                             relevantLinksSection(links: relevantLinks)
                                 .padding(.horizontal, DetailDesign.horizontalPadding)
@@ -473,11 +481,18 @@ struct ContentDetailView: View {
                narrationPlaybackService.speakingTarget == oldTarget {
                 narrationPlaybackService.stop()
             }
-            guard let id = newValue, let content = viewModel.content else { return }
+            guard let id = newValue, let content = viewModel.content else {
+                resetDiscussionState()
+                return
+            }
+            resetDiscussionState(fallbackURL: discussionURL(for: content))
             if let type = content.contentTypeEnum {
                 readingStateStore.setCurrent(contentId: id, type: type)
             }
             logSummarySnapshot(content: content, context: "content_change")
+            if content.contentTypeEnum == .news {
+                Task { await prefetchStoredDiscussion(for: content) }
+            }
         }
         // If user is navigating (chevrons or swipe), skip items that were already read
         .onChange(of: viewModel.wasAlreadyReadWhenLoaded) { _, wasRead in
@@ -703,16 +718,19 @@ struct ContentDetailView: View {
 
         Task { @MainActor in
             do {
+                let isNews = content.contentTypeEnum == .news
                 let response = try await ChatService.shared.createAssistantTurn(
                     message: "Dig deeper into this selected text from \(content.displayTitle): \"\(trimmed)\"",
                     screenContext: AssistantScreenContext(
                         screenType: "article_reader",
                         screenTitle: "Article Reader",
-                        contentId: content.id,
-                        visibleContentIds: allContentIds,
+                        contentId: isNews ? nil : content.id,
+                        newsItemId: isNews ? content.id : nil,
+                        visibleContentIds: isNews ? [] : allContentIds,
+                        visibleNewsItemIds: isNews ? allContentIds : [],
                         selectedTopic: trimmed,
                         query: trimmed,
-                        note: "The user selected text from the full article reader. Use the article body and selected passage as primary context."
+                        note: "The user selected text from the full article reader. Use the article body and selected passage as primary context. For news items, use news_item_id and do not resolve same-numbered content IDs."
                     )
                 )
                 ChatNavigationCoordinator.shared.openAssistantTurn(response)
@@ -1761,24 +1779,38 @@ struct ContentDetailView: View {
         discussionFallbackURL = fallbackURL
         discussionUnavailableMessage = nil
         activeSheet = .discussion
+
+        if let discussion = cachedDiscussionPayload(for: content), discussion.hasRenderableContent {
+            applyDiscussionPayload(discussion)
+            return
+        }
+
         Task { await loadDiscussion(content: content, fallbackURL: fallbackURL) }
     }
 
     @MainActor
     private func loadDiscussion(content: ContentDetail, fallbackURL: URL, refresh: Bool = false) async {
         discussionFallbackURL = fallbackURL
-        if isLoadingDiscussion {
-            activeSheet = .discussion
+        activeSheet = .discussion
+
+        if !refresh, let discussion = cachedDiscussionPayload(for: content), discussion.hasRenderableContent {
+            applyDiscussionPayload(discussion)
             return
         }
+
+        if isLoadingDiscussion { return }
+
+        let requestToken = UUID()
+        discussionRequestToken = requestToken
         isLoadingDiscussion = true
-        discussionPayload = nil
+        if refresh || cachedDiscussionPayload(for: content) == nil {
+            discussionPayload = nil
+        }
         discussionUnavailableMessage = nil
-        activeSheet = .discussion
         defer { isLoadingDiscussion = false }
 
         do {
-            var discussion: ContentDiscussion
+            let discussion: ContentDiscussion
             if refresh {
                 discussion = try await ContentService.shared.refreshContentDiscussion(
                     id: content.id,
@@ -1789,22 +1821,97 @@ struct ContentDetailView: View {
                     id: content.id,
                     contentType: content.contentTypeEnum
                 )
-                if discussion.shouldAutoRefresh {
-                    discussion = try await ContentService.shared.refreshContentDiscussion(
-                        id: content.id,
-                        contentType: content.contentTypeEnum
-                    )
-                }
             }
-            discussionPayload = discussion
-            if discussion.hasRenderableContent {
-                discussionTab = .comments
-                collapsedCommentIDs = []
-            } else {
-                discussionUnavailableMessage = discussion.unavailableMessage
+
+            guard discussionRequestToken == requestToken,
+                  viewModel.content?.id == content.id else {
+                return
             }
+
+            applyDiscussionPayload(discussion)
         } catch {
+            guard discussionRequestToken == requestToken else { return }
             discussionUnavailableMessage = "Comments could not be loaded right now."
+        }
+    }
+
+    @MainActor
+    private func prefetchStoredDiscussion(for content: ContentDetail) async {
+        guard content.contentTypeEnum == .news,
+              discussionURL(for: content) != nil else {
+            return
+        }
+
+        let requestToken = UUID()
+        discussionRequestToken = requestToken
+
+        do {
+            let discussion = try await ContentService.shared.fetchContentDiscussion(
+                id: content.id,
+                contentType: content.contentTypeEnum
+            )
+            guard discussionRequestToken == requestToken,
+                  viewModel.content?.id == content.id,
+                  discussion.hasRenderableContent else {
+                return
+            }
+            applyDiscussionPayload(discussion, showUnavailable: false)
+        } catch {
+            detailLogger.debug("[ContentDetailView] Stored discussion prefetch failed | contentId=\(content.id) error=\(error.localizedDescription)")
+        }
+    }
+
+    private func cachedDiscussionPayload(for content: ContentDetail) -> ContentDiscussion? {
+        guard let discussionPayload,
+              discussionPayload.contentId == content.id else {
+            return nil
+        }
+        return discussionPayload
+    }
+
+    private func inlineDiscussionSummaryPayload(for content: ContentDetail) -> ContentDiscussion? {
+        guard let discussion = cachedDiscussionPayload(for: content),
+              discussion.summary != nil else {
+            return nil
+        }
+        return discussion
+    }
+
+    private func discussionURL(for content: ContentDetail) -> URL? {
+        let rawURL = normalizedText(content.newsDiscussionURL)
+            ?? normalizedText(content.newsMetadata?.discussionURL)
+        guard let rawURL else { return nil }
+        return URL(string: rawURL)
+    }
+
+    private func normalizedText(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func resetDiscussionState(fallbackURL: URL? = nil) {
+        discussionRequestToken = UUID()
+        discussionPayload = nil
+        isLoadingDiscussion = false
+        discussionFallbackURL = fallbackURL
+        discussionUnavailableMessage = nil
+        discussionTab = .comments
+        collapsedCommentIDs = []
+        isDiscussionSummaryExpanded = true
+    }
+
+    private func applyDiscussionPayload(
+        _ discussion: ContentDiscussion,
+        showUnavailable: Bool = true
+    ) {
+        discussionPayload = discussion
+        if discussion.hasRenderableContent {
+            discussionUnavailableMessage = nil
+            discussionTab = .comments
+            collapsedCommentIDs = []
+        } else if showUnavailable {
+            discussionUnavailableMessage = discussion.unavailableMessage
         }
     }
 
@@ -1851,10 +1958,14 @@ struct ContentDetailView: View {
                         if discussion.summary != nil {
                             ScrollView {
                                 let commentIndex = buildDiscussionCommentIndex(from: discussion.comments)
+                                let linksOutsideSummary = discussion.linksOutsideSummary
                                 VStack(alignment: .leading, spacing: 0) {
                                     discussionSummaryContent(discussion)
-                                    if !discussion.links.isEmpty {
-                                        linksTabContent(discussion: discussion, commentsByID: commentIndex.commentsByID)
+                                    if !linksOutsideSummary.isEmpty {
+                                        linksTabContent(
+                                            links: linksOutsideSummary,
+                                            commentsByID: commentIndex.commentsByID
+                                        )
                                     }
                                     if !discussion.comments.isEmpty {
                                         commentsTabContent(commentIndex: commentIndex)
@@ -1881,7 +1992,10 @@ struct ContentDetailView: View {
                                     case .comments:
                                         commentsTabContent(commentIndex: commentIndex)
                                     case .links:
-                                        linksTabContent(discussion: discussion, commentsByID: commentIndex.commentsByID)
+                                        linksTabContent(
+                                            links: discussion.links,
+                                            commentsByID: commentIndex.commentsByID
+                                        )
                                     }
                                 }
                             }
@@ -2053,6 +2167,113 @@ struct ContentDetailView: View {
             current = parent
         }
         return false
+    }
+
+    @ViewBuilder
+    private func communityDiscussionSummarySection(discussion: ContentDiscussion) -> some View {
+        if let summary = discussion.summary {
+            modernExpandableSection(
+                title: "Comment Summary",
+                icon: "bubble.left.and.bubble.right",
+                isExpanded: $isDiscussionSummaryExpanded
+            ) {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let commentCount = discussion.commentCount, commentCount > 0 {
+                            Text("\(commentCount) comments summarized")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Text(summary.overview)
+                            .font(.callout)
+                            .foregroundColor(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if !summary.topics.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            discussionSubsectionHeader("Key Topics")
+
+                            ForEach(Array(summary.topics.prefix(4))) { topic in
+                                discussionTopicCard(topic)
+                            }
+                        }
+                    }
+
+                    if !summary.representativeComments.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            discussionSubsectionHeader("Representative Comments")
+
+                            ForEach(Array(summary.representativeComments.prefix(3))) { comment in
+                                discussionRepresentativeCommentCard(comment)
+                            }
+                        }
+                    }
+
+                    if let urlString = summary.externalDiscussionURL ?? discussion.discussionURL ?? discussion.sourceURL,
+                       let url = URL(string: urlString) {
+                        Link(destination: url) {
+                            Label("Open original discussion", systemImage: "arrow.up.right.square")
+                        }
+                        .font(.subheadline)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func discussionSubsectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .foregroundColor(.secondary)
+    }
+
+    @ViewBuilder
+    private func discussionTopicCard(_ topic: DiscussionSummaryTopic) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(topic.title)
+                .font(.callout)
+                .fontWeight(.semibold)
+            Text(topic.summary)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let stance = topic.stance {
+                Text(stance)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.surfacePrimary.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func discussionRepresentativeCommentCard(_ comment: DiscussionSummaryComment) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(comment.author ?? "unknown")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundColor(.secondary)
+            Text(comment.text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+            if let reason = comment.reason {
+                Text(reason)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.surfacePrimary.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder
@@ -2263,18 +2484,18 @@ struct ContentDetailView: View {
 
     @ViewBuilder
     private func linksTabContent(
-        discussion: ContentDiscussion,
+        links: [DiscussionLink],
         commentsByID: [String: DiscussionComment]
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if discussion.links.isEmpty {
+            if links.isEmpty {
                 Text("No links found.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .padding(.top, 20)
                     .frame(maxWidth: .infinity)
             } else {
-                ForEach(discussion.links) { link in
+                ForEach(links) { link in
                     if let url = URL(string: link.url) {
                         let addState = viewModel.discussionLinkAddState(for: link.id)
 
@@ -2353,7 +2574,7 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func relevantLinksSection(links: [RelevantLink]) -> some View {
         modernExpandableSection(
-            title: "Relevant Links",
+            title: "Links from article or comments",
             icon: "link",
             isExpanded: $isRelevantLinksExpanded
         ) {

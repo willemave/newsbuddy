@@ -76,11 +76,6 @@ class KnowledgeHubViewModel: ObservableObject {
         }
     }
 
-    func loadMoreSessionsIfNeeded(currentSession: ChatSessionSummary?) async {
-        guard shouldLoadMore(currentSession: currentSession) else { return }
-        await loadMoreSessions()
-    }
-
     func loadMoreSessions() async {
         guard !isLoading, !isLoadingMore, hasMoreSessions, let cursor = nextCursor else {
             return
@@ -219,20 +214,6 @@ class KnowledgeHubViewModel: ObservableObject {
             query: query,
             note: note
         )
-    }
-
-    private func shouldLoadMore(currentSession: ChatSessionSummary?) -> Bool {
-        guard !isLoading, !isLoadingMore, hasMoreSessions, nextCursor != nil else {
-            return false
-        }
-        guard let currentSession else {
-            return true
-        }
-        guard let index = sessions.firstIndex(where: { $0.id == currentSession.id }) else {
-            return false
-        }
-        let thresholdIndex = max(sessions.count - 5, 0)
-        return index >= thresholdIndex
     }
 
     private func appendUniqueSessions(_ newSessions: [ChatSessionSummary]) {

@@ -353,9 +353,6 @@ struct KnowledgeView: View {
                         }
                         .buttonStyle(.plain)
                         .padding(.horizontal, Spacing.screenHorizontal)
-                        .task {
-                            await viewModel.loadMoreSessionsIfNeeded(currentSession: session)
-                        }
                     }
                 }
 
@@ -398,6 +395,18 @@ struct KnowledgeView: View {
                 } label: {
                     Label("Retry", systemImage: "arrow.clockwise")
                         .font(.terracottaBodyMedium)
+                        .foregroundStyle(Color.terracottaPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, Spacing.screenHorizontal)
+            } else if viewModel.hasMoreSessions {
+                Button {
+                    Task { await viewModel.loadMoreSessions() }
+                } label: {
+                    Label("Load more", systemImage: "chevron.down")
+                        .font(.terracottaBodyMedium.weight(.semibold))
                         .foregroundStyle(Color.terracottaPrimary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)

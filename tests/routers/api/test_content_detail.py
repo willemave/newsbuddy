@@ -4,7 +4,8 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, unquote_plus, urlparse
 
-from app.models.db import Content, NewsItemDiscussion
+from app.constants import AGGREGATOR_FEED_URL_PREFIX, AGGREGATOR_SCRAPER_TYPE
+from app.models.db import Content, NewsItemDiscussion, UserScraperConfig
 from app.queries.get_content_body import MAX_CONTENT_BODY_RESPONSE_CHARS, TRUNCATED_BODY_NOTICE
 
 
@@ -14,6 +15,20 @@ def _get_display_title(fixture_data: dict) -> str:
     if summary and summary.get("title"):
         return summary["title"]
     return fixture_data.get("title") or "Untitled"
+
+
+def _subscribe_to_hackernews(db_session, *, user_id: int) -> None:
+    db_session.add(
+        UserScraperConfig(
+            user_id=user_id,
+            scraper_type=AGGREGATOR_SCRAPER_TYPE,
+            display_name="Hacker News",
+            feed_url=f"{AGGREGATOR_FEED_URL_PREFIX}hackernews",
+            is_active=True,
+            config={"key": "hackernews"},
+        )
+    )
+    db_session.flush()
 
 
 def test_chat_url_includes_user_prompt(
@@ -236,9 +251,11 @@ def test_content_detail_redacts_oversized_internal_metadata(
 def test_content_detail_falls_back_to_visible_news_item_when_legacy_content_is_missing(
     client,
     db_session,
+    test_user,
     news_item_factory,
 ) -> None:
     """Unified content detail should serve visible news items when legacy content is unavailable."""
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     legacy_news = Content(
         id=6227,
         content_type="news",
@@ -286,8 +303,10 @@ def test_content_detail_falls_back_to_visible_news_item_when_legacy_content_is_m
 def test_content_detail_rewrites_placeholder_news_metadata_titles(
     client,
     db_session,
+    test_user,
     news_item_factory,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     news_item_factory(
         id=7331,
         ingest_key="news-item-7331",
@@ -327,8 +346,10 @@ def test_content_detail_rewrites_placeholder_news_metadata_titles(
 def test_content_detail_includes_news_relevant_links(
     client,
     db_session,
+    test_user,
     news_item_factory,
 ) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
     news_item = news_item_factory(
         id=7441,
         ingest_key="news-item-7441",

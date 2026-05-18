@@ -41,6 +41,9 @@ enum APIEndpoints {
     static func newsItem(id: Int) -> String {
         return "/api/news/items/\(id)"
     }
+    static func newsItemBody(id: Int) -> String {
+        return "/api/news/items/\(id)/body"
+    }
     static func newsItemDiscussion(id: Int) -> String {
         return "/api/news/items/\(id)/discussion"
     }

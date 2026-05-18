@@ -243,9 +243,18 @@ class ContentService {
         return try await client.request(APIEndpoints.newsItems, queryItems: queryItems)
     }
 
-    func fetchContentBody(id: Int, variant: String = "source") async throws -> ContentBody {
+    func fetchContentBody(
+        id: Int,
+        variant: String = "source",
+        contentType: ContentType? = nil
+    ) async throws -> ContentBody {
+        let path = if contentType == .news {
+            APIEndpoints.newsItemBody(id: id)
+        } else {
+            APIEndpoints.contentBody(id: id)
+        }
         let endpoint = APIRequestDescriptor<ContentBody>(
-            path: APIEndpoints.contentBody(id: id),
+            path: path,
             queryItems: [URLQueryItem(name: "variant", value: variant)]
         )
         return try await client.request(endpoint)

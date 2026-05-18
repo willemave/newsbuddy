@@ -151,7 +151,7 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         let viewModel = KnowledgeHubViewModel(chatService: chatService)
 
         await viewModel.loadHub()
-        await viewModel.loadMoreSessionsIfNeeded(currentSession: viewModel.sessions.last)
+        await viewModel.loadMoreSessions()
 
         XCTAssertEqual(chatService.requestedPageCursors, [nil, "next-page"])
         XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2, 3])

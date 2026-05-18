@@ -120,4 +120,53 @@ final class ContentDiscussionTests: XCTestCase {
 
         XCTAssertFalse(discussion.shouldAutoRefresh)
     }
+
+    func testLinksOutsideSummaryDropsNotableLinkDuplicates() {
+        let discussion = ContentDiscussion(
+            contentId: 1,
+            status: "completed",
+            mode: "comments",
+            platform: "hackernews",
+            sourceURL: nil,
+            discussionURL: "https://news.ycombinator.com/item?id=1",
+            fetchedAt: nil,
+            errorMessage: nil,
+            comments: [],
+            discussionGroups: [],
+            links: [
+                DiscussionLink(
+                    url: "https://example.com/context/",
+                    source: "summary",
+                    commentID: nil,
+                    groupLabel: nil,
+                    title: "Context"
+                ),
+                DiscussionLink(
+                    url: "https://example.com/extra",
+                    source: "comment",
+                    commentID: "c2",
+                    groupLabel: nil,
+                    title: "Extra"
+                )
+            ],
+            summary: DiscussionSummary(
+                overview: "Commenters focused on useful outside context.",
+                topics: [],
+                notableLinks: [
+                    DiscussionSummaryLink(
+                        url: "https://example.com/context",
+                        title: "Context",
+                        reason: "Referenced by the discussion.",
+                        sourceCommentID: nil
+                    )
+                ],
+                representativeComments: [],
+                externalDiscussionURL: nil,
+                generatedAt: nil
+            ),
+            stats: [:]
+        )
+
+        XCTAssertEqual(discussion.linksOutsideSummary.map(\.url), ["https://example.com/extra"])
+    }
 }

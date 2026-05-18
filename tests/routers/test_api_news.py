@@ -3,11 +3,69 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 from app.constants import AGGREGATOR_FEED_URL_PREFIX, AGGREGATOR_SCRAPER_TYPE
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, NewsItem, NewsItemReadStatus, UserScraperConfig
 from app.repositories import knowledge_repository
+from app.services import news_article_bodies
+from app.services.gateways.object_storage_gateway import ObjectStorageGateway, StoredObjectMetadata
+from app.services.news_article_bodies import (
+    NewsItemArticleBodyResolver,
+    persist_news_item_article_body,
+)
+
+
+class _FakeArticleBodyGateway:
+    provider = "local"
+
+    def __init__(self) -> None:
+        self.objects: dict[str, str] = {}
+
+    def put_text(self, *, key: str, text: str, content_type: str) -> StoredObjectMetadata:
+        del content_type
+        self.objects[key] = text
+        return StoredObjectMetadata(
+            provider="local",
+            bucket=None,
+            key=key,
+            size_bytes=len(text.encode("utf-8")),
+        )
+
+    def get_text(self, *, key: str) -> str:
+        return self.objects[key]
+
+    def exists(self, *, key: str) -> bool:
+        return key in self.objects
+
+    def delete(self, *, key: str) -> None:
+        self.objects.pop(key, None)
+
+    def head(self, *, key: str) -> StoredObjectMetadata | None:
+        text = self.objects.get(key)
+        if text is None:
+            return None
+        return StoredObjectMetadata(
+            provider="local",
+            bucket=None,
+            key=key,
+            size_bytes=len(text.encode("utf-8")),
+        )
+
+    def copy(self, *, source_key: str, destination_key: str) -> StoredObjectMetadata:
+        text = self.objects[source_key]
+        self.objects[destination_key] = text
+        return StoredObjectMetadata(
+            provider="local",
+            bucket=None,
+            key=destination_key,
+            size_bytes=len(text.encode("utf-8")),
+        )
+
+
+def _typed_article_body_gateway(gateway: _FakeArticleBodyGateway) -> ObjectStorageGateway:
+    return cast(ObjectStorageGateway, gateway)
 
 
 class _FakeQueueService:
@@ -333,6 +391,173 @@ def test_get_news_item_detail_includes_cluster_metadata(client, db_session, test
     assert payload["display_title"] == "Detail story"
     assert payload["metadata"]["cluster"]["related_titles"] == ["Detail story"]
     assert payload["metadata"]["summary"]["key_points"] == ["Point one", "Point two"]
+
+
+def test_get_news_item_detail_marks_article_body_available(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
+    gateway = _FakeArticleBodyGateway()
+    typed_gateway = _typed_article_body_gateway(gateway)
+    monkeypatch.setattr(
+        news_article_bodies,
+        "_news_item_article_body_resolver",
+        NewsItemArticleBodyResolver(gateway=typed_gateway),
+    )
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="detail-body-available",
+        summary_title="Detail story with body",
+    )
+    body_ref = persist_news_item_article_body(
+        db_session,
+        news_item=news_item,
+        text="This is the full short-form article body.",
+        source_url=news_item.article_url,
+        final_url=news_item.article_url,
+        gateway=typed_gateway,
+    )
+    news_item.raw_metadata = {
+        **dict(news_item.raw_metadata or {}),
+        "article_body_ref": body_ref,
+    }
+    db_session.commit()
+
+    response = client.get(f"/api/news/items/{news_item.id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["body_available"] is True
+    assert payload["body_kind"] == "article"
+    assert payload["body_format"] == "text"
+
+
+def test_get_news_item_body_returns_visible_storage_body(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
+    gateway = _FakeArticleBodyGateway()
+    typed_gateway = _typed_article_body_gateway(gateway)
+    monkeypatch.setattr(
+        news_article_bodies,
+        "_news_item_article_body_resolver",
+        NewsItemArticleBodyResolver(gateway=typed_gateway),
+    )
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="body-storage",
+        summary_title="Body story",
+    )
+    body_ref = persist_news_item_article_body(
+        db_session,
+        news_item=news_item,
+        text="Paragraph one.\n\nParagraph two.",
+        source_url=news_item.article_url,
+        final_url=news_item.article_url,
+        gateway=typed_gateway,
+    )
+    news_item.raw_metadata = {
+        **dict(news_item.raw_metadata or {}),
+        "article_body_ref": body_ref,
+    }
+    db_session.commit()
+
+    response = client.get(f"/api/news/items/{news_item.id}/body")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["content_id"] == news_item.id
+    assert payload["variant"] == "source"
+    assert payload["kind"] == "article"
+    assert payload["format"] == "text"
+    assert payload["text"] == "Paragraph one.\n\nParagraph two."
+
+
+def test_get_news_item_body_can_return_rendered_content_ref(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
+    monkeypatch.setattr(news_article_bodies, "_news_item_article_body_resolver", None)
+    article = Content(
+        url="https://example.com/rendered-body",
+        source_url="https://example.com/rendered-body",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Rendered article",
+        content_metadata={
+            "content_to_summarize": "Source article text.",
+            "summary": {"full_markdown": "# Rendered Article\n\nMarkdown body."},
+        },
+    )
+    db_session.add(article)
+    db_session.flush()
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="body-content-ref",
+        summary_title="Body story",
+        raw_metadata={"article_body_ref": {"kind": "content", "content_id": article.id}},
+    )
+    db_session.commit()
+
+    response = client.get(
+        f"/api/news/items/{news_item.id}/body",
+        params={"variant": "rendered"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["content_id"] == news_item.id
+    assert payload["variant"] == "rendered"
+    assert payload["format"] == "markdown"
+    assert payload["text"] == "# Rendered Article\n\nMarkdown body."
+
+
+def test_get_news_item_body_requires_visible_news_item(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    gateway = _FakeArticleBodyGateway()
+    typed_gateway = _typed_article_body_gateway(gateway)
+    monkeypatch.setattr(
+        news_article_bodies,
+        "_news_item_article_body_resolver",
+        NewsItemArticleBodyResolver(gateway=typed_gateway),
+    )
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="body-hidden",
+        summary_title="Hidden body story",
+        visibility_scope="user",
+        owner_user_id=(test_user.id or 0) + 1,
+    )
+    body_ref = persist_news_item_article_body(
+        db_session,
+        news_item=news_item,
+        text="Hidden article body.",
+        source_url=news_item.article_url,
+        final_url=news_item.article_url,
+        gateway=typed_gateway,
+    )
+    news_item.raw_metadata = {
+        **dict(news_item.raw_metadata or {}),
+        "article_body_ref": body_ref,
+    }
+    db_session.commit()
+
+    response = client.get(f"/api/news/items/{news_item.id}/body")
+
+    assert response.status_code == 404
 
 
 def test_list_news_items_falls_back_from_placeholder_titles(client, db_session, test_user) -> None:

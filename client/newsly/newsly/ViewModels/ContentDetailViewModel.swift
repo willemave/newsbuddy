@@ -128,7 +128,8 @@ class ContentDetailViewModel: ObservableObject {
     }
 
     func canShowReader(for content: ContentDetail) -> Bool {
-        content.contentTypeEnum == .article && content.bodyAvailable
+        guard content.bodyAvailable else { return false }
+        return content.contentTypeEnum == .article || content.contentTypeEnum == .news
     }
 
     func loadReaderBody(for content: ContentDetail, force: Bool = false) async {
@@ -144,7 +145,7 @@ class ContentDetailViewModel: ObservableObject {
             let body = try await fetchReaderBody(for: content)
             guard self.contentId == content.id,
                   self.content?.id == content.id,
-                  self.content?.contentTypeEnum == .article else {
+                  self.content?.contentTypeEnum == content.contentTypeEnum else {
                 logger.debug("[ContentDetail] Ignoring stale reader body | requestedId=\(content.id) currentId=\(self.contentId)")
                 return
             }
@@ -158,7 +159,10 @@ class ContentDetailViewModel: ObservableObject {
 
     private func loadContentBody(for fetched: ContentDetail) async {
         do {
-            let body = try await contentService.fetchContentBody(id: fetched.id)
+            let body = try await contentService.fetchContentBody(
+                id: fetched.id,
+                contentType: fetched.contentTypeEnum
+            )
             guard self.contentId == fetched.id else {
                 logger.debug("[ContentDetail] Ignoring stale content body | requestedId=\(fetched.id) currentId=\(self.contentId)")
                 return
@@ -173,7 +177,8 @@ class ContentDetailViewModel: ObservableObject {
         do {
             let renderedBody = try await contentService.fetchContentBody(
                 id: content.id,
-                variant: "rendered"
+                variant: "rendered",
+                contentType: content.contentTypeEnum
             )
             if !renderedBody.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return renderedBody
@@ -182,7 +187,11 @@ class ContentDetailViewModel: ObservableObject {
             logger.debug("[ContentDetail] Rendered reader body unavailable, falling back to source | contentId=\(content.id) error=\(error.localizedDescription)")
         }
 
-        return try await contentService.fetchContentBody(id: content.id, variant: "source")
+        return try await contentService.fetchContentBody(
+            id: content.id,
+            variant: "source",
+            contentType: content.contentTypeEnum
+        )
     }
 
     private func markFetchedContentAsReadIfNeeded(_ fetched: ContentDetail) async {

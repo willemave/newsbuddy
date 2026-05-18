@@ -364,23 +364,29 @@ class TestKnowledgeLibraryPagination:
         assert response1.status_code == 200
 
         data1 = response1.json()
-        # Should have some saved items (may be less than 10 due to DB state)
-        assert len(data1["contents"]) >= 0
-        assert "has_more" in data1["meta"]
-        assert "next_cursor" in data1["meta"]
+        assert len(data1["contents"]) == 10
+        assert data1["meta"]["page_size"] == 10
+        assert data1["meta"]["has_more"] is True
+        assert data1["meta"]["next_cursor"]
 
-        # If there's a next page, fetch it
-        if data1["meta"]["next_cursor"]:
-            response2 = client.get(
-                "/api/content/knowledge/list",
-                params={
-                    "limit": 10,
-                    "cursor": data1["meta"]["next_cursor"],
-                },
-            )
-            assert response2.status_code == 200
-            data2 = response2.json()
-            assert len(data2["contents"]) >= 0
+        # Second page should honor the same page size and not repeat rows.
+        response2 = client.get(
+            "/api/content/knowledge/list",
+            params={
+                "limit": 10,
+                "cursor": data1["meta"]["next_cursor"],
+            },
+        )
+        assert response2.status_code == 200
+        data2 = response2.json()
+        assert len(data2["contents"]) == 10
+        assert data2["meta"]["page_size"] == 10
+        assert data2["meta"]["has_more"] is True
+        assert data2["meta"]["next_cursor"]
+
+        ids_page1 = {item["id"] for item in data1["contents"]}
+        ids_page2 = {item["id"] for item in data2["contents"]}
+        assert ids_page1.isdisjoint(ids_page2)
 
     def test_empty_knowledge_library(self, client, sample_contents):
         """Test knowledge library pagination with no saved items."""

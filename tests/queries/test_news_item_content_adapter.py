@@ -90,6 +90,19 @@ def test_present_news_item_detail_builds_content_detail_without_content_metadata
     assert response.is_read is False
 
 
+def test_present_news_item_detail_can_advertise_article_body() -> None:
+    response = present_news_item_detail(
+        _news_item(),
+        is_read=False,
+        body_available=True,
+        body_format="text",
+    )
+
+    assert response.body_available is True
+    assert response.body_kind == "article"
+    assert response.body_format == "text"
+
+
 def test_present_news_item_detail_projects_relevant_links_without_related_links() -> None:
     item = _news_item()
     item.raw_metadata = {

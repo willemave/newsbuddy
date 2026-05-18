@@ -7,6 +7,15 @@
 
 import Foundation
 
+private func normalizedDiscussionURLKey(_ value: String?) -> String? {
+    guard let value else { return nil }
+    var cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    while cleaned.hasSuffix("/") {
+        cleaned.removeLast()
+    }
+    return cleaned.isEmpty ? nil : cleaned
+}
+
 struct ContentDiscussion: Codable {
     let contentId: Int
     let status: String
@@ -80,6 +89,20 @@ struct ContentDiscussion: Codable {
             return !discussionGroups.isEmpty || !links.isEmpty
         }
         return false
+    }
+
+    var linksOutsideSummary: [DiscussionLink] {
+        guard let summary else { return links }
+
+        let summaryLinkKeys = Set(
+            summary.notableLinks.compactMap { normalizedDiscussionURLKey($0.url) }
+        )
+        guard !summaryLinkKeys.isEmpty else { return links }
+
+        return links.filter { link in
+            guard let key = normalizedDiscussionURLKey(link.url) else { return true }
+            return !summaryLinkKeys.contains(key)
+        }
     }
 
     var shouldAutoRefresh: Bool {
