@@ -73,6 +73,14 @@ Production debug:
 4. Prefer DB, log, runtime, and queue evidence over local speculation.
 5. Do not patch production directly unless explicitly asked.
 
+iOS TestFlight deploy:
+
+1. Before archiving, confirm the intended build number is higher than the latest App Store Connect/App Store build; if needed, bump with `xcrun agvtool new-version -all <build>` from `client/newsly`.
+2. Run a local Xcode build before release work, for example `xcodebuild -project client/newsly/newsly.xcodeproj -scheme newsly -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/newsly-codex-derived-data CODE_SIGNING_ALLOWED=NO build`.
+3. Commit the build-number/project changes only when the user explicitly asks for a commit or release commit.
+4. For TestFlight upload requests, use the Xcode app: `Product > Archive`, then Organizer `Distribute App` -> `TestFlight Internal Only`.
+5. Verify the selected Organizer archive and final upload sheet both show the intended version/build, then confirm Organizer `Submission Status` shows `Uploaded` and the expected `Build Number`.
+
 ## Code Rules
 
 - Prefer functions over classes unless stateful objects clearly improve the design.

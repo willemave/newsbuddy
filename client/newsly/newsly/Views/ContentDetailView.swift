@@ -56,6 +56,7 @@ private enum DetailDesign {
     static let parallaxHeroHeight: CGFloat = 360
     static let parallaxRate: CGFloat = 0.25
     static let floatingBackButtonSize: CGFloat = 44
+    static let textOnlyNewsBackButtonTopPadding: CGFloat = 8
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
 }
 
@@ -102,7 +103,6 @@ struct ContentDetailView: View {
     // Transcript/Full Article collapsed state
     @State private var isTranscriptExpanded: Bool = false
     @State private var isRelevantLinksExpanded: Bool = true
-    @State private var isDiscussionSummaryExpanded: Bool = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     init(
         contentId: Int,
@@ -299,7 +299,7 @@ struct ContentDetailView: View {
                         if let discussion = inlineDiscussionSummaryPayload(for: content) {
                             communityDiscussionSummarySection(discussion: discussion)
                                 .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.sectionSpacing)
+                                .padding(.top, 16)
                         }
 
                         if content.contentTypeEnum == .news, !relevantLinks.isEmpty {
@@ -1283,8 +1283,16 @@ struct ContentDetailView: View {
     }
 
     private func floatingBackTopPadding(for proxy: GeometryProxy) -> CGFloat {
-        let fallbackTopInset: CGFloat = hasHeroImage ? 56 : 0
-        return max(proxy.safeAreaInsets.top, fallbackTopInset) + 8
+        if hasHeroImage {
+            let fallbackTopInset: CGFloat = 56
+            return max(proxy.safeAreaInsets.top, fallbackTopInset) + 8
+        }
+
+        if viewModel.content?.contentTypeEnum == .news {
+            return DetailDesign.textOnlyNewsBackButtonTopPadding
+        }
+
+        return proxy.safeAreaInsets.top + 8
     }
 
     @ViewBuilder
@@ -1898,7 +1906,6 @@ struct ContentDetailView: View {
         discussionUnavailableMessage = nil
         discussionTab = .comments
         collapsedCommentIDs = []
-        isDiscussionSummaryExpanded = true
     }
 
     private func applyDiscussionPayload(
@@ -2172,108 +2179,129 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func communityDiscussionSummarySection(discussion: ContentDiscussion) -> some View {
         if let summary = discussion.summary {
-            modernExpandableSection(
-                title: "Comment Summary",
-                icon: "bubble.left.and.bubble.right",
-                isExpanded: $isDiscussionSummaryExpanded
-            ) {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let commentCount = discussion.commentCount, commentCount > 0 {
-                            Text("\(commentCount) comments summarized")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
+                    Label("Comments", systemImage: "bubble.left.and.bubble.right")
+                        .font(.headline)
+                        .fontWeight(.semibold)
 
-                        Text(summary.overview)
-                            .font(.callout)
-                            .foregroundColor(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 12)
+
+                    if let commentCount = discussion.commentCount, commentCount > 0 {
+                        Text("\(commentCount) summarized")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
 
-                    if !summary.topics.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            discussionSubsectionHeader("Key Topics")
-
-                            ForEach(Array(summary.topics.prefix(4))) { topic in
-                                discussionTopicCard(topic)
-                            }
-                        }
-                    }
-
-                    if !summary.representativeComments.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            discussionSubsectionHeader("Representative Comments")
-
-                            ForEach(Array(summary.representativeComments.prefix(3))) { comment in
-                                discussionRepresentativeCommentCard(comment)
-                            }
-                        }
-                    }
-
-                    if let urlString = summary.externalDiscussionURL ?? discussion.discussionURL ?? discussion.sourceURL,
-                       let url = URL(string: urlString) {
+                    if let url = discussionSummaryURL(summary: summary, discussion: discussion) {
                         Link(destination: url) {
-                            Label("Open original discussion", systemImage: "arrow.up.right.square")
+                            Label("Open", systemImage: "arrow.up.right.square")
+                                .labelStyle(.titleAndIcon)
                         }
-                        .font(.subheadline)
+                        .font(.caption.weight(.semibold))
                     }
+                }
+
+                Text(summary.overview)
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !summary.topics.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        discussionSubsectionHeader("Focus")
+
+                        ForEach(Array(summary.topics.prefix(4))) { topic in
+                            discussionTopicRow(topic)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+
+                if !summary.representativeComments.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        discussionSubsectionHeader("Representative comments")
+
+                        ForEach(Array(summary.representativeComments.prefix(3))) { comment in
+                            discussionRepresentativeCommentRow(comment)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
             }
         }
     }
 
+    private func discussionSummaryURL(
+        summary: DiscussionSummary,
+        discussion: ContentDiscussion
+    ) -> URL? {
+        let rawURL = summary.externalDiscussionURL ?? discussion.discussionURL ?? discussion.sourceURL
+        guard let rawURL else { return nil }
+        return URL(string: rawURL)
+    }
+
     @ViewBuilder
     private func discussionSubsectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.subheadline)
+            .font(.caption)
             .fontWeight(.semibold)
             .foregroundColor(.secondary)
     }
 
     @ViewBuilder
-    private func discussionTopicCard(_ topic: DiscussionSummaryTopic) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(topic.title)
-                .font(.callout)
-                .fontWeight(.semibold)
-            Text(topic.summary)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let stance = topic.stance {
-                Text(stance)
+    private func discussionTopicRow(_ topic: DiscussionSummaryTopic) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle()
+                .fill(Color.secondary.opacity(0.55))
+                .frame(width: 4, height: 4)
+                .padding(.top, 7)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(topic.title)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text(topic.summary)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if let stance = topic.stance {
+                    Text(stance)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
             }
         }
-        .padding(12)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.surfacePrimary.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder
-    private func discussionRepresentativeCommentCard(_ comment: DiscussionSummaryComment) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+    private func discussionRepresentativeCommentRow(_ comment: DiscussionSummaryComment) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             Text(comment.author ?? "unknown")
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundColor(.secondary)
             Text(comment.text)
-                .font(.subheadline)
+                .font(.caption)
                 .fixedSize(horizontal: false, vertical: true)
             if let reason = comment.reason {
                 Text(reason)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
             }
         }
-        .padding(12)
+        .padding(.leading, 10)
+        .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.surfacePrimary.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.22))
+                .frame(width: 2)
+        }
     }
 
     @ViewBuilder
