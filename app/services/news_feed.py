@@ -25,7 +25,7 @@ from app.queries.news_item_content_adapter import (
     present_news_item_detail,
     present_news_item_summary,
 )
-from app.services.news_article_bodies import get_news_item_article_body_reference_format
+from app.services.news_article_bodies import get_news_item_article_body_available_format
 from app.utils.pagination import PaginationCursor
 
 # Brutalist Report is the only aggregator that surfaces topic subscriptions; we
@@ -264,7 +264,7 @@ def get_visible_news_item_detail(
         .filter(NewsItemDiscussion.news_item_id == news_item_id)
         .scalar()
     )
-    body_format = get_news_item_article_body_reference_format(item)
+    body_format = get_news_item_article_body_available_format(db, news_item=item)
     return present_news_item_detail(
         item,
         is_read=bool(row_is_read),

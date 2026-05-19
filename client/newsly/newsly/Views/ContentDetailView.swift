@@ -103,7 +103,7 @@ struct ContentDetailView: View {
     @State private var didTriggerSwipeHaptic: Bool = false
     // Transcript/Full Article collapsed state
     @State private var isTranscriptExpanded: Bool = false
-    @State private var isRelevantLinksExpanded: Bool = true
+    @State private var isRelevantLinksExpanded: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     init(
         contentId: Int,
@@ -2603,17 +2603,49 @@ struct ContentDetailView: View {
     // MARK: - Modern Section Components (Flat, no borders)
     @ViewBuilder
     private func relevantLinksSection(links: [RelevantLink]) -> some View {
-        modernExpandableSection(
-            title: "Links from article or comments",
-            icon: "link",
-            isExpanded: $isRelevantLinksExpanded
-        ) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(links.enumerated()), id: \.element.id) { index, link in
-                    relevantLinkRow(link)
-                    if index < links.count - 1 {
-                        Divider()
-                            .padding(.vertical, 10)
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isRelevantLinksExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "link")
+                        .font(.footnote)
+                        .foregroundColor(.secondary.opacity(0.75))
+
+                    Text("Links from article or comments")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(.secondary)
+
+                    Text("\(links.count)")
+                        .font(.caption2.monospacedDigit().weight(.medium))
+                        .foregroundColor(.secondary.opacity(0.85))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.surfaceSecondary.opacity(0.55), in: Capsule())
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundColor(.secondary.opacity(0.55))
+                        .rotationEffect(.degrees(isRelevantLinksExpanded ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isRelevantLinksExpanded {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(links.enumerated()), id: \.element.id) { index, link in
+                        relevantLinkRow(link)
+                        if index < links.count - 1 {
+                            Divider()
+                                .opacity(0.4)
+                                .padding(.leading, 28)
+                                .padding(.vertical, 8)
+                        }
                     }
                 }
             }
@@ -2624,18 +2656,18 @@ struct ContentDetailView: View {
     private func relevantLinkRow(_ link: RelevantLink) -> some View {
         if let url = URL(string: link.url) {
             let state = viewModel.relevantLinkReadLaterState(for: link.id)
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
                 Link(destination: url) {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.subheadline)
-                            .foregroundColor(.accentColor)
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary.opacity(0.75))
                             .frame(width: 20, height: 20)
 
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(link.title ?? link.url)
                                 .font(.subheadline)
-                                .fontWeight(.semibold)
+                                .fontWeight(.medium)
                                 .foregroundColor(.primary)
                                 .multilineTextAlignment(.leading)
                                 .lineLimit(2)
@@ -2650,13 +2682,12 @@ struct ContentDetailView: View {
                                 if let source = relevantLinkSourceLabel(link.source) {
                                     Text(source)
                                         .font(.caption2)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.accentColor)
+                                        .foregroundColor(Color(.tertiaryLabel))
                                 }
 
                                 Text(link.url)
                                     .font(.caption2)
-                                    .foregroundColor(.secondary.opacity(0.85))
+                                    .foregroundColor(Color(.tertiaryLabel))
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                             }
@@ -2672,21 +2703,22 @@ struct ContentDetailView: View {
                 Button {
                     Task { await viewModel.addRelevantLinkToReadLater(link) }
                 } label: {
-                    HStack(spacing: 5) {
+                    Group {
                         if state == .adding {
                             ProgressView()
                                 .controlSize(.small)
                         } else {
                             Image(systemName: relevantLinkReadLaterIcon(for: state))
                         }
-                        Text(relevantLinkReadLaterTitle(for: state))
                     }
-                    .lineLimit(1)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(state == .added ? .accentColor : .secondary.opacity(0.78))
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
                 }
-                .font(.caption.weight(.semibold))
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
                 .disabled(isLinkActionDisabled(state))
+                .accessibilityLabel(relevantLinkReadLaterTitle(for: state))
                 .accessibilityIdentifier("content.relevant_link.read_later.\(link.id)")
             }
         }

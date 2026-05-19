@@ -435,6 +435,42 @@ def test_get_news_item_detail_marks_article_body_available(
     assert payload["body_format"] == "text"
 
 
+def test_get_news_item_detail_marks_article_body_available_from_existing_article_fallback(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
+    article = Content(
+        url="https://example.com/detail-body-fallback",
+        source_url="https://example.com/detail-body-fallback",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Existing article",
+        content_metadata={"content_to_summarize": "Existing article body."},
+    )
+    db_session.add(article)
+    db_session.flush()
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="detail-body-fallback",
+        summary_title="Detail story with fallback body",
+    )
+    db_session.commit()
+
+    response = client.get(f"/api/news/items/{news_item.id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["body_available"] is True
+    assert payload["body_kind"] == "article"
+    assert payload["body_format"] == "text"
+
+    body_response = client.get(f"/api/news/items/{news_item.id}/body")
+    assert body_response.status_code == 200
+    assert body_response.json()["text"] == "Existing article body."
+
+
 def test_get_news_item_body_returns_visible_storage_body(
     client,
     db_session,

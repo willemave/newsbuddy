@@ -92,6 +92,31 @@ def get_news_item_article_body_reference_format(news_item: NewsItem) -> ContentB
     return None
 
 
+def get_news_item_article_body_available_format(
+    db: Session,
+    *,
+    news_item: NewsItem,
+) -> ContentBodyFormat | None:
+    """Return the available article-body format for detail payload gating."""
+    reference_format = get_news_item_article_body_reference_format(news_item)
+    if reference_format is not None:
+        return reference_format
+
+    article_url = normalize_http_url(news_item.article_url or news_item.canonical_story_url)
+    if article_url is None:
+        return None
+    existing_article = _existing_article_content(db, article_url)
+    if existing_article is None:
+        return None
+
+    resolver = get_content_body_resolver()
+    for variant in (ContentBodyVariant.SOURCE, ContentBodyVariant.RENDERED):
+        resolved = resolver.resolve(db, content=existing_article, variant=variant)
+        if resolved is not None and resolved.text:
+            return resolved.format
+    return None
+
+
 def _is_missing_storage_error(exc: ClientError) -> bool:
     error_code = str(exc.response.get("Error", {}).get("Code") or "")
     return error_code in {"404", "NoSuchKey", "NotFound"}
