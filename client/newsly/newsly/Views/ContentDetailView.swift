@@ -58,6 +58,7 @@ private enum DetailDesign {
     static let floatingBackButtonSize: CGFloat = 44
     static let textOnlyNewsBackButtonTopPadding: CGFloat = 8
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
+    static let discussionSummaryBodyIndent: CGFloat = 34
 }
 
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
@@ -2206,6 +2207,7 @@ struct ContentDetailView: View {
                     .font(.subheadline)
                     .foregroundColor(.primary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, DetailDesign.discussionSummaryBodyIndent)
 
                 if !summary.topics.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
