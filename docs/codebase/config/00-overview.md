@@ -19,7 +19,7 @@ File-backed feed and tooling configuration used by scraper bootstrapping, onboar
 | `config/atom.example.yml` | Example Atom feed file | Template only. |
 | `config/podcasts.yml` | Podcast RSS inputs with names and per-feed limits | Default podcast feed seeds for onboarding/import flows; live subscriptions now primarily come from DB-backed configs. |
 | `config/podcasts.example.yml` | Example podcast feed file | Template only. |
-| `config/reddit.yml` | Default subreddit list and per-subreddit limits | Hybrid runtime input: the Reddit scraper can merge or override DB-backed sources with file-backed subreddits. |
+| `config/reddit.yml` | Default subreddit list and per-subreddit limits | Onboarding/default-source input only; runtime Reddit scraping uses DB-backed per-user `scraper_type='reddit'` configs and ignores file-backed targets. |
 | `config/reddit.example.yml` | Example Reddit config | Template only. |
 | `config/techmeme.yml` | Techmeme feed URL plus cluster/related-link limits | Active runtime config for the scheduled Techmeme scraper. |
 | `config/twitter.yml` | Twitter list IDs, cookies path, limits, lookback window, filters, and optional proxy | Available for the Twitter list scraper, but the scheduled runner currently leaves that scraper disabled. |

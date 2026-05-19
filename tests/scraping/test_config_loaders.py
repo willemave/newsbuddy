@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from app.scraping.podcast_unified import PodcastUnifiedScraper
-from app.scraping.reddit_unified import RedditUnifiedScraper
+from app.scraping.reddit_unified import RedditTarget, RedditUnifiedScraper
 from app.scraping.substack_unified import load_substack_feeds
 from app.utils.error_logger import get_scraper_metrics, reset_scraper_metrics
 
@@ -91,7 +91,9 @@ def test_podcast_no_feeds_configured(
     assert any("No podcast feeds configured" in message for message in warn_messages)
 
 
-def test_reddit_config_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_reddit_scraper_loads_db_targets_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     cfg = config_dir / "reddit.yml"
@@ -101,14 +103,15 @@ def test_reddit_config_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     )
 
     monkeypatch.setenv("NEWSAPP_CONFIG_DIR", str(config_dir))
+    db_target = RedditTarget(subreddit="LocalLLaMA", limit=3, visibility_scope="user")
     monkeypatch.setattr(
         RedditUnifiedScraper,
         "_load_subreddits_from_db",
-        lambda self: [],
+        lambda self: [db_target],
     )
 
     scraper = RedditUnifiedScraper()
-    assert scraper.targets == []
+    assert scraper.targets == [db_target]
 
     metrics = get_scraper_metrics()
     assert "Reddit" not in metrics or "scrape_config_missing" not in metrics["Reddit"]

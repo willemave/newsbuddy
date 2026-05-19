@@ -9,7 +9,7 @@ from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.constants import AGGREGATOR_SCRAPER_TYPE
+from app.constants import AGGREGATOR_SCRAPER_TYPE, SUPPORTED_AGGREGATOR_KEYS
 from app.core.settings import get_settings
 from app.models.contracts import ContentStatus, ContentType, NewsItemStatus, TaskType
 from app.models.db import (
@@ -83,7 +83,7 @@ def _active_short_news_source_keys(db: Session, *, user_id: int) -> set[str]:
         if not isinstance(config, dict):
             continue
         source_key = _normalize_scrape_source(config.get("key"))
-        if source_key:
+        if source_key in SUPPORTED_AGGREGATOR_KEYS:
             source_keys.add(source_key)
     return source_keys
 

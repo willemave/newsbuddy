@@ -1,5 +1,6 @@
 import pytest
 
+from app.models.internal.scraper_configs import normalize_aggregator_config
 from app.services.scraper_configs import (
     CreateUserScraperConfig,
     build_feed_payloads,
@@ -77,6 +78,11 @@ def test_create_youtube_config_accepts_channel_id(db_session):
     created = create_user_scraper_config(db_session, user_id=1, data=payload)
     assert created.feed_url == "https://www.youtube.com/channel/UC1234567890"
     assert created.config.get("channel_id") == "UC1234567890"
+
+
+def test_aggregator_config_rejects_reddit_key():
+    with pytest.raises(ValueError, match="unsupported aggregator key: reddit"):
+        normalize_aggregator_config({"key": "reddit"})
 
 
 def test_build_feed_payloads_apply_default_limit(db_session):

@@ -10,6 +10,7 @@ from app.constants import (
     AGGREGATOR_FEED_URL_PREFIX,
     AGGREGATOR_SCRAPER_TYPE,
     DEFAULT_NEW_FEED_LIMIT,
+    SUPPORTED_AGGREGATOR_KEYS,
 )
 
 ALLOWED_SCRAPER_TYPES = {
@@ -133,6 +134,8 @@ def normalize_aggregator_config(config: dict[str, Any]) -> dict[str, Any]:
     key = str(config.get("key") or "").strip().lower()
     if not key:
         raise ValueError("config.key is required for aggregator subscriptions")
+    if key not in SUPPORTED_AGGREGATOR_KEYS:
+        raise ValueError(f"unsupported aggregator key: {key}")
 
     config["key"] = key
     config["feed_url"] = f"{AGGREGATOR_FEED_URL_PREFIX}{key}"

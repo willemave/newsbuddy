@@ -223,16 +223,15 @@ def test_new_visible_supported_news_item_enqueues_discussion_refresh(db_session,
     """New HN/Reddit news items should queue discussion refresh only when visible."""
     user = user_factory()
     assert user.id is not None
-    db_session.add(
-        UserScraperConfig(
-            user_id=user.id,
-            scraper_type=AGGREGATOR_SCRAPER_TYPE,
-            display_name="reddit",
-            feed_url=f"{AGGREGATOR_FEED_URL_PREFIX}reddit",
-            config={"key": "reddit"},
-            is_active=True,
-        )
+    reddit_config = UserScraperConfig(
+        user_id=user.id,
+        scraper_type="reddit",
+        display_name="example",
+        feed_url="https://www.reddit.com/r/example/",
+        config={"subreddit": "example", "limit": 1},
+        is_active=True,
     )
+    db_session.add(reddit_config)
     db_session.commit()
     queue_service = Mock()
 
@@ -244,6 +243,9 @@ def test_new_visible_supported_news_item_enqueues_discussion_refresh(db_session,
         "url": "https://example.com/story",
         "title": "Example story",
         "content_type": ContentType.NEWS,
+        "visibility_scope": "user",
+        "owner_user_id": user.id,
+        "user_scraper_config_id": reddit_config.id,
         "metadata": {
             "platform": "reddit",
             "source": "example",

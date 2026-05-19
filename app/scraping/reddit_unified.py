@@ -1,14 +1,11 @@
-import logging
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import praw
 import prawcore
-import yaml
 
 from app.core.db import get_db
 from app.core.logging import get_logger
@@ -16,13 +13,10 @@ from app.core.settings import get_settings
 from app.models.contracts import ContentType
 from app.scraping.base import BaseScraper
 from app.services.scraper_configs import list_active_configs_by_type
-from app.utils.error_logger import log_scraper_event
-from app.utils.paths import resolve_config_directory, resolve_config_path
 
 logger = get_logger(__name__)
 settings = get_settings()
 REDDIT_USER_AGENT = settings.reddit_user_agent or "news_app.scraper/1.0 (by u/anonymous)"
-_MISSING_CONFIG_WARNINGS: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -36,53 +30,19 @@ class RedditTarget:
     user_scraper_config_id: int | None = None
 
 
-def _resolve_reddit_config_path(config_path: str | Path | None) -> Path:
-    if config_path is None:
-        return resolve_config_path("REDDIT_CONFIG_PATH", "reddit.yml")
-
-    candidate = Path(config_path).expanduser()
-    if candidate.is_absolute():
-        return candidate.resolve(strict=False)
-
-    base_dir = resolve_config_directory()
-    return (base_dir / candidate).resolve(strict=False)
-
-
-def _emit_missing_config_warning(resolved_path: Path) -> None:
-    key = str(resolved_path.resolve(strict=False))
-    if key in _MISSING_CONFIG_WARNINGS:
-        return
-    _MISSING_CONFIG_WARNINGS.add(key)
-    log_scraper_event(
-        service="Reddit",
-        event="config_missing",
-        level=logging.WARNING,
-        metric="scrape_config_missing",
-        path=str(resolved_path.resolve(strict=False)),
-    )
-
-
 class RedditUnifiedScraper(BaseScraper):
     """Unified scraper for Reddit using the new architecture."""
 
-    def __init__(self, config_path: str | Path | None = None):
+    def __init__(self):
         super().__init__("Reddit")
-        self.config_path = _resolve_reddit_config_path(config_path)
         self.targets = self._load_subreddit_config()
         self._reddit_client: praw.Reddit | None = None
 
     def _load_subreddit_config(self) -> list[RedditTarget]:
         """Load subreddit configuration from user scraper configs only."""
-        file_targets = self._load_subreddits_from_file()
-        db_targets = self._load_subreddits_from_db()
-        merged = db_targets
-        logger.info(
-            "Loaded %s Reddit subreddits (db=%s, file_ignored=%s)",
-            len(merged),
-            len(db_targets),
-            len(file_targets),
-        )
-        return merged
+        targets = self._load_subreddits_from_db()
+        logger.info("Loaded %s Reddit subreddits from user scraper configs", len(targets))
+        return targets
 
     def _load_subreddits_from_db(self) -> list[RedditTarget]:
         """Load subreddit configuration from user scraper configs."""
@@ -113,37 +73,6 @@ class RedditUnifiedScraper(BaseScraper):
                 )
 
         return targets
-
-    def _load_subreddits_from_file(self) -> list[RedditTarget]:
-        """Load subreddit configuration from YAML file for observability only."""
-        config_path = self.config_path
-        if not config_path.exists():
-            _emit_missing_config_warning(config_path)
-            return []
-
-        try:
-            with open(config_path, encoding="utf-8") as f:
-                config = yaml.safe_load(f) or {}
-
-            configured = config.get("subreddits", [])
-            configured_count = len(configured) if isinstance(configured, list) else 0
-            if configured_count > 0:
-                logger.info(
-                    "Ignoring %s file-configured Reddit targets; "
-                    "only user-scoped Reddit scraping is enabled",
-                    configured_count,
-                )
-            return []
-
-        except Exception as e:
-            log_scraper_event(
-                service="Reddit",
-                event="config_load_failed",
-                level=logging.ERROR,
-                path=str(config_path),
-                error=str(e),
-            )
-            return []
 
     def scrape(self) -> list[dict[str, Any]]:
         """Scrape Reddit posts from multiple subreddits."""

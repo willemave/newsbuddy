@@ -92,6 +92,42 @@ def _add_aggregator_subscription(
     return row
 
 
+def _user_news_item(
+    db_session,
+    *,
+    user_id: int,
+    ingest_key: str,
+    platform: str,
+    title: str,
+    article_url: str,
+    ingested_at: datetime,
+    source_type: str | None = None,
+) -> NewsItem:
+    item = NewsItem(
+        ingest_key=ingest_key,
+        visibility_scope=NewsItemVisibilityScope.USER.value,
+        owner_user_id=user_id,
+        platform=platform,
+        source_type=source_type or platform,
+        source_label=platform.title(),
+        source_external_id=ingest_key,
+        canonical_story_url=article_url,
+        article_url=article_url,
+        article_title=title,
+        article_domain="example.com",
+        summary_title=title,
+        summary_key_points=[f"{title} bullet"],
+        summary_text=f"{title} summary",
+        raw_metadata={"platform": platform},
+        status=NewsItemStatus.READY.value,
+        ingested_at=_utc_naive(ingested_at),
+        processed_at=_utc_naive(ingested_at),
+    )
+    db_session.add(item)
+    db_session.flush()
+    return item
+
+
 @pytest.fixture
 def base_time() -> datetime:
     return datetime(2026, 4, 22, 12, 0, tzinfo=UTC)
@@ -130,6 +166,40 @@ def test_visibility_filters_global_items_to_user_aggregator_picks(
     )
     titles = [item.title for item in response.contents]
     assert titles == ["HN story"]
+
+
+def test_visibility_ignores_reddit_aggregator_subscription(
+    db_session, test_user, base_time
+) -> None:
+    user_id = test_user.id
+    assert user_id is not None
+
+    _global_news_item(
+        db_session,
+        ingest_key="global-reddit",
+        platform="reddit",
+        title="Global Reddit story",
+        article_url="https://example.com/reddit",
+        ingested_at=base_time,
+        source_type="reddit",
+    )
+    user_item = _user_news_item(
+        db_session,
+        user_id=user_id,
+        ingest_key="user-reddit",
+        platform="reddit",
+        title="User Reddit story",
+        article_url="https://example.com/user-reddit",
+        ingested_at=base_time + timedelta(minutes=1),
+        source_type="reddit",
+    )
+    _add_aggregator_subscription(db_session, user_id=user_id, key="reddit")
+
+    response = list_visible_news_items(
+        db_session, user_id=user_id, read_filter="all", cursor=None, limit=25
+    )
+
+    assert [item.id for item in response.contents] == [user_item.id]
 
 
 def test_list_unread_visible_news_items_uses_visible_unread_rows(

@@ -31,6 +31,17 @@ DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT = 2
 # scraper_type and a ``feed_url`` of ``AGGREGATOR_FEED_URL_PREFIX + <key>``.
 AGGREGATOR_SCRAPER_TYPE = "aggregator"
 AGGREGATOR_FEED_URL_PREFIX = "aggregator://"
+SUPPORTED_AGGREGATOR_KEYS = frozenset(
+    {
+        "brutalist",
+        "finurls",
+        "hackernews",
+        "mediagazer",
+        "memeorandum",
+        "sciurls",
+        "techmeme",
+    }
+)
 
 # Summary kind/version constants
 SUMMARY_KIND_LONG_INTERLEAVED = "long_interleaved"

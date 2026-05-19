@@ -223,6 +223,47 @@ def test_refresh_enqueue_requires_visible_due_item(
     )
 
 
+def test_refresh_enqueue_ignores_reddit_aggregator_subscription(
+    db_session,
+    news_item_factory,
+    user_factory,
+) -> None:
+    user = user_factory()
+    assert user.id is not None
+    _add_aggregator_subscription(db_session, user_id=user.id, key="reddit")
+    now = datetime(2026, 5, 14, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+
+    item = news_item_factory(
+        ingest_key="reddit-stale-aggregator-hidden",
+        platform="reddit",
+        source_type="reddit",
+        source_external_id="stale-aggregator-hidden",
+        discussion_url="https://reddit.com/r/example/comments/stale/thread/",
+        raw_metadata={
+            "platform": "reddit",
+            "aggregator": {
+                "external_id": "stale",
+                "metadata": {"comments_count": 20},
+            },
+        },
+    )
+    row = sync_news_item_discussion_from_news_item(db_session, item)
+    assert row is not None
+    row.fetched_comment_count = 1
+    row.next_refresh_after = now - timedelta(minutes=1)
+    db_session.commit()
+
+    assert not is_news_item_discussion_visible_to_active_user(
+        db_session,
+        news_item_id=item.id,
+    )
+    assert not should_enqueue_news_item_discussion_refresh(
+        db_session,
+        row=row,
+        now=now,
+    )
+
+
 def test_due_discussion_candidates_prioritize_visible_due_rows(
     db_session,
     news_item_factory,

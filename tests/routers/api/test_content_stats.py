@@ -230,6 +230,35 @@ def test_processing_count_includes_selected_news_source_crawls(
     assert payload["news_count"] == 0
 
 
+def test_processing_count_ignores_reddit_aggregator_subscription(
+    client,
+    db_session,
+    test_user,
+    processing_task_factory,
+) -> None:
+    db_session.add(
+        UserScraperConfig(
+            user_id=test_user.id,
+            scraper_type=AGGREGATOR_SCRAPER_TYPE,
+            display_name="Reddit",
+            feed_url=f"{AGGREGATOR_FEED_URL_PREFIX}reddit",
+            config={"key": "reddit"},
+        )
+    )
+    processing_task_factory(
+        task_type="scrape",
+        payload={"sources": ["reddit"]},
+        status="pending",
+    )
+    db_session.commit()
+
+    response = client.get("/api/content/stats/processing-count")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["news_crawl_count"] == 0
+
+
 def test_processing_count_excludes_orphaned_stale_rows(
     client,
     test_user,

@@ -16,7 +16,7 @@ from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, aliased
 
-from app.constants import AGGREGATOR_SCRAPER_TYPE
+from app.constants import AGGREGATOR_SCRAPER_TYPE, SUPPORTED_AGGREGATOR_KEYS
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
@@ -309,6 +309,7 @@ def _visible_to_active_user_clause():
         .where(User.is_active.is_(True))
         .where(UserScraperConfig.scraper_type == AGGREGATOR_SCRAPER_TYPE)
         .where(UserScraperConfig.is_active.is_(True))
+        .where(func.lower(aggregator_key).in_(sorted(SUPPORTED_AGGREGATOR_KEYS)))
         .where(func.lower(aggregator_key) == NewsItem.platform)
     )
 
@@ -322,7 +323,7 @@ def _visible_to_active_user_clause():
         .where(fallback_config.user_id == fallback_user.id)
         .where(fallback_config.scraper_type == AGGREGATOR_SCRAPER_TYPE)
         .where(fallback_config.is_active.is_(True))
-        .where(fallback_config_key.is_not(None))
+        .where(func.lower(fallback_config_key).in_(sorted(SUPPORTED_AGGREGATOR_KEYS)))
     )
     fallback_user_has_scoped_scraper_news = exists(
         select(fallback_news_item.id)

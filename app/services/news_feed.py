@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.constants import AGGREGATOR_SCRAPER_TYPE
+from app.constants import AGGREGATOR_SCRAPER_TYPE, SUPPORTED_AGGREGATOR_KEYS
 from app.models.api.content import ContentDetailResponse, ContentListResponse
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
@@ -83,7 +83,7 @@ def _user_aggregator_subscriptions(db: Session, *, user_id: int) -> dict[str, li
         if not isinstance(config, dict):
             continue
         key = str(config.get("key") or "").strip().lower()
-        if not key:
+        if key not in SUPPORTED_AGGREGATOR_KEYS:
             continue
         topics_raw = config.get("topics") or []
         topics = [t.strip().lower() for t in topics_raw if isinstance(t, str) and t.strip()]

@@ -62,3 +62,28 @@ def test_create_aggregator_configs_is_idempotent(db_session, test_user) -> None:
     )
     assert count_again == 1
     assert len(rows) == 1
+
+
+def test_create_aggregator_configs_skips_reddit_aggregator(db_session, test_user) -> None:
+    user_id = test_user.id
+    assert user_id is not None
+
+    count = _create_aggregator_configs(
+        db_session,
+        user_id,
+        [
+            OnboardingSelectedAggregator(key="reddit", title="Reddit"),
+            OnboardingSelectedAggregator(key="sciurls", title="SciURLs"),
+        ],
+    )
+    db_session.commit()
+
+    rows = (
+        db_session.query(UserScraperConfig)
+        .filter(UserScraperConfig.user_id == user_id)
+        .filter(UserScraperConfig.scraper_type == AGGREGATOR_SCRAPER_TYPE)
+        .all()
+    )
+
+    assert count == 1
+    assert [row.config["key"] for row in rows] == ["sciurls"]

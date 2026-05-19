@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.constants import SUPPORTED_AGGREGATOR_KEYS
 from app.scraping.aggregators import (
     AggregatorScraper,
     BrutalistReportAggregatorScraper,
@@ -20,15 +21,7 @@ from app.scraping.aggregators.config import (
     load_aggregators_config,
 )
 
-EXPECTED_KEYS = {
-    "hackernews",
-    "techmeme",
-    "mediagazer",
-    "memeorandum",
-    "sciurls",
-    "finurls",
-    "brutalist",
-}
+EXPECTED_KEYS = set(SUPPORTED_AGGREGATOR_KEYS)
 
 
 def test_known_aggregator_keys_matches_registry() -> None:

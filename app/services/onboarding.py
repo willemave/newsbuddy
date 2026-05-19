@@ -14,7 +14,11 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT, DEFAULT_NEW_FEED_LIMIT
+from app.constants import (
+    DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
+    DEFAULT_NEW_FEED_LIMIT,
+    SUPPORTED_AGGREGATOR_KEYS,
+)
 from app.core.logging import get_logger
 from app.core.model_defaults import FAST_MODEL_SPEC
 from app.models.api.onboarding import (
@@ -716,7 +720,7 @@ def complete_onboarding(
     sources_to_scrape = _resolve_scraper_sources(created_types - FEED_SUGGESTION_TYPES)
     for aggregator_selection in request.selected_aggregators:
         source = aggregator_selection.key.strip().lower()
-        if source and source not in sources_to_scrape:
+        if source in SUPPORTED_AGGREGATOR_KEYS and source not in sources_to_scrape:
             sources_to_scrape.append(source)
     discovery_payload: dict[str, Any] | None = None
     if request.profile_summary:
@@ -2312,7 +2316,7 @@ def _create_aggregator_configs(
     configured_count = 0
     for selection in aggregators:
         key = selection.key.strip().lower()
-        if not key:
+        if key not in SUPPORTED_AGGREGATOR_KEYS:
             continue
         config_payload: dict[str, Any] = {"key": key, "limit": DEFAULT_NEW_FEED_LIMIT}
         if selection.topics:
