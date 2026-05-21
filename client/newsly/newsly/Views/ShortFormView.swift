@@ -116,6 +116,7 @@ struct ShortFormView: View {
         .screenContainer()
         .onScrollTargetVisibilityChange(idType: Int.self) { visibleIds in
             scrollReadTracker.updateTopVisibleItemId(visibleIds.first)
+            markItemsAboveAsRead()
         }
         .onScrollPhaseChange { _, newPhase in
             guard newPhase == .idle else { return }
