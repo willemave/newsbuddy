@@ -837,6 +837,20 @@ PRODUCTION_CLUSTER_CASES = [
             "Meta outbid OpenAI for OpenClaw creator Peter Steinberger but lost him on “vibe” and vision",
         ],
     },
+    {
+        "case_id": "batch_007_spacex_s1_disclosures",
+        "label": "SpaceX IPO / S-1 disclosure family",
+        "titles": [
+            "SpaceX files for IPO, to list on Nasdaq under symbol SPCX",
+            "SpaceX files S-1 registration statement with SEC",
+            "SpaceX 2025 revenue $18.7B, up 33% YoY; loss $4.9B vs profit; capex $20.7B",
+            "SpaceX filing reveals Starlink hits 10.3M subscribers",
+            "Anthropic to pay SpaceX $1.25B/month through May 2029, expand deal to Colossus 2",
+            "xAI had $6.4B operating loss on $3.2B revenue in 2025 per SpaceX IPO filing",
+            "xAI to spend $2.8B on turbines, including $2B on mobile gas turbines it's sued over",
+            "Filing: SpaceX set aside $530M for potential litigation losses, including lawsuits involving Grok's Spicy mode",
+        ],
+    },
 ]
 
 
@@ -1030,6 +1044,24 @@ NEGATIVE_PRODUCTION_CLUSTER_CASES = [
             ["Subscribe to read"],
             ["Subscribe to read"],
             ["Subscribe to read"],
+        ],
+    },
+    {
+        "case_id": "batch_007_negative_spacex_s1_vs_adjacent",
+        "label": "SpaceX IPO/S-1 disclosures should not absorb launch or acquisition-adjacent stories",
+        "groups": [
+            [
+                "SpaceX files for IPO, to list on Nasdaq under symbol SPCX",
+                "SpaceX files S-1 registration statement with SEC",
+                "SpaceX 2025 revenue $18.7B, up 33% YoY; loss $4.9B vs profit; capex $20.7B",
+                "SpaceX filing reveals Starlink hits 10.3M subscribers",
+            ],
+            [
+                "SpaceX prepares Starship 12th flight test for May 21 launch",
+            ],
+            [
+                "SpaceX Plans to Acquire AI Startup Cursor 30 Days After IPO",
+            ],
         ],
     },
 ]

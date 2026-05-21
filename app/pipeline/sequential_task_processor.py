@@ -46,6 +46,7 @@ from app.pipeline.worker import get_llm_service
 from app.services.gateways.task_queue_gateway import TaskQueueGateway
 from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.news_embeddings import warm_news_embedding_model
+from app.services.news_reranker import warm_news_reranker_model
 from app.services.queue import QueueService, TaskQueue, TaskType
 
 try:
@@ -133,11 +134,17 @@ class SequentialTaskProcessor:
         self.settings = get_settings()
         logger.debug("Settings loaded")
         self.queue_name = QueueService._normalize_queue_name(queue_name) or TaskQueue.CONTENT.value
-        if self.queue_name == TaskQueue.CONTENT.value and self.settings.news_list_warm_embeddings:
-            try:
-                warm_news_embedding_model()
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to warm news embedding model")
+        if self.queue_name == TaskQueue.CONTENT.value:
+            if self.settings.news_list_warm_embeddings:
+                try:
+                    warm_news_embedding_model()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to warm news embedding model")
+            if self.settings.news_list_reranker_enabled:
+                try:
+                    warm_news_reranker_model()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to warm news reranker model")
         self.running = True
         self.worker_slot = worker_slot
         self.worker_id = f"{self.queue_name}-processor-{self.worker_slot}"

@@ -147,5 +147,10 @@ def rerank_news_documents(
     return scores
 
 
+def warm_news_reranker_model() -> None:
+    """Warm the reranker model to avoid first-match latency."""
+    _get_news_reranker_runtime()
+
+
 def clear_news_reranker_cache() -> None:
     _get_news_reranker_runtime.cache_clear()
