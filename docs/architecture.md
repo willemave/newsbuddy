@@ -2,12 +2,13 @@
 
 > Canonical architecture reference for the FastAPI backend, DB-backed processing pipeline, discovery and chat systems, and the SwiftUI iOS client.
 
-**Last Updated:** 2026-04-19
-**Repository Root:** `newsbuddy/`
+**Last Reviewed:** 2026-05-19
+**Repository Root:** `news_app/`
+**Use:** Cross-boundary architecture reference. For folder inventories, use `docs/codebase/`.
 **Primary Runtime:** Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, pydantic-ai
 **Primary Clients:** SwiftUI iOS app, iOS Share Extension, Jinja admin UI, machine-facing agent/CLI APIs
-**Storage:** PostgreSQL for local/staging/production with native queue and search support
-**Processing Model:** Database-backed async task queue with queue partitions and sequential workers
+**Storage:** PostgreSQL for local/staging/production, plus local or S3-compatible content-body storage
+**Processing Model:** Task-spec-routed database queue with queue partitions and sequential workers
 
 ## 1. Documentation Map
 
@@ -25,8 +26,8 @@
 Newsly is a content ingestion and reading system with four major surfaces:
 
 1. A FastAPI backend that owns auth, APIs, admin pages, chat, voice, discovery, integrations, and processing orchestration.
-2. A database-backed task queue that handles analysis, extraction, summarization, discussion fetching, image generation, onboarding discovery, and external sync.
-3. Scrapers and ingestion paths that create canonical `contents` records from feeds, user submissions, and synced external sources.
+2. A database-backed task queue that handles analysis, extraction, summarization, discussion fetching, image generation, audio episodes, onboarding discovery, and external sync.
+3. Scrapers and ingestion paths that create canonical long-form `contents` records and short-form `news_items` from feeds, user submissions, and synced external sources.
 4. A SwiftUI iOS client plus share extension that consume the backend as the source of truth.
 
 The backend is not split into microservices. Most application logic lives in one deployable FastAPI codebase with clear internal boundaries:
@@ -38,6 +39,8 @@ The backend is not split into microservices. Most application logic lives in one
 - task execution in `app/pipeline/`
 - extraction implementations in `app/processing_strategies/`
 - scrapers in `app/scraping/`
+- server-rendered admin UI in `app/admin_web/`
+- production operator workflows in `admin/`
 
 ## 3. Runtime Topology
 
@@ -84,7 +87,7 @@ Current bootstrap responsibilities:
 - mount `/admin/static` from `app/admin_web/static`
 - register exception handlers for request validation and admin auth redirects
 - add request logging middleware
-- add permissive CORS middleware
+- add CORS middleware from `settings.cors_allow_origins`
 - expose `/health`
 - redirect `/` to `/admin`
 
@@ -95,20 +98,22 @@ The app currently mounts:
 - `/auth`
   - Apple Sign In, token refresh, `/me`, profile updates, admin login/logout.
 - `/admin`
-  - Dashboard, eval tooling, API key management, onboarding lane preview.
+  - Dashboard, eval tooling, API key management, feedback, insight reports, usage dashboards, onboarding lane preview.
 - `/admin/logs` and `/admin/errors`
   - Log browser and error reset utilities.
 - `/api/content`
-  - Main content list/detail/actions/state/chat/narration surface.
+  - Long-form content list/detail/actions/state/chat/knowledge/narration/audio-episode surface.
+- `/api/news`
+  - Short-form Fast Reads list/detail/body/discussion/read-state/conversion/audio surface backed by `news_items`.
 - `/api`
-  - Discovery, onboarding, analytics interactions, X integrations, LLM integrations, agent APIs, OpenAI helper endpoints, voice APIs.
+  - Discovery, onboarding, analytics, feedback, scraper config, X and LLM integrations, agent APIs, CLI link, agent library, OpenAI transcription helpers.
 
 ### 4.3 Middleware and request behavior
 
 Actual middleware/handler behavior in `app/main.py`:
 
 - request logging with duration-based severity and Langfuse trace context
-- CORS allowing all origins, methods, and headers
+- CORS allowing configured origins, all methods, and all headers; production rejects wildcard origins
 - validation exceptions logged with redacted sensitive headers and bounded request body summaries
 - admin auth failures redirected to login through a custom exception handler
 
@@ -141,7 +146,9 @@ Commands in `app/commands/`:
 
 - content submission and ingestion
 - mark read / unread
-- toggle favorites
+- save to / remove from Knowledge
+- convert short-form news items into long-form article content
+- submit feedback
 - start and complete agent onboarding
 - create and revoke API keys
 - upsert and delete user-managed LLM provider keys
@@ -150,9 +157,12 @@ Commands in `app/commands/`:
 Queries in `app/queries/`:
 
 - list/search content cards
+- list/search Knowledge library
+- news-item body and discussion lookups
 - content detail
-- favorites and recently read
+- recently read
 - unread/processing/long-form stats
+- queue health
 - job status
 - API key listing
 - user LLM integration listing
@@ -165,11 +175,13 @@ SQLAlchemy query composition and persistence helpers.
 Notable repository slices:
 
 - `content_card_repository.py`
-  - card/list/favorites/recently-read projections
+  - card/list/recently-read projections
 - `content_detail_repository.py`
   - detail projection
 - `content_feed_query.py`
   - feed visibility rules shared by list-like endpoints
+- `knowledge_repository.py`
+  - per-user Knowledge saves
 - `stats_repository.py`
   - unread/processing/long-form metrics
 - `api_key_repository.py`
@@ -183,7 +195,7 @@ The old top-level presenter package was collapsed into the API and models layers
 
 - `app/routers/api/content_responses.py`
   - builds content list/detail API DTOs
-- `app/models/content_display.py`
+- `app/models/domain/content_display.py`
   - image URL resolution, list readiness checks, and feed-subscription affordances
 
 ### 5.5 Search and API key helpers
@@ -199,10 +211,27 @@ Implementation seams now live alongside the layers that use them:
 
 The old top-level domain package was collapsed into `app/models/`:
 
-- `app/models/content_mapper.py`
+- `app/models/domain/content_mapper.py`
   - converts ORM `Content` rows to and from canonical `ContentData`
-- `app/models/content_form.py`
+- `app/models/domain/content.py`
   - derives canonical short/long form labels from content type
+
+Model ownership is split by boundary:
+
+- `app/models/db/`
+  - SQLAlchemy tables
+- `app/models/api/`
+  - HTTP request/response DTOs
+- `app/models/domain/`
+  - app-domain objects and mappers
+- `app/models/metadata/`
+  - structured metadata and summary contracts
+- `app/models/internal/`
+  - worker/admin/runtime-only shapes
+- `app/models/llm/`
+  - structured LLM outputs
+- `app/models/contracts.py`
+  - shared enums such as content types, task types, queues, and providers
 
 ### 5.7 `app/services/`
 
@@ -215,8 +244,9 @@ Most orchestration logic lives here. Major service families:
 - onboarding flows
 - chat and deep research
 - X integration and sync
-- content interactions, favorites, read state
-- narration and voice systems
+- content interactions, Knowledge saves, read state
+- narration, transcription, and audio episodes
+- content-body storage and personal markdown sync
 - Langfuse tracing
 - Exa and external API clients
 
@@ -239,37 +269,39 @@ URL/content-type-specific extraction logic:
 - arXiv
 - PubMed
 - YouTube
+- Twitter/X share URLs
 - PDF
 - image URLs
+- plain text
 - general HTML fallback
-- Twitter/X share strategy
 
 ### 5.10 `app/scraping/`
 
 Unified scrapers for scheduled or manual feed ingestion:
 
-- Hacker News
+- configured news aggregators loaded from `config/aggregators.yml`
 - Reddit
 - Substack
-- Techmeme
 - Podcast RSS
 - Atom feeds
-- YouTube scraper code exists, but is disabled in the default runner
+- discussion-comment catch-up refresh
+
+X sync and YouTube configuration paths exist outside the default scheduled scraper runner.
 
 ## 6. Configuration and Environment
 
-`app/core/settings.py` is the config authority. Settings are loaded from `.env` and exposed through a cached `Settings` object.
+`app/core/settings.py` is the config authority. Settings are loaded from `NEWSLY_ENV_FILE` with `.env` as the default and exposed through a cached `Settings` object. Docker Compose defaults to `.env.docker.local`; RackNerd deploys use `.env.racknerd`.
 
 ### 6.1 Core configuration groups
 
 - database
-  - `DATABASE_URL`, pool size, overflow
+  - `DATABASE_URL`, pool size, overflow; PostgreSQL is required
 - auth
   - `JWT_SECRET_KEY`, algorithm, access/refresh expiry, `ADMIN_PASSWORD`
 - worker limits
   - max workers, timeouts, retry limits, checkout timeout
 - external providers
-  - OpenAI, Anthropic, Google, Cerebras, Exa, ElevenLabs, Firecrawl
+  - OpenAI, Anthropic, Google, Cerebras, OpenRouter, Exa, ElevenLabs, Firecrawl, Runware
 - tracing
   - Langfuse host, keys, sample rate, instrumentation mode
 - discovery and onboarding
@@ -285,47 +317,61 @@ Unified scrapers for scheduled or manual feed ingestion:
 - HTTP client
   - timeout and retry counts
 - storage paths
-  - media, logs, and generated images
+  - media, logs, generated images, content bodies, personal markdown libraries
+- object storage
+  - local or S3-compatible content-body storage
 - crawl4ai options
   - table extraction and chunking flags
 - Firecrawl
   - API key and timeout for HTML fallback extraction
+
+Production rejects wildcard CORS origins and non-PostgreSQL database URLs during settings validation.
 
 ### 6.2 Path conventions
 
 - media defaults to `./data/media`
 - logs default to `./logs`
 - images default to `/data/images` when writable, otherwise `./data/images`
+- content bodies default to `./data/content_bodies`
+- personal markdown libraries default to `./data/personal_markdown`
 
 ## 7. Data Model
 
-The SQLAlchemy schema lives primarily in `app/models/schema.py` and `app/models/user.py`.
+SQLAlchemy tables live under `app/models/db/`. API DTOs, domain objects, metadata contracts, internal runtime shapes, and LLM output models live in sibling `app/models/` subpackages.
 
 ### 7.1 Primary tables
 
 | Table | Purpose | Notes |
 |---|---|---|
-| `users` | End users and admin users | Apple identity, profile, onboarding flags, X username |
-| `contents` | Canonical content records | Content type, URL, source/platform, lifecycle status, JSON metadata, publication date |
-| `processing_tasks` | Async task queue | Task type, queue partition, payload, retries, timestamps |
-| `content_read_status` | Per-user read marks | One row per user/content |
-| `content_favorites` | Per-user favorites | One row per user/content |
+| `users` | End users and admin users | Apple identity, profile, onboarding flags, X username, display preferences |
+| `contents` | Canonical long-form records and compatibility rows | Content type, URL, source/platform, lifecycle status, compact metadata, publication date |
+| `content_bodies` | Canonical body storage pointers | Source/rendered text stored outside `content_metadata` in local or S3-compatible storage |
+| `processing_tasks` | Async task queue | Task type, queue partition, normalized payload, active dedupe key, retries, lease timestamps |
+| `content_status` | Per-user inbox/feed membership | Main long-form visibility overlay |
+| `content_read_status` | Per-user read marks for `contents` | One row per user/content |
+| `content_knowledge_saves` | Per-user Knowledge saves | Drives saved-content state and personal markdown sync |
 | `content_unlikes` | Per-user dislike/unlike state | One row per user/content |
-| `content_status` | Per-user inbox/feed membership | Used to decide whether long-form content is visible to a given user |
-| `content_discussions` | Persisted discussion payload | HN/Reddit/Techmeme/social discussion snapshots |
-| `user_scraper_configs` | User-managed feed subscriptions | Substack, Atom, podcast RSS, YouTube, Reddit |
-| `news_items` | Short-form news rows | Visible news feed items, summaries, source metadata, clustering relations |
-| `feed_discovery_runs` | Discovery run metadata | Seed favorites, token/timing usage, status |
+| `content_discussions` | Long-form and legacy discussion payloads | HN/Reddit/Techmeme/social discussion snapshots tied to `contents` |
+| `news_items` | Canonical short-form/Fast Reads rows | Visible representative news items, summaries, source metadata, clustering relations |
+| `news_item_discussions` | Canonical short-form discussion payloads | Latest raw-comment storage pointer, structured summary, refresh status and lease |
+| `news_item_read_status` | Per-user read marks for `news_items` | Separate from `content_read_status` |
+| `audio_episodes` | On-demand podcast-style episode state | Fast Reads brief, long-form council, and news-item discussion episodes |
+| `user_scraper_configs` | User-managed feed subscriptions | Substack, Atom, podcast RSS, YouTube, Reddit, aggregator subscriptions |
+| `feed_discovery_runs` | Discovery run metadata | Seed Knowledge items, token/timing usage, status |
 | `feed_discovery_suggestions` | Discovery recommendations | Feed/podcast/YouTube suggestions with score/rationale |
 | `onboarding_discovery_runs` | Async onboarding runs | Audio/topic-driven discovery state |
 | `onboarding_discovery_lanes` | Onboarding lane plans | Lane target, queries, progress |
-| `onboarding_discovery_suggestions` | Onboarding recommendations | Sources/subreddits chosen during onboarding |
+| `onboarding_discovery_suggestions` | Onboarding recommendations | Sources/subreddits/aggregators chosen during onboarding |
 | `analytics_interactions` | Append-only interaction events | Surface + context payload |
 | `user_integration_connections` | Per-user external connections | X OAuth and BYO provider credential storage |
 | `user_integration_sync_state` | Cursor/state for a connection | Last sync cursor, status, metadata |
+| `user_integration_synced_items` | Per-user integration sync ledger | Prevents duplicate bookmark-derived items |
+| `vendor_usage_records` | Provider usage and cost ledger | LLM, image, transcription, and other provider usage |
 | `user_api_keys` | Machine access keys | Prefix + hash + audit fields |
-| `chat_sessions` | Stored chat sessions | Session type, model/provider, optional content link, snapshot |
+| `cli_link_sessions` | CLI/device link sessions | Links local agent clients to approved API keys |
+| `chat_sessions` | Stored chat sessions | Session type, model/provider, optional content/news link, snapshot |
 | `chat_messages` | Stored message history | Serialized pydantic-ai messages plus async message status |
+| `user_feedback` | User-submitted feedback | Admin-visible product feedback |
 
 ### 7.2 Fast-news read model
 
@@ -333,12 +379,19 @@ The SQLAlchemy schema lives primarily in `app/models/schema.py` and `app/models/
 
 `contents` rows with `content_type='news'` are legacy compatibility records. They may still exist as bridges for older content-card/detail surfaces, historical discussion payloads, or conversion flows, but they should not be treated as the source of truth for new fast-news behavior. When a bridge exists, `news_items.legacy_content_id` is the explicit link back to the legacy `contents` row.
 
+Visible Fast Reads are ready representative `news_items` filtered by one of:
+
+- `visibility_scope='user'` and matching `user_id`
+- global aggregator/topic rows that match the user's selected source configs
+
+Read state for Fast Reads is stored in `news_item_read_status`, not `content_read_status`.
+
 ### 7.3 Content model
 
 `contents` is the central table. Key fields:
 
 - `content_type`
-  - `article`, `podcast`, `news`, `unknown`
+  - `article`, `podcast`, `news`, `insight_report`, `unknown`
 - `url`
   - canonical normalized URL
 - `source_url`
@@ -348,7 +401,7 @@ The SQLAlchemy schema lives primarily in `app/models/schema.py` and `app/models/
 - `platform`
   - source platform such as `youtube`, `substack`, `reddit`, `hackernews`, `x`
 - `status`
-  - `new`, `pending`, `processing`, `completed`, `failed`, `skipped`
+  - `new`, `pending`, `processing`, `awaiting_image`, `completed`, `failed`, `skipped`
 - `classification`
   - currently used for read priority / skip behavior
 - `content_metadata`
@@ -356,8 +409,8 @@ The SQLAlchemy schema lives primarily in `app/models/schema.py` and `app/models/
 
 The `content_metadata` JSON holds most type-specific payloads:
 
-- article body and author data
-- podcast transcript/audio/thumbnail
+- compact article and author data
+- podcast audio/thumbnail metadata
 - news article/discussion metadata
 - summaries and summary version/kind
 - image generation outputs
@@ -365,34 +418,37 @@ The `content_metadata` JSON holds most type-specific payloads:
 - processing workflow state
 - share-and-chat flags and other submission metadata
 
+Full source/rendered body text belongs in `content_bodies`; API metadata sanitization strips legacy full-body fields before responses.
+
 ### 7.4 User visibility model
 
-Long-form content visibility is user-scoped. News items are globally visible once completed; articles and podcasts usually require a `content_status` inbox row for that user.
+Long-form content visibility is user-scoped. Articles and podcasts usually require a `content_status` inbox row for that user. Fast Reads have a separate `news_items` visibility model described above.
 
 The shared visibility query in `app/repositories/content_feed_query.py` enforces:
 
 - `Content.status == completed`
 - `classification != skip`
 - inbox membership for articles and podcasts
-- favorites/recently-read derived from overlay tables
+- Knowledge/read-state overlays from `content_knowledge_saves` and `content_read_status`
 
 ### 7.5 Chat persistence model
 
 Chat is server-stored, not client-authoritative.
 
 - `chat_sessions`
-  - one logical conversation
+  - one logical conversation, optionally attached to `content_id` or `news_item_id`
 - `chat_messages`
   - serialized pydantic-ai message arrays plus render metadata
 - async message state
   - `processing`, `completed`, `failed`
+  - the iOS client polls status for async message completion
 
 ### 7.6 Schema evolution
 
 Alembic migration history in `migrations/alembic/versions/` shows the app’s major feature evolution:
 
 - initial content + user schema
-- read/favorite state and user-based tracking
+- read/Knowledge state and user-based tracking
 - chat tables
 - per-user scraper configs and `content_status`
 - news content type
@@ -406,10 +462,17 @@ Alembic migration history in `migrations/alembic/versions/` shows the app’s ma
 - user API keys
 - news feed ranking settings
 - user feedback submissions
+- content-body storage
+- CLI link sessions
+- vendor usage records
+- Knowledge-save rename
+- news-item discussions and news chat linkage
+- audio episodes
+- user integration synced-item ledger
 
 ## 8. API Surface
 
-The API is split between the main content namespace and additive feature namespaces.
+The API is split between the main content namespace, the short-form news namespace, and additive feature namespaces. Exact wire contracts are exported to `docs/library/reference/openapi.json`; generated Swift and Go artifacts must be regenerated from that export rather than edited manually.
 
 ### 8.1 Auth and profile
 
@@ -447,9 +510,16 @@ Prefix: `/api/content`
 #### Detail and narration
 
 - `GET /api/content/{content_id}`
+- `GET /api/content/{content_id}/body`
 - `GET /api/content/{content_id}/discussion`
+- `POST /api/content/{content_id}/discussion/refresh`
 - `GET /api/content/{content_id}/chat-url`
 - `GET /api/content/narration/{target_type}/{target_id}`
+- `POST /api/content/audio-episodes/fast-news`
+- `POST /api/content/{content_id}/audio-episodes/council`
+- `GET /api/content/audio-episodes/{audio_episode_id}`
+- `GET /api/content/audio-episodes/{audio_episode_id}/audio`
+- `GET /api/content/audio-episodes/{audio_episode_id}/stream`
 
 #### Content actions
 
@@ -457,15 +527,15 @@ Prefix: `/api/content`
 - `POST /api/content/{content_id}/download-more`
 - `POST /api/content/{content_id}/tweet-suggestions`
 
-#### Read/favorite state
+#### Read and Knowledge state
 
 - `POST /api/content/{content_id}/mark-read`
 - `DELETE /api/content/{content_id}/mark-unread`
 - `POST /api/content/bulk-mark-read`
 - `GET /api/content/recently-read/list`
-- `POST /api/content/{content_id}/favorite`
-- `DELETE /api/content/{content_id}/unfavorite`
-- `GET /api/content/favorites/list`
+- `POST /api/content/{content_id}/knowledge`
+- `DELETE /api/content/{content_id}/knowledge`
+- `GET /api/content/knowledge/list`
 
 #### Submission and status
 
@@ -474,9 +544,9 @@ Prefix: `/api/content`
 
 #### Stats
 
-- `GET /api/content/unread-counts`
-- `GET /api/content/processing-count`
-- `GET /api/content/long-form`
+- `GET /api/content/stats/unread-counts`
+- `GET /api/content/stats/processing-count`
+- `GET /api/content/stats/long-form`
 
 #### Chat
 
@@ -487,11 +557,31 @@ Prefix: `/api/content`
 - `GET /api/content/chat/sessions/{session_id}`
 - `DELETE /api/content/chat/sessions/{session_id}`
 - `POST /api/content/chat/sessions/{session_id}/messages`
+- `POST /api/content/chat/sessions/{session_id}/council/start`
+- `POST /api/content/chat/sessions/{session_id}/council/select`
+- `POST /api/content/chat/sessions/{session_id}/council/retry`
 - `POST /api/content/chat/assistant/turns`
 - `GET /api/content/chat/messages/{message_id}/status`
 - `POST /api/content/chat/sessions/{session_id}/initial-suggestions`
 
-### 8.3 Discovery
+### 8.3 News API
+
+Prefix: `/api/news`
+
+This is the canonical short-form/Fast Reads surface. SwiftUI news-only lists use this API rather than `/api/content`.
+
+Endpoints:
+
+- `GET /api/news/items`
+- `POST /api/news/items/mark-read`
+- `GET /api/news/items/{news_item_id}`
+- `GET /api/news/items/{news_item_id}/body`
+- `GET /api/news/items/{news_item_id}/discussion`
+- `POST /api/news/items/{news_item_id}/discussion/refresh`
+- `POST /api/news/items/{news_item_id}/convert-to-article`
+- `POST /api/news/items/{news_item_id}/audio-episodes/discussion`
+
+### 8.4 Discovery
 
 Prefix: `/api/discovery/...`
 
@@ -506,7 +596,7 @@ Endpoints:
 - `POST /api/discovery/dismiss`
 - `POST /api/discovery/clear`
 
-### 8.4 Onboarding
+### 8.5 Onboarding
 
 Prefix: `/api/onboarding`
 
@@ -520,9 +610,9 @@ Endpoints:
 - `POST /api/onboarding/complete`
 - `POST /api/onboarding/tutorial-complete`
 
-### 8.5 Scraper config management
+### 8.6 Scraper config management
 
-Prefix: `/api/scrapers`
+Prefixes: `/api/scrapers` and `/api/content/scrapers`
 
 Endpoints:
 
@@ -532,15 +622,16 @@ Endpoints:
 - `DELETE /api/scrapers/{config_id}`
 - `POST /api/scrapers/subscribe`
 
-### 8.6 Analytics interactions
+### 8.7 Analytics interactions and feedback
 
 Prefix: `/api`
 
 Endpoints:
 
 - `POST /api/analytics`
+- `POST /api/feedback`
 
-### 8.7 Agent / machine-facing APIs
+### 8.8 Agent / machine-facing APIs
 
 Prefix: `/api`
 
@@ -551,10 +642,15 @@ Endpoints:
 - `POST /api/agent/onboarding`
 - `GET /api/agent/onboarding/{run_id}`
 - `POST /api/agent/onboarding/{run_id}/complete`
+- `POST /api/agent/cli/link/start`
+- `POST /api/agent/cli/link/{session_id}/approve`
+- `GET /api/agent/cli/link/{session_id}`
+- `GET /api/agent/library/manifest`
+- `GET /api/agent/library/file`
 
 These are additive APIs for machine or agent flows, not a separate v2 backend.
 
-### 8.8 X integrations
+### 8.9 X integrations
 
 Prefixes:
 
@@ -570,16 +666,16 @@ X endpoints:
 
 LLM integration endpoints are mounted from `integrations.llm_router` and back user-managed provider keys.
 
-### 8.9 OpenAI helper endpoints
+### 8.10 OpenAI helper endpoints
 
 Prefix: `/api/openai`
 
 Endpoints:
 
-- `POST /api/openai/realtime/token`
+- `GET /api/openai/transcriptions/health`
 - `POST /api/openai/transcriptions`
 
-### 8.10 Admin UI and logs
+### 8.11 Admin UI and logs
 
 Prefix: `/admin`
 
@@ -589,7 +685,9 @@ Representative routes:
 - onboarding lane preview
 - eval summaries and eval run trigger
 - API key management
+- feedback and insight report review
 - log browser and error reset tools
+- vendor and LLM usage dashboards
 
 ## 9. Queue and Worker Architecture
 
@@ -666,10 +764,12 @@ used by `app/services/queue.py`:
 
 `QueueService` provides:
 
-- enqueue with optional dedupe for selected content task types
-- dequeue with compare-and-set claiming
+- enqueue with task-spec-normalized payloads and queue names from `TASK_SPECS`
+- dedupe controlled by `TaskSpec`, explicit `dedupe_key`, and a partial unique index over active `pending`/`processing` rows
+- dequeue with compare-and-set claiming via `FOR UPDATE SKIP LOCKED`
+- worker leases for active tasks, with expired `processing` rows eligible for reclaim
 - retry bucket rotation to reduce starvation
-- retry scheduling through delayed `created_at`
+- retry scheduling through delayed `available_at`
 - completion and retry state transitions
 
 This design assumes PostgreSQL row-locking and notification features, including
@@ -682,9 +782,11 @@ This design assumes PostgreSQL row-locking and notification features, including
 Responsibilities:
 
 - poll one queue partition
+- wait on PostgreSQL `LISTEN`/`NOTIFY` with polling fallback
 - normalize task payload into `TaskEnvelope`
 - dispatch to a typed handler
 - wrap execution in Langfuse tracing
+- renew task leases while long tasks execute
 - apply retry/backoff policy
 - gracefully handle shutdown signals
 
@@ -712,6 +814,14 @@ Registered handlers:
 - generate insight report
 - generate audio episode
 
+### 9.5 Worker launch and drift guards
+
+Workers are launched per queue partition. `scripts/dev.sh` and `scripts/start_services.sh` start `content`, `media`, `audio_episode`, `image`, `onboarding`, `backfill`, `discussion`, `twitter`, and `chat` workers. The `content` queue runs with higher parallelism by default because it carries the widest set of user-visible work.
+
+`supervisor.conf` and `docker/supervisord.conf` mirror the same queue partitions; `docker/supervisord.server.conf` intentionally starts only server/bootstrap processes. `tests/scripts/test_supervisor_queue_config.py` derives expected worker coverage from `TaskQueue` and guards host/Docker config drift.
+
+`scripts/watchdog_queue_recovery.py` is part of the production runtime. It moves misrouted active tasks back to their task-spec queue and requeues stale media, process-content, process-news-item, and integration-sync work.
+
 ## 10. Content Ingestion and Processing Flow
 
 ### 10.1 Main long-form flow
@@ -721,10 +831,13 @@ flowchart TD
   Submit["User submit or scraper"] --> Create["Create/reuse content row"]
   Create --> Analyze["ANALYZE_URL (optional)"]
   Analyze --> Process["PROCESS_CONTENT"]
+  Process --> Media["PROCESS_PODCAST_MEDIA (podcasts)"]
+  Media --> Summary
   Process --> Summary["SUMMARIZE"]
   Summary --> Discussion["FETCH_DISCUSSION (when applicable)"]
   Summary --> Image["GENERATE_IMAGE (article/podcast)"]
-  Summary --> Done["completed content"]
+  Image --> DoneImage["completed content"]
+  Summary --> DoneSummary["completed or awaiting_image content"]
 ```
 
 ### 10.2 User submission flow
@@ -739,7 +852,7 @@ Behavior:
 - attach submission metadata such as `submitted_by_user_id`, `submitted_via`, `platform_hint`
 - ensure inbox status for the submitting user
 - enqueue `ANALYZE_URL`
-- optionally set `crawl_links`, `subscribe_to_feed`, or `share_and_chat`
+- optionally set `crawl_links`, `subscribe_to_feed`, `share_and_chat`, or `save_to_knowledge_and_mark_read`
 
 ### 10.3 URL analysis
 
@@ -775,10 +888,11 @@ Current strategy set:
 - `ArxivProcessorStrategy`
 - `PubMedProcessorStrategy`
 - `YouTubeProcessorStrategy`
+- `TwitterShareStrategy`
 - `PdfProcessorStrategy`
 - `ImageProcessorStrategy`
+- `PlainTextProcessorStrategy`
 - `HtmlProcessorStrategy`
-- `TwitterShareStrategy`
 
 Behavioral notes:
 
@@ -786,23 +900,21 @@ Behavioral notes:
 - YouTube extraction can provide transcript and provider thumbnail metadata
 - Twitter/X posts can carry embedded-video metadata and route through media transcription before summarization.
 - image URLs can short-circuit to skipped states
+- plain-text URLs are downloaded directly and summarized from their text body
 - HTML is the broad fallback: crawl4ai is primary, with Firecrawl scrape as the paid recovery path when crawl4ai fails or returns suspect content.
 
 ### 10.6 Podcast-specific flow
 
-Podcast processing is split further:
+Normal podcast processing is:
 
-- `download_audio`
-  - fetch audio and store under `settings.podcast_media_dir`
-- `transcribe`
-  - run Whisper through `app/services/whisper_local.py`
-- `summarize`
+- `PROCESS_CONTENT`
+  - identify podcast metadata and enqueue media work
+- `PROCESS_PODCAST_MEDIA`
+  - download, normalize, transcribe when needed, persist transcript/body state, then enqueue `SUMMARIZE`
+- `SUMMARIZE`
   - summarize transcript once text is available
 
-Workers:
-
-- `PodcastDownloadWorker`
-- `PodcastTranscribeWorker`
+`DOWNLOAD_AUDIO` and `TRANSCRIBE` handlers still exist as compatibility paths for older queued work and tests.
 
 Tweet video processing reuses the same audio primitives:
 
@@ -818,7 +930,9 @@ Tweet video processing reuses the same audio primitives:
 Current defaults:
 
 - news
-  - `google:gemini-3.1-flash-lite-preview`
+  - `openrouter:deepseek/deepseek-v4-flash`
+- discussion summaries
+  - `openrouter:deepseek/deepseek-v4-flash`
 - articles
   - `openai:gpt-5.4-mini`
 - podcasts
@@ -833,7 +947,7 @@ Key behaviors:
 - quote pruning
 - fallback routing for provider errors, context limits, and event-loop issues
 
-Summary shapes live in `app/models/metadata.py` and `app/models/summary_contracts.py`.
+Summary shapes live in `app/models/metadata/` and `app/models/metadata/summary_contracts.py`.
 
 ### 10.8 Discussion fetching
 
@@ -847,8 +961,8 @@ summary in the database, and enforces a one-hour refresh TTL. Before downloading
 claims the row with `last_refresh_status="processing"` and a short `next_refresh_after` lease so
 queued work, explicit refreshes, and the scheduled catch-up scraper do not fetch the same thread
 at the same time. Scrape-time comment counts are captured during news ingestion without fetching
-full comment trees; newly-created supported news items enqueue `FETCH_NEWS_ITEM_DISCUSSION` so raw
-comments and summaries are generated by the content queue. The scheduled `DiscussionComments`
+full comment trees; newly-created supported news items enqueue `FETCH_NEWS_ITEM_DISCUSSION` on the
+`discussion` queue so raw comments and summaries are generated asynchronously. The scheduled `DiscussionComments`
 scraper is a periodic catch-up path for due or missed discussion refreshes.
 
 Supported discussion sources include:
@@ -858,14 +972,15 @@ Supported discussion sources include:
 - Techmeme-linked discussions
 - selected social/link platforms when discoverable
 
-Stored output lands in `content_discussions` and may also denormalize preview fields into content metadata.
+Stored output lands in `content_discussions` for long-form/legacy content and `news_item_discussions` for canonical short-form news discussions.
 
 ### 10.9 Image generation
 
-`app/services/image_generation.py` uses Google Gemini image generation to create:
+`app/services/image_generation.py` uses Google Gemini and optional Runware generation to create:
 
-- editorial infographics for articles and podcasts
-- thumbnails and derivative resized assets
+- editorial infographics for articles, podcasts, and insight reports
+- news thumbnails
+- derivative resized assets
 
 Generated files are stored in image directories resolved by `app/utils/image_paths.py` and exposed from `/static/images/...`.
 
@@ -876,15 +991,21 @@ Generated files are stored in image directories resolved by `app/utils/image_pat
 
 `app/scraping/runner.py` currently runs these scrapers by default:
 
-- Hacker News
+- configured aggregators from `config/aggregators.yml`
+  - Hacker News
+  - Techmeme
+  - Mediagazer
+  - Memeorandum
+  - SciURLs
+  - FinURLs
+  - Brutalist Report
 - Reddit
 - Substack
-- Techmeme
 - Podcast RSS
-- Twitter/X
 - Atom
+- DiscussionComments catch-up
 
-The YouTube scraper implementation exists but is commented out in the default runner.
+X sync is handled through integration-sync jobs, not the default scraper runner. YouTube config support exists for user-managed sources, but there is no default scheduled YouTube scraper in the runner.
 
 ### 11.2 Scraper behavior
 
@@ -892,9 +1013,10 @@ Scrapers generally:
 
 - fetch items from a source
 - normalize URLs and metadata
-- dedupe against existing content
-- create new `contents` rows with `status=new`
-- enqueue processing
+- dedupe against existing content or news rows
+- upsert canonical `news_items` for short-form aggregator/news sources
+- create or reuse `contents` rows for long-form article/podcast sources
+- enqueue processing, enrichment, or discussion refresh work through `QueueService`
 - ensure inbox visibility for relevant users when source ownership is user-specific
 - emit structured log entries and in-process scraper metrics
 
@@ -907,6 +1029,7 @@ Scrapers generally:
 - `podcast_rss`
 - `youtube`
 - `reddit`
+- `aggregator`
 
 `app/services/scraper_configs.py` normalizes config payloads and enforces limits and required fields.
 
@@ -916,11 +1039,11 @@ These are related but separate systems.
 
 ### 12.1 Feed discovery
 
-`app/services/feed_discovery.py` is a favorites-driven discovery workflow.
+`app/services/feed_discovery.py` is a Knowledge-driven discovery workflow.
 
 Inputs:
 
-- user favorites
+- user Knowledge saves
 - Exa web results
 - LLM-selected discovery directions and lanes
 
@@ -946,7 +1069,7 @@ Capabilities:
 - run fast source discovery
 - run audio-driven discovery planning with multiple lanes
 - persist onboarding lanes and suggestions
-- complete onboarding by creating user scraper configs and feed memberships
+- complete onboarding by creating user scraper configs, aggregator subscriptions, and feed memberships
 
 Primary/default onboarding model today:
 
@@ -956,7 +1079,7 @@ Fallbacks are defined for discovery and audio plan generation.
 
 ### 12.3 Discovery boundaries
 
-Discovery does not directly replace the content feed. It proposes sources or feed subscriptions that then become normal user scraper configs or inbox content through the existing ingestion pipeline.
+Discovery does not directly replace the content feed. It proposes sources, aggregators, or feed subscriptions that then become normal user scraper configs or inbox content through the existing ingestion pipeline.
 
 ## 13. Chat, Deep Research, and Agent Features
 
@@ -967,11 +1090,17 @@ Discovery does not directly replace the content feed. It proposes sources or fee
 Capabilities:
 
 - article-aware deep-dive chat
+- short-form news-aware chat
 - topic chat
 - ad hoc chat
 - source-backed Exa web search
+- Knowledge search and personal markdown context
 - persisted sessions and messages
 - model/provider tracking per session
+- async message status polling
+- council mode start/select/retry flows
+
+Chat sessions can attach to either `content_id` or `news_item_id`. The iOS client sends compact screen context, polls async message status, and can continue active sessions through `ActiveChatSessionManager`.
 
 The system prompt explicitly instructs the agent to use web search and cite sources when it does.
 
@@ -993,16 +1122,19 @@ The `/api/agent/*` surface wraps existing features into machine-friendly flows:
 
 - external search
 - onboarding start/status/complete
+- CLI link approval/polling
+- personal markdown library manifest/file reads
 - job polling
 
 These APIs are intended for assistant and CLI style clients that do not need the full mobile UI semantics.
 
 ## 14. Audio and Narration Systems
 
-Audio support is intentionally non-live.
+Audio support is intentionally non-live. The active voice path is authenticated upload transcription, not a realtime websocket voice client.
 
 Active modules:
 
+- `app/services/audio_episodes.py`
 - `app/services/voice/narration_tts.py`
 - `app/routers/api/openai.py`
 
@@ -1010,9 +1142,23 @@ Active modules:
 
 `/api/openai/transcriptions` accepts uploaded audio and returns backend-managed STT results.
 
+The iOS client uses this for onboarding voice input, chat composer dictation, quick mic flows, and tweet suggestions.
+
 ### 14.2 Narration flow
 
 Narration text is generated from content and rendered to one-shot TTS audio via `narration_tts.py`.
+
+### 14.3 Audio episode flow
+
+Audio episodes are separate from narration. They are backed by `audio_episodes` rows and `GENERATE_AUDIO_EPISODE` tasks on the `audio_episode` queue.
+
+Current episode kinds:
+
+- Fast Reads digest
+- long-form content council discussion
+- short-form news-item discussion
+
+Episode routes can enqueue background generation, generate inline for stream delivery, or serve a cached MP3.
 
 ## 15. X Integration and External Connections
 
@@ -1067,6 +1213,10 @@ Search is intentionally abstracted from the routers.
 - Exa web search
 - podcast episode search providers
 
+### 16.3 Knowledge search
+
+Knowledge search is intentionally scoped to user-saved content. Assistant tools and library APIs read from `content_knowledge_saves`, `content_bodies`, and the personal markdown library rather than searching every visible feed item.
+
 ## 17. iOS Client Architecture
 
 The SwiftUI client lives in `client/newsly/newsly/`.
@@ -1084,11 +1234,11 @@ Primary layers:
 - `Repositories/`
   - content and read-status repository wrappers
 - `Services/`
-  - API client, auth, chat, discovery, narration, voice, X integration, image cache, notifications
+  - API client, auth, chat, discovery, narration, audio episodes, transcription, X integration, image cache, notifications
 - `ViewModels/`
   - feature-level state and pagination
 - `Views/`
-  - authenticated root, lists, detail, chat, discovery, onboarding, settings, sources, live voice, knowledge views
+  - authenticated root, lists, detail, chat, discovery, onboarding, settings, sources, dictation/quick mic, Knowledge views
 - `Shared/`
   - app chrome, state stores, shared container utilities
 
@@ -1103,10 +1253,11 @@ The client has dedicated flows for:
 - content lists and search
 - content detail
 - short-form news
-- chat session history and message views
-- discovery and onboarding
-- live voice
-- settings and sources
+- audio episodes and narration playback
+- chat session history, async message polling, and council flows
+- discovery and onboarding, including aggregator selection and resumable voice discovery
+- backend-managed transcription/dictation
+- settings, feedback, CLI link, X OAuth, display preferences, council personas, debug tools, and sources
 - submissions and processing status
 - X integration
 
@@ -1135,6 +1286,8 @@ Supporting scripts:
 
 OpenAPI is authoritative for the public wire format. Checked-in Go and Swift generated artifacts must be regenerated from those scripts rather than edited manually.
 
+The iOS runtime still uses hand-written `APIClient`, `APIEndpoints`, services, and Codable DTOs for most networking. Generated Swift contracts are selectively consumed for canonical enums and future typed-client/drift-check work.
+
 ## 18. iOS Share Extension
 
 The share extension lives in `client/newsly/ShareExtension/`.
@@ -1152,7 +1305,9 @@ The extension:
 - shares auth state through the app group / shared keychain
 - submits URLs to the backend
 - lets the user choose whether the backend should summarize, crawl linked pages, or subscribe to the site feed
+- supports a "Bookmark only" path that sends `save_to_knowledge_and_mark_read`
 - can submit a chat-start request that saves the item to Knowledge, processes it normally, and uses the typed share-sheet message as the first content-linked chat turn
+- applies platform hints for X, YouTube, podcast hosts, and other known URL shapes
 
 ## 19. Admin UI
 
@@ -1187,6 +1342,8 @@ The codebase standard is direct `logger.error()` / `logger.exception()` calls wi
 
 Structured JSONL logs store operational payloads for scraper events, failures, maintenance work, and HTTP/request diagnostics. The admin log views read these files from the configured logs directory.
 
+Current log layout includes `logs/errors/` for ERROR+ records and `logs/structured/` for structured operational streams. Request logging attaches request IDs, response-time headers, redacted header/payload summaries, route names, and duration-based severity.
+
 ### 20.3 Langfuse
 
 Langfuse tracing is initialized during app startup and used in:
@@ -1202,54 +1359,98 @@ Per repo conventions, ERROR+ logs are written to JSONL error logs under `logs/er
 
 ## 21. Operations and Scripts
 
-Representative scripts under `scripts/`:
+### 21.1 Admin CLI
 
-### 21.1 Core runtime
+The `admin` project script (`admin.cli:main`) is the operator surface for Docker-backed production. It exposes:
 
+- `db`
+- `logs`
+- `usage`
+- `health`
+- `events`
+- `debug`
+- allowlisted `fix` commands
+
+Commands emit a stable `--output json|text` envelope. Remote commands SSH to the host and run `python -m admin.remote` inside the `newsly` container. Mutating fixes require explicit apply/confirmation flags.
+
+### 21.2 Local runtime
+
+Local development runs native services against local PostgreSQL. Docker is the staging/production runtime, not the default local-dev path.
+
+Representative local entrypoints:
+
+- `scripts/dev.sh`
+- `scripts/start_services.sh`
 - `scripts/start_server.sh`
 - `scripts/run_workers.py`
 - `scripts/start_workers.sh`
 - `scripts/run_scrapers.py`
 - `scripts/start_scrapers.sh`
+- `scripts/run_supervisor_status.py`
 
-### 21.2 Schema and bootstrapping
+### 21.3 Docker runtime
 
-- `scripts/init_database.py`
+The supported Docker runtime is a single `newsly` container with embedded Postgres and Supervisor. `docker/entrypoint.sh` initializes `/data`, builds `DATABASE_URL` from `POSTGRES_*`, and selects `NEWSLY_RUNTIME_MODE=full` or `server`.
+
+Full mode runs:
+
+- bootstrap/migrations
+- API
+- all queue workers
+- queue watchdog
+- scheduler via `docker/supercronic.py` and `docker/crontab`
+
+Server mode intentionally starts only API/bootstrap processes.
+
+### 21.4 Schema and bootstrapping
+
 - `scripts/check_and_run_migrations.sh`
 - Alembic migrations under `migrations/alembic/`
+- `scripts/setup_local_postgres.sh`
+- `scripts/load_production_snapshot.py`
 
-### 21.3 Discovery and sync
+### 21.5 Discovery and sync
 
 - `scripts/run_feed_discovery.py`
 - `scripts/run_integration_sync.py`
+- `scripts/run_twitter_sync.py`
 
-### 21.4 Content maintenance
+### 21.6 Queue and content maintenance
 
+- `scripts/queue_control.py`
+- `scripts/watchdog_queue_recovery.py`
+- `scripts/start_queue_watchdog.sh`
 - `scripts/reset_errored_content.py`
 - `scripts/reset_content_processing.py`
 - `scripts/reconcile_stale_long_form_processing.py`
 - `scripts/cancel_ineligible_generate_image_tasks.py`
-- `scripts/resummarize_podcasts.py`
 - `scripts/retranscribe_podcasts.py`
 - `scripts/generate_thumbnails.py`
 - `scripts/resize_thumbnails.py`
 
-### 21.5 Contract and documentation generation
+### 21.7 Contract and documentation generation
 
 - `scripts/export_openapi_schema.py`
 - `scripts/export_agent_openapi_schema.py`
 - `scripts/generate_ios_contracts.py`
+- `scripts/generate_ios_openapi_artifacts.sh`
+- `scripts/generate_agent_cli_artifacts.sh`
+- `scripts/regenerate_public_contracts.sh`
+- `scripts/check_public_contracts.sh`
 - `docs/generate_codebase_docs.sh`
 - `docs/generate_architecture.sh`
 - `scripts/update-docs-from-commit.sh`
 
-### 21.6 Diagnostics and reports
+### 21.8 Diagnostics, reports, and deploy helpers
 
 - `scripts/dump_database.py`
 - `scripts/dump_system_stats.py`
 - `scripts/view_remote_errors.sh`
 - `scripts/build_prompt_debug_report.py`
 - `scripts/generate_eval_html_report.py`
+- `scripts/sync_logs_from_server.sh`
+- `scripts/pull_production_db.sh`
+- `scripts/deploy/push_envs.sh`
 
 ## 22. Testing Strategy
 
@@ -1258,18 +1459,27 @@ The test suite under `tests/` mirrors the codebase structure and covers both uni
 Top-level coverage areas include:
 
 - `tests/core/`
+- `tests/admin/`
+- `tests/application/`
+- `tests/contracts/`
 - `tests/domain/`
+- `tests/evals/`
 - `tests/http_client/`
 - `tests/integration/`
+- `tests/ios_e2e/`
 - `tests/models/`
 - `tests/pipeline/`
 - `tests/presenters/`
 - `tests/processing_strategies/`
+- `tests/queries/`
+- `tests/repositories/`
 - `tests/routers/`
+- `tests/schemas/`
 - `tests/scraping/`
+- `tests/scripts/`
 - `tests/services/`
+- `tests/support/`
 - `tests/utils/`
-- `tests/cli/`
 
 Key test infrastructure:
 
@@ -1287,29 +1497,26 @@ The suite covers:
 - X integration
 - search and visibility semantics
 - scraper behavior
+- generated contract drift
+- admin CLI and operator tooling
+
+Architecture drift is guarded by CI, `scripts/architecture_guard.sh`, public contract checks, admin CLI tests, and supervisor queue tests. `tests/scripts/test_supervisor_queue_config.py` derives expected worker queues from `TaskQueue` and verifies host/Docker supervisor configs stay aligned.
 
 ## 23. Known Constraints and Risks
 
 The architecture is intentionally pragmatic, but a few constraints are explicit in the code:
 
-### 23.1 Admin sessions are in memory
+### 23.1 Admin sessions are stateless
 
-`app/routers/auth.py` stores admin sessions in an in-memory set.
+Admin login issues a signed JWT cookie with a configured TTL. This is restart-safe, but there is no server-side revocation list or persistent admin-session audit trail.
 
-Implications:
+### 23.2 Apple token verification depends on Apple JWKS
 
-- lost on restart
-- not multi-instance safe
-- no persistent audit trail
-- no TTL-backed expiry
+Apple Sign In verifies ID tokens with Apple JWKS, RS256, audience, and issuer checks. Runtime availability depends on reaching Apple's key endpoint when a signing key is needed.
 
-### 23.2 Apple token verification is not production-grade yet
+### 23.3 CORS is permissive by default
 
-`app/core/security.py` currently decodes Apple ID tokens without verifying the signature against Apple's public keys. The file explicitly marks this as MVP-only behavior.
-
-### 23.3 CORS is wide open
-
-`app/main.py` currently allows all origins, methods, and headers.
+Local defaults allow broad origins for development. Production settings validation rejects wildcard CORS origins, so deploy environments must configure explicit origins.
 
 ### 23.4 Queue is DB-backed
 
@@ -1318,10 +1525,15 @@ This keeps deployment simple, but it also means:
 - worker throughput is constrained by DB polling and row updates
 - partitioning is logical, not broker-native
 - horizontal scale requires care
+- high-volume user-facing queues need backlog and lease monitoring
 
 ### 23.5 Metadata is flexible JSON
 
-`content_metadata` makes the system adaptable, but schema drift is always possible if validations or migration discipline weaken.
+`content_metadata` makes the system adaptable, but schema drift is always possible if validations or migration discipline weaken. Full body text is now pushed into `content_bodies`, but compact metadata still needs disciplined accessors and sanitization.
+
+### 23.6 Generated contracts can drift
+
+The backend, iOS hand-written services, generated Swift enum contracts, OpenAPI export, and Go CLI client are separate artifacts. Route/API changes need `scripts/regenerate_public_contracts.sh` and `scripts/check_public_contracts.sh` to keep them aligned.
 
 ## 24. Mental Model for Working in This Repo
 
@@ -1337,12 +1549,13 @@ When making processing changes, use this direction:
 1. task type or handler
 2. worker/service orchestration
 3. strategy or provider implementation
-4. persistence and presenter updates
+4. persistence and response/contract updates
 
 When making product changes, remember the system has three parallel user-facing states:
 
 - shared canonical content in `contents`
-- per-user visibility/state overlays in `content_status`, read, favorite, unlike
+- canonical short-form news in `news_items`
+- per-user visibility/state overlays in `content_status`, read status, Knowledge saves, unlike state, and news-item read status
 - per-user conversational/discovery/integration state in dedicated tables
 
 That split is the core architectural idea behind Newsly.
