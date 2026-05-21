@@ -4,13 +4,21 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import Mock
 
+import httpx
+
+from app.http_client.robust_http_client import RobustHttpClient
 from app.models.contracts import ContentType
 from app.models.db import Content, NewsItem
 from app.models.metadata.summaries import NewsSummary
+from app.processing_strategies.plain_text_strategy import PlainTextProcessorStrategy
 from app.services import news_article_enrichment as news_article_enrichment_module
 from app.services import news_processing as news_processing_module
-from app.services.news_article_bodies import NEWS_ARTICLE_BODY_REF_KEY
+from app.services.news_article_bodies import (
+    NEWS_ARTICLE_BODY_REF_KEY,
+    get_news_item_article_body_resolver,
+)
 from app.services.news_article_enrichment import enrich_news_item_article
 from app.services.news_processing import process_news_item
 from app.services.news_relevant_links import NEWS_ARTICLE_RELEVANT_LINKS_KEY
@@ -1069,6 +1077,67 @@ def test_enrich_news_item_article_uses_direct_article_url_for_no_discussion_aggr
     assert extraction["status"] == "completed"
     assert extraction["source"] == "storage"
     assert extraction["article_url"] == "https://finance.yahoo.com/example/story.html"
+
+
+def test_enrich_news_item_article_persists_plain_text_article_body(db_session) -> None:
+    article_url = "https://sep.turbifycdn.com/ty/cdn/paulgraham/bbnexcerpts.txt"
+    item = NewsItem(
+        ingest_key="news-item-plain-text-url",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="hn-plain-text-url-1",
+        canonical_item_url="https://news.ycombinator.com/item?id=48178390",
+        canonical_story_url=article_url,
+        article_url=article_url,
+        article_title="Lisp in Web-Based Applications",
+        article_domain="sep.turbifycdn.com",
+        discussion_url="https://news.ycombinator.com/item?id=48178390",
+        raw_metadata={"excerpt": "HN discussion only."},
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    plain_text = (
+        "Lisp in Web-Based Applications\n\n"
+        "Paul Graham\n\n"
+        "One of the reasons to use Lisp in writing Web-based applications is that "
+        "you can use Lisp."
+    )
+    mock_http_client = Mock(spec=RobustHttpClient)
+    mock_http_client.get.return_value = httpx.Response(
+        200,
+        request=httpx.Request("GET", article_url),
+        text=plain_text,
+    )
+    strategy = PlainTextProcessorStrategy(mock_http_client)
+
+    class _FakeRegistry:
+        def get_strategy(self, url: str) -> PlainTextProcessorStrategy:
+            assert url == article_url
+            return strategy
+
+    result = enrich_news_item_article(
+        db_session,
+        news_item_id=_require_id(item.id),
+        strategy_registry=_FakeRegistry(),  # type: ignore[arg-type]
+    )
+
+    db_session.refresh(item)
+    item_metadata = _metadata(item.raw_metadata)
+    body_ref = _metadata(item_metadata[NEWS_ARTICLE_BODY_REF_KEY])
+    extraction = _metadata(item_metadata["article_extraction"])
+    resolved_text = get_news_item_article_body_resolver().resolve_text(db_session, news_item=item)
+
+    assert result.success is True
+    assert result.status == "completed"
+    assert body_ref["kind"] == "storage"
+    assert extraction["strategy"] == "PlainTextProcessorStrategy"
+    assert extraction["article_url"] == article_url
+    assert resolved_text == plain_text
 
 
 def test_enrich_news_item_article_skips_native_aggregator_item_url_without_discussion(

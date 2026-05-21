@@ -70,6 +70,13 @@ def _clean_string(value: Any) -> str | None:
     return cleaned or None
 
 
+def _clean_body_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def _clean_title(value: Any) -> str | None:
     return clean_title(value)
 
@@ -316,7 +323,7 @@ def enrich_news_item_article(
             raise ValueError(extraction_error)
 
         llm_data = _run_strategy_method(strategy.prepare_for_llm, extracted_data) or {}
-        source_text = _clean_string(llm_data.get("content_to_summarize"))
+        source_text = _clean_body_text(llm_data.get("content_to_summarize"))
         if source_text is None:
             raise ValueError("Article extraction did not yield content_to_summarize")
 

@@ -6,6 +6,7 @@ from app.processing_strategies.hackernews_strategy import HackerNewsProcessorStr
 from app.processing_strategies.html_strategy import HtmlProcessorStrategy
 from app.processing_strategies.image_strategy import ImageProcessorStrategy
 from app.processing_strategies.pdf_strategy import PdfProcessorStrategy
+from app.processing_strategies.plain_text_strategy import PlainTextProcessorStrategy
 from app.processing_strategies.pubmed_strategy import PubMedProcessorStrategy
 from app.processing_strategies.twitter_share_strategy import TwitterShareProcessorStrategy
 from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
@@ -30,6 +31,7 @@ class StrategyRegistry:
         # YouTubeStrategy for YouTube video URLs.
         # PdfProcessorStrategy for direct .pdf links or Content-Type PDF.
         # ImageProcessorStrategy for image files.
+        # PlainTextProcessorStrategy for direct .txt/text responses.
         # TwitterShareProcessorStrategy for tweet-only share URLs.
         # HtmlProcessorStrategy should be checked before URL strategy fallback.
         self.register(HackerNewsProcessorStrategy(self.http_client))  # HackerNews discussions
@@ -41,6 +43,7 @@ class StrategyRegistry:
             PdfProcessorStrategy(self.http_client)
         )  # Specific content type by extension/common URL pattern
         self.register(ImageProcessorStrategy(self.http_client))  # Image files
+        self.register(PlainTextProcessorStrategy(self.http_client))  # Plain text documents
         self.register(HtmlProcessorStrategy(self.http_client))  # HTML content (uses crawl4ai)
 
     def register(self, strategy: UrlProcessorStrategy):
