@@ -10,7 +10,13 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserProm
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
-from app.models.contracts import ContentStatus, ContentType, MessageProcessingStatus
+from app.models.contracts import (
+    ContentStatus,
+    ContentType,
+    MessageProcessingStatus,
+    NewsItemStatus,
+    NewsItemVisibilityScope,
+)
 from app.models.db import ChatMessage, ChatSession, Content, NewsItem
 from app.services.chat_agent import ChatRunResult, create_processing_message, save_messages
 
@@ -40,6 +46,7 @@ def _create_news_item(
     db_session: Session,
     *,
     item_id: int | None = None,
+    owner_user_id: int,
     ingest_key: str = "news-chat",
     summary_title: str = "Correct News Story",
     article_url: str = "https://example.com/correct-news-article",
@@ -47,7 +54,8 @@ def _create_news_item(
     news_item = NewsItem(
         id=item_id,
         ingest_key=ingest_key,
-        visibility_scope="global",
+        visibility_scope=NewsItemVisibilityScope.USER.value,
+        owner_user_id=owner_user_id,
         platform="techmeme",
         source_type="techmeme",
         source_label="Techmeme",
@@ -63,7 +71,7 @@ def _create_news_item(
         summary_text="Correct news item summary for chat grounding.",
         raw_metadata={},
         cluster_size=1,
-        status="ready",
+        status=NewsItemStatus.READY.value,
         published_at=datetime.now(UTC).replace(tzinfo=None),
         ingested_at=datetime.now(UTC).replace(tzinfo=None),
         processed_at=datetime.now(UTC).replace(tzinfo=None),
@@ -153,6 +161,7 @@ def test_create_chat_session_with_news_item_ignores_content_id_collision(
     news_item = _create_news_item(
         db_session,
         item_id=unrelated_content.id,
+        owner_user_id=test_user.id,
         ingest_key="chat-collision",
         summary_title="Correct News Story",
     )
@@ -1458,6 +1467,10 @@ def test_create_assistant_turn_creates_session_with_screen_context(
     assert payload["session"]["session_type"] == "knowledge_chat"
     assert payload["session"]["content_id"] == content.id
     assert payload["session"]["title"] == "AI Infrastructure Update"
+    assert payload["session"]["has_pending_message"] is True
+    assert payload["session"]["last_message_preview"] == "Find me more coverage like this."
+    assert payload["session"]["last_message_role"] == "user"
+    assert payload["session"]["last_message_at"] is not None
     assert payload["user_message"]["content"] == "Find me more coverage like this."
     assert captured == [
         (
@@ -1473,6 +1486,7 @@ def test_create_assistant_turn_creates_session_with_screen_context(
     )
     assert session is not None
     assert session.session_type == "knowledge_chat"
+    assert session.last_message_at is not None
     assert session.context_snapshot is not None
     assert "Screen Type: content_detail" in session.context_snapshot
     assert f"[{content.id}] AI Infrastructure Update" in session.context_snapshot
@@ -1500,6 +1514,7 @@ def test_create_assistant_turn_with_news_item_ignores_content_id_collision(
     news_item = _create_news_item(
         db_session,
         item_id=unrelated_content.id,
+        owner_user_id=test_user.id,
         ingest_key="assistant-collision",
         summary_title="Assistant Correct News Story",
     )
@@ -1610,6 +1625,9 @@ def test_create_assistant_turn_titles_new_ad_hoc_session_from_message(
     assert payload["status"] == "processing"
     assert payload["session"]["content_id"] is None
     assert payload["session"]["title"] == message[:80]
+    assert payload["session"]["has_pending_message"] is True
+    assert payload["session"]["last_message_preview"] == message[:200]
+    assert payload["session"]["last_message_role"] == "user"
     assert payload["user_message"]["content"] == message
     assert captured == [
         (
@@ -1743,11 +1761,15 @@ def test_create_assistant_turn_refreshes_existing_session_context(
     assert payload["session"]["id"] == session.id
     assert payload["session"]["content_id"] == new_content.id
     assert payload["session"]["title"] == "New Context"
+    assert payload["session"]["has_pending_message"] is True
+    assert payload["session"]["last_message_preview"] == "Use what I'm looking at now."
+    assert payload["session"]["last_message_role"] == "user"
     assert captured == [(session.id, "content_detail")]
 
     db_session.refresh(session)
     assert session.content_id == new_content.id
     assert session.title == "New Context"
+    assert session.last_message_at is not None
     assert session.context_snapshot is not None
     assert f"[{new_content.id}] New Context" in session.context_snapshot
 

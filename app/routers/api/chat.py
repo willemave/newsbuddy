@@ -1422,6 +1422,15 @@ async def create_assistant_turn(
 
     db_message = create_processing_message(db, session_row_id, request.message)
     message_id = _require_message_id(db_message)
+    message_created_at = _require_timestamp(
+        db_message.created_at,
+        detail="Chat message missing created_at",
+    )
+    session.last_message_at = message_created_at
+    session.updated_at = message_created_at
+    db.commit()
+    db.refresh(session)
+
     background_tasks.add_task(
         process_assistant_turn_async,
         session_row_id,
@@ -1430,32 +1439,8 @@ async def create_assistant_turn(
         screen_context=screen_context,
     )
 
-    article_title = None
-    article_url = None
-    article_summary = None
-    article_source = None
-    if session.content_id:
-        content = db.query(Content).filter(Content.id == session.content_id).first()
-        if content:
-            article_title = _resolve_article_title(content)
-            article_url = content.url
-            article_summary = _extract_short_summary(content)
-            article_source = content.source
-    elif session.news_item_id:
-        news_item = db.query(NewsItem).filter(NewsItem.id == session.news_item_id).first()
-        if news_item:
-            article_title, article_url, article_summary, article_source = (
-                _news_item_article_metadata(news_item)
-            )
-
     return AssistantTurnResponse(
-        session=_session_to_summary(
-            session,
-            article_title,
-            article_url,
-            article_summary,
-            article_source,
-        ),
+        session=_build_session_summaries(db, user_id=user_id, sessions=[session])[0],
         user_message=_build_processing_user_message(
             db_message=db_message,
             session_id=session_row_id,
