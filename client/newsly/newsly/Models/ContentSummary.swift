@@ -42,6 +42,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     private let cachedDisplayDate: Date?
     private let cachedProcessedDate: Date?
     private let cachedItemDate: Date?
+    private let cachedCalendarDayKey: String
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -152,9 +153,13 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         self.previewBullets = previewBullets
         self.reasonToRead = reasonToRead
         self.savedSource = savedSource
-        self.cachedDisplayDate = Self.parseDate(processedAt ?? createdAt)
-        self.cachedProcessedDate = processedAt.flatMap(Self.parseDate)
-        self.cachedItemDate = Self.parseDate(publicationDate ?? processedAt ?? createdAt)
+        let displayDate = Self.parseDate(processedAt ?? createdAt)
+        let processedDate = processedAt.flatMap(Self.parseDate)
+        let itemDate = Self.parseDate(publicationDate ?? processedAt ?? createdAt)
+        self.cachedDisplayDate = displayDate
+        self.cachedProcessedDate = processedDate
+        self.cachedItemDate = itemDate
+        self.cachedCalendarDayKey = itemDate.map { Self.calendarDayFormatter.string(from: $0) } ?? ""
     }
 
     init(from decoder: Decoder) throws {
@@ -289,7 +294,8 @@ struct ContentSummary: Codable, Identifiable, Equatable {
 
     /// Relative time display for news items (e.g., "2h ago", "3d ago")
     var relativeTimeDisplay: String? {
-        ContentTimestampFormatter.compactRelativeText(from: primaryTimestamp)
+        guard let date = cachedItemDate else { return nil }
+        return ContentTimestampFormatter.compactRelativeText(from: date)
     }
 
     func updating(
@@ -333,7 +339,6 @@ struct ContentSummary: Codable, Identifiable, Equatable {
 
     /// Calendar day key for grouping (e.g. "2026-02-19").
     var calendarDayKey: String {
-        guard let date = itemDate else { return "" }
-        return Self.calendarDayFormatter.string(from: date)
+        cachedCalendarDayKey
     }
 }

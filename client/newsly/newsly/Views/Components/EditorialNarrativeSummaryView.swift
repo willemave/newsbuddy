@@ -16,28 +16,10 @@ private enum EditorialNarrativeDesign {
 struct EditorialNarrativeSummaryView: View {
     let summary: EditorialNarrativeSummary
     var contentId: Int?
-    @AppStorage("longArticleDisplayMode", store: SharedContainer.userDefaults)
-    private var longArticleDisplayModeRawValue: String = LongArticleDisplayMode.both.rawValue
-
-    private var displayMode: LongArticleDisplayMode {
-        LongArticleDisplayMode(rawValue: longArticleDisplayModeRawValue) ?? .both
-    }
-
-    private var showsNarrativeContent: Bool {
-        displayMode != .keyPoints
-    }
-
-    private var showsKeyPoints: Bool {
-        displayMode != .narrative
-    }
-
-    private var showsSupportingContext: Bool {
-        true
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: EditorialNarrativeDesign.sectionSpacing) {
-            if showsNarrativeContent {
+            if !summary.narrativeParagraphs.isEmpty {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(summary.narrativeParagraphs.enumerated()), id: \.offset) { _, paragraph in
                         Text(paragraph)
@@ -49,7 +31,7 @@ struct EditorialNarrativeSummaryView: View {
                 }
             }
 
-            if showsKeyPoints, !summary.keyPoints.isEmpty {
+            if !summary.keyPoints.isEmpty {
                 sectionHeader("Key Points", icon: "list.bullet.rectangle", tint: .blue)
                 VStack(alignment: .leading, spacing: EditorialNarrativeDesign.itemSpacing) {
                     ForEach(summary.keyPoints) { point in
@@ -85,7 +67,7 @@ struct EditorialNarrativeSummaryView: View {
                 }
             }
 
-            if showsSupportingContext, !summary.quotes.isEmpty {
+            if !summary.quotes.isEmpty {
                 sectionHeader("Notable Quotes", icon: "quote.opening", tint: .purple)
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(summary.quotes, id: \.text) { quote in

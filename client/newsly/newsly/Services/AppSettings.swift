@@ -86,34 +86,6 @@ enum ServerConfigurationDefaults {
     }
 }
 
-enum LongArticleDisplayMode: String, CaseIterable {
-    case narrative = "narrative"
-    case keyPoints = "key_points"
-    case both = "both"
-
-    var title: String {
-        switch self {
-        case .narrative:
-            return "Narrative"
-        case .keyPoints:
-            return "Key Points"
-        case .both:
-            return "Both"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .narrative:
-            return "Show the narrative with notable quotes"
-        case .keyPoints:
-            return "Show key points with notable quotes"
-        case .both:
-            return "Show narrative, key points, and quotes"
-        }
-    }
-}
-
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
     
@@ -122,7 +94,6 @@ class AppSettings: ObservableObject {
     @AppStorage("useHTTPS", store: SharedContainer.userDefaults) var useHTTPS: Bool = false
     @AppStorage("appTextSizeIndex", store: SharedContainer.userDefaults) var appTextSizeIndex: Int = 1
     @AppStorage("contentTextSizeIndex", store: SharedContainer.userDefaults) var contentTextSizeIndex: Int = 2
-    @AppStorage("longArticleDisplayMode", store: SharedContainer.userDefaults) var longArticleDisplayMode: String = LongArticleDisplayMode.both.rawValue
     @AppStorage("useLongFormCardStack", store: SharedContainer.userDefaults) var useLongFormCardStack: Bool = true
     @AppStorage("backendTranscriptionAvailable", store: SharedContainer.userDefaults) var backendTranscriptionAvailable: Bool = false
     private var hasExplicitServerConfiguration: Bool {

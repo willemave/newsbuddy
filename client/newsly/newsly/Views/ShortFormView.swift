@@ -16,12 +16,10 @@ struct ShortFormView: View {
     let onSelect: (ContentDetailRoute) -> Void
     @StateObject private var processingCountService = ProcessingCountService.shared
     @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
+    @State private var scrollReadTracker = ShortNewsScrollReadTracker()
     private let chatService = ChatService.shared
 
-    /// Track which items have already been marked as read to avoid duplicates
-    @State private var markedAsReadIds: Set<Int> = []
     @State private var showMarkAllConfirmation = false
-    @State private var topVisibleItemId: Int?
     @State private var quickActionErrorMessage: String?
     @State private var activeQuickActionId: String?
     @State private var fastNewsAudioEpisode: AudioEpisode?
@@ -117,10 +115,7 @@ struct ShortFormView: View {
         .accessibilityIdentifier("short.screen")
         .screenContainer()
         .onScrollTargetVisibilityChange(idType: Int.self) { visibleIds in
-            topVisibleItemId = visibleIds.first
-        }
-        .onChange(of: topVisibleItemId) { _, _ in
-            markItemsAboveAsRead()
+            scrollReadTracker.updateTopVisibleItemId(visibleIds.first)
         }
         .onScrollPhaseChange { _, newPhase in
             guard newPhase == .idle else { return }
@@ -224,18 +219,11 @@ struct ShortFormView: View {
     }
 
     private func markItemsAboveAsRead() {
-        guard let topVisibleItemId else { return }
         let items = viewModel.currentItems()
-        guard let index = items.firstIndex(where: { $0.id == topVisibleItemId }) else { return }
-
-        let idsToMark = items.prefix(index)
-            .filter { !$0.isRead && !markedAsReadIds.contains($0.id) }
-            .map(\.id)
-
+        let idsToMark = scrollReadTracker.idsToMarkAboveTop(in: items)
         guard !idsToMark.isEmpty else { return }
 
         logger.info("[ShortFormView] Items scrolled past top | ids=\(idsToMark, privacy: .public)")
-        idsToMark.forEach { markedAsReadIds.insert($0) }
         viewModel.itemsScrolledPastTop(ids: idsToMark)
     }
 
@@ -397,6 +385,32 @@ struct ShortFormView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .containerRelativeFrame(.vertical)
         }
+    }
+}
+
+@MainActor
+private final class ShortNewsScrollReadTracker {
+    private var topVisibleItemId: Int?
+    private var markedAsReadIds: Set<Int> = []
+
+    func updateTopVisibleItemId(_ itemId: Int?) {
+        topVisibleItemId = itemId
+    }
+
+    func idsToMarkAboveTop(in items: [ContentSummary]) -> [Int] {
+        guard let topVisibleItemId,
+              let topIndex = items.firstIndex(where: { $0.id == topVisibleItemId })
+        else {
+            return []
+        }
+
+        let idsToMark = items.prefix(topIndex).compactMap { item -> Int? in
+            guard !item.isRead, !markedAsReadIds.contains(item.id) else { return nil }
+            return item.id
+        }
+
+        markedAsReadIds.formUnion(idsToMark)
+        return idsToMark
     }
 }
 

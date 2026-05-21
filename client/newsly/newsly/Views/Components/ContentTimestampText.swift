@@ -101,7 +101,10 @@ enum ContentTimestampFormatter {
 
     static func compactRelativeText(from rawValue: String?, now: Date = Date()) -> String? {
         guard let date = parse(rawValue) else { return nil }
+        return compactRelativeText(from: date, now: now)
+    }
 
+    static func compactRelativeText(from date: Date, now: Date = Date()) -> String {
         let interval = now.timeIntervalSince(date)
 
         if interval >= 0, interval < 60 {

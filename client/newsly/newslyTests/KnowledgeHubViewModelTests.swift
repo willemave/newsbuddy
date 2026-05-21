@@ -128,6 +128,31 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testLoadHubIgnoresCancelledRefreshAndKeepsCurrentSessions() async {
+        let chatService = MockKnowledgeHubChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 1), makeSession(id: 2)],
+                        nextCursor: "next-page",
+                        hasMore: true
+                    )
+                ),
+                .failure(APIError.networkError(URLError(.cancelled))),
+            ],
+            turnResponses: []
+        )
+        let viewModel = KnowledgeHubViewModel(chatService: chatService)
+
+        await viewModel.loadHub()
+        await viewModel.loadHub()
+
+        XCTAssertEqual(chatService.requestedPageCursors, [nil, nil])
+        XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2])
+        XCTAssertTrue(viewModel.hasMoreSessions)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     func testLoadMoreAppendsUniqueSessions() async {
         let chatService = MockKnowledgeHubChatService(
             pageResponses: [

@@ -239,10 +239,6 @@ struct SettingsView: View {
 
             VStack(spacing: 0) {
                 textSizeRow
-
-                RowDivider(leadingInset: Spacing.rowHorizontal)
-
-                longArticleDisplayModeRow
             }
             .settingsCard()
         }
@@ -252,9 +248,10 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(title: "Council")
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
                     SettingsIcon(systemName: "person.3.sequence.fill", color: .orange)
+                        .frame(width: 36, height: 36, alignment: .leading)
 
                     Text("Your Experts")
                         .font(.listTitle)
@@ -290,8 +287,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
                     .background(Color.surfaceSecondary.opacity(0.55))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
@@ -448,29 +444,6 @@ struct SettingsView: View {
             .padding(.trailing, Spacing.rowHorizontal)
             .padding(.bottom, Spacing.rowVertical)
         }
-    }
-
-    private var longArticleDisplayModeRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                SettingsIcon(systemName: "doc.text.magnifyingglass", color: .indigo)
-
-                Text("Long Article Format")
-                    .font(.listTitle)
-                    .foregroundStyle(Color.onSurface)
-
-                Spacer(minLength: 8)
-            }
-
-            Picker("Long Article Format", selection: $settings.longArticleDisplayMode) {
-                ForEach(LongArticleDisplayMode.allCases, id: \.rawValue) { mode in
-                    Text(mode.title).tag(mode.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-        .padding(.horizontal, Spacing.rowHorizontal)
-        .padding(.vertical, Spacing.rowVertical)
     }
 
     // MARK: - Sources Section

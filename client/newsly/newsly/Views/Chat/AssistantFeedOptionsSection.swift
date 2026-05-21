@@ -99,33 +99,10 @@ struct AssistantFeedOptionsSection: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    HStack(spacing: 10) {
-                        Button {
-                            Task { await actionModel.subscribe(option) }
-                        } label: {
-                            if actionModel.isSubscribing(option) {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: actionModel.isSubscribed(option) ? "checkmark.circle.fill" : "plus.circle.fill")
-                                    .font(.system(size: 20))
-                            }
-                        }
-                        .foregroundStyle(actionModel.isSubscribed(option) ? Color.onSurfaceSecondary : Color.chatUserBubble)
-                        .disabled(actionModel.isSubscribed(option) || actionModel.isSubscribing(option))
-
-                        Button {
-                            onPreview(option)
-                        } label: {
-                            Image(systemName: "safari")
-                                .font(.system(size: 20))
-                        }
-                        .foregroundStyle(Color.onSurfaceSecondary)
-
-                        Spacer()
-                    }
+                    actionRow(for: option)
                 }
                 .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.surfaceTertiary)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
@@ -133,6 +110,148 @@ struct AssistantFeedOptionsSection: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private extension AssistantFeedOptionsSection {
+    func actionRow(for option: AssistantFeedOption) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                Task { await actionModel.subscribe(option) }
+            } label: {
+                FeedOptionActionLabel(
+                    title: addButtonTitle(for: option),
+                    systemImage: actionModel.isSubscribed(option) ? "checkmark.circle.fill" : "plus.circle.fill",
+                    isLoading: actionModel.isSubscribing(option)
+                )
+            }
+            .buttonStyle(
+                FeedOptionActionButtonStyle(
+                    role: actionModel.isSubscribed(option) ? .subscribed : .primary
+                )
+            )
+            .disabled(actionModel.isSubscribed(option) || actionModel.isSubscribing(option))
+            .accessibilityLabel(addButtonAccessibilityLabel(for: option))
+
+            Button {
+                onPreview(option)
+            } label: {
+                FeedOptionActionLabel(
+                    title: "View",
+                    systemImage: "safari",
+                    isLoading: false
+                )
+            }
+            .buttonStyle(FeedOptionActionButtonStyle(role: .secondary))
+            .accessibilityLabel("View \(option.title)")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 2)
+    }
+
+    func addButtonTitle(for option: AssistantFeedOption) -> String {
+        if actionModel.isSubscribing(option) {
+            return "Adding"
+        }
+        if actionModel.isSubscribed(option) {
+            return "Added"
+        }
+        return "Add"
+    }
+
+    func addButtonAccessibilityLabel(for option: AssistantFeedOption) -> String {
+        if actionModel.isSubscribing(option) {
+            return "Adding \(option.title)"
+        }
+        if actionModel.isSubscribed(option) {
+            return "Added \(option.title)"
+        }
+        return "Add \(option.title)"
+    }
+}
+
+private struct FeedOptionActionLabel: View {
+    let title: String
+    let systemImage: String
+    let isLoading: Bool
+    var loadingTint: Color = .white
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(loadingTint)
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct FeedOptionActionButtonStyle: ButtonStyle {
+    enum Role {
+        case primary
+        case secondary
+        case subscribed
+    }
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    let role: Role
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 46)
+            .background(backgroundColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(borderColor, lineWidth: 0.5)
+            )
+            .opacity(isEnabled ? (configuration.isPressed ? 0.88 : 1) : 0.74)
+            .scaleEffect(configuration.isPressed && isEnabled ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+    }
+
+    private var foregroundColor: Color {
+        switch role {
+        case .primary:
+            return .white.opacity(0.96)
+        case .secondary:
+            return .onSurface
+        case .subscribed:
+            return .onSurfaceSecondary
+        }
+    }
+
+    private var backgroundColor: Color {
+        switch role {
+        case .primary:
+            return .chatUserBubble
+        case .secondary:
+            return Color.surfaceContainerHigh.opacity(0.7)
+        case .subscribed:
+            return Color.surfaceContainer.opacity(0.82)
+        }
+    }
+
+    private var borderColor: Color {
+        switch role {
+        case .primary:
+            return Color.white.opacity(0.16)
+        case .secondary, .subscribed:
+            return Color.outlineVariant.opacity(0.42)
         }
     }
 }

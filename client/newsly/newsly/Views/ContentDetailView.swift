@@ -58,7 +58,8 @@ private enum DetailDesign {
     static let floatingBackButtonSize: CGFloat = 44
     static let textOnlyNewsBackButtonTopPadding: CGFloat = 8
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
-    static let discussionSummaryBodyIndent: CGFloat = 34
+    static let discussionSummaryBodyIndent: CGFloat = 18
+    static let edgeBackSwipeWidth: CGFloat = 28
 }
 
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
@@ -77,6 +78,7 @@ struct ContentDetailView: View {
     // Navigation skipping state
     @State private var didTriggerNavigation: Bool = false
     @State private var navigationDirection: Int = 0 // +1 next, -1 previous
+    @State private var isEdgeBackSwipeActive: Bool = false
     // Convert button state
     @State private var isConverting: Bool = false
     // Modal presentation state
@@ -310,7 +312,7 @@ struct ContentDetailView: View {
                         }
 
                         // Full Content Section (collapsible, modern style)
-                        if let bodyText = viewModel.contentBody?.text {
+                        if content.contentTypeEnum != .news, let bodyText = viewModel.contentBody?.text {
                             modernExpandableSection(
                                 title: content.contentTypeEnum == .podcast ? "Transcript" : "Full Article",
                                 icon: content.contentTypeEnum == .podcast ? "text.alignleft" : "doc.text",
@@ -360,8 +362,8 @@ struct ContentDetailView: View {
         .textSelection(.enabled)
         .accessibilityIdentifier("content.detail.screen")
         .overlay(alignment: .leading) {
-            // Left edge indicator (previous)
-            if dragAmount > 30 && currentIndex > 0 {
+            // Left indicator for previous article or edge-back dismissal.
+            if dragAmount > 30 && (currentIndex > 0 || isEdgeBackSwipeActive) {
                 swipeIndicator(direction: .previous, progress: min(1.0, dragAmount / 100))
             }
         }
@@ -391,9 +393,12 @@ struct ContentDetailView: View {
 
                     // Require horizontal swipe
                     if horizontalAmount > verticalAmount * 2 && horizontalAmount > 30 {
+                        let isEdgeBackSwipe = isLeftEdgeBackSwipe(value)
+                        isEdgeBackSwipeActive = isEdgeBackSwipe
+
                         // More responsive drag with resistance at edges
                         let canGoLeft = currentIndex < allContentIds.count - 1
-                        let canGoRight = currentIndex > 0
+                        let canGoRight = currentIndex > 0 || isEdgeBackSwipe
 
                         var newOffset = value.translation.width * 0.6
 
@@ -416,11 +421,22 @@ struct ContentDetailView: View {
                 }
                 .onEnded { value in
                     didTriggerSwipeHaptic = false
+                    isEdgeBackSwipeActive = false
                     let horizontalAmount = abs(value.translation.width)
                     let verticalAmount = abs(value.translation.height)
 
                     if horizontalAmount > verticalAmount * 2 && horizontalAmount > 80 {
-                        if value.translation.width > 80 && currentIndex > 0 {
+                        if value.translation.width > 80 && isLeftEdgeBackSwipe(value) {
+                            let generator = UIImpactFeedbackGenerator(style: .medium)
+                            generator.impactOccurred()
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                dragAmount = UIScreen.main.bounds.width
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                dismiss()
+                            }
+                            return
+                        } else if value.translation.width > 80 && currentIndex > 0 {
                             // Swipe right - previous
                             let generator = UIImpactFeedbackGenerator(style: .medium)
                             generator.impactOccurred()
@@ -2180,58 +2196,72 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func communityDiscussionSummarySection(discussion: ContentDiscussion) -> some View {
         if let summary = discussion.summary {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 10) {
-                    Label("Comments", systemImage: "bubble.left.and.bubble.right")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-
-                    Spacer(minLength: 12)
-
-                    if let commentCount = discussion.commentCount, commentCount > 0 {
-                        Text("\(commentCount) summarized")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    if let url = discussionSummaryURL(summary: summary, discussion: discussion) {
-                        Link(destination: url) {
-                            Label("Open", systemImage: "arrow.up.right.square")
-                                .labelStyle(.titleAndIcon)
-                        }
-                        .font(.caption.weight(.semibold))
-                    }
-                }
-
-                Text(summary.overview)
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, DetailDesign.discussionSummaryBodyIndent)
+            VStack(alignment: .leading, spacing: 14) {
+                discussionSummaryHeader(summary: summary, discussion: discussion)
 
                 if !summary.topics.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 10) {
                         discussionSubsectionHeader("Focus")
 
-                        ForEach(Array(summary.topics.prefix(4))) { topic in
-                            discussionTopicRow(topic)
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(Array(summary.topics.prefix(4))) { topic in
+                                discussionTopicRow(topic)
+                            }
                         }
                     }
-                    .padding(.top, 2)
-                }
-
-                if !summary.representativeComments.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        discussionSubsectionHeader("Representative comments")
-
-                        ForEach(Array(summary.representativeComments.prefix(3))) { comment in
-                            discussionRepresentativeCommentRow(comment)
-                        }
-                    }
-                    .padding(.top, 2)
+                    .padding(.leading, DetailDesign.discussionSummaryBodyIndent)
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func discussionSummaryHeader(
+        summary: DiscussionSummary,
+        discussion: ContentDiscussion
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.headline.weight(.semibold))
+                .foregroundColor(.primary)
+                .frame(width: 18, height: 24, alignment: .center)
+                .accessibilityHidden(true)
+
+            Text("Comments")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .layoutPriority(1)
+
+            Spacer(minLength: 10)
+
+            HStack(alignment: .center, spacing: 12) {
+                if let commentCount = discussion.commentCount, commentCount > 0 {
+                    Text("\(commentCount) summarized")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+
+                if let url = discussionSummaryURL(summary: summary, discussion: discussion) {
+                    Link(destination: url) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.up.right.square")
+                            Text("Open")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     private func discussionSummaryURL(
@@ -2246,64 +2276,74 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func discussionSubsectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.caption)
+            .font(.caption2)
             .fontWeight(.semibold)
             .foregroundColor(.secondary)
+            .textCase(.uppercase)
+            .tracking(0.6)
     }
 
     @ViewBuilder
     private func discussionTopicRow(_ topic: DiscussionSummaryTopic) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 12) {
             Circle()
-                .fill(Color.secondary.opacity(0.55))
-                .frame(width: 4, height: 4)
+                .fill(Color.accentColor.opacity(0.85))
+                .frame(width: 6, height: 6)
                 .padding(.top, 7)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(topic.title)
-                    .font(.subheadline)
+                    .font(.callout)
                     .fontWeight(.semibold)
+                    .foregroundColor(.primary.opacity(0.92))
                 Text(topic.summary)
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundColor(.secondary)
+                    .lineSpacing(1)
                     .fixedSize(horizontal: false, vertical: true)
                 if let stance = topic.stance {
                     Text(stance)
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary.opacity(0.85))
+                        .textCase(.uppercase)
+                        .tracking(0.4)
                         .lineLimit(2)
+                        .padding(.top, 1)
                 }
             }
         }
-        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
     private func discussionRepresentativeCommentRow(_ comment: DiscussionSummaryComment) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(comment.author ?? "unknown")
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
-            Text(comment.text)
-                .font(.caption)
-                .fixedSize(horizontal: false, vertical: true)
-            if let reason = comment.reason {
-                Text(reason)
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color.secondary.opacity(0.28))
+                .frame(width: 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(comment.author ?? "unknown")
                     .font(.caption2)
+                    .fontWeight(.semibold)
                     .foregroundColor(.secondary)
-                    .lineLimit(1)
+                    .textCase(.uppercase)
+                    .tracking(0.4)
+                Text(comment.text)
+                    .font(.footnote)
+                    .foregroundColor(.primary.opacity(0.9))
+                    .lineSpacing(1)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let reason = comment.reason {
+                    Text(reason)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
-        .padding(.leading, 10)
-        .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.22))
-                .frame(width: 2)
-        }
     }
 
     @ViewBuilder
@@ -2977,6 +3017,10 @@ struct ContentDetailView: View {
         didTriggerNavigation = true
         navigationDirection = -1
         currentIndex -= 1
+    }
+
+    private func isLeftEdgeBackSwipe(_ value: DragGesture.Value) -> Bool {
+        value.startLocation.x <= DetailDesign.edgeBackSwipeWidth && value.translation.width > 0
     }
 }
 

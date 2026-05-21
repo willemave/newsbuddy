@@ -110,7 +110,7 @@ class ContentDetailViewModel: ObservableObject {
                 await self.trackOpenedInteraction(for: fetched)
             }
 
-            if fetched.bodyAvailable {
+            if fetched.bodyAvailable && fetched.contentTypeEnum != .news {
                 Task {
                     await self.loadContentBody(for: fetched)
                 }

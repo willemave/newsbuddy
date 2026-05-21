@@ -102,33 +102,26 @@ final class ShortNewsListViewModel: BaseContentListViewModel {
     private func markBatchRead(ids: [Int]) {
         logger.info("[ShortNewsList] markBatchRead called | ids=\(ids, privacy: .public)")
 
-        // Filter to only unread items to avoid double-counting
-        let unreadIds = ids.filter { id in
-            currentItems().first { $0.id == id }?.isRead == false
-        }
-
-        guard !unreadIds.isEmpty else {
+        let markedIds = markItemsLocallyRead(ids: ids)
+        guard !markedIds.isEmpty else {
             logger.debug("[ShortNewsList] markBatchRead: all items already read, skipping")
             return
         }
 
-        logger.info("[ShortNewsList] markBatchRead: marking \(unreadIds.count) unread items | ids=\(unreadIds, privacy: .public)")
+        logger.info("[ShortNewsList] markBatchRead: marking \(markedIds.count) unread items | ids=\(markedIds, privacy: .public)")
 
-        unreadIds.forEach { markItemLocallyRead(id: $0) }
-        logger.debug("[ShortNewsList] Marked items locally read | count=\(unreadIds.count)")
-
-        unreadCountService.decrementNewsCount(by: unreadIds.count)
-        logger.debug("[ShortNewsList] Decremented unread count by \(unreadIds.count)")
+        unreadCountService.decrementNewsCount(by: markedIds.count)
+        logger.debug("[ShortNewsList] Decremented unread count by \(markedIds.count)")
 
         readRepository
-            .markRead(ids: unreadIds)
+            .markRead(ids: markedIds)
             .receive(on: DispatchQueue.main)
             .sink { completion in
                 if case .failure(let error) = completion {
-                    logger.error("[ShortNewsList] markBatchRead API failed | ids=\(unreadIds, privacy: .public) error=\(error.localizedDescription)")
+                    logger.error("[ShortNewsList] markBatchRead API failed | ids=\(markedIds, privacy: .public) error=\(error.localizedDescription)")
                 }
             } receiveValue: { _ in
-                logger.info("[ShortNewsList] markBatchRead API success | ids=\(unreadIds, privacy: .public)")
+                logger.info("[ShortNewsList] markBatchRead API success | ids=\(markedIds, privacy: .public)")
             }
             .store(in: &readCancellables)
     }

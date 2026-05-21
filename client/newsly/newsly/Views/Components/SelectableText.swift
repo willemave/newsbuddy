@@ -57,11 +57,22 @@ struct SelectableText: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
-        uiView.text = text
-        uiView.adaptiveTextColor = textColor
-        uiView.font = font
-        uiView.textContainer.maximumNumberOfLines = lineLimit ?? 0
-        uiView.textContainer.lineBreakMode = lineBreakMode
+        if uiView.text != text {
+            uiView.text = text
+        }
+        if uiView.adaptiveTextColor?.isEqual(textColor) != true {
+            uiView.adaptiveTextColor = textColor
+        }
+        if uiView.font?.isEqual(font) != true {
+            uiView.font = font
+        }
+        let maximumNumberOfLines = lineLimit ?? 0
+        if uiView.textContainer.maximumNumberOfLines != maximumNumberOfLines {
+            uiView.textContainer.maximumNumberOfLines = maximumNumberOfLines
+        }
+        if uiView.textContainer.lineBreakMode != lineBreakMode {
+            uiView.textContainer.lineBreakMode = lineBreakMode
+        }
         uiView.onDigDeeper = onDigDeeper
         context.coordinator.onTap = onTap
     }
