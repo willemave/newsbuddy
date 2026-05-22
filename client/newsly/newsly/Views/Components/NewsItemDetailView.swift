@@ -7,6 +7,11 @@
 
 import SwiftUI
 
+private enum NewsItemDetailDesign {
+    static let bulletMarkerWidth: CGFloat = 12
+    static let bulletTextSpacing: CGFloat = 8
+}
+
 struct NewsItemDetailView: View {
     let content: ContentDetail
     let metadata: NewsMetadata
@@ -58,16 +63,17 @@ struct NewsItemDetailView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(keyPoints.enumerated()), id: \.offset) { _, point in
-                    HStack(alignment: .top, spacing: 12) {
-                        Circle()
-                            .fill(Color.accentColor.opacity(0.85))
-                            .frame(width: 6, height: 6)
-                            .padding(.top, 7)
+                    HStack(alignment: .firstTextBaseline, spacing: NewsItemDetailDesign.bulletTextSpacing) {
+                        Text(verbatim: "\u{2022}")
+                            .font(.callout.weight(.semibold))
+                            .foregroundColor(Color.accentColor.opacity(0.85))
+                            .frame(width: NewsItemDetailDesign.bulletMarkerWidth, alignment: .center)
 
                         Text(point)
                             .font(.callout)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }

@@ -58,7 +58,8 @@ private enum DetailDesign {
     static let floatingBackButtonSize: CGFloat = 44
     static let textOnlyNewsBackButtonTopPadding: CGFloat = 8
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
-    static let discussionSummaryBodyIndent: CGFloat = 18
+    static let bulletMarkerWidth: CGFloat = 12
+    static let bulletTextSpacing: CGFloat = 8
     static let edgeBackSwipeWidth: CGFloat = 28
 }
 
@@ -2209,7 +2210,6 @@ struct ContentDetailView: View {
                             }
                         }
                     }
-                    .padding(.leading, DetailDesign.discussionSummaryBodyIndent)
                 }
             }
         }
@@ -2285,35 +2285,44 @@ struct ContentDetailView: View {
 
     @ViewBuilder
     private func discussionTopicRow(_ topic: DiscussionSummaryTopic) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(Color.accentColor.opacity(0.85))
-                .frame(width: 6, height: 6)
-                .padding(.top, 7)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: DetailDesign.bulletTextSpacing) {
+                Text(verbatim: "\u{2022}")
+                    .font(.callout.weight(.semibold))
+                    .foregroundColor(Color.accentColor.opacity(0.85))
+                    .frame(width: DetailDesign.bulletMarkerWidth, alignment: .center)
 
-            VStack(alignment: .leading, spacing: 3) {
                 Text(topic.title)
                     .font(.callout)
                     .fontWeight(.semibold)
                     .foregroundColor(.primary.opacity(0.92))
-                Text(topic.summary)
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .lineSpacing(1)
                     .fixedSize(horizontal: false, vertical: true)
-                if let stance = topic.stance {
-                    Text(stance)
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary.opacity(0.85))
-                        .textCase(.uppercase)
-                        .tracking(0.4)
-                        .lineLimit(2)
-                        .padding(.top, 1)
-                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(topic.summary)
+                .font(.footnote)
+                .foregroundColor(.secondary)
+                .lineSpacing(1)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, discussionBulletTextIndent)
+            if let stance = topic.stance {
+                Text(stance)
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary.opacity(0.85))
+                    .textCase(.uppercase)
+                    .tracking(0.4)
+                    .lineLimit(2)
+                    .padding(.top, 1)
+                    .padding(.leading, discussionBulletTextIndent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var discussionBulletTextIndent: CGFloat {
+        DetailDesign.bulletMarkerWidth + DetailDesign.bulletTextSpacing
     }
 
     @ViewBuilder

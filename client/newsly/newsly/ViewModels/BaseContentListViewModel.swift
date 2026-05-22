@@ -106,28 +106,39 @@ class BaseContentListViewModel: ObservableObject {
 
     @discardableResult
     func markItemsLocallyRead(ids: [Int]) -> [Int] {
+        markItemsLocallyRead(ids: ids, removeReadItems: false).map(\.id)
+    }
+
+    @discardableResult
+    func markItemsLocallyRead(ids: [Int], removeReadItems: Bool) -> [ContentSummary] {
         guard !ids.isEmpty else { return [] }
 
         let targetIds = Set(ids)
         var nextItems = items
-        var markedIds: [Int] = []
+        var markedItems: [ContentSummary] = []
 
         for index in nextItems.indices {
             let item = nextItems[index]
             guard targetIds.contains(item.id), !item.isRead else { continue }
 
-            nextItems[index] = item.updating(isRead: true)
-            markedIds.append(item.id)
+            let updatedItem = item.updating(isRead: true)
+            nextItems[index] = updatedItem
+            markedItems.append(updatedItem)
         }
 
-        guard !markedIds.isEmpty else {
+        guard !markedItems.isEmpty else {
             logger.debug("[BaseContentList] markItemsLocallyRead: no unread matches")
             return []
         }
 
+        if removeReadItems {
+            nextItems.removeAll { $0.isRead }
+        }
+
         items = nextItems
+        let markedIds = markedItems.map(\.id)
         logger.info("[BaseContentList] markItemsLocallyRead | ids=\(markedIds, privacy: .public) count=\(markedIds.count)")
-        return markedIds
+        return markedItems
     }
 
     func dropReadItems() {

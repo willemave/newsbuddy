@@ -112,13 +112,19 @@ final class LongContentListViewModel: BaseContentListViewModel {
             logger.warning("[LongContentList] markAsRead failed: item not found | id=\(id)")
             return
         }
-
-        markItemLocallyRead(id: id)
-        decrementCount(for: item)
-        logger.debug("[LongContentList] Marked locally read | id=\(id) type=\(item.contentType, privacy: .public)")
-        if currentReadFilter() == .unread {
-            dropReadItems()
+        guard !item.isRead else {
+            logger.debug("[LongContentList] markAsRead skipped: item already read | id=\(id)")
+            return
         }
+
+        let markedItems = markItemsLocallyRead(
+            ids: [id],
+            removeReadItems: currentReadFilter() == .unread
+        )
+        guard let markedItem = markedItems.first else { return }
+
+        decrementCount(for: markedItem)
+        logger.debug("[LongContentList] Marked locally read | id=\(id) type=\(markedItem.contentType, privacy: .public)")
 
         readRepository
             .markRead(ids: [id])
@@ -143,7 +149,17 @@ final class LongContentListViewModel: BaseContentListViewModel {
         let ids = unreadItems.map(\.id)
         logger.info("[LongContentList] markAllVisibleAsRead | ids=\(ids, privacy: .public) count=\(ids.count)")
 
-        let reductions = unreadItems.reduce(into: (articles: 0, podcasts: 0)) { partial, item in
+        let markedItems = markItemsLocallyRead(
+            ids: ids,
+            removeReadItems: currentReadFilter() == .unread
+        )
+        let markedIds = markedItems.map(\.id)
+        guard !markedIds.isEmpty else {
+            logger.debug("[LongContentList] markAllVisibleAsRead: all items already read")
+            return
+        }
+
+        let reductions = markedItems.reduce(into: (articles: 0, podcasts: 0)) { partial, item in
             switch item.contentTypeEnum {
             case .article:
                 partial.articles += 1
@@ -154,8 +170,6 @@ final class LongContentListViewModel: BaseContentListViewModel {
             }
         }
 
-        unreadItems.forEach { markItemLocallyRead(id: $0.id) }
-
         if reductions.articles > 0 {
             unreadCountService.decrementArticleCount(by: reductions.articles)
         }
@@ -163,13 +177,10 @@ final class LongContentListViewModel: BaseContentListViewModel {
             unreadCountService.decrementPodcastCount(by: reductions.podcasts)
         }
         logger.debug("[LongContentList] Decremented counts | articles=\(reductions.articles) podcasts=\(reductions.podcasts)")
-        if currentReadFilter() == .unread {
-            dropReadItems()
-        }
 
         await withCheckedContinuation { continuation in
             readRepository
-                .markRead(ids: ids)
+                .markRead(ids: markedIds)
                 .receive(on: DispatchQueue.main)
                 .sink { completion in
                     if case .failure(let error) = completion {
@@ -177,7 +188,7 @@ final class LongContentListViewModel: BaseContentListViewModel {
                     }
                     continuation.resume()
                 } receiveValue: { _ in
-                    logger.info("[LongContentList] markAllVisibleAsRead API success | count=\(ids.count)")
+                    logger.info("[LongContentList] markAllVisibleAsRead API success | count=\(markedIds.count)")
                 }
                 .store(in: &cancellables)
         }
