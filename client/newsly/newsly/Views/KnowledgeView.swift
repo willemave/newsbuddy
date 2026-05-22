@@ -12,8 +12,12 @@ struct KnowledgeView: View {
     let onShowKnowledgeLibrary: (() -> Void)?
 
     @StateObject private var viewModel = KnowledgeHubViewModel()
+    @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
     @ObservedObject private var settings = AppSettings.shared
     @State private var searchText = ""
+    @State private var customNarrations: [AudioEpisode] = []
+    @State private var isLoadingCustomNarrations = false
+    @State private var customNarrationError: String?
     @FocusState private var isSearchFocused: Bool
 
     private let primaryAction = HubAction(
@@ -69,6 +73,7 @@ struct KnowledgeView: View {
                 searchFieldSection
                 errorBannerSection
                 librarySection
+                narrationsSection
                 actionsSection
                 chatHistorySection
             }
@@ -83,10 +88,10 @@ struct KnowledgeView: View {
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await viewModel.loadHub()
+            await loadKnowledgeScreen()
         }
         .refreshable {
-            await viewModel.loadHub()
+            await loadKnowledgeScreen()
         }
     }
 
@@ -199,6 +204,193 @@ struct KnowledgeView: View {
                 }
                 .padding(.bottom, 24)
             }
+        }
+    }
+
+    // MARK: - Narrations
+
+    private var narrationsSection: some View {
+        Group {
+            if isLoadingCustomNarrations && customNarrations.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading narrations")
+                        .font(.terracottaBodyMedium)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.bottom, 22)
+            } else if !customNarrations.isEmpty || customNarrationError != nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Narrations")
+                        .font(.terracottaHeadlineSmall)
+                        .foregroundStyle(Color.onSurface)
+                        .padding(.horizontal, Spacing.screenHorizontal)
+
+                    if let customNarrationError {
+                        Text(customNarrationError)
+                            .font(.terracottaBodySmall)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, Spacing.screenHorizontal)
+                    }
+
+                    VStack(spacing: 10) {
+                        ForEach(customNarrations.prefix(5)) { episode in
+                            customNarrationRow(episode)
+                        }
+                    }
+                    .padding(.horizontal, Spacing.screenHorizontal)
+                }
+                .padding(.bottom, 22)
+            }
+        }
+    }
+
+    private func customNarrationRow(_ episode: AudioEpisode) -> some View {
+        Button {
+            Task {
+                await handleCustomNarrationTap(episode)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.terracottaPrimary.opacity(0.14))
+                        .frame(width: 36, height: 36)
+
+                    customNarrationIcon(episode)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(episode.title)
+                        .font(.terracottaBodyLarge.weight(.semibold))
+                        .foregroundStyle(Color.onSurface)
+                        .lineLimit(2)
+
+                    Text(customNarrationSubtitle(episode))
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 10)
+
+                if episode.isGenerating {
+                    Text("Generating")
+                        .font(.terracottaBodySmall.weight(.semibold))
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                } else if episode.isFailed {
+                    Text("Failed")
+                        .font(.terracottaBodySmall.weight(.semibold))
+                        .foregroundStyle(.red)
+                } else {
+                    Image(systemName: isCustomNarrationPlaying(episode) ? "pause.fill" : "play.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color.terracottaPrimary)
+                        .frame(width: 30, height: 30)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(Color.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("knowledge.narration.\(episode.id)")
+    }
+
+    @ViewBuilder
+    private func customNarrationIcon(_ episode: AudioEpisode) -> some View {
+        if episode.isGenerating {
+            ProgressView()
+                .controlSize(.small)
+        } else if episode.isFailed {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.red)
+        } else {
+            Image(systemName: isCustomNarrationPlaying(episode) ? "speaker.wave.3.fill" : "waveform")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.terracottaPrimary)
+        }
+    }
+
+    private func customNarrationSubtitle(_ episode: AudioEpisode) -> String {
+        let sourceText: String
+        if episode.sourceCount == 1 {
+            sourceText = "1 source"
+        } else {
+            sourceText = "\(episode.sourceCount) sources"
+        }
+
+        if episode.isGenerating {
+            return "\(sourceText) • Generating"
+        }
+        if episode.isFailed {
+            return "\(sourceText) • \(episode.errorMessage ?? "Failed")"
+        }
+        if let duration = episode.durationSeconds {
+            return "\(sourceText) • \(formattedNarrationDuration(duration))"
+        }
+        return sourceText
+    }
+
+    private func formattedNarrationDuration(_ seconds: Int) -> String {
+        let minutes = max(Int(round(Double(seconds) / 60.0)), 1)
+        return "\(minutes) min"
+    }
+
+    private func isCustomNarrationPlaying(_ episode: AudioEpisode) -> Bool {
+        narrationPlaybackService.isSpeaking
+            && narrationPlaybackService.speakingTarget == .audioEpisode(episode.id)
+    }
+
+    @MainActor
+    private func handleCustomNarrationTap(_ episode: AudioEpisode) async {
+        if isCustomNarrationPlaying(episode) {
+            narrationPlaybackService.pause()
+            return
+        }
+
+        if episode.isGenerating {
+            await refreshCustomNarration(episode)
+            return
+        }
+
+        guard episode.isCompleted else { return }
+
+        do {
+            try await narrationPlaybackService.playStreamingNarration(
+                for: .audioEpisode(episode.id),
+                fetchStreamResource: {
+                    try await AudioEpisodeService.shared.streamResource(for: episode)
+                }
+            )
+        } catch {
+            customNarrationError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func refreshCustomNarration(_ episode: AudioEpisode) async {
+        do {
+            let latest = try await AudioEpisodeService.shared.fetchEpisode(id: episode.id)
+            replaceCustomNarration(latest)
+        } catch {
+            customNarrationError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func replaceCustomNarration(_ episode: AudioEpisode) {
+        if let index = customNarrations.firstIndex(where: { $0.id == episode.id }) {
+            customNarrations[index] = episode
         }
     }
 
@@ -451,6 +643,26 @@ struct KnowledgeView: View {
             if let route = await viewModel.startSearchChat(message: query) {
                 onSelectSession?(route)
             }
+        }
+    }
+
+    @MainActor
+    private func loadKnowledgeScreen() async {
+        await viewModel.loadHub()
+        await loadCustomNarrations()
+    }
+
+    @MainActor
+    private func loadCustomNarrations() async {
+        guard !isLoadingCustomNarrations else { return }
+        isLoadingCustomNarrations = true
+        defer { isLoadingCustomNarrations = false }
+
+        do {
+            customNarrations = try await AudioEpisodeService.shared.fetchCustomNarrationEpisodes()
+            customNarrationError = nil
+        } catch {
+            customNarrationError = error.localizedDescription
         }
     }
 }

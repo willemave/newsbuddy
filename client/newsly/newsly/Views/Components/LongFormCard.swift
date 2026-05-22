@@ -11,7 +11,7 @@ import UIKit
 struct LongFormCard: View {
     let content: ContentSummary
     var variant: Variant = .hero
-    @ObservedObject var playbackService: NarrationPlaybackService
+    let playbackService: NarrationPlaybackService
     var isAudioSupported = false
     var isAudioPreparing = false
     var isAudioPlaying = false

@@ -32,6 +32,7 @@ enum APIEndpoints {
     static func contentCouncilAudioEpisode(id: Int) -> String {
         return "/api/content/\(id)/audio-episodes/council"
     }
+    static let customNarrationAudioEpisodes = "/api/content/audio-episodes/custom-narrations"
     static func audioEpisode(id: Int) -> String {
         return "/api/content/audio-episodes/\(id)"
     }

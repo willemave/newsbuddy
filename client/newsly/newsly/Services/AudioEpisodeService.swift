@@ -18,6 +18,16 @@ enum AudioEpisodeDelivery: String {
     case inline
 }
 
+private struct CustomNarrationCreatePayload: Encodable {
+    let contentIds: [Int]
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case contentIds = "content_ids"
+        case title
+    }
+}
+
 final class AudioEpisodeService {
     static let shared = AudioEpisodeService()
 
@@ -102,6 +112,48 @@ final class AudioEpisodeService {
         }
     }
 
+    func createCustomNarrationEpisode(
+        contentIds: [Int],
+        title: String? = nil,
+        delivery: AudioEpisodeDelivery = .background
+    ) async throws -> AudioEpisode {
+        let startedAt = Date()
+        let payload = CustomNarrationCreatePayload(contentIds: contentIds, title: title)
+        let body = try JSONEncoder().encode(payload)
+        audioEpisodeLogger.info(
+            "Create episode started | kind=custom_narration sourceCount=\(contentIds.count) delivery=\(delivery.rawValue, privacy: .public)"
+        )
+        do {
+            let episode: AudioEpisode = try await client.request(
+                APIEndpoints.customNarrationAudioEpisodes,
+                method: "POST",
+                body: body,
+                queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
+            )
+            audioEpisodeLogger.info(
+                "Create episode completed | kind=custom_narration episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) sourceCount=\(episode.sourceCount)"
+            )
+            return episode
+        } catch {
+            audioEpisodeLogger.error(
+                "Create episode failed | kind=custom_narration elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
+    }
+
+    func fetchCustomNarrationEpisodes(limit: Int = 20) async throws -> [AudioEpisode] {
+        let startedAt = Date()
+        let episodes: [AudioEpisode] = try await client.request(
+            APIEndpoints.customNarrationAudioEpisodes,
+            queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+        )
+        audioEpisodeLogger.info(
+            "Fetch custom narrations completed | count=\(episodes.count) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
+        )
+        return episodes
+    }
+
     func fetchEpisode(id: Int) async throws -> AudioEpisode {
         let startedAt = Date()
         let episode: AudioEpisode = try await client.request(APIEndpoints.audioEpisode(id: id))
@@ -163,13 +215,13 @@ final class AudioEpisodeService {
             "Wait episode started | episodeId=\(episode.id) status=\(episode.status, privacy: .public) maxAttempts=\(maxAttempts)"
         )
         for _ in 0..<maxAttempts {
-            if current.status == "completed" {
+            if current.isCompleted {
                 audioEpisodeLogger.info(
                     "Wait episode completed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
                 )
                 return current
             }
-            if current.status == "failed" {
+            if current.isFailed {
                 audioEpisodeLogger.error(
                     "Wait episode failed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(current.errorMessage ?? "unknown", privacy: .public)"
                 )

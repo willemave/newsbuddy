@@ -27,31 +27,41 @@ struct LongFormView: View {
     @State private var loadingAudioContentIds: Set<Int> = []
     @State private var audioEpisodeByContentId: [Int: AudioEpisode] = [:]
     @State private var audioErrorByContentId: [Int: String] = [:]
+    @State private var showCustomNarrationPicker = false
+    @State private var isCreatingCustomNarration = false
+    @State private var customNarrationEpisode: AudioEpisode?
+    @State private var customNarrationError: String?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        let items = viewModel.currentItems()
+
         ZStack {
             VStack(spacing: 0) {
-                if viewModel.state == .initialLoading && viewModel.currentItems().isEmpty {
+                if viewModel.state == .initialLoading && items.isEmpty {
                     LoadingView()
-                } else if case .error(let error) = viewModel.state, viewModel.currentItems().isEmpty {
+                } else if case .error(let error) = viewModel.state, items.isEmpty {
                     ErrorView(message: error.localizedDescription) {
                         viewModel.refreshTrigger.send(())
                     }
                 } else {
-                    if viewModel.currentItems().isEmpty {
+                    if items.isEmpty {
                         longFormEmptyState
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 0) {
                                 EditorialMastheadHeader(title: "Long Read")
 
-                                let items = viewModel.currentItems()
+                                customNarrationAction()
+                                    .padding(.horizontal, Spacing.screenHorizontal)
+                                    .padding(.bottom, 14)
+
                                 VStack(spacing: CardMetrics.cardSpacing) {
-                                    let groups = bentoGroups(from: items)
-                                    ForEach(groups.indices, id: \.self) { groupIndex in
-                                        let group = groups[groupIndex]
-                                        bentoGroupView(group: group, allItems: items)
+                                    ForEach(items) { content in
+                                        cardLink(
+                                            content: content,
+                                            isLast: content.id == items.last?.id
+                                        )
                                     }
                                 }
                                 .padding(.horizontal, Spacing.screenHorizontal)
@@ -112,65 +122,102 @@ struct LongFormView: View {
         }
         .screenContainer()
         .accessibilityIdentifier("long.screen")
+        .sheet(isPresented: $showCustomNarrationPicker) {
+            CustomNarrationPickerSheet(
+                currentItems: viewModel.currentItems(),
+                isCreating: isCreatingCustomNarration,
+                onCreate: { selectedItems in
+                    await createCustomNarration(from: selectedItems)
+                }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .task(id: customNarrationEpisode?.id) {
+            await pollCustomNarrationIfNeeded()
+        }
     }
 
     private var shouldPollLongForm: Bool {
         isActive && scenePhase == .active
     }
 
-    // MARK: - Bento Grid Layout
-
-    private struct BentoGroup {
-        enum Layout {
-            case hero(ContentSummary)
-            case pair(ContentSummary, ContentSummary)
-            case single(ContentSummary)
-        }
-        let layout: Layout
+    private var isCustomNarrationGenerating: Bool {
+        isCreatingCustomNarration || customNarrationEpisode?.isGenerating == true
     }
 
-    private func bentoGroups(from items: [ContentSummary]) -> [BentoGroup] {
-        var groups: [BentoGroup] = []
-        var index = 0
-        while index < items.count {
-            // Hero card
-            groups.append(BentoGroup(layout: .hero(items[index])))
-            index += 1
-            // Side pair (if two more items available)
-            if index + 1 < items.count {
-                groups.append(BentoGroup(layout: .pair(items[index], items[index + 1])))
-                index += 2
-            } else if index < items.count {
-                groups.append(BentoGroup(layout: .single(items[index])))
-                index += 1
+    private func customNarrationAction() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                customNarrationError = nil
+                showCustomNarrationPicker = true
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color.terracottaPrimary.opacity(0.14))
+                            .frame(width: 32, height: 32)
+
+                        if isCustomNarrationGenerating {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.terracottaPrimary)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(isCustomNarrationGenerating ? "Creating narration" : "Create narration")
+                            .font(.terracottaBodyLarge.weight(.semibold))
+                            .foregroundStyle(Color.onSurface)
+
+                        Text(customNarrationSubtitle())
+                            .font(.terracottaBodySmall)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.onSurfaceSecondary.opacity(0.75))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(Color.surfaceSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isCustomNarrationGenerating)
+            .accessibilityIdentifier("long.custom_narration.create")
+
+            if let customNarrationError {
+                Text(customNarrationError)
+                    .font(.terracottaBodySmall)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
             }
         }
-        return groups
+    }
+
+    private func customNarrationSubtitle() -> String {
+        if isCustomNarrationGenerating {
+            return "Generating in the background"
+        }
+        return "Select Long Read or saved articles and podcasts"
     }
 
     @ViewBuilder
-    private func bentoGroupView(group: BentoGroup, allItems: [ContentSummary]) -> some View {
-        switch group.layout {
-        case .hero(let content):
-            cardLink(content: content, variant: .hero, allItems: allItems)
-
-        case .pair(let left, let right):
-            HStack(alignment: .top, spacing: 12) {
-                cardLink(content: left, variant: .compact, allItems: allItems)
-                cardLink(content: right, variant: .compact, allItems: allItems)
-            }
-            .frame(maxWidth: .infinity, alignment: .top)
-
-        case .single(let content):
-            cardLink(content: content, variant: .compact, allItems: allItems)
-        }
-    }
-
-    @ViewBuilder
-    private func cardLink(content: ContentSummary, variant: LongFormCard.Variant, allItems: [ContentSummary]) -> some View {
+    private func cardLink(content: ContentSummary, isLast: Bool) -> some View {
         LongFormCard(
             content: content,
-            variant: variant,
+            variant: .hero,
             playbackService: narrationPlaybackService,
             isAudioSupported: supportsAudioDiscussion(for: content),
             isAudioPreparing: isAudioPreparing(for: content),
@@ -187,15 +234,16 @@ struct LongFormView: View {
                 }
             },
             onDigDeeper: { selectedText in
+                let visibleContentIds = viewModel.currentItems().prefix(15).map(\.id)
                 FeedDigDeeperAction.start(
                     selectedText: selectedText,
                     item: content,
-                    visibleContentIds: allItems.prefix(15).map(\.id),
+                    visibleContentIds: visibleContentIds,
                     surface: .longForm
                 )
             },
             onOpen: {
-                openContent(content, allItems: allItems)
+                openContent(content)
             },
             onToggleAudio: {
                 handleAudioDiscussion(for: content)
@@ -204,7 +252,7 @@ struct LongFormView: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("long.row.\(content.id)")
         .onAppear {
-            if content.id == allItems.last?.id {
+            if isLast {
                 viewModel.loadMoreTrigger.send(())
             }
         }
@@ -320,11 +368,78 @@ struct LongFormView: View {
         )
     }
 
-    private func openContent(_ content: ContentSummary, allItems: [ContentSummary]) {
+    @MainActor
+    private func createCustomNarration(from selectedItems: [ContentSummary]) async -> Bool {
+        guard !selectedItems.isEmpty, !isCreatingCustomNarration else { return false }
+        isCreatingCustomNarration = true
+        customNarrationError = nil
+        defer { isCreatingCustomNarration = false }
+
+        do {
+            let episode = try await AudioEpisodeService.shared.createCustomNarrationEpisode(
+                contentIds: selectedItems.map(\.id),
+                delivery: .background
+            )
+            customNarrationEpisode = episode
+            ToastService.shared.showSuccess(
+                episode.isCompleted ? "Narration ready in Knowledge" : "Narration is generating"
+            )
+            return true
+        } catch {
+            customNarrationError = error.localizedDescription
+            ToastService.shared.showError("Failed to create narration: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    @MainActor
+    private func pollCustomNarrationIfNeeded() async {
+        guard let episode = customNarrationEpisode, episode.isGenerating else { return }
+
+        do {
+            let completed = try await AudioEpisodeService.shared.waitForCompletedEpisode(
+                episode,
+                pollIntervalNanoseconds: 2_000_000_000,
+                maxAttempts: 90
+            )
+            customNarrationEpisode = completed
+            ToastService.shared.showSuccess("Narration ready in Knowledge")
+        } catch {
+            if error is CancellationError {
+                return
+            }
+            await handleCustomNarrationPollError(error, episodeId: episode.id)
+        }
+    }
+
+    @MainActor
+    private func handleCustomNarrationPollError(_ error: Error, episodeId: Int) async {
+        let nsError = error as NSError
+        if nsError.domain == "AudioEpisodeService", nsError.code == 1 {
+            let latest = try? await AudioEpisodeService.shared.fetchEpisode(id: episodeId)
+            customNarrationEpisode = latest
+            customNarrationError = latest?.errorMessage ?? error.localizedDescription
+            ToastService.shared.showError(customNarrationError ?? "Narration generation failed.")
+            return
+        }
+
+        if nsError.domain == "AudioEpisodeService", nsError.code == 2 {
+            let timeoutMessage = "Narration is still generating. Check Knowledge for status."
+            customNarrationError = timeoutMessage
+            customNarrationEpisode = nil
+            ToastService.shared.show(timeoutMessage)
+            return
+        }
+
+        customNarrationError = error.localizedDescription
+        customNarrationEpisode = nil
+    }
+
+    private func openContent(_ content: ContentSummary) {
         guard pendingOpenContentId != content.id else { return }
         pendingOpenContentId = content.id
         ContentImagePrefetcher.prefetch(content)
-        onSelect(ContentDetailRoute(summary: content, allContentIds: allItems.map(\.id)))
+        onSelect(ContentDetailRoute(summary: content, allContentIds: viewModel.currentItems().map(\.id)))
 
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 300_000_000)
@@ -587,11 +702,12 @@ struct LongFormView: View {
 
     @MainActor
     private func runLongFormPollingLoop() async {
-        await refreshLongFormSurface(forceReload: true)
+        await refreshLongFormSurface(forceReload: false)
 
         while !Task.isCancelled {
+            let interval: Duration = viewModel.currentItems().isEmpty ? .seconds(5) : .seconds(30)
             do {
-                try await Task.sleep(for: .seconds(5))
+                try await Task.sleep(for: interval)
             } catch {
                 break
             }
