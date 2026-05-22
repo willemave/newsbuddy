@@ -20,7 +20,8 @@ struct NarrationPlaybackSpeedOption: Identifiable, Hashable {
     static let standardOptions: [NarrationPlaybackSpeedOption] = [
         NarrationPlaybackSpeedOption(rate: NarrationPlaybackService.defaultPlaybackRate, title: "1x"),
         NarrationPlaybackSpeedOption(rate: 1.25, title: "1.25x"),
-        NarrationPlaybackSpeedOption(rate: NarrationPlaybackService.longPressPlaybackRate, title: "1.5x")
+        NarrationPlaybackSpeedOption(rate: NarrationPlaybackService.longPressPlaybackRate, title: "1.5x"),
+        NarrationPlaybackSpeedOption(rate: 2.0, title: "2x")
     ]
 
     static func option(
@@ -50,7 +51,7 @@ struct NarrationPressButton<Label: View>: View {
     init(
         isDisabled: Bool = false,
         accessibilityLabel: String,
-        accessibilityHint: String = "Long press to choose 1x, 1.25x, or 1.5x speed.",
+        accessibilityHint: String = "Long press to choose playback speed.",
         playbackSpeedOptions: [NarrationPlaybackSpeedOption] = NarrationPlaybackSpeedOption.standardOptions,
         onTap: @escaping () -> Void,
         onSelectPlaybackSpeed: @escaping (NarrationPlaybackSpeedOption) -> Void,
@@ -94,64 +95,23 @@ struct NarrationPressButton<Label: View>: View {
             handleTap()
         }
 
-        if let firstPlaybackSpeedOption,
-           let secondPlaybackSpeedOption,
-           let thirdPlaybackSpeedOption {
-            baseButton
-                .accessibilityAction(named: firstPlaybackSpeedOption.accessibilityActionName) {
-                    guard !isDisabled else { return }
-                    onSelectPlaybackSpeed(firstPlaybackSpeedOption)
+        baseButton
+            .accessibilityActions {
+                ForEach(playbackSpeedOptions) { option in
+                    Button(option.accessibilityActionName) {
+                        selectPlaybackSpeed(option)
+                    }
                 }
-                .accessibilityAction(named: secondPlaybackSpeedOption.accessibilityActionName) {
-                    guard !isDisabled else { return }
-                    onSelectPlaybackSpeed(secondPlaybackSpeedOption)
-                }
-                .accessibilityAction(named: thirdPlaybackSpeedOption.accessibilityActionName) {
-                    guard !isDisabled else { return }
-                    onSelectPlaybackSpeed(thirdPlaybackSpeedOption)
-                }
-        } else if let firstPlaybackSpeedOption, let secondPlaybackSpeedOption {
-            baseButton
-                .accessibilityAction(named: firstPlaybackSpeedOption.accessibilityActionName) {
-                    guard !isDisabled else { return }
-                    onSelectPlaybackSpeed(firstPlaybackSpeedOption)
-                }
-                .accessibilityAction(named: secondPlaybackSpeedOption.accessibilityActionName) {
-                    guard !isDisabled else { return }
-                    onSelectPlaybackSpeed(secondPlaybackSpeedOption)
-                }
-        } else if let firstPlaybackSpeedOption {
-            baseButton
-                .accessibilityAction(named: firstPlaybackSpeedOption.accessibilityActionName) {
-                    guard !isDisabled else { return }
-                    onSelectPlaybackSpeed(firstPlaybackSpeedOption)
-                }
-        } else {
-            baseButton
-        }
+            }
+    }
+
+    private func selectPlaybackSpeed(_ option: NarrationPlaybackSpeedOption) {
+        guard !isDisabled else { return }
+        onSelectPlaybackSpeed(option)
     }
 
     private func handleTap() {
         guard !isDisabled else { return }
         onTap()
-    }
-
-    private var firstPlaybackSpeedOption: NarrationPlaybackSpeedOption? {
-        playbackSpeedOptions[safe: 0]
-    }
-
-    private var secondPlaybackSpeedOption: NarrationPlaybackSpeedOption? {
-        playbackSpeedOptions[safe: 1]
-    }
-
-    private var thirdPlaybackSpeedOption: NarrationPlaybackSpeedOption? {
-        playbackSpeedOptions[safe: 2]
-    }
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        guard indices.contains(index) else { return nil }
-        return self[index]
     }
 }

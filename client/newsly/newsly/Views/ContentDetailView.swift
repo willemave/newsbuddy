@@ -2202,12 +2202,8 @@ struct ContentDetailView: View {
 
                 if !summary.topics.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        discussionSubsectionHeader("Focus")
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(Array(summary.topics.prefix(4))) { topic in
-                                discussionTopicRow(topic)
-                            }
+                        ForEach(Array(summary.topics.prefix(4))) { topic in
+                            discussionTopicRow(topic)
                         }
                     }
                 }
@@ -2271,16 +2267,6 @@ struct ContentDetailView: View {
         let rawURL = summary.externalDiscussionURL ?? discussion.discussionURL ?? discussion.sourceURL
         guard let rawURL else { return nil }
         return URL(string: rawURL)
-    }
-
-    @ViewBuilder
-    private func discussionSubsectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.caption2)
-            .fontWeight(.semibold)
-            .foregroundColor(.secondary)
-            .textCase(.uppercase)
-            .tracking(0.6)
     }
 
     @ViewBuilder

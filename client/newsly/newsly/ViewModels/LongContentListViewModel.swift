@@ -60,10 +60,13 @@ final class LongContentListViewModel: BaseContentListViewModel {
                     return
                 }
 
-                // Update local state
                 logger.info("[LongContentList] Updating local read state | contentId=\(contentId)")
-                markItemLocallyRead(id: contentId)
-                if currentReadFilter() == .unread {
+                let shouldDropReadItems = currentReadFilter() == .unread
+                let markedItems = markItemsLocallyRead(
+                    ids: [contentId],
+                    removeReadItems: shouldDropReadItems
+                )
+                if markedItems.isEmpty && shouldDropReadItems {
                     dropReadItems()
                 }
             }

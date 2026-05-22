@@ -8,9 +8,14 @@
 import SwiftUI
 import UIKit
 
+private enum LongFormCardDesign {
+    static let imageHeight: CGFloat = 220
+    static let headlineFont = UIFont(name: "Newsreader", size: 28) ?? UIFont.systemFont(ofSize: 28, weight: .regular)
+    static let summaryFont = UIFont(name: "Inter", size: 14) ?? UIFont.systemFont(ofSize: 14, weight: .regular)
+}
+
 struct LongFormCard: View {
     let content: ContentSummary
-    var variant: Variant = .hero
     let playbackService: NarrationPlaybackService
     var isAudioSupported = false
     var isAudioPreparing = false
@@ -24,21 +29,13 @@ struct LongFormCard: View {
     var onOpen: (() -> Void)?
     var onToggleAudio: (() -> Void)?
 
-    enum Variant {
-        case hero
-        case compact
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Image section with gradient overlay
             Color.clear
-                .frame(height: variant == .hero ? 220 : 160)
+                .frame(height: LongFormCardDesign.imageHeight)
                 .overlay {
-                    GeometryReader { geo in
-                        heroImage
-                            .frame(width: geo.size.width, height: geo.size.height)
-                    }
+                    heroImage
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .clipped()
                 .overlay(alignment: .bottom) {
@@ -77,12 +74,11 @@ struct LongFormCard: View {
                     .padding(.bottom, 8)
                 }
 
-                // Headline
                 SelectableText(
                     content.displayTitle,
                     textColor: content.isRead ? .appOnSurfaceSecondary : .appOnSurface,
                     font: headlineUIFont,
-                    lineLimit: variant == .hero ? 3 : 2,
+                    lineLimit: 3,
                     lineBreakMode: .byTruncatingTail,
                     onDigDeeper: onDigDeeper,
                     onTap: onOpen
@@ -91,13 +87,12 @@ struct LongFormCard: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 8)
 
-                // Description (hero only gets more lines)
                 if let summary = summaryText {
                     SelectableText(
                         summary,
                         textColor: .appOnSurfaceSecondary,
                         font: summaryUIFont,
-                        lineLimit: variant == .hero ? 3 : 2,
+                        lineLimit: 3,
                         lineBreakMode: .byTruncatingTail,
                         onDigDeeper: onDigDeeper,
                         onTap: onOpen
@@ -106,53 +101,50 @@ struct LongFormCard: View {
                     .padding(.bottom, 12)
                 }
 
-                if variant == .hero, let chipText = aiInsightChipText {
+                if let chipText = aiInsightChipText {
                     AIInsightChip(text: chipText)
                         .padding(.bottom, 12)
                         .contentShape(Rectangle())
                         .onTapGesture { onOpen?() }
                 }
 
-                // Footer: source + actions (hero variant only)
-                if variant == .hero {
-                    HStack {
-                        Text(sourceLabel)
-                            .font(.terracottaBodySmall)
-                            .tracking(0.5)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                            .lineLimit(1)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                onOpen?()
-                            }
-
-                        Spacer()
-
-                        HStack(spacing: 12) {
-                            Button {
-                                onMarkRead?()
-                            } label: {
-                                Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(content.isRead ? Color.onSurfaceSecondary.opacity(0.5) : Color.onSurfaceSecondary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("long.action.mark_read.\(content.id)")
-
-                            Button {
-                                onToggleKnowledgeSave?()
-                            } label: {
-                                KnowledgeSaveIcon(
-                                    isSaved: content.isSavedToKnowledge,
-                                    unsavedColor: Color.onSurfaceSecondary
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("long.action.knowledge.\(content.id)")
+                HStack {
+                    Text(sourceLabel)
+                        .font(.terracottaBodySmall)
+                        .tracking(0.5)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(1)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onOpen?()
                         }
+
+                    Spacer()
+
+                    HStack(spacing: 12) {
+                        Button {
+                            onMarkRead?()
+                        } label: {
+                            Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
+                                .font(.system(size: 20))
+                                .foregroundStyle(content.isRead ? Color.onSurfaceSecondary.opacity(0.5) : Color.onSurfaceSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("long.action.mark_read.\(content.id)")
+
+                        Button {
+                            onToggleKnowledgeSave?()
+                        } label: {
+                            KnowledgeSaveIcon(
+                                isSaved: content.isSavedToKnowledge,
+                                unsavedColor: Color.onSurfaceSecondary
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("long.action.knowledge.\(content.id)")
                     }
-                    .padding(.top, 4)
                 }
+                .padding(.top, 4)
 
                 if isAudioControlVisible {
                     NarrationPlaybackControlRow(
@@ -275,13 +267,11 @@ struct LongFormCard: View {
     }
 
     private var headlineUIFont: UIFont {
-        let size: CGFloat = variant == .hero ? 28 : 18
-        return UIFont(name: "Newsreader", size: size) ?? .systemFont(ofSize: size, weight: .regular)
+        LongFormCardDesign.headlineFont
     }
 
     private var summaryUIFont: UIFont {
-        let size: CGFloat = variant == .hero ? 14 : 12
-        return UIFont(name: "Inter", size: size) ?? .systemFont(ofSize: size, weight: .regular)
+        LongFormCardDesign.summaryFont
     }
 
     private var aiInsightChipText: String? {
