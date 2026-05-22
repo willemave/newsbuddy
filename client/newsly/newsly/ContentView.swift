@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var isRestoringPath = false
     @State private var hasAppliedE2EOpenChatRoute = false
     @State private var hasAppliedE2EOpenContentRoute = false
+    @State private var knowledgeFocusRequest: KnowledgeFocusRequest?
     @Environment(\.scenePhase) private var scenePhase
 
     @MainActor
@@ -64,6 +65,9 @@ struct ContentView: View {
                     isActive: tabCoordinator.selectedTab == .longContent,
                     onSelect: { route in
                         longFormPath.append(route)
+                    },
+                    onShowNarrations: {
+                        openKnowledgeNarrations()
                     }
                 )
                 .withContentRoutes(
@@ -103,6 +107,12 @@ struct ContentView: View {
 
             NavigationStack(path: $knowledgePath) {
                 KnowledgeView(
+                    focusRequest: knowledgeFocusRequest,
+                    onFocusHandled: { request in
+                        if knowledgeFocusRequest == request {
+                            knowledgeFocusRequest = nil
+                        }
+                    },
                     onSelectSession: { route in
                         knowledgePath = NavigationPath()
                         knowledgePath.append(route)
@@ -218,6 +228,12 @@ struct ContentView: View {
         tabCoordinator.selectedTab = .knowledge
         knowledgePath = NavigationPath()
         knowledgePath.append(route)
+    }
+
+    private func openKnowledgeNarrations() {
+        knowledgePath = NavigationPath()
+        knowledgeFocusRequest = KnowledgeFocusRequest(target: .narrations)
+        tabCoordinator.selectedTab = .knowledge
     }
 
     private func applyE2EOpenChatRouteIfNeeded() {

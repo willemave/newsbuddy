@@ -7,7 +7,18 @@
 
 import SwiftUI
 
+enum KnowledgeFocusTarget: Hashable {
+    case narrations
+}
+
+struct KnowledgeFocusRequest: Equatable {
+    let id = UUID()
+    let target: KnowledgeFocusTarget
+}
+
 struct KnowledgeView: View {
+    let focusRequest: KnowledgeFocusRequest?
+    let onFocusHandled: ((KnowledgeFocusRequest) -> Void)?
     let onSelectSession: ((ChatSessionRoute) -> Void)?
     let onShowKnowledgeLibrary: (() -> Void)?
 
@@ -59,25 +70,41 @@ struct KnowledgeView: View {
     }
 
     init(
+        focusRequest: KnowledgeFocusRequest? = nil,
+        onFocusHandled: ((KnowledgeFocusRequest) -> Void)? = nil,
         onSelectSession: ((ChatSessionRoute) -> Void)? = nil,
         onShowKnowledgeLibrary: (() -> Void)? = nil
     ) {
+        self.focusRequest = focusRequest
+        self.onFocusHandled = onFocusHandled
         self.onSelectSession = onSelectSession
         self.onShowKnowledgeLibrary = onShowKnowledgeLibrary
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                headerSection
-                searchFieldSection
-                errorBannerSection
-                librarySection
-                narrationsSection
-                actionsSection
-                chatHistorySection
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    headerSection
+                    searchFieldSection
+                    errorBannerSection
+                    librarySection
+                    narrationsSection
+                        .id(KnowledgeFocusTarget.narrations)
+                    actionsSection
+                    chatHistorySection
+                }
+                .padding(.bottom, 32)
             }
-            .padding(.bottom, 32)
+            .refreshable {
+                await loadKnowledgeScreen()
+            }
+            .onAppear {
+                scrollToFocusRequest(focusRequest, proxy: scrollProxy)
+            }
+            .onChange(of: focusRequest) { _, request in
+                scrollToFocusRequest(request, proxy: scrollProxy)
+            }
         }
         .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
             newChatMicButton
@@ -88,9 +115,6 @@ struct KnowledgeView: View {
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await loadKnowledgeScreen()
-        }
-        .refreshable {
             await loadKnowledgeScreen()
         }
     }
@@ -210,7 +234,19 @@ struct KnowledgeView: View {
     // MARK: - Narrations
 
     private var narrationsSection: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Narrations")
+                .font(.terracottaHeadlineSmall)
+                .foregroundStyle(Color.onSurface)
+                .padding(.horizontal, Spacing.screenHorizontal)
+
+            if let customNarrationError {
+                Text(customNarrationError)
+                    .font(.terracottaBodySmall)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, Spacing.screenHorizontal)
+            }
+
             if isLoadingCustomNarrations && customNarrations.isEmpty {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -221,39 +257,27 @@ struct KnowledgeView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Spacing.screenHorizontal)
-                .padding(.bottom, 22)
-            } else if !customNarrations.isEmpty || customNarrationError != nil {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Narrations")
-                        .font(.terracottaHeadlineSmall)
-                        .foregroundStyle(Color.onSurface)
-                        .padding(.horizontal, Spacing.screenHorizontal)
-
-                    if let customNarrationError {
-                        Text(customNarrationError)
-                            .font(.terracottaBodySmall)
-                            .foregroundStyle(.red)
-                            .padding(.horizontal, Spacing.screenHorizontal)
-                    }
-
-                    VStack(spacing: 10) {
-                        ForEach(customNarrations.prefix(5)) { episode in
-                            customNarrationRow(episode)
-                        }
-                    }
+            } else if customNarrations.isEmpty {
+                Text("No narrations yet")
+                    .font(.terracottaBodyMedium)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Spacing.screenHorizontal)
+                    .padding(.vertical, 8)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(customNarrations) { episode in
+                        customNarrationRow(episode)
+                    }
                 }
-                .padding(.bottom, 22)
+                .padding(.horizontal, Spacing.screenHorizontal)
             }
         }
+        .padding(.bottom, 22)
     }
 
     private func customNarrationRow(_ episode: AudioEpisode) -> some View {
-        Button {
-            Task {
-                await handleCustomNarrationTap(episode)
-            }
-        } label: {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -285,24 +309,57 @@ struct KnowledgeView: View {
                     Text("Failed")
                         .font(.terracottaBodySmall.weight(.semibold))
                         .foregroundStyle(.red)
-                } else {
-                    Image(systemName: isCustomNarrationPlaying(episode) ? "pause.fill" : "play.fill")
-                        .font(.system(size: 12, weight: .bold))
+                } else if isCustomNarrationPlaying(episode) {
+                    Text("Playing")
+                        .font(.terracottaBodySmall.weight(.semibold))
                         .foregroundStyle(Color.terracottaPrimary)
-                        .frame(width: 30, height: 30)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .background(Color.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-            )
+
+            if episode.isCompleted {
+                NarrationPlaybackControlRow(
+                    playbackService: narrationPlaybackService,
+                    target: .audioEpisode(episode.id),
+                    isPreparing: false,
+                    onTogglePlayback: {
+                        Task {
+                            await handleCustomNarrationTap(episode)
+                        }
+                    }
+                )
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Color.surfaceSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !episode.isCompleted else { return }
+            Task {
+                await handleCustomNarrationTap(episode)
+            }
+        }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("knowledge.narration.\(episode.id)")
+    }
+
+    private func scrollToFocusRequest(
+        _ request: KnowledgeFocusRequest?,
+        proxy: ScrollViewProxy
+    ) {
+        guard let request else { return }
+
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(request.target, anchor: .top)
+            }
+            onFocusHandled?(request)
+        }
     }
 
     @ViewBuilder

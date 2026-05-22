@@ -14,6 +14,7 @@ struct LongFormView: View {
     @ObservedObject var viewModel: LongContentListViewModel
     let isActive: Bool
     let onSelect: (ContentDetailRoute) -> Void
+    let onShowNarrations: () -> Void
 
     @StateObject private var unreadCountService = UnreadCountService.shared
     @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
@@ -31,10 +32,14 @@ struct LongFormView: View {
     @State private var isCreatingCustomNarration = false
     @State private var customNarrationEpisode: AudioEpisode?
     @State private var customNarrationError: String?
+    @State private var isStartingLongFormSummaryChat = false
+    @State private var longFormSummaryError: String?
+    private let chatService = ChatService.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         let items = viewModel.currentItems()
+        let lastItemId = items.last?.id
 
         ZStack {
             VStack(spacing: 0) {
@@ -52,7 +57,7 @@ struct LongFormView: View {
                             LazyVStack(spacing: 0) {
                                 EditorialMastheadHeader(title: "Long Read")
 
-                                customNarrationAction()
+                                longFormActions(items: items)
                                     .padding(.horizontal, Spacing.screenHorizontal)
                                     .padding(.bottom, 14)
 
@@ -60,7 +65,7 @@ struct LongFormView: View {
                                     ForEach(items) { content in
                                         cardLink(
                                             content: content,
-                                            isLast: content.id == items.last?.id
+                                            isLast: content.id == lastItemId
                                         )
                                     }
                                 }
@@ -145,60 +150,48 @@ struct LongFormView: View {
         isCreatingCustomNarration || customNarrationEpisode?.isGenerating == true
     }
 
-    private func customNarrationAction() -> some View {
+    private func longFormActions(items: [ContentSummary]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button {
+            LongFormTopActionButton(
+                title: isCustomNarrationGenerating ? "Creating narration" : "Create narration",
+                subtitle: customNarrationSubtitle(),
+                systemImage: "waveform",
+                isBusy: isCustomNarrationGenerating,
+                accessibilityIdentifier: "long.custom_narration.create"
+            ) {
                 customNarrationError = nil
                 showCustomNarrationPicker = true
-            } label: {
-                HStack(spacing: 10) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(Color.terracottaPrimary.opacity(0.14))
-                            .frame(width: 32, height: 32)
-
-                        if isCustomNarrationGenerating {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Color.terracottaPrimary)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(isCustomNarrationGenerating ? "Creating narration" : "Create narration")
-                            .font(.terracottaBodyLarge.weight(.semibold))
-                            .foregroundStyle(Color.onSurface)
-
-                        Text(customNarrationSubtitle())
-                            .font(.terracottaBodySmall)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Color.onSurfaceSecondary.opacity(0.75))
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 11)
-                .background(Color.surfaceSecondary)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-                )
             }
-            .buttonStyle(.plain)
             .disabled(isCustomNarrationGenerating)
-            .accessibilityIdentifier("long.custom_narration.create")
+
+            LongFormTopActionButton(
+                title: "List narrations",
+                subtitle: "Open custom narrations in Knowledge",
+                systemImage: "list.bullet.rectangle",
+                accessibilityIdentifier: "long.custom_narration.list",
+                action: onShowNarrations
+            )
+
+            LongFormTopActionButton(
+                title: "Summarize recent long-form articles",
+                subtitle: "Choose an article or podcast in chat",
+                systemImage: "text.bubble",
+                isBusy: isStartingLongFormSummaryChat,
+                accessibilityIdentifier: "long.quick_action.summarize_recent"
+            ) {
+                startLongFormSummaryChat(items: items)
+            }
+            .disabled(isStartingLongFormSummaryChat)
 
             if let customNarrationError {
                 Text(customNarrationError)
+                    .font(.terracottaBodySmall)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+
+            if let longFormSummaryError {
+                Text(longFormSummaryError)
                     .font(.terracottaBodySmall)
                     .foregroundStyle(.red)
                     .lineLimit(2)
@@ -213,11 +206,55 @@ struct LongFormView: View {
         return "Select Long Read or saved articles and podcasts"
     }
 
+    private func startLongFormSummaryChat(items: [ContentSummary]) {
+        guard !isStartingLongFormSummaryChat else { return }
+
+        isStartingLongFormSummaryChat = true
+        longFormSummaryError = nil
+        let visibleContentIds = Array(
+            items.lazy
+                .filter { supportsAudioDiscussion(for: $0) }
+                .prefix(15)
+                .map(\.id)
+        )
+
+        Task { @MainActor in
+            defer { isStartingLongFormSummaryChat = false }
+
+            do {
+                let response = try await chatService.createAssistantTurn(
+                    message: longFormSummaryPrompt,
+                    screenContext: AssistantScreenContext(
+                        screenType: "long_form_feed",
+                        screenTitle: "Long Read",
+                        visibleContentIds: visibleContentIds,
+                        query: "choose a recent long-form article or podcast to summarize or discuss",
+                        note: (
+                            "Ask the user which visible Long Read article or podcast they want to "
+                            + "interact with before summarizing. Present the visible options by title "
+                            + "when possible. Prefer in-app content before web search."
+                        )
+                    )
+                )
+                ChatNavigationCoordinator.shared.openAssistantTurn(response)
+            } catch {
+                longFormSummaryError = error.localizedDescription
+            }
+        }
+    }
+
+    private var longFormSummaryPrompt: String {
+        (
+            "Ask me which recent long-form article or podcast I would like to "
+            + "interact with. Use the visible Long Read articles and podcasts as "
+            + "options, and wait for my choice before summarizing or discussing it."
+        )
+    }
+
     @ViewBuilder
     private func cardLink(content: ContentSummary, isLast: Bool) -> some View {
         LongFormCard(
             content: content,
-            variant: .hero,
             playbackService: narrationPlaybackService,
             isAudioSupported: supportsAudioDiscussion(for: content),
             isAudioPreparing: isAudioPreparing(for: content),
@@ -723,5 +760,65 @@ struct LongFormView: View {
         guard !hasLoadedBootstrapSources else { return }
         hasLoadedBootstrapSources = true
         await sourcesViewModel.loadConfigs()
+    }
+}
+
+private struct LongFormTopActionButton: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    var isBusy: Bool = false
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.terracottaPrimary.opacity(0.14))
+                        .frame(width: 32, height: 32)
+
+                    if isBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: systemImage)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.terracottaPrimary)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.terracottaBodyLarge.weight(.semibold))
+                        .foregroundStyle(Color.onSurface)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(subtitle)
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.onSurfaceSecondary.opacity(0.75))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(Color.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 }
