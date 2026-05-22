@@ -15,16 +15,19 @@ from app.core.logging import get_logger
 from app.models.api.audio_episodes import (
     AudioEpisodeDelivery,
     AudioEpisodeResponse,
+    CustomNarrationCreateRequest,
 )
 from app.models.db.users import User
 from app.services.audio_episodes import (
     audio_episode_file_path,
     commit_audio_episode_delivery,
     create_content_council_episode,
+    create_custom_narration_episode,
     create_fast_news_digest_episode,
     follow_audio_episode_stream_chunks,
     get_user_audio_episode,
     is_audio_episode_processing_stale,
+    list_custom_narration_episodes,
     present_audio_episode,
     stream_audio_episode_chunks,
 )
@@ -70,6 +73,46 @@ def create_content_council_audio_episode(
     user_id = require_user_id(current_user)
     episode = create_content_council_episode(db, user_id=user_id, content_id=content_id)
     return commit_audio_episode_delivery(db, episode, delivery=delivery)
+
+
+@router.post(
+    "/audio-episodes/custom-narrations",
+    response_model=AudioEpisodeResponse,
+    summary="Create one combined custom narration from selected long-form content",
+)
+def create_custom_narration_audio_episode(
+    request: CustomNarrationCreateRequest,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    delivery: Annotated[AudioEpisodeDelivery, Query()] = "background",
+) -> AudioEpisodeResponse:
+    """Create or reuse a multi-source custom narration and enqueue generation."""
+
+    user_id = require_user_id(current_user)
+    episode = create_custom_narration_episode(
+        db,
+        user_id=user_id,
+        content_ids=request.content_ids,
+        title=request.title,
+    )
+    return commit_audio_episode_delivery(db, episode, delivery=delivery)
+
+
+@router.get(
+    "/audio-episodes/custom-narrations",
+    response_model=list[AudioEpisodeResponse],
+    summary="List custom narrations for the current user",
+)
+def list_custom_narration_audio_episodes(
+    db: Annotated[Session, Depends(get_readonly_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[AudioEpisodeResponse]:
+    """Return recent custom narration episodes."""
+
+    user_id = require_user_id(current_user)
+    episodes = list_custom_narration_episodes(db, user_id=user_id, limit=limit)
+    return [present_audio_episode(episode) for episode in episodes]
 
 
 @router.get(

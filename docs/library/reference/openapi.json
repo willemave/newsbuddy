@@ -841,7 +841,8 @@
             "enum": [
               "fast_news_digest",
               "content_council_discussion",
-              "news_item_discussion"
+              "news_item_discussion",
+              "custom_narration"
             ],
             "title": "Kind",
             "type": "string"
@@ -868,11 +869,30 @@
             ],
             "title": "Source Content Id"
           },
+          "source_content_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Source Content Ids",
+            "type": "array"
+          },
+          "source_count": {
+            "default": 0,
+            "title": "Source Count",
+            "type": "integer"
+          },
           "source_item_ids": {
             "items": {
               "type": "integer"
             },
             "title": "Source Item Ids",
+            "type": "array"
+          },
+          "source_titles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Titles",
             "type": "array"
           },
           "status": {
@@ -3316,6 +3336,37 @@
           "scraper_type"
         ],
         "title": "CreateUserScraperConfig",
+        "type": "object"
+      },
+      "CustomNarrationCreateRequest": {
+        "description": "Create one combined custom narration from selected long-form sources.",
+        "properties": {
+          "content_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Content Ids",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "content_ids"
+        ],
+        "title": "CustomNarrationCreateRequest",
         "type": "object"
       },
       "DebugUserSessionRequest": {
@@ -8163,6 +8214,129 @@
         ]
       }
     },
+    "/api/content/audio-episodes/custom-narrations": {
+      "get": {
+        "description": "Return recent custom narration episodes.",
+        "operationId": "listContentCustomNarrationAudioEpisodes",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AudioEpisodeResponse"
+                  },
+                  "title": "Response Listcontentcustomnarrationaudioepisodes",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List custom narrations for the current user",
+        "tags": [
+          "content"
+        ]
+      },
+      "post": {
+        "description": "Create or reuse a multi-source custom narration and enqueue generation.",
+        "operationId": "createContentCustomNarrationAudioEpisode",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "delivery",
+            "required": false,
+            "schema": {
+              "default": "background",
+              "enum": [
+                "background",
+                "stream",
+                "inline"
+              ],
+              "title": "Delivery",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomNarrationCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEpisodeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create one combined custom narration from selected long-form content",
+        "tags": [
+          "content"
+        ]
+      }
+    },
     "/api/content/audio-episodes/fast-news": {
       "post": {
         "description": "Create or reuse a Fast Reads digest and enqueue generation.",
@@ -12059,6 +12233,71 @@
           }
         ],
         "summary": "Create an on-demand Fast Read discussion podcast episode",
+        "tags": [
+          "news"
+        ]
+      }
+    },
+    "/api/news/items/{news_item_id}/body": {
+      "get": {
+        "description": "Return canonical article body text for a visible short-form news item.",
+        "operationId": "getNewsItemBody",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "news_item_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "News Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Body variant",
+            "in": "query",
+            "name": "variant",
+            "required": false,
+            "schema": {
+              "default": "source",
+              "description": "Body variant",
+              "pattern": "^(source|rendered)$",
+              "title": "Variant",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentBodyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get one news item article body",
         "tags": [
           "news"
         ]

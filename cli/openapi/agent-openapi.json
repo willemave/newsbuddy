@@ -679,7 +679,8 @@
             "enum": [
               "fast_news_digest",
               "content_council_discussion",
-              "news_item_discussion"
+              "news_item_discussion",
+              "custom_narration"
             ],
             "title": "Kind",
             "type": "string"
@@ -694,11 +695,30 @@
             "title": "Source Content Id",
             "type": "integer"
           },
+          "source_content_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Source Content Ids",
+            "type": "array"
+          },
+          "source_count": {
+            "default": 0,
+            "title": "Source Count",
+            "type": "integer"
+          },
           "source_item_ids": {
             "items": {
               "type": "integer"
             },
             "title": "Source Item Ids",
+            "type": "array"
+          },
+          "source_titles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Titles",
             "type": "array"
           },
           "status": {
@@ -2560,6 +2580,31 @@
           "scraper_type"
         ],
         "title": "CreateUserScraperConfig",
+        "type": "object"
+      },
+      "CustomNarrationCreateRequest": {
+        "description": "Create one combined custom narration from selected long-form sources.",
+        "properties": {
+          "content_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Content Ids",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 120,
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_ids"
+        ],
+        "title": "CustomNarrationCreateRequest",
         "type": "object"
       },
       "DebugUserSessionRequest": {

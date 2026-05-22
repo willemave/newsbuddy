@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from app.models.contracts import ContentType
-from app.models.db import AudioEpisode, NewsItemReadStatus
+from app.models.db import AudioEpisode, ContentKnowledgeSave, NewsItemReadStatus
 from app.services import audio_episodes as service
 from tests.support.builders import create_content_status_entry_row, create_news_item_row
 
@@ -169,6 +172,175 @@ def test_content_council_episode_excerpts_long_source_text(
     assert "MIDDLE_MARKER" in source_text
     assert "CLOSING_MARKER" in source_text
     assert source_snapshot["source_text_truncated"] is True
+
+
+def test_create_custom_narration_episode_uses_selected_full_sources(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    article_body = "Full article source text " * 40
+    podcast_body = "Full podcast transcript " * 35
+    article = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Agentic Browsers",
+        content_metadata={
+            "summary": "Browsers are becoming agent runtimes.",
+            "content": article_body,
+        },
+    )
+    podcast = content_factory(
+        content_type=ContentType.PODCAST,
+        title="Compute Markets",
+        content_metadata={
+            "summary": "A conversation about AI compute markets.",
+            "transcript": podcast_body,
+        },
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=article)
+    db_session.add(ContentKnowledgeSave(user_id=test_user.id, content_id=podcast.id))
+    db_session.commit()
+
+    episode = service.create_custom_narration_episode(
+        db_session,
+        user_id=test_user.id,
+        content_ids=[article.id, podcast.id, article.id],
+        title="AI market briefing",
+    )
+
+    assert episode.kind == service.CUSTOM_NARRATION_KIND
+    assert episode.source_content_id is None
+    assert episode.source_item_ids == []
+    assert episode.title == "AI market briefing"
+    source_snapshot = episode.source_snapshot
+    assert isinstance(source_snapshot, dict)
+    assert source_snapshot["kind"] == service.CUSTOM_NARRATION_KIND
+    assert source_snapshot["content_ids"] == [article.id, podcast.id]
+    assert source_snapshot["source_count"] == 2
+    assert source_snapshot["items"][0]["title"] == "Agentic Browsers"
+    assert source_snapshot["items"][0]["source_text"] == article_body.strip()
+    assert source_snapshot["items"][1]["title"] == "Compute Markets"
+    assert source_snapshot["items"][1]["source_text"] == podcast_body.strip()
+
+
+def test_create_custom_narration_episode_rejects_unsupported_content_type(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = content_factory(
+        content_type=ContentType.NEWS,
+        title="Short news",
+        content_metadata={"content": "Short-form article body."},
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=content)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.create_custom_narration_episode(
+            db_session,
+            user_id=test_user.id,
+            content_ids=[content.id],
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "articles and podcasts" in str(exc_info.value.detail)
+
+
+def test_create_custom_narration_episode_rejects_missing_body(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="No body",
+        content_metadata={"summary": "No source text is available."},
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=content)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.create_custom_narration_episode(
+            db_session,
+            user_id=test_user.id,
+            content_ids=[content.id],
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "No article or transcript text" in str(exc_info.value.detail)
+
+
+def test_create_custom_narration_episode_rejects_invalid_ids(db_session, test_user) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        service.create_custom_narration_episode(
+            db_session,
+            user_id=test_user.id,
+            content_ids=[0],
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "positive" in str(exc_info.value.detail)
+
+
+def test_custom_narration_prompt_uses_gemini_flash_lite_and_full_text(monkeypatch) -> None:
+    full_text = "Opening. " + ("Long source paragraph. " * 1_000) + "Closing."
+    script = service.AudioEpisodeScript(
+        title="Custom Script",
+        estimated_duration_seconds=240,
+        turns=[
+            service.AudioEpisodeTurn(speaker="host", text="One."),
+            service.AudioEpisodeTurn(speaker="cohost", text="Two."),
+            service.AudioEpisodeTurn(speaker="expert", text="Three."),
+            service.AudioEpisodeTurn(speaker="host", text="Four."),
+            service.AudioEpisodeTurn(speaker="cohost", text="Five."),
+            service.AudioEpisodeTurn(speaker="expert", text="Six."),
+            service.AudioEpisodeTurn(speaker="host", text="Seven."),
+            service.AudioEpisodeTurn(speaker="cohost", text="Eight."),
+            service.AudioEpisodeTurn(speaker="expert", text="Nine."),
+            service.AudioEpisodeTurn(speaker="host", text="Ten."),
+        ],
+    )
+    captured: dict[str, str] = {}
+
+    class FakeAgent:
+        def __init__(self, model_spec: str) -> None:
+            self.model_spec = model_spec
+
+        def run_sync(self, message, model_settings=None):  # noqa: ANN001
+            del model_settings
+            captured["model"] = self.model_spec
+            captured["message"] = message
+            return SimpleNamespace(output=script)
+
+    def fake_get_basic_agent(model_spec, _output_type, _system_prompt):  # noqa: ANN001
+        return FakeAgent(model_spec)
+
+    episode = AudioEpisode(
+        id=100,
+        user_id=123,
+        kind=service.CUSTOM_NARRATION_KIND,
+        source_snapshot={
+            "kind": service.CUSTOM_NARRATION_KIND,
+            "content_ids": [1],
+            "source_count": 1,
+            "items": [
+                {
+                    "content_id": 1,
+                    "content_type": "article",
+                    "title": "Full source",
+                    "source_text": full_text,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(service, "get_basic_agent", fake_get_basic_agent)
+    monkeypatch.setattr(service, "extract_usage_from_result", lambda _result: None)
+
+    generated = service._generate_script(episode)
+
+    assert generated.model == service.CUSTOM_NARRATION_MODEL
+    assert captured["model"] == service.CUSTOM_NARRATION_MODEL
+    assert full_text in captured["message"]
+    assert "[Source opening excerpt]" not in captured["message"]
 
 
 def test_generate_script_uses_audio_episode_model(monkeypatch) -> None:
@@ -421,4 +593,24 @@ def test_fit_script_to_dialogue_limit_trims_overlong_turns() -> None:
 
     assert sum(len(turn.text) for turn in fitted.turns) <= service.DIALOGUE_TEXT_CHAR_LIMIT
     assert len(fitted.turns) == len(script.turns)
+    assert all(turn.text for turn in fitted.turns)
+
+
+def test_fit_script_to_dialogue_limit_respects_cap_with_sixteen_turns() -> None:
+    script = service.AudioEpisodeScript(
+        title="Many Turns",
+        estimated_duration_seconds=240,
+        turns=[
+            service.AudioEpisodeTurn(
+                speaker="host" if index % 2 == 0 else "cohost",
+                text=f"Turn {index}. " + ("long detail " * 50),
+            )
+            for index in range(16)
+        ],
+    )
+
+    fitted = service._fit_script_to_dialogue_limit(script)
+
+    assert sum(len(turn.text) for turn in fitted.turns) <= service.DIALOGUE_TEXT_CHAR_LIMIT
+    assert len(fitted.turns) == 16
     assert all(turn.text for turn in fitted.turns)

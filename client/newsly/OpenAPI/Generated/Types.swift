@@ -220,6 +220,20 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /api/content/`.
     /// - Remark: Generated from `#/paths//api/content//get(listContents)`.
     func listContents(_ input: Operations.ListContents.Input) async throws -> Operations.ListContents.Output
+    /// List custom narrations for the current user
+    ///
+    /// Return recent custom narration episodes.
+    ///
+    /// - Remark: HTTP `GET /api/content/audio-episodes/custom-narrations`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/get(listContentCustomNarrationAudioEpisodes)`.
+    func listContentCustomNarrationAudioEpisodes(_ input: Operations.ListContentCustomNarrationAudioEpisodes.Input) async throws -> Operations.ListContentCustomNarrationAudioEpisodes.Output
+    /// Create one combined custom narration from selected long-form content
+    ///
+    /// Create or reuse a multi-source custom narration and enqueue generation.
+    ///
+    /// - Remark: HTTP `POST /api/content/audio-episodes/custom-narrations`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/post(createContentCustomNarrationAudioEpisode)`.
+    func createContentCustomNarrationAudioEpisode(_ input: Operations.CreateContentCustomNarrationAudioEpisode.Input) async throws -> Operations.CreateContentCustomNarrationAudioEpisode.Output
     /// Create an on-demand Fast Reads podcast episode
     ///
     /// Create or reuse a Fast Reads digest and enqueue generation.
@@ -689,6 +703,13 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /api/news/items/{news_item_id}/audio-episodes/discussion`.
     /// - Remark: Generated from `#/paths//api/news/items/{news_item_id}/audio-episodes/discussion/post(createDiscussionNewsItemAudioEpisode)`.
     func createDiscussionNewsItemAudioEpisode(_ input: Operations.CreateDiscussionNewsItemAudioEpisode.Input) async throws -> Operations.CreateDiscussionNewsItemAudioEpisode.Output
+    /// Get one news item article body
+    ///
+    /// Return canonical article body text for a visible short-form news item.
+    ///
+    /// - Remark: HTTP `GET /api/news/items/{news_item_id}/body`.
+    /// - Remark: Generated from `#/paths//api/news/items/{news_item_id}/body/get(getNewsItemBody)`.
+    func getNewsItemBody(_ input: Operations.GetNewsItemBody.Input) async throws -> Operations.GetNewsItemBody.Output
     /// Convert one news item into article content
     ///
     /// Convert one representative news item into saved article content.
@@ -1299,6 +1320,38 @@ extension APIProtocol {
         try await listContents(Operations.ListContents.Input(
             query: query,
             headers: headers
+        ))
+    }
+    /// List custom narrations for the current user
+    ///
+    /// Return recent custom narration episodes.
+    ///
+    /// - Remark: HTTP `GET /api/content/audio-episodes/custom-narrations`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/get(listContentCustomNarrationAudioEpisodes)`.
+    internal func listContentCustomNarrationAudioEpisodes(
+        query: Operations.ListContentCustomNarrationAudioEpisodes.Input.Query = .init(),
+        headers: Operations.ListContentCustomNarrationAudioEpisodes.Input.Headers = .init()
+    ) async throws -> Operations.ListContentCustomNarrationAudioEpisodes.Output {
+        try await listContentCustomNarrationAudioEpisodes(Operations.ListContentCustomNarrationAudioEpisodes.Input(
+            query: query,
+            headers: headers
+        ))
+    }
+    /// Create one combined custom narration from selected long-form content
+    ///
+    /// Create or reuse a multi-source custom narration and enqueue generation.
+    ///
+    /// - Remark: HTTP `POST /api/content/audio-episodes/custom-narrations`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/post(createContentCustomNarrationAudioEpisode)`.
+    internal func createContentCustomNarrationAudioEpisode(
+        query: Operations.CreateContentCustomNarrationAudioEpisode.Input.Query = .init(),
+        headers: Operations.CreateContentCustomNarrationAudioEpisode.Input.Headers = .init(),
+        body: Operations.CreateContentCustomNarrationAudioEpisode.Input.Body
+    ) async throws -> Operations.CreateContentCustomNarrationAudioEpisode.Output {
+        try await createContentCustomNarrationAudioEpisode(Operations.CreateContentCustomNarrationAudioEpisode.Input(
+            query: query,
+            headers: headers,
+            body: body
         ))
     }
     /// Create an on-demand Fast Reads podcast episode
@@ -2281,6 +2334,23 @@ extension APIProtocol {
         headers: Operations.CreateDiscussionNewsItemAudioEpisode.Input.Headers = .init()
     ) async throws -> Operations.CreateDiscussionNewsItemAudioEpisode.Output {
         try await createDiscussionNewsItemAudioEpisode(Operations.CreateDiscussionNewsItemAudioEpisode.Input(
+            path: path,
+            query: query,
+            headers: headers
+        ))
+    }
+    /// Get one news item article body
+    ///
+    /// Return canonical article body text for a visible short-form news item.
+    ///
+    /// - Remark: HTTP `GET /api/news/items/{news_item_id}/body`.
+    /// - Remark: Generated from `#/paths//api/news/items/{news_item_id}/body/get(getNewsItemBody)`.
+    internal func getNewsItemBody(
+        path: Operations.GetNewsItemBody.Input.Path,
+        query: Operations.GetNewsItemBody.Input.Query = .init(),
+        headers: Operations.GetNewsItemBody.Input.Headers = .init()
+    ) async throws -> Operations.GetNewsItemBody.Output {
+        try await getNewsItemBody(Operations.GetNewsItemBody.Input(
             path: path,
             query: query,
             headers: headers
@@ -3318,11 +3388,18 @@ internal enum Components {
                 case fastNewsDigest = "fast_news_digest"
                 case contentCouncilDiscussion = "content_council_discussion"
                 case newsItemDiscussion = "news_item_discussion"
+                case customNarration = "custom_narration"
             }
             /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/kind`.
             internal var kind: Components.Schemas.AudioEpisodeResponse.KindPayload
+            /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/source_content_ids`.
+            internal var sourceContentIds: [Swift.Int]?
+            /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/source_count`.
+            internal var sourceCount: Swift.Int?
             /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/source_item_ids`.
             internal var sourceItemIds: [Swift.Int]?
+            /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/source_titles`.
+            internal var sourceTitles: [Swift.String]?
             /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/status`.
             internal enum StatusPayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case pending = "pending"
@@ -3340,21 +3417,30 @@ internal enum Components {
             ///   - createdAt:
             ///   - id:
             ///   - kind:
+            ///   - sourceContentIds:
+            ///   - sourceCount:
             ///   - sourceItemIds:
+            ///   - sourceTitles:
             ///   - status:
             ///   - title:
             internal init(
                 createdAt: Foundation.Date,
                 id: Swift.Int,
                 kind: Components.Schemas.AudioEpisodeResponse.KindPayload,
+                sourceContentIds: [Swift.Int]? = nil,
+                sourceCount: Swift.Int? = nil,
                 sourceItemIds: [Swift.Int]? = nil,
+                sourceTitles: [Swift.String]? = nil,
                 status: Components.Schemas.AudioEpisodeResponse.StatusPayload,
                 title: Swift.String
             ) {
                 self.createdAt = createdAt
                 self.id = id
                 self.kind = kind
+                self.sourceContentIds = sourceContentIds
+                self.sourceCount = sourceCount
                 self.sourceItemIds = sourceItemIds
+                self.sourceTitles = sourceTitles
                 self.status = status
                 self.title = title
             }
@@ -3362,7 +3448,10 @@ internal enum Components {
                 case createdAt = "created_at"
                 case id
                 case kind
+                case sourceContentIds = "source_content_ids"
+                case sourceCount = "source_count"
                 case sourceItemIds = "source_item_ids"
+                case sourceTitles = "source_titles"
                 case status
                 case title
             }
@@ -4765,6 +4854,23 @@ internal enum Components {
                 case config
                 case isActive = "is_active"
                 case scraperType = "scraper_type"
+            }
+        }
+        /// Create one combined custom narration from selected long-form sources.
+        ///
+        /// - Remark: Generated from `#/components/schemas/CustomNarrationCreateRequest`.
+        internal struct CustomNarrationCreateRequest: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/CustomNarrationCreateRequest/content_ids`.
+            internal var contentIds: [Swift.Int]
+            /// Creates a new `CustomNarrationCreateRequest`.
+            ///
+            /// - Parameters:
+            ///   - contentIds:
+            internal init(contentIds: [Swift.Int]) {
+                self.contentIds = contentIds
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case contentIds = "content_ids"
             }
         }
         /// Request schema for creating or resuming a debug user session.
@@ -12216,6 +12322,453 @@ internal enum Operations {
             /// - Throws: An error if `self` is not `.unprocessableContent`.
             /// - SeeAlso: `.unprocessableContent`.
             internal var unprocessableContent: Operations.ListContents.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// List custom narrations for the current user
+    ///
+    /// Return recent custom narration episodes.
+    ///
+    /// - Remark: HTTP `GET /api/content/audio-episodes/custom-narrations`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/get(listContentCustomNarrationAudioEpisodes)`.
+    internal enum ListContentCustomNarrationAudioEpisodes {
+        internal static let id: Swift.String = "listContentCustomNarrationAudioEpisodes"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/GET/query`.
+            internal struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/GET/query/limit`.
+                internal var limit: Swift.Int?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - limit:
+                internal init(limit: Swift.Int? = nil) {
+                    self.limit = limit
+                }
+            }
+            internal var query: Operations.ListContentCustomNarrationAudioEpisodes.Input.Query
+            /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/GET/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListContentCustomNarrationAudioEpisodes.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListContentCustomNarrationAudioEpisodes.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.ListContentCustomNarrationAudioEpisodes.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - query:
+            ///   - headers:
+            internal init(
+                query: Operations.ListContentCustomNarrationAudioEpisodes.Input.Query = .init(),
+                headers: Operations.ListContentCustomNarrationAudioEpisodes.Input.Headers = .init()
+            ) {
+                self.query = query
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/GET/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/GET/responses/200/content/application\/json`.
+                    case json([Components.Schemas.AudioEpisodeResponse])
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: [Components.Schemas.AudioEpisodeResponse] {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.ListContentCustomNarrationAudioEpisodes.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.ListContentCustomNarrationAudioEpisodes.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/get(listContentCustomNarrationAudioEpisodes)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.ListContentCustomNarrationAudioEpisodes.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.ListContentCustomNarrationAudioEpisodes.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                internal init() {}
+            }
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/get(listContentCustomNarrationAudioEpisodes)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.ListContentCustomNarrationAudioEpisodes.Output.NotFound)
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/get(listContentCustomNarrationAudioEpisodes)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            internal static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            internal var notFound: Operations.ListContentCustomNarrationAudioEpisodes.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/GET/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/GET/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.ListContentCustomNarrationAudioEpisodes.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.ListContentCustomNarrationAudioEpisodes.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/get(listContentCustomNarrationAudioEpisodes)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.ListContentCustomNarrationAudioEpisodes.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.ListContentCustomNarrationAudioEpisodes.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Create one combined custom narration from selected long-form content
+    ///
+    /// Create or reuse a multi-source custom narration and enqueue generation.
+    ///
+    /// - Remark: HTTP `POST /api/content/audio-episodes/custom-narrations`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/post(createContentCustomNarrationAudioEpisode)`.
+    internal enum CreateContentCustomNarrationAudioEpisode {
+        internal static let id: Swift.String = "createContentCustomNarrationAudioEpisode"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/query`.
+            internal struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/query/delivery`.
+                internal enum DeliveryPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case background = "background"
+                    case stream = "stream"
+                    case inline = "inline"
+                }
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/query/delivery`.
+                internal var delivery: Operations.CreateContentCustomNarrationAudioEpisode.Input.Query.DeliveryPayload?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - delivery:
+                internal init(delivery: Operations.CreateContentCustomNarrationAudioEpisode.Input.Query.DeliveryPayload? = nil) {
+                    self.delivery = delivery
+                }
+            }
+            internal var query: Operations.CreateContentCustomNarrationAudioEpisode.Input.Query
+            /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateContentCustomNarrationAudioEpisode.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateContentCustomNarrationAudioEpisode.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.CreateContentCustomNarrationAudioEpisode.Input.Headers
+            /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/requestBody`.
+            internal enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.CustomNarrationCreateRequest)
+            }
+            internal var body: Operations.CreateContentCustomNarrationAudioEpisode.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - query:
+            ///   - headers:
+            ///   - body:
+            internal init(
+                query: Operations.CreateContentCustomNarrationAudioEpisode.Input.Query = .init(),
+                headers: Operations.CreateContentCustomNarrationAudioEpisode.Input.Headers = .init(),
+                body: Operations.CreateContentCustomNarrationAudioEpisode.Input.Body
+            ) {
+                self.query = query
+                self.headers = headers
+                self.body = body
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.AudioEpisodeResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.AudioEpisodeResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateContentCustomNarrationAudioEpisode.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateContentCustomNarrationAudioEpisode.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/post(createContentCustomNarrationAudioEpisode)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.CreateContentCustomNarrationAudioEpisode.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.CreateContentCustomNarrationAudioEpisode.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                internal init() {}
+            }
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/post(createContentCustomNarrationAudioEpisode)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.CreateContentCustomNarrationAudioEpisode.Output.NotFound)
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/post(createContentCustomNarrationAudioEpisode)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            internal static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            internal var notFound: Operations.CreateContentCustomNarrationAudioEpisode.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/audio-episodes/custom-narrations/POST/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateContentCustomNarrationAudioEpisode.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateContentCustomNarrationAudioEpisode.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/custom-narrations/post(createContentCustomNarrationAudioEpisode)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.CreateContentCustomNarrationAudioEpisode.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.CreateContentCustomNarrationAudioEpisode.Output.UnprocessableContent {
                 get throws {
                     switch self {
                     case let .unprocessableContent(response):
@@ -26768,6 +27321,240 @@ internal enum Operations {
             /// - Throws: An error if `self` is not `.unprocessableContent`.
             /// - SeeAlso: `.unprocessableContent`.
             internal var unprocessableContent: Operations.CreateDiscussionNewsItemAudioEpisode.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Get one news item article body
+    ///
+    /// Return canonical article body text for a visible short-form news item.
+    ///
+    /// - Remark: HTTP `GET /api/news/items/{news_item_id}/body`.
+    /// - Remark: Generated from `#/paths//api/news/items/{news_item_id}/body/get(getNewsItemBody)`.
+    internal enum GetNewsItemBody {
+        internal static let id: Swift.String = "getNewsItemBody"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/news/items/{news_item_id}/body/GET/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/news/items/{news_item_id}/body/GET/path/news_item_id`.
+                internal var newsItemId: Swift.Int
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - newsItemId:
+                internal init(newsItemId: Swift.Int) {
+                    self.newsItemId = newsItemId
+                }
+            }
+            internal var path: Operations.GetNewsItemBody.Input.Path
+            /// - Remark: Generated from `#/paths/api/news/items/{news_item_id}/body/GET/query`.
+            internal struct Query: Sendable, Hashable {
+                /// Body variant
+                ///
+                /// - Remark: Generated from `#/paths/api/news/items/{news_item_id}/body/GET/query/variant`.
+                internal var variant: Swift.String?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - variant: Body variant
+                internal init(variant: Swift.String? = nil) {
+                    self.variant = variant
+                }
+            }
+            internal var query: Operations.GetNewsItemBody.Input.Query
+            /// - Remark: Generated from `#/paths/api/news/items/{news_item_id}/body/GET/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNewsItemBody.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetNewsItemBody.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.GetNewsItemBody.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - query:
+            ///   - headers:
+            internal init(
+                path: Operations.GetNewsItemBody.Input.Path,
+                query: Operations.GetNewsItemBody.Input.Query = .init(),
+                headers: Operations.GetNewsItemBody.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.query = query
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/news/items/{news_item_id}/body/GET/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/news/items/{news_item_id}/body/GET/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ContentBodyResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.ContentBodyResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.GetNewsItemBody.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.GetNewsItemBody.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/news/items/{news_item_id}/body/get(getNewsItemBody)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.GetNewsItemBody.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.GetNewsItemBody.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                internal init() {}
+            }
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/news/items/{news_item_id}/body/get(getNewsItemBody)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.GetNewsItemBody.Output.NotFound)
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/news/items/{news_item_id}/body/get(getNewsItemBody)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            internal static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            internal var notFound: Operations.GetNewsItemBody.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/news/items/{news_item_id}/body/GET/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/news/items/{news_item_id}/body/GET/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.GetNewsItemBody.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.GetNewsItemBody.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/news/items/{news_item_id}/body/get(getNewsItemBody)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.GetNewsItemBody.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.GetNewsItemBody.Output.UnprocessableContent {
                 get throws {
                     switch self {
                     case let .unprocessableContent(response):
