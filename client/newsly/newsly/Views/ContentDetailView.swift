@@ -25,6 +25,12 @@ private enum DetailSheetDestination: String, Identifiable {
     var id: String { rawValue }
 }
 
+private struct BrowserDestination: Identifiable {
+    let url: URL
+
+    var id: String { url.absoluteString }
+}
+
 private struct DetailImageAsset: Identifiable {
     let imageURL: URL
     let thumbnailURL: URL?
@@ -73,7 +79,6 @@ struct ContentDetailView: View {
     @StateObject private var chatSessionManager = ActiveChatSessionManager.shared
     @EnvironmentObject var readingStateStore: ReadingStateStore
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     @State private var dragAmount: CGFloat = 0
     @State private var currentIndex: Int
     // Navigation skipping state
@@ -92,6 +97,7 @@ struct ContentDetailView: View {
     @State private var audioEpisodeByContentId: [Int: AudioEpisode] = [:]
     @State private var activeAlert: ViewAlert?
     @State private var activeReaderContent: ContentDetail?
+    @State private var activeBrowserDestination: BrowserDestination?
     // Full image viewer
     @State private var selectedImageAsset: DetailImageAsset?
     // Discussion sheet
@@ -606,6 +612,10 @@ struct ContentDetailView: View {
             .task(id: content.id) {
                 await viewModel.loadReaderBody(for: content)
             }
+        }
+        .fullScreenCover(item: $activeBrowserDestination) { destination in
+            SafariView(url: destination.url)
+                .ignoresSafeArea()
         }
     }
 
@@ -1349,10 +1359,14 @@ struct ContentDetailView: View {
         HStack(spacing: 0) {
             // Primary action - Open in browser
             if let url = URL(string: content.url) {
-                Link(destination: url) {
+                Button {
+                    openInAppBrowser(url)
+                } label: {
                     minimalActionIcon("safari", color: overlaid ? .white : .accentColor, overlaid: overlaid)
                 }
+                .buttonStyle(.plain)
                 .accessibilityIdentifier("content.action.open_external")
+                .accessibilityLabel("Open article")
             }
 
             Spacer()
@@ -1910,6 +1924,17 @@ struct ContentDetailView: View {
         return URL(string: rawURL)
     }
 
+    private func openInAppBrowser(_ url: URL) {
+        if activeSheet != nil {
+            activeSheet = nil
+            DispatchQueue.main.async {
+                activeBrowserDestination = BrowserDestination(url: url)
+            }
+            return
+        }
+        activeBrowserDestination = BrowserDestination(url: url)
+    }
+
     private func normalizedText(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1962,13 +1987,16 @@ struct ContentDetailView: View {
                                                 .font(.headline)
                                             ForEach(group.items) { item in
                                                 if let url = URL(string: item.url) {
-                                                    Link(destination: url) {
+                                                    Button {
+                                                        openInAppBrowser(url)
+                                                    } label: {
                                                         HStack(spacing: 8) {
                                                             Image(systemName: "arrow.up.right.square")
                                                             Text(item.title)
                                                                 .multilineTextAlignment(.leading)
                                                         }
                                                     }
+                                                    .buttonStyle(.plain)
                                                 }
                                             }
                                         }
@@ -2070,7 +2098,7 @@ struct ContentDetailView: View {
             if let url = discussionResolvedFallbackURL {
                 Button {
                     activeSheet = nil
-                    openURL(url)
+                    openInAppBrowser(url)
                 } label: {
                     Label("Open original discussion", systemImage: "arrow.up.right.square")
                         .frame(maxWidth: .infinity)
@@ -2217,12 +2245,6 @@ struct ContentDetailView: View {
         discussion: ContentDiscussion
     ) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.headline.weight(.semibold))
-                .foregroundColor(.primary)
-                .frame(width: 18, height: 24, alignment: .center)
-                .accessibilityHidden(true)
-
             Text("Comments")
                 .font(.headline)
                 .fontWeight(.semibold)
@@ -2243,7 +2265,9 @@ struct ContentDetailView: View {
                 }
 
                 if let url = discussionSummaryURL(summary: summary, discussion: discussion) {
-                    Link(destination: url) {
+                    Button {
+                        openInAppBrowser(url)
+                    } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.up.right.square")
                             Text("Open")
@@ -2252,6 +2276,7 @@ struct ContentDetailView: View {
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                     }
+                    .buttonStyle(.plain)
                     .fixedSize(horizontal: true, vertical: false)
                 }
             }
@@ -2356,9 +2381,12 @@ struct ContentDetailView: View {
 
                     if let urlString = summary.externalDiscussionURL ?? discussion.discussionURL ?? discussion.sourceURL,
                        let url = URL(string: urlString) {
-                        Link(destination: url) {
+                        Button {
+                            openInAppBrowser(url)
+                        } label: {
                             Label("Open original discussion", systemImage: "arrow.up.right.square")
                         }
+                        .buttonStyle(.plain)
                         .font(.subheadline)
                         .padding(.top, 4)
                     }
@@ -2434,7 +2462,9 @@ struct ContentDetailView: View {
 
                         ForEach(summary.notableLinks) { link in
                             if let url = URL(string: link.url) {
-                                Link(destination: url) {
+                                Button {
+                                    openInAppBrowser(url)
+                                } label: {
                                     VStack(alignment: .leading, spacing: 5) {
                                         HStack(spacing: 6) {
                                             Image(systemName: "arrow.up.right.square")
@@ -2453,6 +2483,7 @@ struct ContentDetailView: View {
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 }
+                                .buttonStyle(.plain)
                                 .padding(12)
                                 .background(Color.surfaceSecondary)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -2483,13 +2514,13 @@ struct ContentDetailView: View {
                         let childCount = commentIndex.descendantCountByID[comment.commentID] ?? 0
 
                         VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
-                                Text(comment.author ?? "unknown")
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.secondary)
-
-                                if isCollapsed && childCount > 0 {
+                            if !isCollapsed {
+                                Text(comment.compactText ?? comment.text)
+                                    .font(.callout)
+                                    .fontWeight(.regular)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else if childCount > 0 {
+                                HStack(spacing: 6) {
                                     Text("+\(childCount)")
                                         .font(.caption2)
                                         .fontWeight(.semibold)
@@ -2498,21 +2529,11 @@ struct ContentDetailView: View {
                                         .padding(.vertical, 1)
                                         .background(Color.orange.opacity(0.12))
                                         .clipShape(Capsule())
-                                }
 
-                                Spacer()
-
-                                if childCount > 0 {
-                                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                                    Image(systemName: "chevron.right")
                                         .font(.caption2)
                                         .foregroundColor(.secondary.opacity(0.6))
                                 }
-                            }
-
-                            if !isCollapsed {
-                                Text(comment.compactText ?? comment.text)
-                                    .font(.callout)
-                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         .padding(12)
@@ -2598,7 +2619,9 @@ struct ContentDetailView: View {
                             }
 
                             HStack(spacing: 10) {
-                                Link(destination: url) {
+                                Button {
+                                    openInAppBrowser(url)
+                                } label: {
                                     Label("Open", systemImage: "arrow.up.right.square")
                                         .frame(maxWidth: .infinity)
                                 }
@@ -2692,7 +2715,9 @@ struct ContentDetailView: View {
         if let url = URL(string: link.url) {
             let state = viewModel.relevantLinkReadLaterState(for: link.id)
             HStack(alignment: .top, spacing: 8) {
-                Link(destination: url) {
+                Button {
+                    openInAppBrowser(url)
+                } label: {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "arrow.up.right")
                             .font(.caption.weight(.semibold))
