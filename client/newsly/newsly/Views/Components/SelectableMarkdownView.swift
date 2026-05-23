@@ -14,17 +14,20 @@ struct SelectableMarkdownView: UIViewRepresentable {
     let markdown: String
     let textColor: UIColor
     let baseFont: UIFont
+    let adjustsFontForContentSizeCategory: Bool
     var onDigDeeper: ((String) -> Void)?
 
     init(
         markdown: String,
         textColor: UIColor = .label,
         baseFont: UIFont = .preferredFont(forTextStyle: .callout),
+        adjustsFontForContentSizeCategory: Bool = false,
         onDigDeeper: ((String) -> Void)? = nil
     ) {
         self.markdown = markdown
         self.textColor = textColor
         self.baseFont = baseFont
+        self.adjustsFontForContentSizeCategory = adjustsFontForContentSizeCategory
         self.onDigDeeper = onDigDeeper
     }
 
@@ -37,7 +40,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
         textView.isEditable = false
         textView.isSelectable = true
         textView.isScrollEnabled = false
-        textView.adjustsFontForContentSizeCategory = false
+        textView.adjustsFontForContentSizeCategory = adjustsFontForContentSizeCategory
         textView.backgroundColor = .clear
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
@@ -52,13 +55,15 @@ struct SelectableMarkdownView: UIViewRepresentable {
 
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
         uiView.onDigDeeper = onDigDeeper
+        uiView.adjustsFontForContentSizeCategory = adjustsFontForContentSizeCategory
         let resolvedTextColor = textColor.resolvedColor(with: uiView.traitCollection)
-        let resolvedLinkColor = UIColor.link.resolvedColor(with: uiView.traitCollection)
+        let resolvedLinkColor = UIColor.appAccent.resolvedColor(with: uiView.traitCollection)
         let linkAppearanceSignature = context.coordinator.colorSignature(for: resolvedLinkColor)
+        let scaledBaseFont = scaledFont(for: baseFont, compatibleWith: uiView.traitCollection)
         let renderKey = RenderKey(
             markdown: markdown,
-            baseFontName: baseFont.fontDescriptor.postscriptName,
-            baseFontSize: baseFont.pointSize,
+            baseFontName: scaledBaseFont.fontDescriptor.postscriptName,
+            baseFontSize: scaledBaseFont.pointSize,
             textColorSignature: context.coordinator.colorSignature(for: resolvedTextColor),
             linkColorSignature: linkAppearanceSignature
         )
@@ -72,7 +77,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
         guard context.coordinator.lastRenderKey != renderKey else { return }
 
         let rendered = MarkdownNSRenderer(
-            baseFont: baseFont,
+            baseFont: scaledBaseFont,
             textColor: resolvedTextColor,
             traitCollection: uiView.traitCollection
         ).render(markdown)
@@ -85,11 +90,12 @@ struct SelectableMarkdownView: UIViewRepresentable {
         guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
 
         let resolvedTextColor = textColor.resolvedColor(with: uiView.traitCollection)
-        let resolvedLinkColor = UIColor.link.resolvedColor(with: uiView.traitCollection)
+        let resolvedLinkColor = UIColor.appAccent.resolvedColor(with: uiView.traitCollection)
+        let scaledBaseFont = scaledFont(for: baseFont, compatibleWith: uiView.traitCollection)
         let renderKey = RenderKey(
             markdown: markdown,
-            baseFontName: baseFont.fontDescriptor.postscriptName,
-            baseFontSize: baseFont.pointSize,
+            baseFontName: scaledBaseFont.fontDescriptor.postscriptName,
+            baseFontSize: scaledBaseFont.pointSize,
             textColorSignature: context.coordinator.colorSignature(for: resolvedTextColor),
             linkColorSignature: context.coordinator.colorSignature(for: resolvedLinkColor)
         )
@@ -103,6 +109,11 @@ struct SelectableMarkdownView: UIViewRepresentable {
         let fittingSize = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         context.coordinator.cachedSize = SizeCacheEntry(renderKey: renderKey, width: width, height: fittingSize.height)
         return CGSize(width: width, height: fittingSize.height)
+    }
+
+    private func scaledFont(for font: UIFont, compatibleWith traitCollection: UITraitCollection) -> UIFont {
+        guard adjustsFontForContentSizeCategory else { return font }
+        return UIFontMetrics(forTextStyle: .body).scaledFont(for: font, compatibleWith: traitCollection)
     }
 
     struct RenderKey: Equatable {
@@ -315,12 +326,18 @@ struct MarkdownNSRenderer {
             result.append(NSAttributedString(string: "\n"))
         }
 
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 3
+        paragraph.paragraphSpacingBefore = 8
+        paragraph.paragraphSpacing = 10
+
         let attrs: [NSAttributedString.Key: Any] = [
             .font: codeFont,
             .foregroundColor: textColor,
-            .backgroundColor: bgColor
+            .backgroundColor: bgColor,
+            .paragraphStyle: paragraph
         ]
-        result.append(NSAttributedString(string: code, attributes: attrs))
+        result.append(NSAttributedString(string: "  " + code + "  ", attributes: attrs))
         result.append(NSAttributedString(string: "\n"))
     }
 
@@ -515,12 +532,22 @@ struct MarkdownNSRenderer {
 
     private func applyHeadingStyle(to attrStr: NSMutableAttributedString, level: Int) {
         let range = NSRange(location: 0, length: attrStr.length)
-        let scales: [CGFloat] = [1.25, 1.15, 1.05, 1.0, 0.9, 0.85]
+        let scales: [CGFloat] = [1.36, 1.22, 1.12, 1.02, 0.94, 0.88]
         let scale = scales[min(level - 1, 5)]
         let weight: UIFont.Weight = level <= 1 ? .bold : .semibold
-        let headingFont = UIFont.systemFont(ofSize: baseFont.pointSize * scale, weight: weight)
+        let headingFont = UIFont(name: "Newsreader", size: baseFont.pointSize * scale)
+            ?? UIFont.systemFont(ofSize: baseFont.pointSize * scale, weight: weight)
+        let descriptor = headingFont.fontDescriptor.addingAttributes([
+            .traits: [UIFontDescriptor.TraitKey.weight: weight.rawValue]
+        ])
+        let styledHeadingFont = UIFont(descriptor: descriptor, size: headingFont.pointSize)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineHeightMultiple = 1.08
+        paragraph.paragraphSpacingBefore = level <= 2 ? 8 : 4
+        paragraph.paragraphSpacing = level <= 2 ? 7 : 5
 
-        attrStr.addAttribute(.font, value: headingFont, range: range)
+        attrStr.addAttribute(.font, value: styledHeadingFont, range: range)
+        attrStr.addAttribute(.paragraphStyle, value: paragraph, range: range)
         if level == 6 {
             attrStr.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: range)
         }
@@ -528,10 +555,17 @@ struct MarkdownNSRenderer {
 
     private func applyBlockquoteStyle(to attrStr: NSMutableAttributedString) {
         let range = NSRange(location: 0, length: attrStr.length)
-        attrStr.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: range)
+        let quoteColor = UIColor.appOnSurfaceSecondary.resolvedColor(with: traitCollection)
+        attrStr.addAttribute(.foregroundColor, value: quoteColor, range: range)
+        attrStr.insert(NSAttributedString(string: "  "), at: 0)
+        attrStr.insert(NSAttributedString(string: "| ", attributes: [
+            .foregroundColor: UIColor.appAccent.resolvedColor(with: traitCollection),
+            .font: UIFont.systemFont(ofSize: baseFont.pointSize, weight: .semibold)
+        ]), at: 0)
 
         // Apply italic where possible
-        attrStr.enumerateAttribute(.font, in: range) { value, subRange, _ in
+        let updatedRange = NSRange(location: 0, length: attrStr.length)
+        attrStr.enumerateAttribute(.font, in: updatedRange) { value, subRange, _ in
             if let font = value as? UIFont,
                let italic = font.withTraits(.traitItalic) {
                 attrStr.addAttribute(.font, value: italic, range: subRange)
@@ -539,17 +573,21 @@ struct MarkdownNSRenderer {
         }
 
         let para = NSMutableParagraphStyle()
-        para.firstLineHeadIndent = 14
-        para.headIndent = 14
-        attrStr.addAttribute(.paragraphStyle, value: para, range: range)
+        para.firstLineHeadIndent = 0
+        para.headIndent = 18
+        para.lineSpacing = 3
+        para.paragraphSpacingBefore = 6
+        para.paragraphSpacing = 8
+        attrStr.addAttribute(.paragraphStyle, value: para, range: updatedRange)
     }
 
     private func applyListStyle(to attrStr: NSMutableAttributedString) {
         let range = NSRange(location: 0, length: attrStr.length)
         let para = NSMutableParagraphStyle()
-        para.headIndent = 20
+        para.headIndent = 25
         para.firstLineHeadIndent = 0
-        para.paragraphSpacing = 3
+        para.lineSpacing = 3
+        para.paragraphSpacing = 6
         attrStr.addAttribute(.paragraphStyle, value: para, range: range)
     }
 
@@ -557,14 +595,22 @@ struct MarkdownNSRenderer {
         let range = NSRange(location: 0, length: attrStr.length)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 2
-        paragraph.paragraphSpacing = 6
+        paragraph.paragraphSpacingBefore = 8
+        paragraph.paragraphSpacing = 10
         attrStr.addAttribute(.paragraphStyle, value: paragraph, range: range)
     }
 
     // MARK: - Inline Rendering
 
     private var defaultAttrs: [NSAttributedString.Key: Any] {
-        [.font: baseFont, .foregroundColor: textColor]
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineHeightMultiple = 1.18
+        paragraph.paragraphSpacing = 7
+        return [
+            .font: baseFont,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraph
+        ]
     }
 
     /// Renders inline markdown (bold, italic, code, links, strikethrough)
@@ -585,7 +631,10 @@ struct MarkdownNSRenderer {
 
             if let inlineIntent = run.inlinePresentationIntent {
                 if inlineIntent.contains(.stronglyEmphasized) {
-                    font = UIFont.systemFont(ofSize: font.pointSize, weight: .semibold)
+                    let descriptor = font.fontDescriptor.addingAttributes([
+                        .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.semibold.rawValue]
+                    ])
+                    font = UIFont(descriptor: descriptor, size: font.pointSize)
                 }
                 if inlineIntent.contains(.emphasized) {
                     font = font.withTraits(.traitItalic) ?? font
@@ -603,7 +652,10 @@ struct MarkdownNSRenderer {
                 }
                 // Handle bold+italic combo
                 if inlineIntent.contains(.stronglyEmphasized) && inlineIntent.contains(.emphasized) {
-                    if let boldItalic = UIFont.systemFont(ofSize: baseFont.pointSize, weight: .semibold)
+                    let descriptor = baseFont.fontDescriptor.addingAttributes([
+                        .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.semibold.rawValue]
+                    ])
+                    if let boldItalic = UIFont(descriptor: descriptor, size: baseFont.pointSize)
                         .withTraits(.traitItalic) {
                         font = boldItalic
                     }

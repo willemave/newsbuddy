@@ -101,23 +101,25 @@ struct LongFormCard: View {
                     .padding(.bottom, 12)
                 }
 
-                if let chipText = aiInsightChipText {
-                    AIInsightChip(text: chipText)
-                        .padding(.bottom, 12)
-                        .contentShape(Rectangle())
-                        .onTapGesture { onOpen?() }
-                }
-
                 HStack {
-                    Text(sourceLabel)
-                        .font(.terracottaBodySmall)
-                        .tracking(0.5)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .lineLimit(1)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            onOpen?()
-                        }
+                    HStack(spacing: 8) {
+                        Image(systemName: contentTypeIcon)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .frame(width: 18, height: 18)
+                            .accessibilityHidden(true)
+
+                        Text(sourceLabel)
+                            .font(.terracottaBodySmall)
+                            .tracking(0.5)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onOpen?()
+                    }
+                    .accessibilityLabel("\(contentTypeLabel), \(sourceLabel)")
 
                     Spacer()
 
@@ -274,18 +276,6 @@ struct LongFormCard: View {
         LongFormCardDesign.summaryFont
     }
 
-    private var aiInsightChipText: String? {
-        if let bullets = content.previewBullets, !bullets.isEmpty {
-            let label = bullets.count == 1 ? "key insight" : "key insights"
-            return "\(bullets.count) \(label)"
-        }
-        if let points = content.newsKeyPoints, !points.isEmpty {
-            let label = points.count == 1 ? "key point" : "key points"
-            return "\(points.count) \(label)"
-        }
-        return nil
-    }
-
     private var sourceLabel: String {
         if let source = content.source, !source.isEmpty {
             return source.uppercased()
@@ -310,6 +300,17 @@ struct LongFormCard: View {
         }
     }
 
+    private var contentTypeLabel: String {
+        switch content.contentTypeEnum {
+        case .article:
+            return "Article"
+        case .podcast:
+            return "Podcast"
+        default:
+            return "Content"
+        }
+    }
+
     private func buildImageURL(from urlString: String) -> URL? {
         if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") {
             return URL(string: urlString)
@@ -317,28 +318,5 @@ struct LongFormCard: View {
         let baseURL = AppSettings.shared.baseURL
         let fullURL = urlString.hasPrefix("/") ? baseURL + urlString : baseURL + "/" + urlString
         return URL(string: fullURL)
-    }
-}
-
-private struct AIInsightChip: View {
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 10, weight: .semibold))
-            Text(text)
-                .font(.terracottaCategoryPill)
-                .tracking(0.4)
-        }
-        .foregroundStyle(Color.terracottaPrimary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            Capsule().fill(Color.terracottaPrimary.opacity(0.10))
-        )
-        .overlay(
-            Capsule().stroke(Color.terracottaPrimary.opacity(0.18), lineWidth: 0.5)
-        )
     }
 }
