@@ -29,6 +29,7 @@ struct KnowledgeView: View {
     @State private var customNarrations: [AudioEpisode] = []
     @State private var isLoadingCustomNarrations = false
     @State private var customNarrationError: String?
+    @State private var showNarrationList = false
     @FocusState private var isSearchFocused: Bool
 
     private let primaryAction = HubAction(
@@ -44,12 +45,6 @@ struct KnowledgeView: View {
             title: "Top Comments",
             subtitle: "Most interesting discussions",
             run: { viewModel in await viewModel.startCommentsChat() }
-        ),
-        HubAction(
-            icon: "sparkles",
-            title: "Best Unread",
-            subtitle: "Most interesting fast-news stories",
-            run: { viewModel in await viewModel.startInterestingUnreadNewsChat() }
         ),
         HubAction(
             icon: "newspaper.fill",
@@ -88,8 +83,7 @@ struct KnowledgeView: View {
                     headerSection
                     searchFieldSection
                     errorBannerSection
-                    librarySection
-                    narrationsSection
+                    savedAndNarrationsSection
                         .id(KnowledgeFocusTarget.narrations)
                     actionsSection
                     chatHistorySection
@@ -114,6 +108,26 @@ struct KnowledgeView: View {
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showNarrationList) {
+            CustomNarrationListSheet(
+                episodes: customNarrations,
+                isLoading: isLoadingCustomNarrations,
+                errorMessage: customNarrationError,
+                playbackService: narrationPlaybackService,
+                onRefresh: {
+                    await loadCustomNarrations()
+                },
+                onTapEpisode: { episode in
+                    await handleCustomNarrationTap(episode)
+                },
+                isEpisodePlaying: { episode in
+                    isCustomNarrationPlaying(episode)
+                },
+                subtitle: { episode in
+                    customNarrationSubtitle(episode)
+                }
+            )
+        }
         .task {
             await loadKnowledgeScreen()
         }
@@ -177,175 +191,84 @@ struct KnowledgeView: View {
         }
     }
 
-    // MARK: - Library
+    // MARK: - Saved and Narrations
 
-    private var librarySection: some View {
-        Group {
-            if let onShowKnowledgeLibrary {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Library")
-                        .font(.terracottaHeadlineSmall)
-                        .foregroundStyle(Color.onSurface)
-                        .padding(.horizontal, Spacing.screenHorizontal)
-
-                    Button {
-                        onShowKnowledgeLibrary()
-                    } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "books.vertical.fill")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.terracottaPrimary)
-                                .frame(width: 38, height: 38)
-                                .background(Color.terracottaPrimary.opacity(0.14))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Saved")
-                                    .font(.terracottaHeadlineSmall)
-                                    .foregroundColor(.onSurface)
-
-                                Text("Bookmarks and saved knowledge with markdown ready")
-                                    .font(.terracottaBodySmall)
-                                    .foregroundColor(.onSurfaceSecondary)
-                            }
-
-                            Spacer()
-
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.onSurfaceSecondary)
-                        }
-                        .padding(14)
-                        .background(Color.surfaceSecondary)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-                        )
-                        .padding(.horizontal, Spacing.screenHorizontal)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.bottom, 24)
-            }
-        }
-    }
-
-    // MARK: - Narrations
-
-    private var narrationsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Narrations")
+    private var savedAndNarrationsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Library")
                 .font(.terracottaHeadlineSmall)
                 .foregroundStyle(Color.onSurface)
                 .padding(.horizontal, Spacing.screenHorizontal)
 
-            if let customNarrationError {
-                Text(customNarrationError)
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(.red)
-                    .padding(.horizontal, Spacing.screenHorizontal)
-            }
-
-            if isLoadingCustomNarrations && customNarrations.isEmpty {
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading narrations")
-                        .font(.terracottaBodyMedium)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Spacing.screenHorizontal)
-            } else if customNarrations.isEmpty {
-                Text("No narrations yet")
-                    .font(.terracottaBodyMedium)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Spacing.screenHorizontal)
-                    .padding(.vertical, 8)
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(customNarrations) { episode in
-                        customNarrationRow(episode)
+            LazyVGrid(columns: twoColumnGrid, spacing: 10) {
+                libraryButton(
+                    title: "Saved",
+                    systemImage: "books.vertical.fill",
+                    action: {
+                        onShowKnowledgeLibrary?()
                     }
-                }
-                .padding(.horizontal, Spacing.screenHorizontal)
+                )
+                .disabled(onShowKnowledgeLibrary == nil)
+
+                libraryButton(
+                    title: "Narration",
+                    systemImage: "waveform",
+                    action: {
+                        showNarrationList = true
+                    }
+                )
             }
+            .padding(.horizontal, Spacing.screenHorizontal)
         }
         .padding(.bottom, 22)
     }
 
-    private func customNarrationRow(_ episode: AudioEpisode) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.terracottaPrimary.opacity(0.14))
-                        .frame(width: 36, height: 36)
+    private var twoColumnGrid: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+        ]
+    }
 
-                    customNarrationIcon(episode)
-                }
+    private func libraryButton(
+        title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.terracottaPrimary)
+                    .frame(width: 40, height: 40)
+                    .background(Color.terracottaPrimary.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(episode.title)
-                        .font(.terracottaBodyLarge.weight(.semibold))
+                HStack(alignment: .lastTextBaseline, spacing: 8) {
+                    Text(title)
+                        .font(.terracottaHeadlineSmall)
                         .foregroundStyle(Color.onSurface)
-                        .lineLimit(2)
-
-                    Text(customNarrationSubtitle(episode))
-                        .font(.terracottaBodySmall)
-                        .foregroundStyle(Color.onSurfaceSecondary)
                         .lineLimit(1)
-                }
+                        .minimumScaleFactor(0.85)
 
-                Spacer(minLength: 10)
+                    Spacer(minLength: 0)
 
-                if episode.isGenerating {
-                    Text("Generating")
-                        .font(.terracottaBodySmall.weight(.semibold))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Color.onSurfaceSecondary)
-                } else if episode.isFailed {
-                    Text("Failed")
-                        .font(.terracottaBodySmall.weight(.semibold))
-                        .foregroundStyle(.red)
-                } else if isCustomNarrationPlaying(episode) {
-                    Text("Playing")
-                        .font(.terracottaBodySmall.weight(.semibold))
-                        .foregroundStyle(Color.terracottaPrimary)
                 }
             }
-
-            if episode.isCompleted {
-                NarrationPlaybackControlRow(
-                    playbackService: narrationPlaybackService,
-                    target: .audioEpisode(episode.id),
-                    isPreparing: false,
-                    onTogglePlayback: {
-                        Task {
-                            await handleCustomNarrationTap(episode)
-                        }
-                    }
-                )
-            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+            .background(Color.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+            )
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
-        .background(Color.surfaceSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard !episode.isCompleted else { return }
-            Task {
-                await handleCustomNarrationTap(episode)
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("knowledge.narration.\(episode.id)")
+        .buttonStyle(.plain)
     }
 
     private func scrollToFocusRequest(
@@ -460,13 +383,10 @@ struct KnowledgeView: View {
                 .foregroundStyle(Color.onSurface)
                 .padding(.horizontal, Spacing.screenHorizontal)
 
-            VStack(spacing: 10) {
-                primaryActionButton(primaryAction)
-
-                LazyVGrid(columns: actionGridColumns, spacing: 10) {
-                    ForEach(secondaryActions) { action in
-                        compactActionButton(action)
-                    }
+            LazyVGrid(columns: twoColumnGrid, spacing: 10) {
+                compactActionButton(primaryAction)
+                ForEach(secondaryActions) { action in
+                    compactActionButton(action)
                 }
             }
             .padding(.horizontal, Spacing.screenHorizontal)
@@ -474,82 +394,36 @@ struct KnowledgeView: View {
         .padding(.bottom, 22)
     }
 
-    private var actionGridColumns: [GridItem] {
-        [
-            GridItem(.flexible(), spacing: 10),
-            GridItem(.flexible(), spacing: 10),
-        ]
-    }
-
-    private func primaryActionButton(_ action: HubAction) -> some View {
+    private func compactActionButton(_ action: HubAction) -> some View {
         Button {
             startAction(action)
         } label: {
-            HStack(spacing: 12) {
-                actionIcon(action.icon, size: 40, iconSize: 18, cornerRadius: 11)
+            VStack(alignment: .leading, spacing: 10) {
+                actionIcon(action.icon, size: 40, iconSize: 17, cornerRadius: 12)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(action.title)
-                        .font(.terracottaHeadlineSmall)
+                        .font(.terracottaBodyLarge.weight(.semibold))
                         .foregroundColor(.onSurface)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.84)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Text(action.subtitle)
                         .font(.terracottaBodySmall)
                         .foregroundColor(.onSurfaceSecondary)
                         .lineLimit(2)
-                }
-
-                Spacer(minLength: 10)
-
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.onSurfaceSecondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
-            .background(Color.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(viewModel.isCreatingSession)
-    }
-
-    private func compactActionButton(_ action: HubAction) -> some View {
-        Button {
-            startAction(action)
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .top, spacing: 7) {
-                    actionIcon(action.icon, size: 28, iconSize: 13, cornerRadius: 9)
-
-                    Text(action.title)
-                        .font(.terracottaBodyLarge.weight(.semibold))
-                        .foregroundColor(.onSurface)
-                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-
-                    Spacer()
                 }
 
-                Text(action.subtitle)
-                    .font(.terracottaBodySmall)
-                    .foregroundColor(.onSurfaceSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 90, alignment: .topLeading)
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
             .background(Color.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
             )
         }
@@ -720,6 +594,151 @@ struct KnowledgeView: View {
             customNarrationError = nil
         } catch {
             customNarrationError = error.localizedDescription
+        }
+    }
+}
+
+private struct CustomNarrationListSheet: View {
+    let episodes: [AudioEpisode]
+    let isLoading: Bool
+    let errorMessage: String?
+    @ObservedObject var playbackService: NarrationPlaybackService
+    let onRefresh: () async -> Void
+    let onTapEpisode: (AudioEpisode) async -> Void
+    let isEpisodePlaying: (AudioEpisode) -> Bool
+    let subtitle: (AudioEpisode) -> String
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(.red)
+                        .appListRow()
+                }
+
+                if isLoading && episodes.isEmpty {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Loading narrations")
+                            .font(.terracottaBodyMedium)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                    }
+                    .appListRow()
+                } else if episodes.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No narrations yet")
+                            .font(.terracottaHeadlineSmall)
+                            .foregroundStyle(Color.onSurface)
+                        Text("Created narrations will show up here.")
+                            .font(.terracottaBodySmall)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+                    .appListRow()
+                } else {
+                    ForEach(episodes) { episode in
+                        narrationRow(episode)
+                            .appListRow()
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.surfacePrimary)
+            .navigationTitle("Narration")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .refreshable {
+                await onRefresh()
+            }
+        }
+    }
+
+    private func narrationRow(_ episode: AudioEpisode) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                Task {
+                    await onTapEpisode(episode)
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.terracottaPrimary.opacity(0.14))
+                            .frame(width: 38, height: 38)
+
+                        narrationIcon(episode)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(episode.title)
+                            .font(.terracottaBodyLarge.weight(.semibold))
+                            .foregroundStyle(Color.onSurface)
+                            .lineLimit(2)
+
+                        Text(subtitle(episode))
+                            .font(.terracottaBodySmall)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 10)
+
+                    Image(systemName: isEpisodePlaying(episode) ? "pause.fill" : "play.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(episode.isCompleted ? Color.terracottaPrimary : Color.onSurfaceSecondary)
+                        .frame(width: 30, height: 30)
+                        .background(Color.surfaceSecondary)
+                        .clipShape(Circle())
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if episode.isCompleted && isEpisodePlaying(episode) {
+                NarrationPlaybackControlRow(
+                    playbackService: playbackService,
+                    target: .audioEpisode(episode.id),
+                    isPreparing: false,
+                    onTogglePlayback: {
+                        Task {
+                            await onTapEpisode(episode)
+                        }
+                    }
+                )
+            }
+        }
+        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.vertical, 9)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("knowledge.narration.\(episode.id)")
+    }
+
+    @ViewBuilder
+    private func narrationIcon(_ episode: AudioEpisode) -> some View {
+        if episode.isGenerating {
+            ProgressView()
+                .controlSize(.small)
+        } else if episode.isFailed {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.red)
+        } else {
+            Image(systemName: isEpisodePlaying(episode) ? "speaker.wave.3.fill" : "waveform")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.terracottaPrimary)
         }
     }
 }

@@ -47,6 +47,7 @@ struct CustomNarrationPickerSheet: View {
                             Text(loadError)
                                 .font(.terracottaBodySmall)
                                 .foregroundStyle(.red)
+                                .appRow(.compact)
                                 .appListRow()
                         }
 
@@ -125,14 +126,7 @@ struct CustomNarrationPickerSheet: View {
                         .foregroundStyle(Color.onSurface)
                         .lineLimit(2)
 
-                    HStack(spacing: 6) {
-                        Text(item.contentTypeEnum?.displayName ?? "Source")
-                        if currentItems.contains(where: { $0.id == item.id }) {
-                            Text("Long Read")
-                        } else {
-                            Text("Saved")
-                        }
-                    }
+                    Text(rowMetadata(for: item).joined(separator: " • "))
                     .font(.terracottaBodySmall)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .lineLimit(1)
@@ -148,7 +142,7 @@ struct CustomNarrationPickerSheet: View {
                             : Color.onSurfaceSecondary.opacity(0.55)
                     )
             }
-            .padding(.vertical, 6)
+            .appRow()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -185,5 +179,53 @@ struct CustomNarrationPickerSheet: View {
     private func supportsCustomNarration(_ item: ContentSummary) -> Bool {
         guard let type = item.contentTypeEnum else { return false }
         return type == .article || type == .podcast
+    }
+
+    private func rowMetadata(for item: ContentSummary) -> [String] {
+        var labels: [String] = []
+        labels.append(customNarrationTypeLabel(for: item))
+
+        if let sourceName = customNarrationSourceLabel(for: item) {
+            labels.append(sourceName)
+        }
+
+        if !currentItems.contains(where: { $0.id == item.id }) {
+            labels.append("Saved")
+        }
+
+        return labels
+    }
+
+    private func customNarrationTypeLabel(for item: ContentSummary) -> String {
+        switch item.contentTypeEnum {
+        case .podcast:
+            return "Podcast"
+        case .article:
+            return "Blog"
+        default:
+            return "Source"
+        }
+    }
+
+    private func customNarrationSourceLabel(for item: ContentSummary) -> String? {
+        for candidate in [item.source, item.savedSource, item.platform] {
+            if let normalized = normalizedMetadataLabel(candidate) {
+                return normalized
+            }
+        }
+
+        guard
+            let host = URL(string: item.url)?.host?
+                .replacingOccurrences(of: "www.", with: "")
+        else {
+            return nil
+        }
+        return normalizedMetadataLabel(host)
+    }
+
+    private func normalizedMetadataLabel(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
