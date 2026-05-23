@@ -1093,6 +1093,93 @@ def summary_classification(summary: SummaryPayload) -> str:
     return "to_read"
 
 
+def generate_article_markdown_body(*, title: str, source: str, topics: list[str]) -> str:
+    """Generate markdown body text for reader-mode fixture articles."""
+    primary_topic = topics[0] if topics else "applied AI"
+    secondary_topic = topics[1] if len(topics) > 1 else "operational quality"
+    sections = [
+        f"# {title}",
+        (
+            f"{source} frames **{primary_topic.lower()}** as a practical operating problem, "
+            "not a demo-stage curiosity. The fixture body is intentionally structured to "
+            "exercise the mobile markdown reader with headings, lists, quotes, links, "
+            "inline code, and a compact table."
+        ),
+        "## The Operating Context",
+        (
+            "Teams are moving from isolated experiments toward repeated workflows. That shift "
+            "changes the core question: the important issue is no longer whether the model can "
+            "produce an impressive answer once, but whether the surrounding system can make "
+            "that answer traceable, reviewable, and cheap enough to run every day."
+        ),
+        "\n".join(
+            [
+                "The strongest implementations tend to share three traits:",
+                "",
+                "- They keep human review close to the decision that carries risk.",
+                (
+                    "- They measure the boring path, including retries, queue delay, "
+                    "and fallback rates."
+                ),
+                "- They document when automation should stop and hand control back to an operator.",
+            ]
+        ),
+        (
+            "> The pattern that survives is rarely the flashiest one. It is the one that makes "
+            "the handoff between software and judgment explicit."
+        ),
+        "## Where the Friction Shows Up",
+        (
+            "The work becomes harder when teams try to turn prototypes into shared "
+            "infrastructure. A local script can hide messy assumptions. A production workflow "
+            "cannot. The useful test is whether a team can explain the failure mode without "
+            "opening five dashboards or reconstructing a prompt from logs."
+        ),
+        (
+            "For example, a fixture workflow might track `summary_kind`, `content_body_ref`, "
+            "and `reader_variant` as separate fields. That looks verbose, but it gives the UI "
+            "a stable contract and gives backend operators a place to inspect what happened."
+        ),
+        "\n".join(
+            [
+                "### Practical Signals",
+                "",
+                "1. The generated output has a clear owner.",
+                "2. The source material remains available after summarization.",
+                "3. The UI can distinguish a missing body from a pending body.",
+                "4. The retry path does not silently change the content contract.",
+            ]
+        ),
+        "\n".join(
+            [
+                "| Signal | Healthy shape | Reader impact |",
+                "| --- | --- | --- |",
+                (
+                    "| Source body | Stored separately from summary metadata | "
+                    "Full article mode opens reliably |"
+                ),
+                (
+                    "| Rendered body | Markdown is preserved when available | "
+                    "Headings and quotes remain readable |"
+                ),
+                "| Summary artifact | Typed payload, small enough for lists | Cards stay fast |",
+            ]
+        ),
+        "## What To Watch",
+        (
+            "The next phase will be less about model capability and more about system "
+            f"boundaries. Teams that treat **{secondary_topic.lower()}** as a product feature "
+            "will have an easier time making the work feel dependable."
+        ),
+        (
+            "Read the original context at "
+            "[the source article](https://example.com/reader-fixture) when testing link "
+            "styling in the reader."
+        ),
+    ]
+    return "\n\n".join(sections)
+
+
 class ArticleGenerator:
     """Generate article test data with full metadata."""
 
@@ -1197,12 +1284,13 @@ class ArticleGenerator:
             summary_version = SUMMARY_VERSION_V1
 
         # Generate article metadata
+        article_body = generate_article_markdown_body(title=title, source=source, topics=topics)
         metadata = ArticleMetadata(
             source=source,
-            content="Full article text content with multiple paragraphs...",
+            content=article_body,
             author=random.choice(["John Smith", "Jane Doe", "Alex Johnson"]),
             publication_date=random_datetime(30),
-            content_type="html",
+            content_type="markdown",
             final_url_after_redirects=url,
             word_count=random.randint(500, 3000),
             summary=summary,
