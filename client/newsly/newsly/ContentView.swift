@@ -77,6 +77,7 @@ struct ContentView: View {
                     contentTextSize: contentTextSize
                 )
             }
+            .toolbar(longFormPath.isEmpty ? .visible : .hidden, for: .tabBar)
             .tag(RootTab.longContent)
             .tabItem {
                 Label("Long", systemImage: "doc.richtext")
@@ -98,6 +99,7 @@ struct ContentView: View {
                     contentTextSize: contentTextSize
                 )
             }
+            .toolbar(shortFormPath.isEmpty ? .visible : .hidden, for: .tabBar)
             .tag(RootTab.shortNews)
             .tabItem {
                 Label("Fast", systemImage: "bolt.fill")
