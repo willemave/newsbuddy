@@ -58,7 +58,6 @@ struct LongFormView: View {
                                 EditorialMastheadHeader(title: "Long Read")
 
                                 longFormActions(items: items)
-                                    .padding(.horizontal, Spacing.screenHorizontal)
                                     .padding(.bottom, 14)
 
                                 VStack(spacing: CardMetrics.cardSpacing) {
@@ -151,43 +150,55 @@ struct LongFormView: View {
     }
 
     private func longFormActions(items: [ContentSummary]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LongFormTopActionButton(
-                title: isCustomNarrationGenerating ? "Creating narration" : "Create narration",
-                subtitle: customNarrationSubtitle(),
-                systemImage: "waveform",
-                isBusy: isCustomNarrationGenerating,
-                accessibilityIdentifier: "long.custom_narration.create"
-            ) {
-                customNarrationError = nil
-                showCustomNarrationPicker = true
-            }
-            .disabled(isCustomNarrationGenerating)
+        VStack(alignment: .leading, spacing: 10) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    Button {
+                        customNarrationError = nil
+                        showCustomNarrationPicker = true
+                    } label: {
+                        LongFormActionChip(
+                            title: isCustomNarrationGenerating ? "Creating narration" : "Create narration",
+                            systemImage: "waveform",
+                            isLoading: isCustomNarrationGenerating
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isCustomNarrationGenerating)
+                    .accessibilityIdentifier("long.custom_narration.create")
 
-            LongFormTopActionButton(
-                title: "List narrations",
-                subtitle: "Open custom narrations in Knowledge",
-                systemImage: "list.bullet.rectangle",
-                accessibilityIdentifier: "long.custom_narration.list",
-                action: onShowNarrations
-            )
+                    Button(action: onShowNarrations) {
+                        LongFormActionChip(
+                            title: "List narrations",
+                            systemImage: "list.bullet.rectangle",
+                            isLoading: false
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("long.custom_narration.list")
 
-            LongFormTopActionButton(
-                title: "Summarize recent long-form articles",
-                subtitle: "Choose an article or podcast in chat",
-                systemImage: "text.bubble",
-                isBusy: isStartingLongFormSummaryChat,
-                accessibilityIdentifier: "long.quick_action.summarize_recent"
-            ) {
-                startLongFormSummaryChat(items: items)
+                    Button {
+                        startLongFormSummaryChat(items: items)
+                    } label: {
+                        LongFormActionChip(
+                            title: "Summarize recent",
+                            systemImage: "text.bubble",
+                            isLoading: isStartingLongFormSummaryChat
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isStartingLongFormSummaryChat)
+                    .accessibilityIdentifier("long.quick_action.summarize_recent")
+                }
+                .padding(.horizontal, Spacing.screenHorizontal)
             }
-            .disabled(isStartingLongFormSummaryChat)
 
             if let customNarrationError {
                 Text(customNarrationError)
                     .font(.terracottaBodySmall)
                     .foregroundStyle(.red)
                     .lineLimit(2)
+                    .padding(.horizontal, Spacing.screenHorizontal)
             }
 
             if let longFormSummaryError {
@@ -195,15 +206,10 @@ struct LongFormView: View {
                     .font(.terracottaBodySmall)
                     .foregroundStyle(.red)
                     .lineLimit(2)
+                    .padding(.horizontal, Spacing.screenHorizontal)
             }
         }
-    }
-
-    private func customNarrationSubtitle() -> String {
-        if isCustomNarrationGenerating {
-            return "Generating in the background"
-        }
-        return "Select Long Read or saved articles and podcasts"
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func startLongFormSummaryChat(items: [ContentSummary]) {
@@ -763,62 +769,35 @@ struct LongFormView: View {
     }
 }
 
-private struct LongFormTopActionButton: View {
+private struct LongFormActionChip: View {
     let title: String
-    let subtitle: String
     let systemImage: String
-    var isBusy: Bool = false
-    let accessibilityIdentifier: String
-    let action: () -> Void
+    let isLoading: Bool
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Color.terracottaPrimary.opacity(0.14))
-                        .frame(width: 32, height: 32)
-
-                    if isBusy {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: systemImage)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Color.terracottaPrimary)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.terracottaBodyLarge.weight(.semibold))
-                        .foregroundStyle(Color.onSurface)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(subtitle)
-                        .font(.terracottaBodySmall)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 8)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color.onSurfaceSecondary.opacity(0.75))
+        HStack(spacing: 8) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.terracottaPrimary)
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.terracottaPrimary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .background(Color.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-            )
+
+            Text(title)
+                .font(.terracottaBodyMedium.weight(.semibold))
+                .foregroundStyle(Color.onSurface)
+                .lineLimit(1)
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(accessibilityIdentifier)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.surfaceSecondary)
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+        }
     }
 }
