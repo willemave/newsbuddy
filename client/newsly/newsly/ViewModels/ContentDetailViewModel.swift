@@ -83,25 +83,36 @@ class ContentDetailViewModel: ObservableObject {
     }
     
     func loadContent() async {
-        logger.info("[ContentDetail] loadContent started | contentId=\(self.contentId)")
+        let requestedContentId = contentId
+        let requestedContentType = contentType
+        logger.info("[ContentDetail] loadContent started | contentId=\(requestedContentId)")
         isLoading = true
         errorMessage = nil
         contentBody = nil
 
         do {
-            logger.debug("[ContentDetail] Fetching content detail | contentId=\(self.contentId) contentType=\(self.contentType?.rawValue ?? "nil", privacy: .public)")
+            logger.debug("[ContentDetail] Fetching content detail | contentId=\(requestedContentId) contentType=\(requestedContentType?.rawValue ?? "nil", privacy: .public)")
             let fetched: ContentDetail
-            if contentType == .news {
-                fetched = try await contentService.fetchNewsItemDetail(id: contentId)
+            if requestedContentType == .news {
+                fetched = try await contentService.fetchNewsItemDetail(id: requestedContentId)
             } else {
-                fetched = try await contentService.fetchContentDetail(id: contentId)
+                fetched = try await contentService.fetchContentDetail(id: requestedContentId)
             }
+
+            guard contentId == requestedContentId,
+                  contentType == requestedContentType else {
+                logger.debug(
+                    "[ContentDetail] Ignoring stale content detail | requestedId=\(requestedContentId) currentId=\(self.contentId)"
+                )
+                return
+            }
+
             content = fetched
-            logger.info("[ContentDetail] Content fetched | contentId=\(self.contentId) type=\(fetched.contentType, privacy: .public) isRead=\(fetched.isRead) title=\(fetched.displayTitle, privacy: .public)")
+            logger.info("[ContentDetail] Content fetched | contentId=\(requestedContentId) type=\(fetched.contentType, privacy: .public) isRead=\(fetched.isRead) title=\(fetched.displayTitle, privacy: .public)")
 
             // Capture read state as returned by the server BEFORE any auto-marking
             wasAlreadyReadWhenLoaded = fetched.isRead
-            logger.debug("[ContentDetail] wasAlreadyReadWhenLoaded=\(fetched.isRead) | contentId=\(self.contentId)")
+            logger.debug("[ContentDetail] wasAlreadyReadWhenLoaded=\(fetched.isRead) | contentId=\(requestedContentId)")
 
             // Render immediately once the main detail payload arrives.
             isLoading = false
@@ -119,12 +130,18 @@ class ContentDetailViewModel: ObservableObject {
             Task {
                 await self.markFetchedContentAsReadIfNeeded(fetched)
             }
+        } catch where isNetworkCancellation(error) {
+            guard contentId == requestedContentId,
+                  contentType == requestedContentType else { return }
+            isLoading = false
         } catch {
-            logger.error("[ContentDetail] Error loading content | contentId=\(self.contentId) error=\(error.localizedDescription)")
+            guard contentId == requestedContentId,
+                  contentType == requestedContentType else { return }
+            logger.error("[ContentDetail] Error loading content | contentId=\(requestedContentId) error=\(error.localizedDescription)")
             errorMessage = error.localizedDescription
             isLoading = false
         }
-        logger.debug("[ContentDetail] loadContent completed | contentId=\(self.contentId)")
+        logger.debug("[ContentDetail] loadContent completed | contentId=\(requestedContentId)")
     }
 
     func canShowReader(for content: ContentDetail) -> Bool {
@@ -150,6 +167,8 @@ class ContentDetailViewModel: ObservableObject {
                 return
             }
             readerBody = body
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             guard self.contentId == content.id else { return }
             logger.error("[ContentDetail] Failed to fetch reader body | contentId=\(content.id) error=\(error.localizedDescription)")
@@ -168,6 +187,8 @@ class ContentDetailViewModel: ObservableObject {
                 return
             }
             contentBody = body
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             logger.error("[ContentDetail] Failed to fetch content body | contentId=\(fetched.id) error=\(error.localizedDescription)")
         }
@@ -183,6 +204,8 @@ class ContentDetailViewModel: ObservableObject {
             if !renderedBody.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return renderedBody
             }
+        } catch where isNetworkCancellation(error) {
+            throw error
         } catch {
             logger.debug("[ContentDetail] Rendered reader body unavailable, falling back to source | contentId=\(content.id) error=\(error.localizedDescription)")
         }
@@ -229,6 +252,8 @@ class ContentDetailViewModel: ObservableObject {
                 logger.debug("[ContentDetail] Decrementing news count | contentId=\(fetched.id)")
                 unreadCountService.decrementNewsCount()
             }
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             logger.error("[ContentDetail] Failed to mark content as read | contentId=\(fetched.id) error=\(error.localizedDescription)")
         }
@@ -248,6 +273,8 @@ class ContentDetailViewModel: ObservableObject {
             logger.debug(
                 "[ContentDetail] Open interaction tracked | contentId=\(fetched.id) recorded=\(response.recorded)"
             )
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             logger.error(
                 "[ContentDetail] Failed to track open interaction | contentId=\(fetched.id) error=\(error.localizedDescription)"

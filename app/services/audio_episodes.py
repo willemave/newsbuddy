@@ -14,16 +14,13 @@ from typing import Any, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
-from app.core.model_defaults import ARTICLE_PODCAST_SUMMARY_MODEL_SPEC, CHEAP_GOOGLE_MODEL_SPEC
 from app.core.settings import get_settings
 from app.models.api.audio_episodes import (
-    CUSTOM_NARRATION_MAX_CONTENT_IDS,
     AudioEpisodeDelivery,
     AudioEpisodeKind,
     AudioEpisodeResponse,
@@ -31,10 +28,22 @@ from app.models.api.audio_episodes import (
 )
 from app.models.contracts import ContentType, TaskType
 from app.models.db import AudioEpisode, Content, NewsItem
-from app.models.domain.content_mapper import content_to_domain
 from app.repositories.content_detail_repository import get_visible_content
-from app.repositories.content_repository import build_visibility_context
+from app.services.audio_episode_kinds import (
+    AUDIO_EPISODE_MODEL,
+    CONTENT_COUNCIL_DISCUSSION_KIND,
+    CUSTOM_NARRATION_KIND,
+    DIALOGUE_TEXT_CHAR_LIMIT,
+    FAST_NEWS_DIGEST_KIND,
+    NEWS_ITEM_DISCUSSION_KIND,
+    audio_episode_kind_spec,
+)
+from app.services.audio_episode_sources import build_content_source_payload
 from app.services.content_bodies import get_content_body_resolver
+from app.services.custom_narrations import (
+    build_custom_narration_source_snapshot,
+    custom_narration_title,
+)
 from app.services.llm_agents import get_basic_agent
 from app.services.news_feed import (
     get_visible_news_item,
@@ -47,24 +56,9 @@ from app.utils.news_titles import resolve_news_display_title
 
 logger = get_logger(__name__)
 
-FAST_NEWS_DIGEST_KIND: Literal["fast_news_digest"] = "fast_news_digest"
-CONTENT_COUNCIL_DISCUSSION_KIND: Literal["content_council_discussion"] = (
-    "content_council_discussion"
-)
-NEWS_ITEM_DISCUSSION_KIND: Literal["news_item_discussion"] = "news_item_discussion"
-CUSTOM_NARRATION_KIND: Literal["custom_narration"] = "custom_narration"
 PROMPT_VERSION = 4
 FAST_NEWS_LIMIT = 200
-CUSTOM_NARRATION_MAX_SOURCES = CUSTOM_NARRATION_MAX_CONTENT_IDS
-LONGFORM_BODY_MAX_CHARS = 16_000
-LONGFORM_BODY_HEAD_CHARS = 7_000
-LONGFORM_BODY_MIDDLE_CHARS = 4_000
-LONGFORM_BODY_TAIL_CHARS = 5_000
-AUDIO_EPISODE_MODEL = ARTICLE_PODCAST_SUMMARY_MODEL_SPEC
-CUSTOM_NARRATION_MODEL = CHEAP_GOOGLE_MODEL_SPEC
 SCRIPT_TIMEOUT_SECONDS = 180
-DIALOGUE_TEXT_CHAR_LIMIT = 1_100
-CUSTOM_NARRATION_DIALOGUE_TEXT_CHAR_LIMIT = 4_500
 AUDIO_EPISODE_PROCESSING_STALE_AFTER = timedelta(minutes=15)
 AUDIO_EPISODE_FILE_CHUNK_SIZE = 1024 * 256
 AUDIO_EPISODE_FOLLOW_POLL_SECONDS = 0.25
@@ -305,7 +299,6 @@ def create_custom_narration_episode(
     """Create or reuse one combined narration from selected articles/podcasts."""
 
     started_at = time.perf_counter()
-    normalized_content_ids = _normalize_custom_narration_content_ids(content_ids)
     logger.info(
         "Audio episode create started",
         extra={
@@ -314,87 +307,17 @@ def create_custom_narration_episode(
             "user_id": user_id,
             "context_data": {
                 "kind": CUSTOM_NARRATION_KIND,
-                "source_count": len(normalized_content_ids),
+                "requested_source_count": len(content_ids),
             },
         },
     )
 
-    source_items: list[dict[str, Any]] = []
-    for content_id in normalized_content_ids:
-        content = _get_visible_or_saved_content(db, user_id=user_id, content_id=content_id)
-        if content is None:
-            logger.info(
-                "Audio episode create rejected",
-                extra={
-                    "component": "audio_episodes",
-                    "operation": "create",
-                    "status": "rejected",
-                    "duration_ms": _duration_ms(started_at),
-                    "content_id": content_id,
-                    "user_id": user_id,
-                    "context_data": {
-                        "kind": CUSTOM_NARRATION_KIND,
-                        "reason": "content_not_found",
-                    },
-                },
-            )
-            raise HTTPException(status_code=404, detail=f"Content {content_id} not found")
-
-        content_type = str(content.content_type or "")
-        if content_type not in {ContentType.ARTICLE.value, ContentType.PODCAST.value}:
-            logger.info(
-                "Audio episode create rejected",
-                extra={
-                    "component": "audio_episodes",
-                    "operation": "create",
-                    "status": "rejected",
-                    "duration_ms": _duration_ms(started_at),
-                    "content_id": content_id,
-                    "user_id": user_id,
-                    "context_data": {
-                        "kind": CUSTOM_NARRATION_KIND,
-                        "reason": "unsupported_content_type",
-                        "content_type": content_type,
-                    },
-                },
-            )
-            raise HTTPException(
-                status_code=400,
-                detail="Custom narrations only support articles and podcasts",
-            )
-
-        body_text = get_content_body_resolver().resolve_text(db, content=content)
-        if not body_text:
-            logger.info(
-                "Audio episode create rejected",
-                extra={
-                    "component": "audio_episodes",
-                    "operation": "create",
-                    "status": "rejected",
-                    "duration_ms": _duration_ms(started_at),
-                    "content_id": content_id,
-                    "user_id": user_id,
-                    "context_data": {
-                        "kind": CUSTOM_NARRATION_KIND,
-                        "reason": "missing_body_text",
-                        "content_type": content_type,
-                    },
-                },
-            )
-            raise HTTPException(
-                status_code=400,
-                detail=f"No article or transcript text is available for content {content_id}",
-            )
-
-        source_items.append(_custom_narration_source_item(content, body_text=body_text))
-
-    source_snapshot = {
-        "kind": CUSTOM_NARRATION_KIND,
-        "source_count": len(source_items),
-        "content_ids": normalized_content_ids,
-        "items": source_items,
-    }
-    episode_title = _custom_narration_title(source_items, title=title)
+    source_snapshot = build_custom_narration_source_snapshot(
+        db,
+        user_id=user_id,
+        content_ids=content_ids,
+    )
+    episode_title = custom_narration_title(source_snapshot, title=title)
     episode = _create_or_reuse_episode(
         db,
         user_id=user_id,
@@ -416,10 +339,9 @@ def create_custom_narration_episode(
             "context_data": {
                 "kind": CUSTOM_NARRATION_KIND,
                 "episode_status": episode.status,
-                "source_count": len(source_items),
-                "source_text_chars": sum(
-                    int(item.get("source_text_chars") or 0) for item in source_items
-                ),
+                "source_count": source_snapshot["source_count"],
+                "source_text_chars": source_snapshot["source_text_total_chars"],
+                "source_text_included_chars": source_snapshot["source_text_included_chars"],
             },
         },
     )
@@ -873,7 +795,9 @@ def stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int) -> Itera
                 if not completed_path or not completed_path.exists():
                     episode.audio_storage_path = None
                 script = _script_from_episode(episode)
-                script_model = str(episode.model or _default_script_model_for_kind(episode_kind))
+                script_model = str(
+                    episode.model or audio_episode_kind_spec(episode_kind).default_model
+                )
                 if script is None:
                     script_input = _copy_episode_for_script_generation(episode)
                 db.commit()
@@ -1331,188 +1255,10 @@ def _news_item_source_snapshot(item: NewsItem) -> dict[str, Any]:
 
 
 def _content_source_snapshot(content: Content, *, body_text: str) -> dict[str, Any]:
-    metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
-    title = _content_display_title(content)
-    source_text, excerpt_strategy = _excerpt_longform_source_text(body_text)
-    return {
-        "kind": CONTENT_COUNCIL_DISCUSSION_KIND,
-        "content_id": _required_int(content.id, "content id"),
-        "content_type": str(content.content_type),
-        "title": title,
-        "source": content.source,
-        "platform": content.platform,
-        "url": content.url,
-        "publication_date": content.publication_date.isoformat()
-        if content.publication_date
-        else None,
-        "summary": _extract_content_summary(metadata, content=content),
-        "source_text": source_text,
-        "source_text_excerpt_strategy": excerpt_strategy,
-        "source_text_truncated": len(body_text) > LONGFORM_BODY_MAX_CHARS,
-    }
-
-
-def _normalize_custom_narration_content_ids(content_ids: list[int]) -> list[int]:
-    normalized: list[int] = []
-    seen: set[int] = set()
-    for raw_content_id in content_ids:
-        try:
-            content_id = int(raw_content_id)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="Content ids must be integers") from None
-        if content_id <= 0:
-            raise HTTPException(status_code=400, detail="Content ids must be positive")
-        if content_id in seen:
-            continue
-        seen.add(content_id)
-        normalized.append(content_id)
-    if not normalized:
-        raise HTTPException(status_code=400, detail="Select at least one article or podcast")
-    if len(normalized) > CUSTOM_NARRATION_MAX_SOURCES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Select at most {CUSTOM_NARRATION_MAX_SOURCES} sources",
-        )
-    return normalized
-
-
-def _get_visible_or_saved_content(
-    db: Session,
-    *,
-    user_id: int,
-    content_id: int,
-) -> Content | None:
-    """Return completed content visible from Long Read or saved Knowledge."""
-
-    context = build_visibility_context(user_id)
-    return (
-        db.query(Content)
-        .filter(
-            Content.id == content_id,
-            Content.status == "completed",
-            or_(context.is_in_inbox, context.is_saved_to_knowledge),
-            (Content.classification != "skip") | (Content.classification.is_(None)),
-        )
-        .first()
-    )
-
-
-def _custom_narration_source_item(content: Content, *, body_text: str) -> dict[str, Any]:
-    metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}
-    title = _content_display_title(content)
-    normalized_body = body_text.strip()
-    return {
-        "content_id": _required_int(content.id, "content id"),
-        "content_type": str(content.content_type),
-        "title": title,
-        "source": content.source,
-        "platform": content.platform,
-        "url": content.url,
-        "publication_date": content.publication_date.isoformat()
-        if content.publication_date
-        else None,
-        "summary": _extract_content_summary(metadata, content=content),
-        "source_text": normalized_body,
-        "source_text_chars": len(normalized_body),
-    }
-
-
-def _custom_narration_title(
-    source_items: list[dict[str, Any]],
-    *,
-    title: str | None,
-) -> str:
-    normalized_title = (title or "").strip()
-    if normalized_title:
-        return normalized_title
-    if not source_items:
-        return "Custom narration"
-    first_title = str(source_items[0].get("title") or "Selected sources").strip()
-    if len(source_items) == 1:
-        return f"Narration: {first_title}"
-    return f"Narration: {first_title} + {len(source_items) - 1} more"
-
-
-def _excerpt_longform_source_text(body_text: str) -> tuple[str, str]:
-    """Keep long-form script prompts bounded while preserving source coverage."""
-
-    normalized = body_text.strip()
-    if len(normalized) <= LONGFORM_BODY_MAX_CHARS:
-        return normalized, "full"
-
-    head = normalized[:LONGFORM_BODY_HEAD_CHARS].rstrip()
-    middle_start = max((len(normalized) - LONGFORM_BODY_MIDDLE_CHARS) // 2, 0)
-    middle = normalized[middle_start : middle_start + LONGFORM_BODY_MIDDLE_CHARS].strip()
-    tail = normalized[-LONGFORM_BODY_TAIL_CHARS:].lstrip()
-    return (
-        "\n\n[Source opening excerpt]\n"
-        f"{head}"
-        "\n\n[Source middle excerpt]\n"
-        f"{middle}"
-        "\n\n[Source closing excerpt]\n"
-        f"{tail}",
-        "head_middle_tail",
-    )
-
-
-def _content_display_title(content: Content) -> str:
-    try:
-        return content_to_domain(content).display_title
-    except Exception:
-        return (content.title or "").strip() or f"Content {content.id}"
-
-
-def _extract_content_summary(metadata: dict[str, Any], *, content: Content) -> dict[str, Any]:
-    summary = metadata.get("summary")
-    if isinstance(summary, dict):
-        overview = _first_text(
-            summary.get("overview"),
-            summary.get("short_summary"),
-            summary.get("summary"),
-            summary.get("narrative"),
-            summary.get("text"),
-        )
-        return {
-            "overview": overview or content.short_summary,
-            "key_points": _extract_summary_points(summary),
-            "raw": summary,
-        }
-    if isinstance(summary, str):
-        return {"overview": summary.strip(), "key_points": []}
-    return {"overview": content.short_summary, "key_points": []}
-
-
-def _extract_summary_points(summary: dict[str, Any]) -> list[str]:
-    for key in ("key_points", "bullet_points", "points", "insights"):
-        raw_value = summary.get(key)
-        if not isinstance(raw_value, list):
-            continue
-        points: list[str] = []
-        for item in raw_value:
-            text: str | None
-            if isinstance(item, str):
-                text = item.strip()
-            elif isinstance(item, dict):
-                text = _first_text(
-                    item.get("text"),
-                    item.get("point"),
-                    item.get("content"),
-                    item.get("insight"),
-                )
-            else:
-                text = None
-            if text:
-                points.append(text)
-        if points:
-            return points[:10]
-    return []
-
-
-def _first_text(*values: Any) -> str | None:
-    for value in values:
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    source_payload = build_content_source_payload(content, body_text=body_text)
+    source_payload.pop("source_text_chars", None)
+    source_payload.pop("source_text_included_chars", None)
+    return {"kind": CONTENT_COUNCIL_DISCUSSION_KIND, **source_payload}
 
 
 def _source_snapshot_hash(source_snapshot: dict[str, Any]) -> str:
@@ -1528,7 +1274,9 @@ def _prepare_audio_episode_script(db: Session, episode: AudioEpisode) -> AudioEp
     """Generate or reuse the structured script for an audio episode."""
 
     script = _script_from_episode(episode)
-    model_spec = str(episode.model or _default_script_model_for_kind(str(episode.kind or "")))
+    model_spec = str(
+        episode.model or audio_episode_kind_spec(str(episode.kind or "")).default_model
+    )
     if script is None:
         generated = _generate_script(episode)
         script = generated.script
@@ -1547,7 +1295,7 @@ def _persist_audio_episode_script(
 
     script = _fit_script_to_dialogue_limit(
         script,
-        limit=_dialogue_text_char_limit_for_kind(str(episode.kind or "")),
+        limit=audio_episode_kind_spec(str(episode.kind or "")).dialogue_text_char_limit,
     )
     script_text = _render_script_text(script)
     fallback_title = _required_str(episode.title, "audio episode title")
@@ -1685,118 +1433,13 @@ def _generate_script_with_model(
 
 
 def _script_model_candidates(episode: AudioEpisode) -> tuple[str, ...]:
-    return (_default_script_model_for_kind(str(episode.kind or "")),)
-
-
-def _default_script_model_for_kind(kind: str) -> str:
-    if kind == CUSTOM_NARRATION_KIND:
-        return CUSTOM_NARRATION_MODEL
-    return AUDIO_EPISODE_MODEL
+    return (audio_episode_kind_spec(str(episode.kind or "")).default_model,)
 
 
 def _build_script_prompt(episode: AudioEpisode) -> str:
-    if episode.kind == FAST_NEWS_DIGEST_KIND:
-        return _build_fast_news_prompt(episode.source_snapshot or {})
-    if episode.kind == CONTENT_COUNCIL_DISCUSSION_KIND:
-        return _build_content_council_prompt(episode.source_snapshot or {})
-    if episode.kind == NEWS_ITEM_DISCUSSION_KIND:
-        return _build_news_item_discussion_prompt(episode.source_snapshot or {})
-    if episode.kind == CUSTOM_NARRATION_KIND:
-        return _build_custom_narration_prompt(episode.source_snapshot or {})
-    raise ValueError(f"Unsupported audio episode kind: {episode.kind}")
-
-
-def _build_fast_news_prompt(source_snapshot: dict[str, Any]) -> str:
-    return f"""Create a roughly 60 second quick-hit episode from these unread Fast Reads.
-
-Goal:
-- Curate the highest-signal highlights across the list, not a rote item-by-item readout.
-- Use only summaries and key points below.
-- Mention concrete companies, products, people, and numbers when present.
-- Group related items into themes when that makes the briefing sharper.
-- Keep it brisk, conversational, and useful for someone catching up while walking.
-
-Shape:
-- 110-150 spoken words.
-- Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 6-8 turns.
-- Start with the top 2-3 headlines and why they matter.
-- End with one short "what to watch next" close.
-
-Unread Fast Reads JSON:
-{json.dumps(source_snapshot, ensure_ascii=False, indent=2)}
-"""
-
-
-def _build_content_council_prompt(source_snapshot: dict[str, Any]) -> str:
-    source_label = "transcript" if source_snapshot.get("content_type") == "podcast" else "article"
-    return f"""Create a roughly 60 second council-of-experts discussion about this
-long-form {source_label}.
-
-Goal:
-- Use the full supplied {source_label} plus the summary.
-- Give listeners the thesis, strongest evidence, implications, and any weak spots or open questions.
-- Make it feel like a compact expert roundtable, not a narration of the article.
-- Keep the discussion grounded: if a point is not in the source, do not include it.
-
-Shape:
-- 110-150 spoken words.
-- Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 6-8 turns.
-- Use speaker='host' for framing, speaker='cohost' for synthesis, and
-  speaker='expert' for sharper analysis.
-- End with a concise takeaway and why the piece is worth remembering.
-
-Long-form source JSON:
-{json.dumps(source_snapshot, ensure_ascii=False, indent=2)}
-"""
-
-
-def _build_news_item_discussion_prompt(source_snapshot: dict[str, Any]) -> str:
-    return f"""Create a roughly 60 second podcast-style discussion about this single Fast Read.
-
-Goal:
-- Use only the supplied summary, key points, and links metadata.
-- Give listeners the headline, context, stakes, and what to watch next.
-- Make it a compact expert roundtable, not a read-aloud summary.
-- Do not invent extra facts beyond the source material.
-
-Shape:
-- 110-150 spoken words.
-- Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 6-8 turns.
-- Use speaker='host' for framing, speaker='cohost' for synthesis, and
-  speaker='expert' for sharper analysis.
-- End with a concise takeaway.
-
-Fast Read source JSON:
-{json.dumps(source_snapshot, ensure_ascii=False, indent=2)}
-"""
-
-
-def _build_custom_narration_prompt(source_snapshot: dict[str, Any]) -> str:
-    return f"""Create one cohesive podcast-style narration from the selected articles and
-podcast transcripts.
-
-Goal:
-- Synthesize across all selected sources as one episode, not separate mini-summaries.
-- Use the full supplied article text and podcast transcripts. The source text is not chunked.
-- Explain the shared themes, contradictions, evidence, and implications.
-- Preserve important source-specific details when they materially support the synthesis.
-- Keep the discussion grounded: if a point is not in the selected sources, do not include it.
-
-Shape:
-- 500-700 spoken words.
-- Hard cap: {CUSTOM_NARRATION_DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 10-14 turns.
-- Use speaker='host' for setup and transitions, speaker='cohost' for synthesis, and
-  speaker='expert' for sharper analysis.
-- Start by framing why these sources belong together.
-- End with a concise takeaway and what the listener should remember.
-
-Selected source JSON:
-{json.dumps(source_snapshot, ensure_ascii=False, indent=2)}
-"""
+    return audio_episode_kind_spec(str(episode.kind or "")).build_prompt(
+        episode.source_snapshot or {}
+    )
 
 
 def _render_script_text(script: AudioEpisodeScript) -> str:
@@ -1832,12 +1475,6 @@ def _fit_script_to_dialogue_limit(
         remaining_chars = max(0, remaining_chars - len(fitted_text))
 
     return script.model_copy(update={"turns": fitted_turns})
-
-
-def _dialogue_text_char_limit_for_kind(kind: str) -> int:
-    if kind == CUSTOM_NARRATION_KIND:
-        return CUSTOM_NARRATION_DIALOGUE_TEXT_CHAR_LIMIT
-    return DIALOGUE_TEXT_CHAR_LIMIT
 
 
 def _truncate_dialogue_turn(text: str, max_chars: int) -> str:

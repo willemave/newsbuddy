@@ -681,6 +681,8 @@ struct ContentDetailView: View {
                     focusComposerOnAppear: pendingResponse == nil
                 )
             }
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             chatError = error.localizedDescription
         }
@@ -729,6 +731,8 @@ struct ContentDetailView: View {
                 content: content,
                 pendingCouncilPrompt: session.isCouncilMode ? nil : prompt
             )
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             chatError = error.localizedDescription
         }
@@ -762,6 +766,8 @@ struct ContentDetailView: View {
                     )
                 )
                 ChatNavigationCoordinator.shared.openAssistantTurn(response)
+            } catch where isNetworkCancellation(error) {
+                return
             } catch {
                 ToastService.shared.showError("Failed to dig deeper: \(error.localizedDescription)")
             }
@@ -800,6 +806,8 @@ struct ContentDetailView: View {
                 initialUserMessage: pendingResponse.userMessage,
                 pendingMessageId: pendingResponse.messageId
             )
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             chatError = error.localizedDescription
         }
@@ -1049,6 +1057,8 @@ struct ContentDetailView: View {
             detailLogger.info(
                 "[PodcastAudio] playback requested | contentId=\(content.id) episodeId=\(episode.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
             )
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             detailLogger.error(
                 "[PodcastAudio] flow failed | contentId=\(content.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
@@ -1869,6 +1879,8 @@ struct ContentDetailView: View {
             }
 
             applyDiscussionPayload(discussion)
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             guard discussionRequestToken == requestToken else { return }
             discussionUnavailableMessage = "Comments could not be loaded right now."
@@ -1896,6 +1908,8 @@ struct ContentDetailView: View {
                 return
             }
             applyDiscussionPayload(discussion, showUnavailable: false)
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             detailLogger.debug("[ContentDetailView] Stored discussion prefetch failed | contentId=\(content.id) error=\(error.localizedDescription)")
         }

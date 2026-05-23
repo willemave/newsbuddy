@@ -18,6 +18,7 @@ struct LongFormView: View {
 
     @StateObject private var unreadCountService = UnreadCountService.shared
     @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
+    @StateObject private var customNarrationCreator = CustomNarrationCreationViewModel()
     @StateObject private var sourcesViewModel = ScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
     )
@@ -29,9 +30,6 @@ struct LongFormView: View {
     @State private var audioEpisodeByContentId: [Int: AudioEpisode] = [:]
     @State private var audioErrorByContentId: [Int: String] = [:]
     @State private var showCustomNarrationPicker = false
-    @State private var isCreatingCustomNarration = false
-    @State private var customNarrationEpisode: AudioEpisode?
-    @State private var customNarrationError: String?
     @State private var isStartingLongFormSummaryChat = false
     @State private var longFormSummaryError: String?
     private let chatService = ChatService.shared
@@ -57,7 +55,20 @@ struct LongFormView: View {
                             LazyVStack(spacing: 0) {
                                 EditorialMastheadHeader(title: "Long Read")
 
-                                longFormActions(items: items)
+                                LongFormActionsView(
+                                    isCustomNarrationGenerating: customNarrationCreator.isGenerating,
+                                    customNarrationError: customNarrationCreator.errorMessage,
+                                    isStartingSummaryChat: isStartingLongFormSummaryChat,
+                                    summaryError: longFormSummaryError,
+                                    onCreateNarration: {
+                                        customNarrationCreator.errorMessage = nil
+                                        showCustomNarrationPicker = true
+                                    },
+                                    onShowNarrations: onShowNarrations,
+                                    onSummarizeRecent: {
+                                        startLongFormSummaryChat(items: items)
+                                    }
+                                )
                                     .padding(.bottom, 14)
 
                                 VStack(spacing: CardMetrics.cardSpacing) {
@@ -129,87 +140,20 @@ struct LongFormView: View {
         .sheet(isPresented: $showCustomNarrationPicker) {
             CustomNarrationPickerSheet(
                 currentItems: viewModel.currentItems(),
-                isCreating: isCreatingCustomNarration,
+                isCreating: customNarrationCreator.isCreating,
                 onCreate: { selectedItems in
-                    await createCustomNarration(from: selectedItems)
+                    await customNarrationCreator.create(from: selectedItems)
                 }
             )
             .presentationDetents([.medium, .large])
         }
-        .task(id: customNarrationEpisode?.id) {
-            await pollCustomNarrationIfNeeded()
+        .task(id: customNarrationCreator.pollKey(isActive: shouldPollLongForm)) {
+            await customNarrationCreator.pollIfNeeded(isActive: shouldPollLongForm)
         }
     }
 
     private var shouldPollLongForm: Bool {
         isActive && scenePhase == .active
-    }
-
-    private var isCustomNarrationGenerating: Bool {
-        isCreatingCustomNarration || customNarrationEpisode?.isGenerating == true
-    }
-
-    private func longFormActions(items: [ContentSummary]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    Button {
-                        customNarrationError = nil
-                        showCustomNarrationPicker = true
-                    } label: {
-                        LongFormActionChip(
-                            title: isCustomNarrationGenerating ? "Creating narration" : "Create narration",
-                            systemImage: "waveform",
-                            isLoading: isCustomNarrationGenerating
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isCustomNarrationGenerating)
-                    .accessibilityIdentifier("long.custom_narration.create")
-
-                    Button(action: onShowNarrations) {
-                        LongFormActionChip(
-                            title: "List narrations",
-                            systemImage: "list.bullet.rectangle",
-                            isLoading: false
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("long.custom_narration.list")
-
-                    Button {
-                        startLongFormSummaryChat(items: items)
-                    } label: {
-                        LongFormActionChip(
-                            title: "Summarize recent",
-                            systemImage: "text.bubble",
-                            isLoading: isStartingLongFormSummaryChat
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isStartingLongFormSummaryChat)
-                    .accessibilityIdentifier("long.quick_action.summarize_recent")
-                }
-                .padding(.horizontal, Spacing.screenHorizontal)
-            }
-
-            if let customNarrationError {
-                Text(customNarrationError)
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-                    .padding(.horizontal, Spacing.screenHorizontal)
-            }
-
-            if let longFormSummaryError {
-                Text(longFormSummaryError)
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-                    .padding(.horizontal, Spacing.screenHorizontal)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func startLongFormSummaryChat(items: [ContentSummary]) {
@@ -243,6 +187,8 @@ struct LongFormView: View {
                     )
                 )
                 ChatNavigationCoordinator.shared.openAssistantTurn(response)
+            } catch where isNetworkCancellation(error) {
+                return
             } catch {
                 longFormSummaryError = error.localizedDescription
             }
@@ -382,6 +328,8 @@ struct LongFormView: View {
             longFormAudioLogger.info(
                 "Long-form audio playback requested | contentId=\(content.id) episodeId=\(episode.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
             )
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             longFormAudioLogger.error(
                 "Long-form audio flow failed | contentId=\(content.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
@@ -395,6 +343,8 @@ struct LongFormView: View {
         do {
             audioEpisodeByContentId[contentId] = episode
             try await playAudioDiscussionEpisode(episode)
+        } catch where isNetworkCancellation(error) {
+            return
         } catch {
             audioErrorByContentId[contentId] = error.localizedDescription
         }
@@ -409,73 +359,6 @@ struct LongFormView: View {
                 try await AudioEpisodeService.shared.streamResource(for: episode)
             }
         )
-    }
-
-    @MainActor
-    private func createCustomNarration(from selectedItems: [ContentSummary]) async -> Bool {
-        guard !selectedItems.isEmpty, !isCreatingCustomNarration else { return false }
-        isCreatingCustomNarration = true
-        customNarrationError = nil
-        defer { isCreatingCustomNarration = false }
-
-        do {
-            let episode = try await AudioEpisodeService.shared.createCustomNarrationEpisode(
-                contentIds: selectedItems.map(\.id),
-                delivery: .background
-            )
-            customNarrationEpisode = episode
-            ToastService.shared.showSuccess(
-                episode.isCompleted ? "Narration ready in Knowledge" : "Narration is generating"
-            )
-            return true
-        } catch {
-            customNarrationError = error.localizedDescription
-            ToastService.shared.showError("Failed to create narration: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    @MainActor
-    private func pollCustomNarrationIfNeeded() async {
-        guard let episode = customNarrationEpisode, episode.isGenerating else { return }
-
-        do {
-            let completed = try await AudioEpisodeService.shared.waitForCompletedEpisode(
-                episode,
-                pollIntervalNanoseconds: 2_000_000_000,
-                maxAttempts: 90
-            )
-            customNarrationEpisode = completed
-            ToastService.shared.showSuccess("Narration ready in Knowledge")
-        } catch {
-            if error is CancellationError {
-                return
-            }
-            await handleCustomNarrationPollError(error, episodeId: episode.id)
-        }
-    }
-
-    @MainActor
-    private func handleCustomNarrationPollError(_ error: Error, episodeId: Int) async {
-        let nsError = error as NSError
-        if nsError.domain == "AudioEpisodeService", nsError.code == 1 {
-            let latest = try? await AudioEpisodeService.shared.fetchEpisode(id: episodeId)
-            customNarrationEpisode = latest
-            customNarrationError = latest?.errorMessage ?? error.localizedDescription
-            ToastService.shared.showError(customNarrationError ?? "Narration generation failed.")
-            return
-        }
-
-        if nsError.domain == "AudioEpisodeService", nsError.code == 2 {
-            let timeoutMessage = "Narration is still generating. Check Knowledge for status."
-            customNarrationError = timeoutMessage
-            customNarrationEpisode = nil
-            ToastService.shared.show(timeoutMessage)
-            return
-        }
-
-        customNarrationError = error.localizedDescription
-        customNarrationEpisode = nil
     }
 
     private func openContent(_ content: ContentSummary) {
@@ -766,38 +649,5 @@ struct LongFormView: View {
         guard !hasLoadedBootstrapSources else { return }
         hasLoadedBootstrapSources = true
         await sourcesViewModel.loadConfigs()
-    }
-}
-
-private struct LongFormActionChip: View {
-    let title: String
-    let systemImage: String
-    let isLoading: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(Color.terracottaPrimary)
-            } else {
-                Image(systemName: systemImage)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.terracottaPrimary)
-            }
-
-            Text(title)
-                .font(.terracottaBodyMedium.weight(.semibold))
-                .foregroundStyle(Color.onSurface)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.surfaceSecondary)
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-        }
     }
 }

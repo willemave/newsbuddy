@@ -8,6 +8,8 @@ from fastapi import HTTPException
 from app.models.contracts import ContentType
 from app.models.db import AudioEpisode, ContentKnowledgeSave, NewsItemReadStatus
 from app.services import audio_episodes as service
+from app.services.audio_episode_kinds import CUSTOM_NARRATION_MODEL
+from app.services.audio_episode_sources import LONGFORM_BODY_MAX_CHARS, excerpt_longform_source_text
 from tests.support.builders import create_content_status_entry_row, create_news_item_row
 
 
@@ -166,7 +168,7 @@ def test_content_council_episode_excerpts_long_source_text(
     source_snapshot = episode.source_snapshot
     assert isinstance(source_snapshot, dict)
     source_text = source_snapshot["source_text"]
-    assert len(source_text) <= service.LONGFORM_BODY_MAX_CHARS + 120
+    assert len(source_text) <= LONGFORM_BODY_MAX_CHARS + 120
     assert source_snapshot["source_text_excerpt_strategy"] == "head_middle_tail"
     assert "[Source opening excerpt]" in source_text
     assert "MIDDLE_MARKER" in source_text
@@ -174,7 +176,7 @@ def test_content_council_episode_excerpts_long_source_text(
     assert source_snapshot["source_text_truncated"] is True
 
 
-def test_create_custom_narration_episode_uses_selected_full_sources(
+def test_create_custom_narration_episode_uses_selected_source_text(
     db_session,
     test_user,
     content_factory,
@@ -281,8 +283,10 @@ def test_create_custom_narration_episode_rejects_invalid_ids(db_session, test_us
     assert "positive" in str(exc_info.value.detail)
 
 
-def test_custom_narration_prompt_uses_gemini_flash_lite_and_full_text(monkeypatch) -> None:
-    full_text = "Opening. " + ("Long source paragraph. " * 1_000) + "Closing."
+def test_custom_narration_prompt_uses_gemini_flash_lite_and_bounded_excerpts(
+    monkeypatch,
+) -> None:
+    full_text = "Opening. " + ("Long source paragraph. " * 1_000) + "CLOSING_MARKER."
     script = service.AudioEpisodeScript(
         title="Custom Script",
         estimated_duration_seconds=240,
@@ -300,6 +304,7 @@ def test_custom_narration_prompt_uses_gemini_flash_lite_and_full_text(monkeypatc
         ],
     )
     captured: dict[str, str] = {}
+    source_text, excerpt_strategy = excerpt_longform_source_text(full_text)
 
     class FakeAgent:
         def __init__(self, model_spec: str) -> None:
@@ -327,7 +332,8 @@ def test_custom_narration_prompt_uses_gemini_flash_lite_and_full_text(monkeypatc
                     "content_id": 1,
                     "content_type": "article",
                     "title": "Full source",
-                    "source_text": full_text,
+                    "source_text": source_text,
+                    "source_text_excerpt_strategy": excerpt_strategy,
                 }
             ],
         },
@@ -337,10 +343,11 @@ def test_custom_narration_prompt_uses_gemini_flash_lite_and_full_text(monkeypatc
 
     generated = service._generate_script(episode)
 
-    assert generated.model == service.CUSTOM_NARRATION_MODEL
-    assert captured["model"] == service.CUSTOM_NARRATION_MODEL
-    assert full_text in captured["message"]
-    assert "[Source opening excerpt]" not in captured["message"]
+    assert generated.model == CUSTOM_NARRATION_MODEL
+    assert captured["model"] == CUSTOM_NARRATION_MODEL
+    assert full_text not in captured["message"]
+    assert "[Source opening excerpt]" in captured["message"]
+    assert "CLOSING_MARKER" in captured["message"]
 
 
 def test_generate_script_uses_audio_episode_model(monkeypatch) -> None:

@@ -210,6 +210,8 @@ struct ShortFormView: View {
                 logger.info(
                     "[FastNewsAudio] playback requested | episodeId=\(episode.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
                 )
+            } catch where isNetworkCancellation(error) {
+                return
             } catch {
                 logger.error(
                     "[FastNewsAudio] flow failed | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
@@ -362,6 +364,8 @@ struct ShortFormView: View {
                     screenContext: action.screenContext
                 )
                 ChatNavigationCoordinator.shared.openAssistantTurn(response)
+            } catch where isNetworkCancellation(error) {
+                return
             } catch {
                 quickActionErrorMessage = error.localizedDescription
             }

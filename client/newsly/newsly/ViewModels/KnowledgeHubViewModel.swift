@@ -69,7 +69,7 @@ class KnowledgeHubViewModel: ObservableObject {
             sessions = response.sessions
             nextCursor = response.meta.nextCursor
             hasMoreSessions = response.meta.hasMore
-        } catch where isKnowledgeHubCancellation(error) {
+        } catch where isNetworkCancellation(error) {
             return
         } catch {
             nextCursor = nil
@@ -97,7 +97,7 @@ class KnowledgeHubViewModel: ObservableObject {
             appendUniqueSessions(response.sessions)
             nextCursor = response.meta.nextCursor
             hasMoreSessions = response.meta.hasMore
-        } catch where isKnowledgeHubCancellation(error) {
+        } catch where isNetworkCancellation(error) {
             return
         } catch {
             hasLoadMoreError = true
@@ -121,7 +121,7 @@ class KnowledgeHubViewModel: ObservableObject {
             )
             prependSession(session)
             return ChatSessionRoute(sessionId: session.id)
-        } catch where isKnowledgeHubCancellation(error) {
+        } catch where isNetworkCancellation(error) {
             return nil
         } catch {
             errorMessage = error.localizedDescription
@@ -204,7 +204,7 @@ class KnowledgeHubViewModel: ObservableObject {
                 initialUserMessageTimestamp: response.userMessage.timestamp,
                 pendingMessageId: response.messageId
             )
-        } catch where isKnowledgeHubCancellation(error) {
+        } catch where isNetworkCancellation(error) {
             return nil
         } catch {
             errorMessage = error.localizedDescription
@@ -235,21 +235,4 @@ class KnowledgeHubViewModel: ObservableObject {
         sessions.removeAll { $0.id == session.id }
         sessions.insert(session, at: 0)
     }
-}
-
-private func isKnowledgeHubCancellation(_ error: Error) -> Bool {
-    if error is CancellationError {
-        return true
-    }
-
-    if let urlError = error as? URLError, urlError.code == .cancelled {
-        return true
-    }
-
-    if case APIError.networkError(let underlyingError) = error {
-        return isKnowledgeHubCancellation(underlyingError)
-    }
-
-    let nsError = error as NSError
-    return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
 }

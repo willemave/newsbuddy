@@ -43,6 +43,23 @@ enum APIError: LocalizedError {
     }
 }
 
+func isNetworkCancellation(_ error: Error) -> Bool {
+    if error is CancellationError {
+        return true
+    }
+
+    if let urlError = error as? URLError, urlError.code == .cancelled {
+        return true
+    }
+
+    if case APIError.networkError(let underlyingError) = error {
+        return isNetworkCancellation(underlyingError)
+    }
+
+    let nsError = error as NSError
+    return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+}
+
 struct APIRequestDescriptor<Response: Decodable> {
     let path: String
     let method: String

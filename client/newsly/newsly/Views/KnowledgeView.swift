@@ -23,12 +23,9 @@ struct KnowledgeView: View {
     let onShowKnowledgeLibrary: (() -> Void)?
 
     @StateObject private var viewModel = KnowledgeHubViewModel()
-    @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
+    @StateObject private var customNarrationLibrary = CustomNarrationLibraryViewModel()
     @ObservedObject private var settings = AppSettings.shared
     @State private var searchText = ""
-    @State private var customNarrations: [AudioEpisode] = []
-    @State private var isLoadingCustomNarrations = false
-    @State private var customNarrationError: String?
     @State private var showNarrationList = false
     @FocusState private var isSearchFocused: Bool
 
@@ -110,22 +107,8 @@ struct KnowledgeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showNarrationList) {
             CustomNarrationListSheet(
-                episodes: customNarrations,
-                isLoading: isLoadingCustomNarrations,
-                errorMessage: customNarrationError,
-                playbackService: narrationPlaybackService,
-                onRefresh: {
-                    await loadCustomNarrations()
-                },
-                onTapEpisode: { episode in
-                    await handleCustomNarrationTap(episode)
-                },
-                isEpisodePlaying: { episode in
-                    isCustomNarrationPlaying(episode)
-                },
-                subtitle: { episode in
-                    customNarrationSubtitle(episode)
-                }
+                viewModel: customNarrationLibrary,
+                playbackService: customNarrationLibrary.playbackService
             )
         }
         .task {
@@ -282,95 +265,6 @@ struct KnowledgeView: View {
                 proxy.scrollTo(request.target, anchor: .top)
             }
             onFocusHandled?(request)
-        }
-    }
-
-    @ViewBuilder
-    private func customNarrationIcon(_ episode: AudioEpisode) -> some View {
-        if episode.isGenerating {
-            ProgressView()
-                .controlSize(.small)
-        } else if episode.isFailed {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.red)
-        } else {
-            Image(systemName: isCustomNarrationPlaying(episode) ? "speaker.wave.3.fill" : "waveform")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.terracottaPrimary)
-        }
-    }
-
-    private func customNarrationSubtitle(_ episode: AudioEpisode) -> String {
-        let sourceText: String
-        if episode.sourceCount == 1 {
-            sourceText = "1 source"
-        } else {
-            sourceText = "\(episode.sourceCount) sources"
-        }
-
-        if episode.isGenerating {
-            return "\(sourceText) • Generating"
-        }
-        if episode.isFailed {
-            return "\(sourceText) • \(episode.errorMessage ?? "Failed")"
-        }
-        if let duration = episode.durationSeconds {
-            return "\(sourceText) • \(formattedNarrationDuration(duration))"
-        }
-        return sourceText
-    }
-
-    private func formattedNarrationDuration(_ seconds: Int) -> String {
-        let minutes = max(Int(round(Double(seconds) / 60.0)), 1)
-        return "\(minutes) min"
-    }
-
-    private func isCustomNarrationPlaying(_ episode: AudioEpisode) -> Bool {
-        narrationPlaybackService.isSpeaking
-            && narrationPlaybackService.speakingTarget == .audioEpisode(episode.id)
-    }
-
-    @MainActor
-    private func handleCustomNarrationTap(_ episode: AudioEpisode) async {
-        if isCustomNarrationPlaying(episode) {
-            narrationPlaybackService.pause()
-            return
-        }
-
-        if episode.isGenerating {
-            await refreshCustomNarration(episode)
-            return
-        }
-
-        guard episode.isCompleted else { return }
-
-        do {
-            try await narrationPlaybackService.playStreamingNarration(
-                for: .audioEpisode(episode.id),
-                fetchStreamResource: {
-                    try await AudioEpisodeService.shared.streamResource(for: episode)
-                }
-            )
-        } catch {
-            customNarrationError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func refreshCustomNarration(_ episode: AudioEpisode) async {
-        do {
-            let latest = try await AudioEpisodeService.shared.fetchEpisode(id: episode.id)
-            replaceCustomNarration(latest)
-        } catch {
-            customNarrationError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func replaceCustomNarration(_ episode: AudioEpisode) {
-        if let index = customNarrations.firstIndex(where: { $0.id == episode.id }) {
-            customNarrations[index] = episode
         }
     }
 
@@ -540,7 +434,7 @@ struct KnowledgeView: View {
         }
     }
 
-    // MARK: - Actions
+    // MARK: - New Chat
 
     private var newChatMicButton: some View {
         TapToTalkMicButton(
@@ -580,166 +474,7 @@ struct KnowledgeView: View {
     @MainActor
     private func loadKnowledgeScreen() async {
         await viewModel.loadHub()
-        await loadCustomNarrations()
-    }
-
-    @MainActor
-    private func loadCustomNarrations() async {
-        guard !isLoadingCustomNarrations else { return }
-        isLoadingCustomNarrations = true
-        defer { isLoadingCustomNarrations = false }
-
-        do {
-            customNarrations = try await AudioEpisodeService.shared.fetchCustomNarrationEpisodes()
-            customNarrationError = nil
-        } catch {
-            customNarrationError = error.localizedDescription
-        }
-    }
-}
-
-private struct CustomNarrationListSheet: View {
-    let episodes: [AudioEpisode]
-    let isLoading: Bool
-    let errorMessage: String?
-    @ObservedObject var playbackService: NarrationPlaybackService
-    let onRefresh: () async -> Void
-    let onTapEpisode: (AudioEpisode) async -> Void
-    let isEpisodePlaying: (AudioEpisode) -> Bool
-    let subtitle: (AudioEpisode) -> String
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.terracottaBodySmall)
-                        .foregroundStyle(.red)
-                        .appListRow()
-                }
-
-                if isLoading && episodes.isEmpty {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Loading narrations")
-                            .font(.terracottaBodyMedium)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                    }
-                    .appListRow()
-                } else if episodes.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("No narrations yet")
-                            .font(.terracottaHeadlineSmall)
-                            .foregroundStyle(Color.onSurface)
-                        Text("Created narrations will show up here.")
-                            .font(.terracottaBodySmall)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 10)
-                    .appListRow()
-                } else {
-                    ForEach(episodes) { episode in
-                        narrationRow(episode)
-                            .appListRow()
-                    }
-                }
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(Color.surfacePrimary)
-            .navigationTitle("Narration")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-            .refreshable {
-                await onRefresh()
-            }
-        }
-    }
-
-    private func narrationRow(_ episode: AudioEpisode) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button {
-                Task {
-                    await onTapEpisode(episode)
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.terracottaPrimary.opacity(0.14))
-                            .frame(width: 38, height: 38)
-
-                        narrationIcon(episode)
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(episode.title)
-                            .font(.terracottaBodyLarge.weight(.semibold))
-                            .foregroundStyle(Color.onSurface)
-                            .lineLimit(2)
-
-                        Text(subtitle(episode))
-                            .font(.terracottaBodySmall)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 10)
-
-                    Image(systemName: isEpisodePlaying(episode) ? "pause.fill" : "play.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(episode.isCompleted ? Color.terracottaPrimary : Color.onSurfaceSecondary)
-                        .frame(width: 30, height: 30)
-                        .background(Color.surfaceSecondary)
-                        .clipShape(Circle())
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if episode.isCompleted && isEpisodePlaying(episode) {
-                NarrationPlaybackControlRow(
-                    playbackService: playbackService,
-                    target: .audioEpisode(episode.id),
-                    isPreparing: false,
-                    onTogglePlayback: {
-                        Task {
-                            await onTapEpisode(episode)
-                        }
-                    }
-                )
-            }
-        }
-        .padding(.horizontal, Spacing.rowHorizontal)
-        .padding(.vertical, 9)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("knowledge.narration.\(episode.id)")
-    }
-
-    @ViewBuilder
-    private func narrationIcon(_ episode: AudioEpisode) -> some View {
-        if episode.isGenerating {
-            ProgressView()
-                .controlSize(.small)
-        } else if episode.isFailed {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.red)
-        } else {
-            Image(systemName: isEpisodePlaying(episode) ? "speaker.wave.3.fill" : "waveform")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.terracottaPrimary)
-        }
+        await customNarrationLibrary.load()
     }
 }
 

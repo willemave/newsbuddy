@@ -33,7 +33,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         XCTAssertEqual(longRepository.loadPageCallCount, 0)
     }
 
-    func testHandleTabChangeDoesNotResetOutgoingLongFormState() {
+    func testHandleTabChangeRefreshesIncomingShortNewsWithoutResettingOutgoingLongFormState() {
         let shortRepository = FakeContentRepository()
         let longRepository = FakeContentRepository()
         let shortViewModel = ShortNewsListViewModel(
@@ -59,7 +59,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
 
         XCTAssertEqual(longViewModel.currentItems().map(\.id), [2])
         XCTAssertEqual(longViewModel.state, .idle)
-        XCTAssertEqual(shortRepository.loadPageCallCount, 0)
+        XCTAssertEqual(shortRepository.loadPageCallCount, 1)
     }
 
     func testEnsureUnreadFeedLoadedSkipsReloadWhenItemsAlreadyPresent() {
@@ -109,6 +109,53 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         await assertEventuallyLoadedItems([9], in: viewModel)
     }
 
+    func testLoadNextPageIgnoresDuplicateTriggerWhilePageIsInFlight() {
+        let repository = PendingContentRepository()
+        let viewModel = LongContentListViewModel(
+            repository: repository,
+            readRepository: FakeReadStatusRepository(),
+            unreadCountService: .shared
+        )
+
+        viewModel.loadNextPage()
+        viewModel.loadNextPage()
+
+        XCTAssertEqual(repository.loadPageCallCount, 1)
+    }
+
+    func testCancelledPageRequestDoesNotEnterErrorState() async {
+        let repository = FailingContentRepository(error: URLError(.cancelled))
+        let viewModel = LongContentListViewModel(
+            repository: repository,
+            readRepository: FakeReadStatusRepository(),
+            unreadCountService: .shared
+        )
+
+        viewModel.refresh()
+
+        await assertEventuallyState(.idle, in: viewModel)
+        if case .error(let error) = viewModel.state {
+            XCTFail("Expected cancellation to be ignored, got \(error.localizedDescription)")
+        }
+    }
+
+    func testUnreadRefreshDoesNotReintroduceLocallyReadLongFormItem() async {
+        let repository = FakeContentRepository(
+            responseContents: [makeSummary(id: 11, contentType: "article")]
+        )
+        let viewModel = LongContentListViewModel(
+            repository: repository,
+            readRepository: FakeReadStatusRepository(),
+            unreadCountService: .shared
+        )
+        viewModel.replaceItems([makeSummary(id: 11, contentType: "article")])
+
+        viewModel.markAsRead(11)
+        viewModel.refreshUnreadFeed()
+
+        await assertEventuallyLoadedItems([], in: viewModel)
+    }
+
     private func makeSummary(id: Int, contentType: String) -> ContentSummary {
         ContentSummary(
             id: id,
@@ -149,6 +196,64 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         }
 
         XCTAssertEqual(viewModel.currentItems().map(\.id), expectedIds, file: file, line: line)
+    }
+
+    private func assertEventuallyState(
+        _ expectedState: LoadingState,
+        in viewModel: LongContentListViewModel,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<50 {
+            if viewModel.state == expectedState {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(viewModel.state, expectedState, file: file, line: line)
+    }
+}
+
+private final class PendingContentRepository: ContentRepositoryType {
+    private(set) var loadPageCallCount = 0
+
+    func loadPage(
+        contentTypes: [ContentType],
+        readFilter: ReadFilter,
+        cursor: String?,
+        limit: Int?
+    ) -> AnyPublisher<ContentListResponse, Error> {
+        loadPageCallCount += 1
+        return Empty<ContentListResponse, Error>(completeImmediately: false)
+            .eraseToAnyPublisher()
+    }
+
+    func loadDetail(id: Int) -> AnyPublisher<ContentDetail, Error> {
+        fatalError("unused in test")
+    }
+}
+
+private final class FailingContentRepository: ContentRepositoryType {
+    private let error: Error
+    private(set) var loadPageCallCount = 0
+
+    init(error: Error) {
+        self.error = error
+    }
+
+    func loadPage(
+        contentTypes: [ContentType],
+        readFilter: ReadFilter,
+        cursor: String?,
+        limit: Int?
+    ) -> AnyPublisher<ContentListResponse, Error> {
+        loadPageCallCount += 1
+        return Fail(error: error).eraseToAnyPublisher()
+    }
+
+    func loadDetail(id: Int) -> AnyPublisher<ContentDetail, Error> {
+        fatalError("unused in test")
     }
 }
 

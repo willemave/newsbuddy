@@ -56,6 +56,9 @@ class BaseContentListViewModel: ObservableObject {
 
     private var pagination = Pagination(nextCursor: nil, hasMore: true, isLoading: false)
     private var cancellables = Set<AnyCancellable>()
+    private var pageRequestCancellable: AnyCancellable?
+    private var requestGeneration = 0
+    private var locallyReadIds: Set<Int> = []
 
     init(
         repository: ContentRepositoryType,
@@ -84,6 +87,7 @@ class BaseContentListViewModel: ObservableObject {
 
     func loadNextPage() {
         guard !pagination.isLoading, pagination.hasMore else { return }
+        pagination.isLoading = true
         state = .loadingMore
         requestPage(cursor: pagination.nextCursor, replaceItems: false)
     }
@@ -91,10 +95,14 @@ class BaseContentListViewModel: ObservableObject {
     func updateReadFilter(_ newValue: ReadFilter) {
         guard newValue != readFilter else { return }
         readFilter = newValue
+        pageRequestCancellable?.cancel()
+        pageRequestCancellable = nil
+        pagination = Pagination(nextCursor: nil, hasMore: true, isLoading: false)
         startInitialLoad()
     }
 
     func markItemLocallyRead(id: Int) {
+        locallyReadIds.insert(id)
         guard let index = items.firstIndex(where: { $0.id == id }) else {
             logger.warning("[BaseContentList] markItemLocallyRead: item not found | id=\(id) itemCount=\(self.items.count)")
             return
@@ -130,6 +138,8 @@ class BaseContentListViewModel: ObservableObject {
             logger.debug("[BaseContentList] markItemsLocallyRead: no unread matches")
             return []
         }
+
+        locallyReadIds.formUnion(markedItems.map(\.id))
 
         if removeReadItems {
             nextItems.removeAll { $0.isRead }
@@ -184,18 +194,28 @@ class BaseContentListViewModel: ObservableObject {
     }
 
     private func requestPage(cursor: String?, replaceItems: Bool) {
-        repository
+        requestGeneration += 1
+        let generation = requestGeneration
+        let requestReadFilter = readFilter
+
+        pageRequestCancellable = repository
             .loadPage(
                 contentTypes: contentTypes,
-                readFilter: readFilter,
+                readFilter: requestReadFilter,
                 cursor: cursor,
                 limit: nil
             )
             .receive(on: DispatchQueue.main)
             .sink { [weak self] completion in
                 guard let self else { return }
+                guard generation == requestGeneration else { return }
                 pagination.isLoading = false
+                pageRequestCancellable = nil
                 switch completion {
+                case .failure(let error) where isNetworkCancellation(error):
+                    if state == .initialLoading || state == .loadingMore {
+                        state = pagination.hasMore ? .idle : .endOfFeed
+                    }
                 case .failure(let error):
                     state = .error(error)
                 case .finished:
@@ -207,14 +227,34 @@ class BaseContentListViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] response in
                 guard let self else { return }
+                guard generation == requestGeneration else { return }
                 pagination.hasMore = response.hasMore
                 pagination.nextCursor = response.nextCursor
+                let incomingItems = applyLocalReadState(
+                    to: response.contents,
+                    requestReadFilter: requestReadFilter
+                )
                 if replaceItems {
-                    items = response.contents
+                    items = incomingItems
                 } else {
-                    items.append(contentsOf: response.contents)
+                    let existingIds = Set(items.map(\.id))
+                    items.append(contentsOf: incomingItems.filter { !existingIds.contains($0.id) })
                 }
             }
-            .store(in: &cancellables)
+    }
+
+    private func applyLocalReadState(
+        to incomingItems: [ContentSummary],
+        requestReadFilter: ReadFilter
+    ) -> [ContentSummary] {
+        var adjustedItems = incomingItems.map { item in
+            locallyReadIds.contains(item.id) ? item.updating(isRead: true) : item
+        }
+
+        if requestReadFilter == .unread {
+            adjustedItems.removeAll { $0.isRead }
+        }
+
+        return adjustedItems
     }
 }
