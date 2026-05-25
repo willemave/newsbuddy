@@ -40,6 +40,7 @@ null_reset = """	if d.Next() == jx.Null {
 """
 
 for opt_type in (
+    "OptContentClassification",
     "OptDetectedFeed",
     "OptInt",
     "OptOnboardingFastDiscoverResponse",

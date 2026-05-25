@@ -109,6 +109,42 @@ func TestContentDetailResponseUnmarshalJSONAcceptsNullSummaryMetadata(t *testing
 	}
 }
 
+func TestContentListResponseUnmarshalJSONAcceptsNullClassification(t *testing.T) {
+	var response ContentListResponse
+
+	err := response.UnmarshalJSON([]byte(`{
+		"available_dates": ["2026-05-23"],
+		"content_types": ["article"],
+		"contents": [
+			{
+				"classification": null,
+				"content_type": "article",
+				"created_at": "2026-05-23T12:00:00Z",
+				"id": 42,
+				"status": "completed",
+				"title": "Rust Overtakes Go in Cloud Infrastructure Adoption",
+				"url": "https://example.com/article"
+			}
+		],
+		"meta": {
+			"has_more": false,
+			"next_cursor": null,
+			"page_size": 1,
+			"total": 1
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("unmarshal content list response: %v", err)
+	}
+
+	if len(response.Contents) != 1 {
+		t.Fatalf("contents length = %d, want 1", len(response.Contents))
+	}
+	if response.Contents[0].Classification.IsSet() {
+		t.Fatal("expected null classification to decode as unset")
+	}
+}
+
 func TestOnboardingDiscoveryStatusResponseUnmarshalJSONAcceptsNullSuggestions(t *testing.T) {
 	var response OnboardingDiscoveryStatusResponse
 
