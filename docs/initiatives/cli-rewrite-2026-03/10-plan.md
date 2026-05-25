@@ -15,7 +15,7 @@ This initiative replaces `cli/` with a Go-based standalone binary built around:
 - a generated typed Go client,
 - a Cobra command surface optimized for scripting and stable JSON output.
 
-The binary remains `newsly-agent`.
+The binary is `newsbuddy`.
 
 ---
 
@@ -87,14 +87,14 @@ The new CLI is a clean break in ergonomics, but remains pipes-first and machine-
 - JSON is the default output.
 - All commands return a stable top-level envelope with `ok`, `command`, `data`, and optional `job` or `error`.
 - Config precedence is `flags > env > config file`.
-- Config remains stored at `~/.config/newsly-agent/config.json`.
-- `NEWSLY_AGENT_CONFIG` becomes the canonical env var, with `NEWSLY_AGENT_CONFIG_PATH` kept as a compatibility alias.
+- Config is stored at `~/.config/newsbuddy/config.json`.
+- `NEWSBUDDY_CONFIG` is the canonical env var, with `NEWSBUDDY_CONFIG_PATH`, `NEWSLY_AGENT_CONFIG`, and `NEWSLY_AGENT_CONFIG_PATH` kept as compatibility aliases.
 
 ### Build Layout
 
 - `cli/` becomes its own Go module.
 - Generated client code lives under `cli/internal/api`.
-- Hand-written command/runtime code lives under `cli/internal/...` and `cli/cmd/newsly-agent`.
+- Hand-written command/runtime code lives under `cli/internal/...` and `cli/cmd/newsbuddy`.
 
 ---
 

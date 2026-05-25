@@ -139,35 +139,42 @@ Local Markdown Sync
 
 ## CLI
 
-The Newsbuddy CLI uses the `newsly-agent` binary (Go, Cobra-based) to give you full control over your knowledge base from the terminal — perfect for scripting, automation, or letting your AI agents manage content on your behalf.
+The Newsbuddy CLI is a Go, Cobra-based binary that gives you full control over your knowledge base from the terminal — perfect for scripting, automation, or letting your AI agents manage content on your behalf.
+
+Install it with Homebrew:
+
+```bash
+brew tap willemave/newsbuddy
+brew install newsbuddy
+```
 
 ```bash
 # Authenticate
-newsly-agent auth login
+newsbuddy auth login
 
 # Subscribe to an RSS feed
-newsly-agent sources add "https://simonwillison.net/atom/everything/" --feed-type rss --display-name "Simon Willison"
+newsbuddy sources add "https://simonwillison.net/atom/everything/" --feed-type rss --display-name "Simon Willison"
 
 # Submit a one-off article and wait for processing
-newsly-agent content submit "https://example.com/great-post" --wait
+newsbuddy content submit "https://example.com/great-post" --wait
 
 # Browse your unread content
-newsly-agent content list --read-filter unread --limit 20
+newsbuddy content list --read-filter unread --limit 20
 
 # Browse today's short-form news
-newsly-agent news list --read-filter unread
+newsbuddy news list --read-filter unread
 
 # Convert a news item into a full article
-newsly-agent news convert 4821
+newsbuddy news convert 4821
 
 # Search across your sources
-newsly-agent search "transformer architectures" --limit 10
+newsbuddy search "transformer architectures" --limit 10
 
 # Sync your knowledge base to local Markdown
-newsly-agent library sync --dir ~/newsly-library --include-source
+newsbuddy library sync --dir ~/newsbuddy-library --include-source
 
 # List all your feed subscriptions
-newsly-agent sources list
+newsbuddy sources list
 ```
 
 For full architecture details, see **[docs/architecture.md](docs/architecture.md)**.
@@ -178,7 +185,7 @@ For full architecture details, see **[docs/architecture.md](docs/architecture.md
 
 ### Prerequisites
 
-- **Homebrew** for the native PostgreSQL local-dev path
+- **Homebrew** for the CLI install and native PostgreSQL local-dev path
 - **uv** for Python environment management
 - **Docker** and **Docker Compose** only if you want the containerized runtime
 
@@ -341,7 +348,7 @@ Production deploys are handled via GitHub Actions with Docker image build + Rack
 |-------|-------------|
 | **Backend** | Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2 |
 | **AI/ML** | pydantic-ai, Anthropic Claude, OpenAI, Google Gemini |
-| **CLI** | Go, Cobra, `newsly-agent` binary |
+| **CLI** | Go, Cobra, `newsbuddy` binary |
 | **iOS** | SwiftUI, Apple Sign In, Share Extension |
 | **Frontend** | Jinja2 templates, Tailwind CSS v4 |
 | **Infrastructure** | PostgreSQL, Alembic, uv, GitHub Actions |

@@ -120,7 +120,7 @@ func DefaultDeviceName() string {
 			return trimmed
 		}
 	}
-	return "Newsly CLI"
+	return "Newsbuddy CLI"
 }
 
 func (c *Client) doJSON(

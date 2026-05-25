@@ -62,8 +62,8 @@ func New(version string, stdout io.Writer, stderr io.Writer) *App {
 	}
 
 	rootCmd := &cobra.Command{
-		Use:           "newsly-agent",
-		Short:         "Newsly API client",
+		Use:           "newsbuddy",
+		Short:         "Newsbuddy API client",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

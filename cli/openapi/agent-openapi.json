@@ -5461,8 +5461,8 @@
     }
   },
   "info": {
-    "description": "Filtered machine-oriented API contract for the standalone newsly-agent CLI.",
-    "title": "Newsly Agent CLI API",
+    "description": "Filtered machine-oriented API contract for the standalone newsbuddy CLI.",
+    "title": "Newsbuddy CLI API",
     "version": "2.0.0"
   },
   "openapi": "3.0.3",

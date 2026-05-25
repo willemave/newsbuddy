@@ -13,7 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const libraryManifestFilename = ".newsly-agent-manifest.json"
+const (
+	libraryManifestFilename       = ".newsbuddy-manifest.json"
+	legacyLibraryManifestFilename = ".newsly-agent-manifest.json"
+)
 
 type localLibraryManifest struct {
 	Files map[string]string `json:"files"`
@@ -66,8 +69,10 @@ func (a *App) newLibraryCommand() *cobra.Command {
 			if err != nil {
 				return a.renderErrorWithPath("library.sync", runtimeCfg.Path, err)
 			}
+			localManifestPath := filepath.Join(libraryRoot, libraryManifestFilename)
 			localManifest, err := loadLocalLibraryManifest(
-				filepath.Join(libraryRoot, libraryManifestFilename),
+				localManifestPath,
+				filepath.Join(libraryRoot, legacyLibraryManifestFilename),
 			)
 			if err != nil {
 				return a.renderError("library.sync", err)
@@ -137,7 +142,7 @@ func (a *App) newLibraryCommand() *cobra.Command {
 				deleted++
 			}
 
-			if err := saveLocalLibraryManifest(filepath.Join(libraryRoot, libraryManifestFilename), remoteFiles); err != nil {
+			if err := saveLocalLibraryManifest(localManifestPath, remoteFiles); err != nil {
 				return a.renderError("library.sync", err)
 			}
 
@@ -162,13 +167,19 @@ func (a *App) newLibraryCommand() *cobra.Command {
 	return libraryCmd
 }
 
-func loadLocalLibraryManifest(path string) (localLibraryManifest, error) {
+func loadLocalLibraryManifest(path string, legacyPath string) (localLibraryManifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return localLibraryManifest{Files: map[string]string{}}, nil
+		if !os.IsNotExist(err) {
+			return localLibraryManifest{}, err
 		}
-		return localLibraryManifest{}, err
+		data, err = os.ReadFile(legacyPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return localLibraryManifest{Files: map[string]string{}}, nil
+			}
+			return localLibraryManifest{}, err
+		}
 	}
 	var manifest localLibraryManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {

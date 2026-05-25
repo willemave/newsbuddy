@@ -9,7 +9,7 @@ Folder-by-folder reference for the Go command-line client, its generated API bin
 ## Top-level folders
 | Folder | Focus |
 |---|---|
-| `cmd/` | `cli/cmd/newsly-agent/main.go`, the `newsly-agent` binary entrypoint. |
+| `cmd/` | `cli/cmd/newsbuddy/main.go`, the `newsbuddy` binary entrypoint. |
 | `internal/` | Command wiring, auth/content/search/onboarding/news subcommands, config parsing, output helpers, runtime API client helpers, and generated API bindings. |
 | `newsly_agent/` | Legacy Python namespace/cache directory; no tracked source files are currently checked in. |
 | `openapi/` | Checked-in `agent-openapi.json` contract used to generate the Go client surface. |

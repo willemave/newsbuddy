@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test the local Newsly CLI against a local backend."""
+"""Smoke-test the local Newsbuddy CLI against a local backend."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI_ROOT = REPO_ROOT / "cli"
-DEFAULT_STATE_DIR = REPO_ROOT / ".tmp" / "newsly-agent-local-smoke"
+DEFAULT_STATE_DIR = REPO_ROOT / ".tmp" / "newsbuddy-local-smoke"
 
 
 class SmokeTestError(RuntimeError):
@@ -108,7 +108,7 @@ def main() -> int:
     state_dir = args.state_dir.resolve()
     config_path = state_dir / "config.json"
     library_root = state_dir / "library"
-    binary_path = state_dir / "newsly-agent"
+    binary_path = state_dir / "newsbuddy"
 
     if args.skip_auth and args.fresh_auth:
         raise SmokeTestError("--skip-auth and --fresh-auth cannot be used together")
@@ -283,7 +283,7 @@ def check_server_health(
 def build_cli(binary_path: Path) -> None:
     print(f"== Building local CLI to {binary_path}")
     run_subprocess(
-        ["go", "build", "-o", str(binary_path), "./cmd/newsly-agent"],
+        ["go", "build", "-o", str(binary_path), "./cmd/newsbuddy"],
         cwd=CLI_ROOT,
         capture=False,
     )

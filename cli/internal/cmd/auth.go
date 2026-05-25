@@ -16,7 +16,7 @@ import (
 func (a *App) newAuthCommand() *cobra.Command {
 	authCmd := &cobra.Command{
 		Use:   "auth",
-		Short: "Authenticate and link the CLI to a Newsly account",
+		Short: "Authenticate and link the CLI to a Newsbuddy account",
 	}
 
 	var args struct {
@@ -98,7 +98,7 @@ func (a *App) newAuthCommand() *cobra.Command {
 }
 
 func renderCLILinkQRCode(w io.Writer, approveURL string) {
-	fmt.Fprintln(w, "Scan this QR code in the Newsly app to approve CLI access:")
+	fmt.Fprintln(w, "Scan this QR code in the Newsbuddy app to approve CLI access:")
 	qrterminal.GenerateHalfBlock(approveURL, qrterminal.M, w)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Approval link:")

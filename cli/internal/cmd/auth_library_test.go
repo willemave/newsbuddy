@@ -65,7 +65,7 @@ func TestAuthLoginPersistsAPIKey(t *testing.T) {
 	if cfg.APIKey != "newsly_ak_linked_secret" {
 		t.Fatalf("expected linked API key to persist, got %q", cfg.APIKey)
 	}
-	if !strings.Contains(cli.stderr.String(), "Scan this QR code in the Newsly app") {
+	if !strings.Contains(cli.stderr.String(), "Scan this QR code in the Newsbuddy app") {
 		t.Fatalf("expected QR instructions on stderr, got %q", cli.stderr.String())
 	}
 	if !strings.Contains(cli.stderr.String(), "newsly://cli-link?") {
@@ -145,7 +145,7 @@ func TestLibrarySyncDownloadsAndPrunesFiles(t *testing.T) {
 	if err := os.WriteFile(stalePath, []byte("old"), 0o644); err != nil {
 		t.Fatalf("write stale file: %v", err)
 	}
-	manifestPath := filepath.Join(libraryRoot, ".newsly-agent-manifest.json")
+	manifestPath := filepath.Join(libraryRoot, ".newsbuddy-manifest.json")
 	if err := os.WriteFile(manifestPath, []byte(`{"files":{"article/example/old-doc.md":"old-sha"}}`), 0o644); err != nil {
 		t.Fatalf("write stale manifest: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestLibrarySyncRefusesToPruneAllTrackedFilesByDefault(t *testing.T) {
 	if err := os.WriteFile(trackedPath, []byte("old"), 0o644); err != nil {
 		t.Fatalf("write tracked file: %v", err)
 	}
-	manifestPath := filepath.Join(libraryRoot, ".newsly-agent-manifest.json")
+	manifestPath := filepath.Join(libraryRoot, ".newsbuddy-manifest.json")
 	if err := os.WriteFile(manifestPath, []byte(`{"files":{"article/example/old-doc.md":"old-sha"}}`), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestLibrarySyncAllowsExplicitPruneAll(t *testing.T) {
 	if err := os.WriteFile(trackedPath, []byte("old"), 0o644); err != nil {
 		t.Fatalf("write tracked file: %v", err)
 	}
-	manifestPath := filepath.Join(libraryRoot, ".newsly-agent-manifest.json")
+	manifestPath := filepath.Join(libraryRoot, ".newsbuddy-manifest.json")
 	if err := os.WriteFile(manifestPath, []byte(`{"files":{"article/example/old-doc.md":"old-sha"}}`), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestLibrarySyncRedownloadsCorruptLocalFile(t *testing.T) {
 	if err := os.WriteFile(targetPath, []byte("corrupt\n"), 0o644); err != nil {
 		t.Fatalf("write corrupt file: %v", err)
 	}
-	manifestPath := filepath.Join(libraryRoot, ".newsly-agent-manifest.json")
+	manifestPath := filepath.Join(libraryRoot, ".newsbuddy-manifest.json")
 	manifestPayload := fmt.Sprintf(`{"files":{%q:%q}}`, relativePath, remoteChecksum)
 	if err := os.WriteFile(manifestPath, []byte(manifestPayload), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
@@ -548,7 +548,7 @@ func TestLibrarySyncIsIdempotentAndPrunesEmptyDirectories(t *testing.T) {
 		t.Fatalf("expected empty article/example directory to be pruned, stat err=%v", err)
 	}
 
-	manifestBytes, err := os.ReadFile(filepath.Join(libraryRoot, ".newsly-agent-manifest.json"))
+	manifestBytes, err := os.ReadFile(filepath.Join(libraryRoot, ".newsbuddy-manifest.json"))
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}

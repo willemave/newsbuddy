@@ -107,10 +107,10 @@ def build_agent_openapi_schema() -> dict[str, Any]:
         **full_schema,
         "openapi": "3.0.3",
         "info": {
-            "title": "Newsly Agent CLI API",
+            "title": "Newsbuddy CLI API",
             "version": str(full_schema.get("info", {}).get("version", "1.0.0")),
             "description": (
-                "Filtered machine-oriented API contract for the standalone newsly-agent CLI."
+                "Filtered machine-oriented API contract for the standalone newsbuddy CLI."
             ),
         },
         "paths": filtered_paths,

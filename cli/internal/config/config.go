@@ -9,10 +9,14 @@ import (
 )
 
 const (
-	EnvConfigPath       = "NEWSLY_AGENT_CONFIG"
-	LegacyEnvConfigPath = "NEWSLY_AGENT_CONFIG_PATH"
-	EnvServerURL        = "NEWSLY_AGENT_SERVER"
-	EnvAPIKey           = "NEWSLY_AGENT_API_KEY"
+	EnvConfigPath          = "NEWSBUDDY_CONFIG"
+	EnvConfigPathAlias     = "NEWSBUDDY_CONFIG_PATH"
+	LegacyEnvConfigPath    = "NEWSLY_AGENT_CONFIG"
+	LegacyEnvConfigPathAlt = "NEWSLY_AGENT_CONFIG_PATH"
+	EnvServerURL           = "NEWSBUDDY_SERVER"
+	LegacyEnvServerURL     = "NEWSLY_AGENT_SERVER"
+	EnvAPIKey              = "NEWSBUDDY_API_KEY"
+	LegacyEnvAPIKey        = "NEWSLY_AGENT_API_KEY"
 )
 
 type FileConfig struct {
@@ -31,17 +35,17 @@ type RuntimeConfig struct {
 func DefaultPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return ".newsly-agent.json"
+		return ".newsbuddy.json"
 	}
-	return filepath.Join(home, ".config", "newsly-agent", "config.json")
+	return filepath.Join(home, ".config", "newsbuddy", "config.json")
 }
 
 func DefaultLibraryRoot() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return ".newsly-agent-library"
+		return ".newsbuddy-library"
 	}
-	return filepath.Join(home, ".local", "share", "newsly-agent", "library")
+	return filepath.Join(home, ".local", "share", "newsbuddy", "library")
 }
 
 func ResolvePath(explicit string) string {
@@ -50,8 +54,12 @@ func ResolvePath(explicit string) string {
 		return cleanPath(explicit)
 	case strings.TrimSpace(os.Getenv(EnvConfigPath)) != "":
 		return cleanPath(os.Getenv(EnvConfigPath))
+	case strings.TrimSpace(os.Getenv(EnvConfigPathAlias)) != "":
+		return cleanPath(os.Getenv(EnvConfigPathAlias))
 	case strings.TrimSpace(os.Getenv(LegacyEnvConfigPath)) != "":
 		return cleanPath(os.Getenv(LegacyEnvConfigPath))
+	case strings.TrimSpace(os.Getenv(LegacyEnvConfigPathAlt)) != "":
+		return cleanPath(os.Getenv(LegacyEnvConfigPathAlt))
 	default:
 		return DefaultPath()
 	}
@@ -125,10 +133,10 @@ func ResolveRuntime(pathOverride string, serverOverride string, apiKeyOverride s
 		LibraryRoot: fileCfg.LibraryRoot,
 	}
 
-	if value := strings.TrimSpace(os.Getenv(EnvServerURL)); value != "" {
+	if value := firstEnvValue(EnvServerURL, LegacyEnvServerURL); value != "" {
 		runtimeCfg.ServerURL = value
 	}
-	if value := strings.TrimSpace(os.Getenv(EnvAPIKey)); value != "" {
+	if value := firstEnvValue(EnvAPIKey, LegacyEnvAPIKey); value != "" {
 		runtimeCfg.APIKey = value
 	}
 	if value := strings.TrimSpace(serverOverride); value != "" {
@@ -146,7 +154,7 @@ func ResolveRuntime(pathOverride string, serverOverride string, apiKeyOverride s
 
 func (c RuntimeConfig) ValidateServerOnly() error {
 	if strings.TrimSpace(c.ServerURL) == "" {
-		return errors.New("missing server_url; run `newsly-agent config set server ...` first")
+		return errors.New("missing server_url; run `newsbuddy config set server ...` first")
 	}
 	return nil
 }
@@ -156,9 +164,18 @@ func (c RuntimeConfig) ValidateRemote() error {
 		return err
 	}
 	if strings.TrimSpace(c.APIKey) == "" {
-		return errors.New("missing api_key; run `newsly-agent config set api-key ...` first")
+		return errors.New("missing api_key; run `newsbuddy config set api-key ...` first")
 	}
 	return nil
+}
+
+func firstEnvValue(names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func MaskedAPIKey(raw string) string {
