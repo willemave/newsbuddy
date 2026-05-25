@@ -56,7 +56,8 @@ go run ./cmd/newsbuddy --server http://localhost:8000 auth login
 
 ## Output
 
-JSON is the default. Use `--output text` for terminal-friendly output.
+JSON is the default. Use `--output text` for terminal-friendly output, or `--json`
+as a shortcut back to JSON in scripts.
 
 Stable JSON envelope shape:
 
@@ -81,6 +82,7 @@ go run ./cmd/newsbuddy content list --limit 10
 go run ./cmd/newsbuddy content get 42
 go run ./cmd/newsbuddy content submit https://example.com/article --wait
 go run ./cmd/newsbuddy content summarize https://example.com/article --wait
+go run ./cmd/newsbuddy content submissions list --limit 10
 go run ./cmd/newsbuddy search "recent AI chip news"
 go run ./cmd/newsbuddy jobs get 1201
 go run ./cmd/newsbuddy jobs wait 1201
@@ -90,6 +92,7 @@ go run ./cmd/newsbuddy sources list
 go run ./cmd/newsbuddy sources add https://example.com/feed.xml --feed-type atom
 go run ./cmd/newsbuddy news list --read-filter unread
 go run ./cmd/newsbuddy news get 123
+go run ./cmd/newsbuddy news mark-read 123
 go run ./cmd/newsbuddy news convert 123
 ```
 
@@ -131,6 +134,20 @@ python3 scripts/test_agent_cli_local_e2e.py \
   --fresh-auth \
   --submit-url https://example.com/article
 ```
+
+For a fuller local sweep with an isolated debug user, generated fixtures, source
+subscription, news actions, jobs, search, and seeded onboarding status/complete:
+
+```bash
+uv run python scripts/test_agent_cli_local_e2e.py \
+  --fresh-auth \
+  --auto-debug-auth \
+  --seed-test-data \
+  --exercise-all
+```
+
+`--run-onboarding-start` also exercises `onboarding start`, but that path can
+invoke live LLM/search providers before returning.
 
 Useful knobs for slower local Docker stacks:
 
