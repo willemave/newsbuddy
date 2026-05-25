@@ -2,8 +2,14 @@ package output
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+)
+
+const (
+	FormatJSON = "json"
+	FormatText = "text"
 )
 
 type Envelope struct {
@@ -22,12 +28,24 @@ type EnvelopeError struct {
 }
 
 func Emit(w io.Writer, envelope Envelope, format string) error {
-	if format == "text" {
+	if err := ValidateFormat(format); err != nil {
+		return err
+	}
+	if format == FormatText {
 		return emitText(w, envelope)
 	}
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(envelope)
+}
+
+func ValidateFormat(format string) error {
+	switch format {
+	case FormatJSON, FormatText:
+		return nil
+	default:
+		return errors.New("unsupported output format; expected one of: json, text")
+	}
 }
 
 func Normalize(value any) (any, error) {

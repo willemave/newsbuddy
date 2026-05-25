@@ -49,6 +49,10 @@ func (a *App) newSourcesCommand() *cobra.Command {
 		Short: "Subscribe to a feed",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, positional []string) error {
+			feedURL, err := runtime.ParseURL(positional[0])
+			if err != nil {
+				return a.renderError("sources.add", err)
+			}
 			if !slices.Contains(supportedFeedTypes, addArgs.FeedType) {
 				return a.renderError(
 					"sources.add",
@@ -60,7 +64,7 @@ func (a *App) newSourcesCommand() *cobra.Command {
 				)
 			}
 			request := &api.SubscribeToFeedRequest{
-				FeedURL:  positional[0],
+				FeedURL:  feedURL.String(),
 				FeedType: addArgs.FeedType,
 			}
 			if addArgs.DisplayName != "" {

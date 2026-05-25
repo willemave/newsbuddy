@@ -56,16 +56,6 @@ type Client struct {
 	httpClient *http.Client
 }
 
-type SubmissionStatusResponse struct {
-	ID           int    `json:"id"`
-	Status       string `json:"status"`
-	ErrorMessage string `json:"error_message"`
-}
-
-type SubmissionStatusListResponse struct {
-	Submissions []SubmissionStatusResponse `json:"submissions"`
-}
-
 type bearerSource struct {
 	token string
 }
@@ -143,7 +133,9 @@ func (c *Client) WaitForSubmittedContent(ctx context.Context, contentID int, wai
 			return nil, err
 		}
 
-		submissions, err := c.ListSubmissionStatuses(ctx, 100)
+		params := api.ListContentSubmissionStatusesParams{}
+		params.Limit.SetTo(100)
+		submissions, err := c.ListContentSubmissionStatuses(ctx, params)
 		if err != nil {
 			return nil, err
 		}
@@ -151,11 +143,15 @@ func (c *Client) WaitForSubmittedContent(ctx context.Context, contentID int, wai
 			if submission.ID != contentID {
 				continue
 			}
-			if IsFailedOrSkippedStatus(submission.Status) {
+			status := string(submission.Status)
+			if IsFailedOrSkippedStatus(status) {
 				payload, _ := normalize(submission)
-				message := fmt.Sprintf("submission %d %s", contentID, normalizeStatus(submission.Status))
-				if strings.TrimSpace(submission.ErrorMessage) != "" {
-					message = submission.ErrorMessage
+				message := fmt.Sprintf("submission %d %s", contentID, normalizeStatus(status))
+				if submission.ErrorMessage.IsSet() && !submission.ErrorMessage.Null {
+					errorMessage := strings.TrimSpace(submission.ErrorMessage.Value)
+					if errorMessage != "" {
+						message = errorMessage
+					}
 				}
 				return nil, &APIError{
 					Message: message,
@@ -323,16 +319,21 @@ func (c *Client) SubmitContent(ctx context.Context, request *api.SubmitContentRe
 	}
 }
 
-func (c *Client) ListSubmissionStatuses(ctx context.Context, limit int) (*SubmissionStatusListResponse, error) {
-	query := url.Values{}
-	if limit > 0 {
-		query.Set("limit", fmt.Sprintf("%d", limit))
-	}
-	var response SubmissionStatusListResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/api/content/submissions/list", nil, true, query, &response); err != nil {
+func (c *Client) ListContentSubmissionStatuses(ctx context.Context, params api.ListContentSubmissionStatusesParams) (*api.SubmissionStatusListResponse, error) {
+	res, err := c.raw.ListContentSubmissionStatuses(ctx, params)
+	if err != nil {
 		return nil, err
 	}
-	return &response, nil
+	switch value := res.(type) {
+	case *api.SubmissionStatusListResponse:
+		return value, nil
+	case *api.ListContentSubmissionStatusesNotFound:
+		return nil, &APIError{Message: "submission status route not found", StatusCode: http.StatusNotFound}
+	case *api.HTTPValidationError:
+		return nil, validationError(value)
+	default:
+		return nil, unexpectedResponse(value)
+	}
 }
 
 func (c *Client) ListNewsItems(ctx context.Context, params api.ListNewsItemsParams) (*api.ContentListResponse, error) {
@@ -379,6 +380,23 @@ func (c *Client) ConvertNewsItemToArticle(ctx context.Context, newsItemID int) (
 		return value, nil
 	case *api.ConvertNewsItemToArticleNotFound:
 		return nil, &APIError{Message: "news item not found", StatusCode: http.StatusNotFound}
+	case *api.HTTPValidationError:
+		return nil, validationError(value)
+	default:
+		return nil, unexpectedResponse(value)
+	}
+}
+
+func (c *Client) MarkNewsItemsRead(ctx context.Context, newsItemIDs []int) (any, error) {
+	res, err := c.raw.MarkNewsItemsRead(ctx, &api.BulkMarkReadRequest{ContentIds: newsItemIDs})
+	if err != nil {
+		return nil, err
+	}
+	switch value := res.(type) {
+	case *api.MarkNewsItemsReadOK:
+		return normalize(value)
+	case *api.MarkNewsItemsReadNotFound:
+		return nil, &APIError{Message: "news items not found", StatusCode: http.StatusNotFound}
 	case *api.HTTPValidationError:
 		return nil, validationError(value)
 	default:
@@ -454,6 +472,12 @@ func ParseURL(rawURL string) (url.URL, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return url.URL{}, err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return url.URL{}, errors.New("url must use http or https")
+	}
+	if parsed.Host == "" {
+		return url.URL{}, errors.New("url must include a host")
 	}
 	return *parsed, nil
 }

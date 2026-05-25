@@ -53,6 +53,165 @@ func TestJobsGetOutputsEnvelope(t *testing.T) {
 	}
 }
 
+func TestOutputFlagRejectsUnsupportedFormatBeforeCommand(t *testing.T) {
+	cli := newTestCLI(t, config.FileConfig{})
+
+	exitCode := cli.run("--output", "yaml", "version")
+	if exitCode != 1 {
+		t.Fatalf("expected exit 1, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+	if cli.stdout.Len() != 0 {
+		t.Fatalf("expected no stdout, got %s", cli.stdout.String())
+	}
+	if !strings.Contains(cli.stderr.String(), "unsupported output format; expected one of: json, text") {
+		t.Fatalf("unexpected stderr: %q", cli.stderr.String())
+	}
+}
+
+func TestJSONFlagOverridesTextOutput(t *testing.T) {
+	cli := newTestCLI(t, config.FileConfig{})
+
+	exitCode := cli.run("--output", "text", "--json", "version")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+
+	envelope := cli.envelope(t)
+	if envelope["command"] != "version" {
+		t.Fatalf("unexpected command: %#v", envelope["command"])
+	}
+}
+
+func TestContentListAcceptsNullClassification(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer newsly_ak_test" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/api/content/" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("limit"); got != "5" {
+			t.Fatalf("unexpected limit: %q", got)
+		}
+		if got := r.URL.Query()["content_type"]; len(got) != 1 || got[0] != "article" {
+			t.Fatalf("unexpected content_type: %#v", got)
+		}
+		writeJSON(t, w, map[string]any{
+			"available_dates": []string{"2026-05-23"},
+			"content_types":   []string{"article"},
+			"contents": []map[string]any{
+				{
+					"classification": nil,
+					"content_type":   "article",
+					"created_at":     "2026-05-23T12:00:00Z",
+					"id":             42,
+					"status":         "completed",
+					"title":          "Rust Overtakes Go in Cloud Infrastructure Adoption",
+					"url":            "https://example.com/article",
+				},
+			},
+			"meta": map[string]any{
+				"has_more":    false,
+				"next_cursor": nil,
+				"page_size":   1,
+				"total":       1,
+			},
+		})
+	}))
+	defer server.Close()
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+
+	exitCode := cli.run("content", "list", "--content-type", "article", "--limit", "5")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+
+	envelope := cli.envelope(t)
+	if envelope["command"] != "content.list" {
+		t.Fatalf("unexpected command: %#v", envelope["command"])
+	}
+	if envelope["ok"] != true {
+		t.Fatalf("expected ok=true: %#v", envelope["ok"])
+	}
+	data, ok := envelope["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected data object: %#v", envelope["data"])
+	}
+	contents, ok := data["contents"].([]any)
+	if !ok || len(contents) != 1 {
+		t.Fatalf("expected one content item: %#v", data["contents"])
+	}
+	item, ok := contents[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected content item object: %#v", contents[0])
+	}
+	if got := item["title"]; got != "Rust Overtakes Go in Cloud Infrastructure Adoption" {
+		t.Fatalf("unexpected title: %#v", got)
+	}
+	if value, exists := item["classification"]; exists && value != nil {
+		t.Fatalf("expected null classification to be absent or null, got %#v", value)
+	}
+}
+
+func TestContentSubmissionsListOutputsEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer newsly_ak_test" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/api/content/submissions/list" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("limit"); got != "3" {
+			t.Fatalf("unexpected limit: %q", got)
+		}
+		if got := r.URL.Query().Get("cursor"); got != "next-1" {
+			t.Fatalf("unexpected cursor: %q", got)
+		}
+		writeJSON(t, w, map[string]any{
+			"submissions": []map[string]any{
+				{
+					"id":           9,
+					"url":          "https://example.com/story",
+					"content_type": "article",
+					"created_at":   "2026-04-09T12:00:00Z",
+					"status":       "processing",
+				},
+			},
+			"meta": map[string]any{
+				"has_more":    false,
+				"next_cursor": nil,
+				"page_size":   1,
+				"total":       1,
+			},
+		})
+	}))
+	defer server.Close()
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+
+	exitCode := cli.run("content", "submissions", "list", "--limit", "3", "--cursor", "next-1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+
+	envelope := cli.envelope(t)
+	if envelope["command"] != "content.submissions.list" {
+		t.Fatalf("unexpected command: %#v", envelope["command"])
+	}
+	data := envelope["data"].(map[string]any)
+	submissions := data["submissions"].([]any)
+	if len(submissions) != 1 {
+		t.Fatalf("expected one submission, got %#v", submissions)
+	}
+}
+
 func TestContentSubmitWaitAddsJobPayload(t *testing.T) {
 	var jobPollCount atomic.Int32
 	var contentPollCount atomic.Int32
@@ -140,10 +299,19 @@ func TestContentSubmitWaitAddsJobPayload(t *testing.T) {
 			writeJSON(t, w, map[string]any{
 				"submissions": []map[string]any{
 					{
+						"content_type":  "article",
+						"created_at":    "2026-04-09T12:00:00Z",
 						"id":            9,
 						"status":        "processing",
 						"error_message": nil,
+						"url":           "https://example.com/story",
 					},
+				},
+				"meta": map[string]any{
+					"has_more":    false,
+					"next_cursor": nil,
+					"page_size":   1,
+					"total":       1,
 				},
 			})
 		default:
@@ -205,10 +373,19 @@ func TestContentSubmitWaitReturnsErrorWhenSubmissionFails(t *testing.T) {
 			writeJSON(t, w, map[string]any{
 				"submissions": []map[string]any{
 					{
+						"content_type":  "article",
+						"created_at":    "2026-04-09T12:00:00Z",
 						"id":            9,
 						"status":        "failed",
 						"error_message": "content extraction failed",
+						"url":           "https://example.com/story",
 					},
+				},
+				"meta": map[string]any{
+					"has_more":    false,
+					"next_cursor": nil,
+					"page_size":   1,
+					"total":       1,
 				},
 			})
 		default:
@@ -292,6 +469,25 @@ func TestContentSummarizeSetsFavoriteAndMarkRead(t *testing.T) {
 	}
 }
 
+func TestContentSubmitRejectsInvalidURLBeforeRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+
+	exitCode := cli.run("content", "submit", "not-a-url")
+	if exitCode != 1 {
+		t.Fatalf("expected exit 1, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+
+	requireErrorMessage(t, cli.envelope(t), "url must use http or https")
+}
+
 func TestContentSubmitRejectsNonPositiveWaitIntervalBeforeRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -339,6 +535,160 @@ func TestOnboardingStartRejectsNonPositiveWaitIntervalBeforeRequest(t *testing.T
 	}
 
 	requireErrorMessage(t, cli.envelope(t), "wait-interval must be greater than zero")
+}
+
+func TestOnboardingStartOutputsEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer newsly_ak_test" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/api/agent/onboarding" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		payload := string(body)
+		if !strings.Contains(payload, `"brief":"ai infrastructure"`) {
+			t.Fatalf("expected brief in payload: %s", payload)
+		}
+		if !strings.Contains(payload, `"seed_urls":["https://example.com/a"]`) {
+			t.Fatalf("expected seed url in payload: %s", payload)
+		}
+		if !strings.Contains(payload, `"seed_feeds":["https://example.com/feed.xml"]`) {
+			t.Fatalf("expected seed feed in payload: %s", payload)
+		}
+		writeJSON(t, w, map[string]any{
+			"run_id": 17,
+			"status": "pending",
+			"job_id": 91,
+		})
+	}))
+	defer server.Close()
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+	exitCode := cli.run(
+		"onboarding", "start",
+		"--brief", "ai infrastructure",
+		"--seed-url", "https://example.com/a",
+		"--seed-feed", "https://example.com/feed.xml",
+	)
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+	envelope := cli.envelope(t)
+	if envelope["command"] != "onboarding.start" {
+		t.Fatalf("unexpected envelope: %s", cli.stdout.String())
+	}
+	data := envelope["data"].(map[string]any)
+	if int(data["run_id"].(float64)) != 17 {
+		t.Fatalf("unexpected data: %#v", data)
+	}
+}
+
+func TestOnboardingStatusAndCompleteOutputEnvelopes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer newsly_ak_test" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agent/onboarding/11":
+			writeJSON(t, w, map[string]any{
+				"run_id":          11,
+				"run_status":      "completed",
+				"topic_summary":   "AI infrastructure",
+				"inferred_topics": []string{"ai", "infrastructure"},
+				"lanes":           []any{},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/agent/onboarding/11/complete":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			if !strings.Contains(string(body), `"accept_all":true`) {
+				t.Fatalf("unexpected payload: %s", string(body))
+			}
+			writeJSON(t, w, map[string]any{
+				"status": "completed",
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	statusCLI := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+	statusExitCode := statusCLI.run("onboarding", "status", "11")
+	if statusExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", statusExitCode, statusCLI.stdout.String(), statusCLI.stderr.String())
+	}
+	if statusCLI.envelope(t)["command"] != "onboarding.status" {
+		t.Fatalf("unexpected status envelope: %s", statusCLI.stdout.String())
+	}
+
+	completeCLI := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+	completeExitCode := completeCLI.run("onboarding", "complete", "11", "--accept-all")
+	if completeExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", completeExitCode, completeCLI.stdout.String(), completeCLI.stderr.String())
+	}
+	if completeCLI.envelope(t)["command"] != "onboarding.complete" {
+		t.Fatalf("unexpected complete envelope: %s", completeCLI.stdout.String())
+	}
+}
+
+func TestSearchOutputsEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer newsly_ak_test" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/api/agent/search" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		payload := string(body)
+		if !strings.Contains(payload, `"query":"ai agents"`) {
+			t.Fatalf("expected query in payload: %s", payload)
+		}
+		if !strings.Contains(payload, `"include_podcasts":false`) {
+			t.Fatalf("expected include_podcasts=false in payload: %s", payload)
+		}
+		writeJSON(t, w, map[string]any{
+			"results": []map[string]any{
+				{
+					"kind":     "web",
+					"title":    "AI Agents",
+					"url":      "https://example.com/agents",
+					"provider": "exa",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+	exitCode := cli.run("search", "ai agents", "--limit", "2", "--include-podcasts=false")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+	if cli.envelope(t)["command"] != "search" {
+		t.Fatalf("unexpected envelope: %s", cli.stdout.String())
+	}
 }
 
 func TestNewsListOutputsEnvelope(t *testing.T) {
@@ -433,6 +783,86 @@ func TestNewsConvertOutputsEnvelope(t *testing.T) {
 	}
 }
 
+func TestNewsMarkReadOutputsEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer newsly_ak_test" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/api/news/items/mark-read" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if !strings.Contains(string(body), `"content_ids":[7,8]`) {
+			t.Fatalf("unexpected payload: %s", string(body))
+		}
+		writeJSON(t, w, map[string]any{
+			"marked_read": 2,
+		})
+	}))
+	defer server.Close()
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+
+	exitCode := cli.run("news", "mark-read", "7", "8")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+
+	envelope := cli.envelope(t)
+	if envelope["command"] != "news.mark-read" {
+		t.Fatalf("unexpected command: %#v", envelope["command"])
+	}
+	data := envelope["data"].(map[string]any)
+	if int(data["marked_read"].(float64)) != 2 {
+		t.Fatalf("unexpected data: %#v", data)
+	}
+}
+
+func TestSourcesListOutputsEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer newsly_ak_test" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/api/scrapers/" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("type"); got != "atom" {
+			t.Fatalf("unexpected type: %q", got)
+		}
+		writeJSON(t, w, []map[string]any{
+			{
+				"id":           1,
+				"scraper_type": "atom",
+				"display_name": "Example Feed",
+				"config":       map[string]any{"feed_url": "https://example.com/feed.xml"},
+				"feed_url":     "https://example.com/feed.xml",
+				"limit":        25,
+				"is_active":    true,
+				"created_at":   "2026-04-04T18:00:00Z",
+			},
+		})
+	}))
+	defer server.Close()
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+	exitCode := cli.run("sources", "list", "--type", "atom")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+	if cli.envelope(t)["command"] != "sources.list" {
+		t.Fatalf("unexpected envelope: %s", cli.stdout.String())
+	}
+}
+
 func TestSourcesAddReturnsBackendDetailOnConflict(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer newsly_ak_test" {
@@ -471,6 +901,29 @@ func TestSourcesAddReturnsBackendDetailOnConflict(t *testing.T) {
 	if int(errorPayload["status_code"].(float64)) != http.StatusBadRequest {
 		t.Fatalf("unexpected status_code: %#v", errorPayload["status_code"])
 	}
+}
+
+func TestSourcesAddRejectsInvalidURLBeforeRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL: server.URL,
+		APIKey:    "newsly_ak_test",
+	})
+
+	exitCode := cli.run(
+		"sources", "add", "not-a-url",
+		"--feed-type", "atom",
+	)
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit 1, got %d stdout=%s stderr=%s", exitCode, cli.stdout.String(), cli.stderr.String())
+	}
+
+	requireErrorMessage(t, cli.envelope(t), "url must use http or https")
 }
 
 func TestSourcesAddRejectsUnsupportedFeedTypeLocally(t *testing.T) {

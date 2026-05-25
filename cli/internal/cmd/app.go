@@ -28,6 +28,7 @@ type rootOptions struct {
 	ServerURL  string
 	APIKey     string
 	Output     string
+	JSON       bool
 	Timeout    time.Duration
 }
 
@@ -56,7 +57,7 @@ func New(version string, stdout io.Writer, stderr io.Writer) *App {
 		stderr:  stderr,
 		version: version,
 		opts: rootOptions{
-			Output:  "json",
+			Output:  output.FormatJSON,
 			Timeout: 30 * time.Second,
 		},
 	}
@@ -66,11 +67,18 @@ func New(version string, stdout io.Writer, stderr io.Writer) *App {
 		Short:         "Newsbuddy API client",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+			if app.opts.JSON {
+				app.opts.Output = output.FormatJSON
+			}
+			return output.ValidateFormat(app.opts.Output)
+		},
 	}
 	rootCmd.PersistentFlags().StringVar(&app.opts.ConfigPath, "config", "", "Override the CLI config path")
 	rootCmd.PersistentFlags().StringVar(&app.opts.ServerURL, "server", "", "Override the Newsly server URL")
 	rootCmd.PersistentFlags().StringVar(&app.opts.APIKey, "api-key", "", "Override the API key for this command")
-	rootCmd.PersistentFlags().StringVar(&app.opts.Output, "output", "json", "Output format: json or text")
+	rootCmd.PersistentFlags().StringVar(&app.opts.Output, "output", output.FormatJSON, "Output format: json or text")
+	rootCmd.PersistentFlags().BoolVar(&app.opts.JSON, "json", false, "Shortcut for --output json")
 	rootCmd.PersistentFlags().DurationVar(&app.opts.Timeout, "timeout", 30*time.Second, "HTTP timeout")
 
 	rootCmd.AddCommand(

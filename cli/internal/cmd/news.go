@@ -81,6 +81,29 @@ func (a *App) newNewsCommand() *cobra.Command {
 		},
 	}
 
-	newsCmd.AddCommand(listCmd, getCmd, convertCmd)
+	markReadCmd := &cobra.Command{
+		Use:   "mark-read <news-item-id>...",
+		Short: "Mark visible news items as read",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			newsItemIDs := make([]int, 0, len(args))
+			for _, arg := range args {
+				newsItemID, err := a.parseIntArg("news.mark-read", arg)
+				if err != nil {
+					return err
+				}
+				newsItemIDs = append(newsItemIDs, newsItemID)
+			}
+			return a.runRemote(cmd, "news.mark-read", func(ctx context.Context, client *runtime.Client) (commandResult, error) {
+				data, err := client.MarkNewsItemsRead(ctx, newsItemIDs)
+				if err != nil {
+					return commandResult{}, err
+				}
+				return commandResult{Data: data}, nil
+			})
+		},
+	}
+
+	newsCmd.AddCommand(listCmd, getCmd, convertCmd, markReadCmd)
 	return newsCmd
 }

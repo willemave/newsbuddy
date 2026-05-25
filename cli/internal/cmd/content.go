@@ -79,8 +79,44 @@ func (a *App) newContentCommand() *cobra.Command {
 		getCmd,
 		a.newSubmitCommand("submit", "content.submit"),
 		a.newSubmitCommand("summarize", "content.summarize"),
+		a.newSubmissionsCommand(),
 	)
 	return contentCmd
+}
+
+func (a *App) newSubmissionsCommand() *cobra.Command {
+	submissionsCmd := &cobra.Command{
+		Use:   "submissions",
+		Short: "Inspect user-submitted content statuses",
+	}
+
+	var listArgs struct {
+		Limit  int
+		Cursor string
+	}
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List active or failed user submissions",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return a.runRemote(cmd, "content.submissions.list", func(ctx context.Context, client *runtime.Client) (commandResult, error) {
+				params := api.ListContentSubmissionStatusesParams{}
+				params.Limit.SetTo(listArgs.Limit)
+				if listArgs.Cursor != "" {
+					params.Cursor.SetTo(listArgs.Cursor)
+				}
+				data, err := client.ListContentSubmissionStatuses(ctx, params)
+				if err != nil {
+					return commandResult{}, err
+				}
+				return commandResult{Data: data}, nil
+			})
+		},
+	}
+	listCmd.Flags().IntVar(&listArgs.Limit, "limit", 25, "Max submissions to return")
+	listCmd.Flags().StringVar(&listArgs.Cursor, "cursor", "", "Pagination cursor")
+
+	submissionsCmd.AddCommand(listCmd)
+	return submissionsCmd
 }
 
 func (a *App) newSubmitCommand(use string, commandName string) *cobra.Command {
