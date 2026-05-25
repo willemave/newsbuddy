@@ -2317,20 +2317,13 @@ struct ContentDetailView: View {
                     .foregroundColor(Color.accentColor.opacity(0.85))
                     .frame(width: DetailDesign.bulletMarkerWidth, alignment: .center)
 
-                Text(topic.title)
+                Text(topic.summary)
                     .font(.callout)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary.opacity(0.92))
+                    .foregroundColor(.primary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(topic.summary)
-                .font(.footnote)
-                .foregroundColor(.secondary)
-                .lineSpacing(1)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, discussionBulletTextIndent)
             if let stance = topic.stance {
                 Text(stance)
                     .font(.caption2)

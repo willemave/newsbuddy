@@ -27,9 +27,11 @@ struct KnowledgeView: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var searchText = ""
     @State private var showNarrationList = false
+    @State private var runningActionID: HubActionID?
     @FocusState private var isSearchFocused: Bool
 
     private let primaryAction = HubAction(
+        id: .summary,
         icon: "doc.text.magnifyingglass",
         title: "Today's Summary",
         subtitle: "Recap of the last day's content",
@@ -38,18 +40,21 @@ struct KnowledgeView: View {
 
     private let secondaryActions: [HubAction] = [
         HubAction(
+            id: .topComments,
             icon: "bubble.left.and.text.bubble.right",
             title: "Top Comments",
             subtitle: "Most interesting discussions",
             run: { viewModel in await viewModel.startCommentsChat() }
         ),
         HubAction(
+            id: .findArticles,
             icon: "newspaper.fill",
             title: "Find Articles",
             subtitle: "Fresh reads based on your history",
             run: { viewModel in await viewModel.startFindArticlesChat() }
         ),
         HubAction(
+            id: .findFeeds,
             icon: "dot.radiowaves.left.and.right",
             title: "Find Feeds",
             subtitle: "Sources and podcasts to add next",
@@ -289,11 +294,13 @@ struct KnowledgeView: View {
     }
 
     private func compactActionButton(_ action: HubAction) -> some View {
-        Button {
+        let isRunning = runningActionID == action.id
+
+        return Button {
             startAction(action)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                actionIcon(action.icon, size: 40, iconSize: 17, cornerRadius: 12)
+                actionIcon(action.icon, size: 40, iconSize: 17, cornerRadius: 12, isRunning: isRunning)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(action.title)
@@ -322,25 +329,39 @@ struct KnowledgeView: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(viewModel.isCreatingSession)
+        .allowsHitTesting(!viewModel.isCreatingSession && runningActionID == nil)
+        .accessibilityValue(isRunning ? "Starting" : "")
     }
 
     private func actionIcon(
         _ systemName: String,
         size: CGFloat,
         iconSize: CGFloat,
-        cornerRadius: CGFloat
+        cornerRadius: CGFloat,
+        isRunning: Bool = false
     ) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: iconSize, weight: .semibold))
-            .foregroundColor(.terracottaPrimary)
-            .frame(width: size, height: size)
-            .background(Color.terracottaPrimary.opacity(0.14))
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        ZStack {
+            if isRunning {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.terracottaPrimary)
+            } else {
+                Image(systemName: systemName)
+                    .font(.system(size: iconSize, weight: .semibold))
+                    .foregroundColor(.terracottaPrimary)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Color.terracottaPrimary.opacity(0.14))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 
     private func startAction(_ action: HubAction) {
-        Task {
+        guard !viewModel.isCreatingSession, runningActionID == nil else { return }
+
+        runningActionID = action.id
+        Task { @MainActor in
+            defer { runningActionID = nil }
             if let route = await action.run(viewModel) {
                 onSelectSession?(route)
             }
@@ -478,8 +499,15 @@ struct KnowledgeView: View {
     }
 }
 
+private enum HubActionID: Hashable {
+    case summary
+    case topComments
+    case findArticles
+    case findFeeds
+}
+
 private struct HubAction: Identifiable {
-    let id = UUID()
+    let id: HubActionID
     let icon: String
     let title: String
     let subtitle: String

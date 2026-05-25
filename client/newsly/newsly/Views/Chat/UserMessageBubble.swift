@@ -7,10 +7,11 @@ import SwiftUI
 
 struct UserMessageBubble: View {
     let message: ChatMessage
+    private let leadingClearance: CGFloat = 72
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
-            Spacer(minLength: 24)
+            Spacer(minLength: leadingClearance)
 
             VStack(alignment: .trailing, spacing: 4) {
                 Text(message.content)

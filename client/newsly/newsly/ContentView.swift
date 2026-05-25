@@ -57,8 +57,20 @@ struct ContentView: View {
         return count > 0 ? String(count) : nil
     }
 
+    private var selectedTabBinding: Binding<RootTab> {
+        Binding(
+            get: { tabCoordinator.selectedTab },
+            set: { newTab in
+                // TabView writes the current selection again on repeated tab taps.
+                // Avoid publishing a no-op change through the whole app shell.
+                guard tabCoordinator.selectedTab != newTab else { return }
+                tabCoordinator.selectedTab = newTab
+            }
+        )
+    }
+
     var body: some View {
-        TabView(selection: $tabCoordinator.selectedTab) {
+        TabView(selection: selectedTabBinding) {
             NavigationStack(path: $longFormPath) {
                 LongFormView(
                     viewModel: tabCoordinator.longContentVM,
