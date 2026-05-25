@@ -13,6 +13,8 @@ import (
 	"github.com/willem/newsbuddy/cli/internal/config"
 )
 
+const pruneAllSafetyError = "remote library manifest is empty; refusing to delete all tracked files without --allow-prune-all"
+
 func TestAuthLoginPersistsAPIKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -145,7 +147,7 @@ func TestLibrarySyncDownloadsAndPrunesFiles(t *testing.T) {
 	if err := os.WriteFile(stalePath, []byte("old"), 0o644); err != nil {
 		t.Fatalf("write stale file: %v", err)
 	}
-	manifestPath := filepath.Join(libraryRoot, ".newsbuddy-manifest.json")
+	manifestPath := filepath.Join(libraryRoot, libraryManifestFilename)
 	if err := os.WriteFile(manifestPath, []byte(`{"files":{"article/example/old-doc.md":"old-sha"}}`), 0o644); err != nil {
 		t.Fatalf("write stale manifest: %v", err)
 	}
@@ -221,7 +223,7 @@ func TestLibrarySyncRefusesToPruneAllTrackedFilesByDefault(t *testing.T) {
 	if err := os.WriteFile(trackedPath, []byte("old"), 0o644); err != nil {
 		t.Fatalf("write tracked file: %v", err)
 	}
-	manifestPath := filepath.Join(libraryRoot, ".newsbuddy-manifest.json")
+	manifestPath := filepath.Join(libraryRoot, libraryManifestFilename)
 	if err := os.WriteFile(manifestPath, []byte(`{"files":{"article/example/old-doc.md":"old-sha"}}`), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
@@ -239,7 +241,7 @@ func TestLibrarySyncRefusesToPruneAllTrackedFilesByDefault(t *testing.T) {
 	requireErrorMessage(
 		t,
 		cli.envelope(t),
-		"remote library manifest is empty; refusing to delete all tracked files without --allow-prune-all",
+		pruneAllSafetyError,
 	)
 	if _, err := os.Stat(trackedPath); err != nil {
 		t.Fatalf("expected tracked file to remain, stat err=%v", err)
@@ -269,7 +271,7 @@ func TestLibrarySyncAllowsExplicitPruneAll(t *testing.T) {
 	if err := os.WriteFile(trackedPath, []byte("old"), 0o644); err != nil {
 		t.Fatalf("write tracked file: %v", err)
 	}
-	manifestPath := filepath.Join(libraryRoot, ".newsbuddy-manifest.json")
+	manifestPath := filepath.Join(libraryRoot, libraryManifestFilename)
 	if err := os.WriteFile(manifestPath, []byte(`{"files":{"article/example/old-doc.md":"old-sha"}}`), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
@@ -335,7 +337,7 @@ func TestLibrarySyncRedownloadsCorruptLocalFile(t *testing.T) {
 	if err := os.WriteFile(targetPath, []byte("corrupt\n"), 0o644); err != nil {
 		t.Fatalf("write corrupt file: %v", err)
 	}
-	manifestPath := filepath.Join(libraryRoot, ".newsbuddy-manifest.json")
+	manifestPath := filepath.Join(libraryRoot, libraryManifestFilename)
 	manifestPayload := fmt.Sprintf(`{"files":{%q:%q}}`, relativePath, remoteChecksum)
 	if err := os.WriteFile(manifestPath, []byte(manifestPayload), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
@@ -548,13 +550,58 @@ func TestLibrarySyncIsIdempotentAndPrunesEmptyDirectories(t *testing.T) {
 		t.Fatalf("expected empty article/example directory to be pruned, stat err=%v", err)
 	}
 
-	manifestBytes, err := os.ReadFile(filepath.Join(libraryRoot, ".newsbuddy-manifest.json"))
+	manifestBytes, err := os.ReadFile(filepath.Join(libraryRoot, libraryManifestFilename))
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
 	if string(manifestBytes) != "{\n  \"files\": {}\n}\n" {
 		t.Fatalf("unexpected manifest contents: %s", string(manifestBytes))
 	}
+}
+
+func TestLibrarySyncReadsLegacyManifestFilename(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agent/library/manifest":
+			writeJSON(t, w, map[string]any{
+				"generated_at":   "2026-04-04T18:00:00Z",
+				"include_source": true,
+				"documents":      []map[string]any{},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	libraryRoot := filepath.Join(t.TempDir(), "library")
+	trackedPath := filepath.Join(libraryRoot, "article", "example", "old-doc.md")
+	if err := os.MkdirAll(filepath.Dir(trackedPath), 0o755); err != nil {
+		t.Fatalf("mkdir tracked dir: %v", err)
+	}
+	if err := os.WriteFile(trackedPath, []byte("old"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	legacyManifestPath := filepath.Join(libraryRoot, legacyLibraryManifestFilename)
+	if err := os.WriteFile(legacyManifestPath, []byte(`{"files":{"article/example/old-doc.md":"old-sha"}}`), 0o644); err != nil {
+		t.Fatalf("write legacy manifest: %v", err)
+	}
+
+	cli := newTestCLI(t, config.FileConfig{
+		ServerURL:   server.URL,
+		APIKey:      "newsly_ak_test",
+		LibraryRoot: libraryRoot,
+	})
+
+	exitCode := cli.run("library", "sync")
+	if exitCode == 0 {
+		t.Fatalf("expected nonzero exit, stdout=%s stderr=%s", cli.stdout.String(), cli.stderr.String())
+	}
+	requireErrorMessage(
+		t,
+		cli.envelope(t),
+		pruneAllSafetyError,
+	)
 }
 
 func testSHA256(text string) string {
