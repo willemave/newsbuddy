@@ -21,10 +21,8 @@ appId: "${APP_ID}"
     id: knowledge.chat_mic
 - tapOn:
     id: knowledge.chat_mic
-- assertVisible: "Recording. Tap the mic to stop."
+- assertVisible: "Recording. Tap the mic to send."
 - tapOn:
     id: knowledge.chat_mic
 - assertVisible: "${TRANSCRIPT}"
-- tapOn:
-    id: knowledge.chat_send
 - assertVisible: "${ASSISTANT_REPLY}"

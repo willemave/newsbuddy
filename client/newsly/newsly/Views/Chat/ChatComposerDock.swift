@@ -167,7 +167,7 @@ struct ChatComposerDock: View {
             )
             .opacity(voiceDictationAvailable || isRecording ? 1 : 0.72)
             .accessibilityLabel(isRecording ? "Stop recording" : "Start recording")
-            .accessibilityHint(isRecording ? "Tap to stop and transcribe into this chat" : "Tap to dictate into this chat")
+            .accessibilityHint(isRecording ? "Tap to stop and send this chat message" : "Tap to dictate and send into this chat")
             .accessibilityIdentifier("knowledge.chat_mic")
 
             Button(action: onSend) {
@@ -234,7 +234,7 @@ private struct RecordingIndicator: View {
                 }
             }
 
-            Text("Recording. Tap the mic to stop.")
+            Text("Recording. Tap the mic to send.")
                 .font(.terracottaBodySmall)
                 .foregroundStyle(Color.onSurfaceSecondary)
         }

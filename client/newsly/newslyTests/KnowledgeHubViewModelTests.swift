@@ -4,6 +4,74 @@ import XCTest
 
 @MainActor
 final class KnowledgeHubViewModelTests: XCTestCase {
+    func testVoiceMicStopsRecordingAndStartsAssistantTurnWithTranscript() async {
+        let transcriptionService = MockKnowledgeSpeechTranscriber(transcript: "What should I read next?")
+        let chatService = MockKnowledgeHubChatService(
+            turnResponses: [.success(makeAssistantTurnResponse(sessionId: 91))]
+        )
+        let viewModel = KnowledgeHubViewModel(
+            chatService: chatService,
+            transcriptionService: transcriptionService,
+            initialVoiceDictationAvailable: true
+        )
+
+        let startRoute = await viewModel.toggleVoiceRecording()
+        XCTAssertNil(startRoute)
+        XCTAssertTrue(viewModel.isVoiceRecording)
+
+        let route = await viewModel.toggleVoiceRecording()
+
+        XCTAssertEqual(route?.sessionId, 91)
+        XCTAssertEqual(chatService.receivedMessages, ["What should I read next?"])
+        XCTAssertEqual(chatService.receivedScreenTypes, ["knowledge_hub"])
+        XCTAssertEqual(transcriptionService.startCallCount, 1)
+        XCTAssertEqual(transcriptionService.stopCallCount, 1)
+        XCTAssertFalse(viewModel.isVoiceRecording)
+        XCTAssertFalse(viewModel.isVoiceTranscribing)
+
+        viewModel.cancelVoiceRecording()
+        XCTAssertEqual(transcriptionService.resetCallCount, 1)
+    }
+
+    func testVoiceSilenceAutoStopPublishesCompletedRoute() async {
+        let transcriptionService = MockKnowledgeSpeechTranscriber(transcript: "Summarize my unread stories")
+        let chatService = MockKnowledgeHubChatService(
+            turnResponses: [.success(makeAssistantTurnResponse(sessionId: 92))]
+        )
+        let viewModel = KnowledgeHubViewModel(
+            chatService: chatService,
+            transcriptionService: transcriptionService,
+            initialVoiceDictationAvailable: true
+        )
+
+        _ = await viewModel.toggleVoiceRecording()
+        await transcriptionService.simulateSilenceAutoStop()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(viewModel.completedVoiceRoute?.sessionId, 92)
+        XCTAssertEqual(chatService.receivedMessages, ["Summarize my unread stories"])
+        XCTAssertEqual(transcriptionService.stopCallCount, 0)
+        XCTAssertFalse(viewModel.isVoiceRecording)
+        XCTAssertFalse(viewModel.isVoiceTranscribing)
+    }
+
+    func testCancelVoiceRecordingResetsTranscriberAndState() async {
+        let transcriptionService = MockKnowledgeSpeechTranscriber(transcript: "Ignore this")
+        let viewModel = KnowledgeHubViewModel(
+            chatService: MockKnowledgeHubChatService(turnResponses: []),
+            transcriptionService: transcriptionService,
+            initialVoiceDictationAvailable: true
+        )
+
+        _ = await viewModel.toggleVoiceRecording()
+        viewModel.cancelVoiceRecording()
+
+        XCTAssertEqual(transcriptionService.resetCallCount, 1)
+        XCTAssertFalse(viewModel.isVoiceRecording)
+        XCTAssertFalse(viewModel.isVoiceTranscribing)
+        XCTAssertFalse(viewModel.isVoiceActionInFlight)
+    }
+
     func testStartSearchChatCreatesAssistantTurnWithKnowledgeContext() async {
         let chatService = MockKnowledgeHubChatService(
             turnResponses: [.success(makeAssistantTurnResponse(sessionId: 91))]
@@ -253,6 +321,69 @@ final class KnowledgeHubViewModelTests: XCTestCase {
 }
 
 @MainActor
+private final class MockKnowledgeSpeechTranscriber: SpeechTranscribing {
+    var onTranscriptDelta: ((String) -> Void)?
+    var onTranscriptFinal: ((String) -> Void)?
+    var onError: ((String) -> Void)?
+    var onStateChange: ((SpeechTranscriptionState) -> Void)?
+    var onStopReason: ((SpeechStopReason) -> Void)?
+
+    var isAvailable = true
+    var isRecording = false
+    var isTranscribing = false
+    private(set) var startCallCount = 0
+    private(set) var stopCallCount = 0
+    private(set) var resetCallCount = 0
+
+    private let transcript: String
+
+    init(transcript: String) {
+        self.transcript = transcript
+    }
+
+    func start() async throws {
+        startCallCount += 1
+        isRecording = true
+        isTranscribing = false
+        onStateChange?(.recording)
+    }
+
+    func stop() async throws -> String {
+        stopCallCount += 1
+        isRecording = false
+        isTranscribing = true
+        onStateChange?(.transcribing)
+        onTranscriptFinal?(transcript)
+        isTranscribing = false
+        onStopReason?(.manual)
+        onStateChange?(.idle)
+        return transcript
+    }
+
+    func simulateSilenceAutoStop() async {
+        isRecording = false
+        isTranscribing = true
+        onStateChange?(.transcribing)
+        onTranscriptFinal?(transcript)
+        isTranscribing = false
+        onStopReason?(.silenceAutoStop)
+        onStateChange?(.idle)
+    }
+
+    func cancel() {
+        reset()
+        onStopReason?(.cancel)
+    }
+
+    func reset() {
+        resetCallCount += 1
+        isRecording = false
+        isTranscribing = false
+        onStateChange?(.idle)
+    }
+}
+
+@MainActor
 private final class MockKnowledgeHubChatService: KnowledgeHubChatServicing {
     enum MockError: LocalizedError {
         case boom
@@ -323,40 +454,4 @@ private final class MockKnowledgeHubChatService: KnowledgeHubChatServicing {
         return try turnResponses.removeFirst().get()
     }
 
-    func createSession(
-        contentId: Int?,
-        newsItemId: Int?,
-        topic: String?,
-        provider: ChatModelProvider?,
-        modelHint: String?,
-        initialMessage: String?
-    ) async throws -> ChatSessionSummary {
-        XCTAssertNil(contentId)
-        XCTAssertNil(newsItemId)
-        XCTAssertNil(topic)
-        XCTAssertNil(provider)
-        XCTAssertNil(modelHint)
-        XCTAssertNil(initialMessage)
-        return ChatSessionSummary(
-            id: 999,
-            contentId: nil,
-            title: "New Session",
-            sessionType: "knowledge_chat",
-            topic: nil,
-            llmProvider: "openai",
-            llmModel: "gpt-5.4-mini",
-            createdAt: "2026-03-21T18:00:00Z",
-            updatedAt: nil,
-            lastMessageAt: nil,
-            articleTitle: nil,
-            articleUrl: nil,
-            articleSummary: nil,
-            articleSource: nil,
-            hasPendingMessage: false,
-            isSavedToKnowledge: false,
-            hasMessages: false,
-            lastMessagePreview: nil,
-            lastMessageRole: nil
-        )
-    }
 }

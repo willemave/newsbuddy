@@ -12,10 +12,14 @@ appId: "${APP_ID}"
       newslyE2EUserId: "${USER_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
+      newslyE2EFakeSpeechEnabled: true
+      newslyE2EFakeSpeechTranscript: "${TRANSCRIPT}"
 - tapOn:
     id: tab.knowledge
 - assertVisible:
     text: Actions
+- tapOn:
+    id: knowledge.new_chat_mic
 - tapOn:
     id: knowledge.new_chat_mic
 - assertVisible:

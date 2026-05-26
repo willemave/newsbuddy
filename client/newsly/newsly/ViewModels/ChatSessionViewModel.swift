@@ -54,6 +54,8 @@ final class ChatSessionViewModel {
     @ObservationIgnored
     private var hasAppliedVoiceTranscript = false
     @ObservationIgnored
+    private var pendingVoiceTranscript: String?
+    @ObservationIgnored
     private var pendingSends: [UUID: PendingSend] = [:]
     @ObservationIgnored
     private var localIdentityAliases: [ChatTimelineID: UUID] = [:]
@@ -387,6 +389,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         isRecording = false
         isTranscribing = false
         isVoiceActionInFlight = false
+        pendingVoiceTranscript = nil
     }
 
     private func handOffBackgroundPollingIfNeeded() {
@@ -769,6 +772,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         let startedAt = Date()
         voiceRecordingStartedAt = startedAt
         hasAppliedVoiceTranscript = false
+        pendingVoiceTranscript = nil
         if !voiceDictationAvailable {
             await checkAndRefreshVoiceDictation()
         }
@@ -796,7 +800,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         }
     }
 
-    /// Stop recording and transcribe into the input box.
+    /// Stop recording, transcribe, and send the message.
     func stopVoiceRecording() async {
         guard isRecording else { return }
         let startedAt = Date()
@@ -814,7 +818,8 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
             isRecording = false
             isTranscribing = false
             voiceRecordingStartedAt = nil
-            applyVoiceTranscript(trimmedTranscription)
+            pendingVoiceTranscript = nil
+            await sendVoiceTranscript(trimmedTranscription)
         } catch {
             logger.error(
                 "[ViewModel] Voice transcription error | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
@@ -823,6 +828,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
             isRecording = false
             isTranscribing = false
             voiceRecordingStartedAt = nil
+            pendingVoiceTranscript = nil
         }
     }
 
@@ -845,6 +851,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         isRecording = false
         isTranscribing = false
         isVoiceActionInFlight = false
+        pendingVoiceTranscript = nil
         if let voiceRecordingStartedAt {
             logger.info(
                 "[ViewModel] Voice recording cancelled | captureElapsedMs=\(Int(Date().timeIntervalSince(voiceRecordingStartedAt) * 1000))"
@@ -866,22 +873,40 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     private func configureTranscriptionCallbacks() {
         transcriptionService.onTranscriptDelta = nil
         transcriptionService.onTranscriptFinal = { [weak self] transcript in
-            self?.applyVoiceTranscript(transcript)
+            self?.pendingVoiceTranscript = transcript
         }
         transcriptionService.onStopReason = { [weak self] reason in
             guard let self else { return }
             switch reason {
             case .manual:
                 return
-            case .silenceAutoStop, .cancel, .failure:
+            case .silenceAutoStop:
+                let transcript = self.pendingVoiceTranscript ?? ""
+                self.pendingVoiceTranscript = nil
                 self.isRecording = false
                 self.isTranscribing = false
+                self.isVoiceActionInFlight = true
+                self.voiceRecordingStartedAt = nil
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await self.sendVoiceTranscript(transcript)
+                    self.isVoiceActionInFlight = false
+                }
+            case .cancel, .failure:
+                self.pendingVoiceTranscript = nil
+                self.isRecording = false
+                self.isTranscribing = false
+                self.isVoiceActionInFlight = false
+                self.voiceRecordingStartedAt = nil
             }
         }
         transcriptionService.onError = { [weak self] message in
             self?.errorMessage = message
+            self?.pendingVoiceTranscript = nil
             self?.isRecording = false
             self?.isTranscribing = false
+            self?.isVoiceActionInFlight = false
+            self?.voiceRecordingStartedAt = nil
         }
         transcriptionService.onStateChange = { [weak self] state in
             guard let self else { return }
@@ -899,9 +924,9 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         }
     }
 
-    private func applyVoiceTranscript(_ transcript: String) {
-        let signpostState = chatPerfSignposter.beginInterval("apply-voice-transcript")
-        defer { chatPerfSignposter.endInterval("apply-voice-transcript", signpostState) }
+    private func sendVoiceTranscript(_ transcript: String) async {
+        let signpostState = chatPerfSignposter.beginInterval("send-voice-transcript")
+        defer { chatPerfSignposter.endInterval("send-voice-transcript", signpostState) }
 
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTranscript.isEmpty else {
@@ -913,10 +938,8 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         hasAppliedVoiceTranscript = true
         errorMessage = nil
         let existingInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if existingInput.isEmpty {
-            inputText = trimmedTranscript
-        } else {
-            inputText = "\(existingInput) \(trimmedTranscript)"
-        }
+        let message = existingInput.isEmpty ? trimmedTranscript : "\(existingInput) \(trimmedTranscript)"
+        inputText = ""
+        await sendMessage(text: message)
     }
 }

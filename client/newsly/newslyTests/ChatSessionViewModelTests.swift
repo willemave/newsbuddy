@@ -31,18 +31,23 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertEqual(transcriptionService.stopCallCount, 0)
     }
 
-    func testToggleVoiceRecordingStopsRecordingOnSecondTapAndPopulatesDraft() async {
+    func testToggleVoiceRecordingStopsRecordingOnSecondTapAndSendsTranscript() async {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Final transcript")
+        let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
             route: ChatSessionRoute(sessionId: 42),
-            dependencies: .test(transcriptionService: transcriptionService),
+            dependencies: .test(
+                transcriptionService: transcriptionService,
+                chatService: chatService
+            ),
             initialVoiceDictationAvailable: true
         )
 
         await viewModel.toggleVoiceRecording()
         await viewModel.toggleVoiceRecording()
 
-        XCTAssertEqual(viewModel.inputText, "Final transcript")
+        XCTAssertEqual(chatService.sentMessages.map { $0.message }, ["Final transcript"])
+        XCTAssertEqual(viewModel.inputText, "")
         XCTAssertFalse(viewModel.isRecording)
         XCTAssertFalse(viewModel.isTranscribing)
         XCTAssertEqual(transcriptionService.startCallCount, 1)
@@ -67,11 +72,15 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.isTranscribing)
     }
 
-    func testStopVoiceRecordingPopulatesInputWithoutStreamingPreview() async {
+    func testStopVoiceRecordingSendsTranscriptWithoutDraftPreview() async {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Final transcript")
+        let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
             route: ChatSessionRoute(sessionId: 42),
-            dependencies: .test(transcriptionService: transcriptionService),
+            dependencies: .test(
+                transcriptionService: transcriptionService,
+                chatService: chatService
+            ),
             initialVoiceDictationAvailable: true
         )
 
@@ -80,17 +89,22 @@ final class ChatSessionViewModelTests: XCTestCase {
 
         await viewModel.stopVoiceRecording()
 
-        XCTAssertEqual(viewModel.inputText, "Final transcript")
+        XCTAssertEqual(chatService.sentMessages.map { $0.message }, ["Final transcript"])
+        XCTAssertEqual(viewModel.inputText, "")
         XCTAssertFalse(viewModel.isRecording)
         XCTAssertFalse(viewModel.isTranscribing)
-        XCTAssertTrue(viewModel.timeline.isEmpty)
+        XCTAssertEqual(viewModel.timeline.map(\.message.content), ["Final transcript", "Assistant reply"])
     }
 
-    func testStopVoiceRecordingAppendsToExistingDraft() async {
+    func testStopVoiceRecordingSendsExistingDraftAndTranscript() async {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "second thought")
+        let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
             route: ChatSessionRoute(sessionId: 42),
-            dependencies: .test(transcriptionService: transcriptionService),
+            dependencies: .test(
+                transcriptionService: transcriptionService,
+                chatService: chatService
+            ),
             initialVoiceDictationAvailable: true
         )
 
@@ -99,21 +113,28 @@ final class ChatSessionViewModelTests: XCTestCase {
 
         await viewModel.stopVoiceRecording()
 
-        XCTAssertEqual(viewModel.inputText, "First draft second thought")
+        XCTAssertEqual(chatService.sentMessages.map { $0.message }, ["First draft second thought"])
+        XCTAssertEqual(viewModel.inputText, "")
     }
 
-    func testSilenceAutoStopPopulatesDraftWithoutManualStop() async {
+    func testSilenceAutoStopSendsTranscriptWithoutManualStop() async {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Auto transcript")
+        let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
             route: ChatSessionRoute(sessionId: 42),
-            dependencies: .test(transcriptionService: transcriptionService),
+            dependencies: .test(
+                transcriptionService: transcriptionService,
+                chatService: chatService
+            ),
             initialVoiceDictationAvailable: true
         )
 
         await viewModel.startVoiceRecording()
         await transcriptionService.simulateSilenceAutoStop()
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
-        XCTAssertEqual(viewModel.inputText, "Auto transcript")
+        XCTAssertEqual(chatService.sentMessages.map { $0.message }, ["Auto transcript"])
+        XCTAssertEqual(viewModel.inputText, "")
         XCTAssertFalse(viewModel.isRecording)
         XCTAssertFalse(viewModel.isTranscribing)
         XCTAssertEqual(transcriptionService.stopCallCount, 0)
@@ -308,6 +329,58 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.session?.contentId, 7)
     }
 
+    private func makeSuccessfulVoiceSendService() -> MockChatSessionService {
+        var latestMessage = ""
+        return MockChatSessionService(
+            getSessionHandler: { _ in
+                ChatSessionDetail(
+                    session: Self.session(),
+                    messages: [
+                        Self.message(id: 101, role: .user, content: latestMessage, status: .completed),
+                        Self.message(id: 201, role: .assistant, content: "Assistant reply", status: .completed),
+                    ]
+                )
+            },
+            sendMessageHandler: { sessionId, message in
+                latestMessage = message
+                return SendChatMessageResponse(
+                    sessionId: sessionId,
+                    userMessage: Self.message(id: 101, role: .user, content: message, status: .processing),
+                    messageId: 501,
+                    status: .processing
+                )
+            },
+            messageStatusHandler: { messageId in
+                MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: 201,
+                        role: .assistant,
+                        content: "Assistant reply",
+                        status: .completed
+                    ),
+                    error: nil
+                )
+            }
+        )
+    }
+
+    private static func message(
+        id: Int,
+        role: ChatMessageRole,
+        content: String,
+        status: MessageProcessingStatus
+    ) -> ChatMessage {
+        ChatMessage(
+            id: id,
+            role: role,
+            timestamp: "2026-04-01T10:00:00Z",
+            content: content,
+            status: status
+        )
+    }
+
     private static func session(
         contentId: Int? = nil,
         newsItemId: Int? = nil,
@@ -361,18 +434,22 @@ private extension ChatDependencies {
 private final class MockChatSessionService: ChatSessionServicing {
     private let getSessionHandler: ((Int) async throws -> ChatSessionDetail)?
     private let sendMessageHandler: ((Int, String) async throws -> SendChatMessageResponse)?
+    private let messageStatusHandler: ((Int) async throws -> MessageStatusResponse)?
     private let selectCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)?
     private let retryCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)?
     private(set) var initialSuggestionsCallCount = 0
+    private(set) var sentMessages: [(sessionId: Int, message: String)] = []
 
     init(
         getSessionHandler: ((Int) async throws -> ChatSessionDetail)? = nil,
         sendMessageHandler: ((Int, String) async throws -> SendChatMessageResponse)? = nil,
+        messageStatusHandler: ((Int) async throws -> MessageStatusResponse)? = nil,
         selectCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)? = nil,
         retryCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)? = nil
     ) {
         self.getSessionHandler = getSessionHandler
         self.sendMessageHandler = sendMessageHandler
+        self.messageStatusHandler = messageStatusHandler
         self.selectCouncilBranchHandler = selectCouncilBranchHandler
         self.retryCouncilBranchHandler = retryCouncilBranchHandler
     }
@@ -385,6 +462,7 @@ private final class MockChatSessionService: ChatSessionServicing {
     }
 
     func sendMessageAsync(sessionId: Int, message: String) async throws -> SendChatMessageResponse {
+        sentMessages.append((sessionId: sessionId, message: message))
         if let sendMessageHandler {
             return try await sendMessageHandler(sessionId, message)
         }
@@ -392,6 +470,9 @@ private final class MockChatSessionService: ChatSessionServicing {
     }
 
     func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse {
+        if let messageStatusHandler {
+            return try await messageStatusHandler(messageId)
+        }
         throw ChatServiceError.timeout
     }
 

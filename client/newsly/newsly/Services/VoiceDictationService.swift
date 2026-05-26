@@ -522,9 +522,9 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
             forName: AVAudioSession.routeChangeNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
             Task { @MainActor in
-                self?.cancelRecordingWithMessage("Recording stopped because the audio route changed")
+                self?.handleAudioRouteChange(notification)
             }
         }
     }
@@ -543,6 +543,30 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
     private func cancelRecordingWithMessage(_ message: String) {
         cancelRecording()
         onError?(message)
+    }
+
+    private func handleAudioRouteChange(_ notification: Notification) {
+        guard isRecording || isTranscribing else { return }
+        guard
+            let reasonValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+            let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
+        else {
+            logger.debug("Ignoring audio route change without a reason")
+            return
+        }
+
+        switch reason {
+        case .oldDeviceUnavailable:
+            guard AVAudioSession.sharedInstance().currentRoute.inputs.isEmpty else {
+                logger.debug("Ignoring audio route change because an input route is still available")
+                return
+            }
+            cancelRecordingWithMessage("Recording stopped because the microphone became unavailable")
+        case .noSuitableRouteForCategory:
+            cancelRecordingWithMessage("Recording stopped because no microphone route is available")
+        default:
+            logger.debug("Ignoring non-fatal audio route change | reason=\(reason.rawValue)")
+        }
     }
 
     private func playRecordingStartHaptic() {

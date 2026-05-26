@@ -509,17 +509,41 @@ def test_knowledge_new_chat_mic_opens_full_chat_session(
     run_ios_flow,
     test_user,
     db_session,
+    completed_chat_processors_factory,
+    monkeypatch,
 ) -> None:
-    """Tapping the Knowledge tab mic should create and open a new chat session."""
+    """Tapping the Knowledge tab mic should record, transcribe, and open a chat turn."""
+    transcript = "Mocked Knowledge mic transcript"
+    assistant_reply = "Mocked Knowledge mic reply"
     initial_count = (
         db_session.query(ChatSession).filter(ChatSession.user_id == test_user.id).count()
     )
+    _fake_process_message_async, _fake_process_assistant_turn_async = (
+        completed_chat_processors_factory(assistant_reply=assistant_reply)
+    )
 
-    run_ios_flow("knowledge_new_chat.yaml")
+    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
+    monkeypatch.setattr(
+        "app.routers.api.chat.process_assistant_turn_async",
+        _fake_process_assistant_turn_async,
+    )
+
+    run_ios_flow("knowledge_new_chat.yaml", extra_env={"TRANSCRIPT": transcript})
 
     db_session.expire_all()
     new_count = db_session.query(ChatSession).filter(ChatSession.user_id == test_user.id).count()
     assert new_count == initial_count + 1
+    message = (
+        db_session.query(ChatMessage)
+        .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+        .filter(ChatSession.user_id == test_user.id)
+        .order_by(ChatMessage.id.desc())
+        .first()
+    )
+    assert message is not None
+    assert message.status == "completed"
+    assert transcript in (message.message_list or "")
+    assert assistant_reply in (message.message_list or "")
 
 
 def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(

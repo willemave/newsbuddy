@@ -20,15 +20,6 @@ protocol KnowledgeHubChatServicing: AnyObject {
         sessionId: Int?,
         screenContext: AssistantScreenContext
     ) async throws -> AssistantTurnResponse
-
-    func createSession(
-        contentId: Int?,
-        newsItemId: Int?,
-        topic: String?,
-        provider: ChatModelProvider?,
-        modelHint: String?,
-        initialMessage: String?
-    ) async throws -> ChatSessionSummary
 }
 
 extension ChatService: KnowledgeHubChatServicing {}
@@ -42,13 +33,27 @@ class KnowledgeHubViewModel: ObservableObject {
     @Published var isCreatingSession = false
     @Published var errorMessage: String?
     @Published var hasLoadMoreError = false
+    @Published private(set) var voiceDictationAvailable = false
+    @Published private(set) var isVoiceRecording = false
+    @Published private(set) var isVoiceTranscribing = false
+    @Published private(set) var isVoiceActionInFlight = false
+    @Published private(set) var completedVoiceRoute: ChatSessionRoute?
 
     private let chatService: any KnowledgeHubChatServicing
+    private let transcriptionService: any SpeechTranscribing
     private var nextCursor: String?
     private let historyPageLimit = 20
+    private var pendingVoiceTranscript: String?
+    private var hasConfiguredVoiceCallbacks = false
 
-    init(chatService: any KnowledgeHubChatServicing = ChatService.shared) {
+    init(
+        chatService: any KnowledgeHubChatServicing = ChatService.shared,
+        transcriptionService: (any SpeechTranscribing)? = nil,
+        initialVoiceDictationAvailable: Bool = false
+    ) {
         self.chatService = chatService
+        self.transcriptionService = transcriptionService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
+        self.voiceDictationAvailable = initialVoiceDictationAvailable
     }
 
     func loadHub() async {
@@ -104,33 +109,43 @@ class KnowledgeHubViewModel: ObservableObject {
         }
     }
 
-    func startNewChat() async -> ChatSessionRoute? {
-        guard !isCreatingSession else { return nil }
-        isCreatingSession = true
-        errorMessage = nil
-        defer { isCreatingSession = false }
-
-        do {
-            let session = try await chatService.createSession(
-                contentId: nil,
-                newsItemId: nil,
-                topic: nil,
-                provider: nil,
-                modelHint: nil,
-                initialMessage: nil
-            )
-            prependSession(session)
-            return ChatSessionRoute(sessionId: session.id)
-        } catch where isNetworkCancellation(error) {
-            return nil
-        } catch {
-            errorMessage = error.localizedDescription
-            return nil
-        }
-    }
-
     func startSearchChat(message: String) async -> ChatSessionRoute? {
         await startHubAssistantTurn(message: message)
+    }
+
+    func checkAndRefreshVoiceDictation() async {
+        if transcriptionService.isAvailable {
+            voiceDictationAvailable = true
+            return
+        }
+
+        voiceDictationAvailable = await OpenAIService.shared.refreshTranscriptionAvailability()
+    }
+
+    func toggleVoiceRecording() async -> ChatSessionRoute? {
+        guard !isCreatingSession else { return nil }
+        if isVoiceRecording {
+            return await stopVoiceRecordingAndStartChat()
+        }
+        guard !isVoiceActionInFlight, !isVoiceTranscribing else { return nil }
+        await startVoiceRecording()
+        return nil
+    }
+
+    func clearCompletedVoiceRoute() {
+        completedVoiceRoute = nil
+    }
+
+    func cancelVoiceRecording() {
+        guard hasConfiguredVoiceCallbacks || isVoiceRecording || isVoiceTranscribing || pendingVoiceTranscript != nil else {
+            return
+        }
+        transcriptionService.reset()
+        hasConfiguredVoiceCallbacks = false
+        pendingVoiceTranscript = nil
+        isVoiceRecording = false
+        isVoiceTranscribing = false
+        isVoiceActionInFlight = false
     }
 
     func startSummaryChat() async -> ChatSessionRoute? {
@@ -234,5 +249,116 @@ class KnowledgeHubViewModel: ObservableObject {
     private func prependSession(_ session: ChatSessionSummary) {
         sessions.removeAll { $0.id == session.id }
         sessions.insert(session, at: 0)
+    }
+
+    private func startVoiceRecording() async {
+        if !voiceDictationAvailable {
+            await checkAndRefreshVoiceDictation()
+        }
+        guard voiceDictationAvailable else {
+            errorMessage = "Microphone is unavailable right now. Try again in a moment."
+            return
+        }
+
+        configureTranscriptionCallbacks()
+        pendingVoiceTranscript = nil
+        errorMessage = nil
+        isVoiceActionInFlight = true
+        defer { isVoiceActionInFlight = false }
+
+        do {
+            try await transcriptionService.start()
+            isVoiceRecording = true
+            isVoiceTranscribing = false
+        } catch {
+            errorMessage = error.localizedDescription
+            isVoiceRecording = false
+            isVoiceTranscribing = false
+        }
+    }
+
+    private func stopVoiceRecordingAndStartChat() async -> ChatSessionRoute? {
+        guard isVoiceRecording else { return nil }
+        isVoiceActionInFlight = true
+        defer { isVoiceActionInFlight = false }
+
+        do {
+            let transcript = try await transcriptionService.stop()
+            pendingVoiceTranscript = nil
+            isVoiceRecording = false
+            isVoiceTranscribing = false
+            return await submitVoiceTranscript(transcript)
+        } catch {
+            errorMessage = error.localizedDescription
+            isVoiceRecording = false
+            isVoiceTranscribing = false
+            return nil
+        }
+    }
+
+    private func submitVoiceTranscript(_ transcript: String) async -> ChatSessionRoute? {
+        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTranscript.isEmpty else {
+            errorMessage = "I didn't catch that. Try again."
+            return nil
+        }
+
+        errorMessage = nil
+        return await startHubAssistantTurn(message: trimmedTranscript)
+    }
+
+    private func configureTranscriptionCallbacks() {
+        hasConfiguredVoiceCallbacks = true
+        transcriptionService.onTranscriptDelta = nil
+        transcriptionService.onTranscriptFinal = { [weak self] transcript in
+            self?.pendingVoiceTranscript = transcript
+        }
+        transcriptionService.onStopReason = { [weak self] reason in
+            guard let self else { return }
+            switch reason {
+            case .manual:
+                return
+            case .silenceAutoStop:
+                let transcript = self.pendingVoiceTranscript ?? ""
+                self.pendingVoiceTranscript = nil
+                self.isVoiceRecording = false
+                self.isVoiceTranscribing = false
+                self.isVoiceActionInFlight = true
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let route = await self.submitVoiceTranscript(transcript)
+                    self.isVoiceActionInFlight = false
+                    if let route {
+                        self.completedVoiceRoute = route
+                    }
+                }
+            case .cancel, .failure:
+                self.pendingVoiceTranscript = nil
+                self.isVoiceRecording = false
+                self.isVoiceTranscribing = false
+                self.isVoiceActionInFlight = false
+            }
+        }
+        transcriptionService.onError = { [weak self] message in
+            self?.errorMessage = message
+            self?.pendingVoiceTranscript = nil
+            self?.isVoiceRecording = false
+            self?.isVoiceTranscribing = false
+            self?.isVoiceActionInFlight = false
+        }
+        transcriptionService.onStateChange = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .idle:
+                self.isVoiceRecording = false
+                self.isVoiceTranscribing = false
+            case .recording:
+                self.isVoiceRecording = true
+                self.isVoiceTranscribing = false
+            case .transcribing:
+                self.isVoiceRecording = false
+                self.isVoiceTranscribing = true
+            }
+        }
     }
 }

@@ -116,8 +116,17 @@ struct KnowledgeView: View {
                 playbackService: customNarrationLibrary.playbackService
             )
         }
+        .onChange(of: viewModel.completedVoiceRoute) { _, route in
+            guard let route else { return }
+            viewModel.clearCompletedVoiceRoute()
+            onSelectSession?(route)
+        }
         .task {
             await loadKnowledgeScreen()
+            await viewModel.checkAndRefreshVoiceDictation()
+        }
+        .onDisappear {
+            viewModel.cancelVoiceRecording()
         }
     }
 
@@ -483,22 +492,25 @@ struct KnowledgeView: View {
 
     private var newChatMicButton: some View {
         TapToTalkMicButton(
-            isEnabled: !viewModel.isCreatingSession,
-            isRecording: false,
-            isBusy: viewModel.isCreatingSession,
+            isEnabled: viewModel.isVoiceRecording ||
+                (!viewModel.isCreatingSession && !viewModel.isVoiceActionInFlight && !viewModel.isVoiceTranscribing),
+            isRecording: viewModel.isVoiceRecording,
+            isBusy: !viewModel.isVoiceRecording &&
+                (viewModel.isCreatingSession || viewModel.isVoiceActionInFlight || viewModel.isVoiceTranscribing),
             size: 60,
             action: {
                 Task {
-                    if let route = await viewModel.startNewChat() {
+                    if let route = await viewModel.toggleVoiceRecording() {
                         onSelectSession?(route)
                     }
                 }
             }
         )
+        .opacity(viewModel.voiceDictationAvailable || viewModel.isVoiceRecording ? 1 : 0.72)
         .shadow(color: .black.opacity(0.22), radius: 12, y: 8)
         .accessibilityIdentifier("knowledge.new_chat_mic")
-        .accessibilityLabel("New chat")
-        .accessibilityHint("Start a new chat session")
+        .accessibilityLabel(viewModel.isVoiceRecording ? "Stop voice chat" : "Start voice chat")
+        .accessibilityHint(viewModel.isVoiceRecording ? "Stop recording and start a chat" : "Record a question and start a chat")
     }
 
     private func sendSearchQuery() {
