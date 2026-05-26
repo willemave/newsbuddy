@@ -90,7 +90,7 @@ async def download_more_from_series(
     response_model=TweetSuggestionsResponse,
     summary="Generate tweet suggestions for content",
     description=(
-        "Generate 3 tweet suggestions for a content item using Gemini. "
+        "Generate 3 tweet suggestions for a content item using the selected LLM provider. "
         "Supports all content types. Requires JWT authentication."
     ),
     responses={

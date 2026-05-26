@@ -1,14 +1,11 @@
-"""
-Tweet suggestions service using Gemini via pydantic-ai.
-Generates tweet suggestions for content items.
-"""
+"""Generate tweet suggestions for content items via configured LLM providers."""
 
 import json
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
-from pydantic_ai import Agent, ModelRetry
+from pydantic_ai import Agent, ModelRetry, PromptedOutput
 from pydantic_ai.settings import ModelSettings
 from tenacity import RetryCallState, retry, stop_after_attempt, wait_exponential
 
@@ -357,6 +354,38 @@ def _model_hint_from_spec(model_spec: str) -> tuple[str | None, str]:
     return None, model_spec
 
 
+def _is_google_model_spec(model_spec: str) -> bool:
+    """Return whether the model spec targets Gemini/Google."""
+    provider_prefix, model_hint = _model_hint_from_spec(model_spec)
+    return provider_prefix in {"google", "google-gla"} or model_hint.startswith("gemini")
+
+
+def _tweet_output_type_for_model(model_spec: str) -> Any:
+    """Choose the structured-output mode that works reliably for the provider."""
+    if _is_google_model_spec(model_spec):
+        return TweetSuggestionsPayload
+
+    return PromptedOutput(
+        TweetSuggestionsPayload,
+        name="tweet_suggestions",
+        description="Exactly three tweet suggestions as a JSON object.",
+    )
+
+
+def _coerce_tweet_payload(output: Any) -> TweetSuggestionsPayload:
+    """Normalize pydantic-ai output into the expected tweet payload."""
+    if isinstance(output, TweetSuggestionsPayload):
+        return output
+    if isinstance(output, dict):
+        return TweetSuggestionsPayload.model_validate(output)
+    if isinstance(output, str):
+        suggestions = _parse_suggestions_response(output)
+        if suggestions is None:
+            raise ValueError("Tweet suggestions response did not contain valid JSON")
+        return TweetSuggestionsPayload.model_validate({"suggestions": suggestions})
+    raise ValueError(f"Unexpected tweet suggestions output type: {type(output).__name__}")
+
+
 def _log_generation_failure(retry_state: RetryCallState) -> None:
     """Log final generation failure after all retries."""
     content = retry_state.args[1] if len(retry_state.args) > 1 else None
@@ -414,7 +443,7 @@ class TweetSuggestionService:
         """Create a configured pydantic-ai agent for tweet suggestions."""
         return get_basic_agent(
             model_spec=model_name,
-            output_type=TweetSuggestionsPayload,
+            output_type=_tweet_output_type_for_model(model_name),
             system_prompt=system_prompt,
         )
 
@@ -474,7 +503,7 @@ class TweetSuggestionService:
                 ),
             )
 
-            payload = run_result.output
+            payload = _coerce_tweet_payload(run_result.output)
 
             # Validate and truncate based on length preference
             _, max_chars = length_to_char_range(length)

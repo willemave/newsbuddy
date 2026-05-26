@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from pydantic import HttpUrl, TypeAdapter
+from pydantic_ai import PromptedOutput
 
 from app.constants import TWEET_MODELS
 from app.core.settings import get_settings
@@ -132,6 +133,47 @@ class TestTweetSuggestionService:
         assert result is not None
         assert len(result.suggestions) == 3
 
+    @patch("app.services.tweet_suggestions.Agent.run_sync")
+    def test_generate_suggestions_accepts_raw_json_text_output(self, mock_run_sync) -> None:
+        """Prompted non-Gemini output can be parsed from raw JSON text."""
+        mock_result = MagicMock()
+        mock_result.output = """
+        ```json
+        {
+          "suggestions": [
+            {"id": 1, "text": "Raw JSON tweet one", "style_label": "clear"},
+            {"id": 2, "text": "Raw JSON tweet two", "style_label": "sharp"},
+            {"id": 3, "text": "Raw JSON tweet three", "style_label": "useful"}
+          ]
+        }
+        ```
+        """
+        mock_result.usage.return_value = None
+        mock_run_sync.return_value = mock_result
+
+        content = MagicMock()
+        content.id = 1
+        content.content_type = ContentType.ARTICLE
+        content.url = "https://example.com/article"
+        content.display_title = "Test Article"
+        content.source = "Tech Blog"
+        content.platform = "web"
+        content.short_summary = "Short summary"
+        content.summary = None
+        content.metadata = {}
+
+        original_key = settings.openrouter_api_key
+        settings.openrouter_api_key = "test-openrouter-key"
+        service = TweetSuggestionService()
+        try:
+            result = service.generate_suggestions(content, creativity=5, llm_provider="openrouter")
+        finally:
+            settings.openrouter_api_key = original_key
+
+        assert result is not None
+        assert len(result.suggestions) == 3
+        assert result.suggestions[0].text == "Raw JSON tweet one"
+
 
 class TestTweetModelSelection:
     """Tests for tweet model resolution."""
@@ -146,3 +188,47 @@ class TestTweetModelSelection:
         service = TweetSuggestionService()
         for provider, model_spec in TWEET_MODELS.items():
             assert service._get_model_for_provider(provider) == model_spec
+
+    def test_non_gemini_agents_use_prompted_json_output(self, monkeypatch) -> None:
+        """OpenAI, Anthropic, and OpenRouter avoid tool-output-only generation."""
+        captured: dict[str, object] = {}
+
+        def fake_get_basic_agent(model_spec, output_type, system_prompt):  # noqa: ANN001
+            captured["model_spec"] = model_spec
+            captured["output_type"] = output_type
+            captured["system_prompt"] = system_prompt
+            return MagicMock()
+
+        monkeypatch.setattr(
+            "app.services.tweet_suggestions.get_basic_agent",
+            fake_get_basic_agent,
+        )
+
+        service = TweetSuggestionService()
+        for model_spec in (
+            "openai:gpt-5.5",
+            "anthropic:claude-opus-4-6",
+            "openrouter:deepseek/deepseek-v4-flash",
+        ):
+            service._build_agent("system prompt", model_spec)
+            output_type = captured["output_type"]
+            assert isinstance(output_type, PromptedOutput)
+            assert output_type.outputs is TweetSuggestionsPayload
+
+    def test_gemini_agent_keeps_native_payload_output(self, monkeypatch) -> None:
+        """Gemini stays on the existing structured payload path."""
+        captured: dict[str, object] = {}
+
+        def fake_get_basic_agent(model_spec, output_type, system_prompt):  # noqa: ANN001
+            captured["output_type"] = output_type
+            return MagicMock()
+
+        monkeypatch.setattr(
+            "app.services.tweet_suggestions.get_basic_agent",
+            fake_get_basic_agent,
+        )
+
+        service = TweetSuggestionService()
+        service._build_agent("system prompt", "google:gemini-3.1-flash-lite-preview")
+
+        assert captured["output_type"] is TweetSuggestionsPayload
