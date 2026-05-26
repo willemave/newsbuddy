@@ -5,11 +5,12 @@ final class NarrationPlaybackSpeedOptionTests: XCTestCase {
     func testStandardOptionsExposeExpectedRatesAndTitles() {
         let options = NarrationPlaybackSpeedOption.standardOptions
 
-        XCTAssertEqual(options.count, 3)
+        XCTAssertEqual(options.count, 4)
         XCTAssertEqual(options[0].rate, 1.0, accuracy: 0.001)
         XCTAssertEqual(options[1].rate, 1.25, accuracy: 0.001)
         XCTAssertEqual(options[2].rate, 1.5, accuracy: 0.001)
-        XCTAssertEqual(options.map(\.title), ["1x", "1.25x", "1.5x"])
+        XCTAssertEqual(options[3].rate, 2.0, accuracy: 0.001)
+        XCTAssertEqual(options.map(\.title), ["1x", "1.25x", "1.5x", "2x"])
     }
 
     func testAccessibilityActionNameMatchesTitle() {
