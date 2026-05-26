@@ -99,13 +99,13 @@ struct ProcessingStatsView: View {
                 Text(title)
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.onSurfaceSecondary)
             }
             Spacer()
             Text("\(count)")
                 .font(.callout)
                 .fontWeight(.semibold)
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.onSurface)
         }
         .padding(.vertical, 2)
     }
@@ -148,7 +148,7 @@ struct ProcessingStatsView: View {
                 Text(title)
                 Text(summary)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.onSurfaceSecondary)
             }
         }
         .padding(.vertical, 2)
@@ -160,20 +160,20 @@ struct ProcessingStatsView: View {
                 SourceTypeIcon(type: config.scraperType)
                 Text(config.displayName ?? config.feedURL ?? "Source")
                     .font(.callout)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.onSurface)
                     .lineLimit(1)
                 Spacer()
                 if let unreadCount = config.stats?.unreadCount, unreadCount > 0 {
                     Text("\(unreadCount) unread")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.onSurfaceSecondary)
                 }
             }
 
             if let meta = sourceMetaLine(config.stats) {
                 Text(meta)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.onSurfaceSecondary)
                     .padding(.leading, 40)
             }
         }

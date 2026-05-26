@@ -29,9 +29,9 @@ struct ContentListView: View {
                                 Spacer()
                                 Image(systemName: "doc.text.magnifyingglass")
                                     .font(.largeTitle)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(Color.onSurfaceSecondary)
                                 Text("No content found matching your filters.")
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(Color.onSurfaceSecondary)
                                 Spacer()
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -107,7 +107,7 @@ struct SuggestionDetailSheet: View {
                             .padding(.horizontal, 12)
                     }
                     .buttonStyle(.bordered)
-                    .tint(.secondary)
+                    .tint(Color.onSurfaceSecondary)
                 }
             }
             .padding(.horizontal, 20)

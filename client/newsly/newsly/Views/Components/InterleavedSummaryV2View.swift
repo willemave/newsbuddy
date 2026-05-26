@@ -21,7 +21,7 @@ struct InterleavedSummaryV2View: View {
         VStack(alignment: .leading, spacing: InterleavedV2Design.sectionSpacing) {
             Text(summary.hook)
                 .font(.callout)
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
 
             if !summary.keyPoints.isEmpty {
@@ -50,7 +50,7 @@ struct InterleavedSummaryV2View: View {
                             Text(topic.topic)
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.primary)
+                                .foregroundColor(Color.onSurface)
 
                             VStack(alignment: .leading, spacing: InterleavedV2Design.itemSpacing) {
                                 ForEach(topic.bullets, id: \.text) { bullet in
@@ -66,7 +66,7 @@ struct InterleavedSummaryV2View: View {
                 sectionHeader("Takeaway", icon: "lightbulb", tint: .terracottaPrimary, uppercase: false)
                 Text(summary.takeaway)
                     .font(.callout)
-                    .foregroundColor(.primary.opacity(0.9))
+                    .foregroundColor(Color.onSurface.opacity(0.9))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -87,7 +87,7 @@ struct InterleavedSummaryV2View: View {
             Text(title)
                 .font(.subheadline)
                 .fontWeight(.semibold)
-                .foregroundColor(.secondary)
+                .foregroundColor(Color.onSurfaceSecondary)
                 .textCase(uppercase ? .uppercase : .none)
                 .tracking(uppercase ? 0.5 : 0)
         }
@@ -97,12 +97,12 @@ struct InterleavedSummaryV2View: View {
     private func bulletRow(text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Circle()
-                .fill(Color.primary.opacity(0.5))
+                .fill(Color.onSurface.opacity(0.5))
                 .frame(width: 5, height: 5)
                 .padding(.top, 7)
             Text(text)
                 .font(.callout)
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -113,14 +113,14 @@ struct InterleavedSummaryV2View: View {
             Text(quote.text)
                 .font(.callout)
                 .italic()
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attributionLine = quoteAttributionLine(quote) {
                 Text("— \(attributionLine)")
                     .font(.footnote)
                     .fontWeight(.medium)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
             }
         }
         .padding(.leading, 14)

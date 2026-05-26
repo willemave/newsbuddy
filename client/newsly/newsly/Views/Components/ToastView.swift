@@ -17,7 +17,7 @@ struct ToastView: View {
 
             Text(toast.message)
                 .font(.subheadline)
-                .foregroundColor(.primary)
+                .foregroundColor(Color.onSurface)
 
             Spacer()
         }

@@ -24,7 +24,7 @@ struct EditorialNarrativeSummaryView: View {
                     ForEach(Array(summary.narrativeParagraphs.enumerated()), id: \.offset) { _, paragraph in
                         Text(paragraph)
                             .font(.callout)
-                            .foregroundColor(.primary.opacity(0.92))
+                            .foregroundColor(Color.onSurface.opacity(0.92))
                             .lineSpacing(5)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -53,7 +53,7 @@ struct EditorialNarrativeSummaryView: View {
                             Text(section.title)
                                 .font(.footnote)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Color.onSurfaceSecondary)
                                 .textCase(.uppercase)
                                 .tracking(0.5)
 
@@ -93,7 +93,7 @@ struct EditorialNarrativeSummaryView: View {
             Text(title)
                 .font(.subheadline)
                 .fontWeight(.semibold)
-                .foregroundColor(.secondary)
+                .foregroundColor(Color.onSurfaceSecondary)
                 .textCase(uppercase ? .uppercase : .none)
                 .tracking(uppercase ? 0.5 : 0)
         }
@@ -103,12 +103,12 @@ struct EditorialNarrativeSummaryView: View {
     private func bulletRow(text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Circle()
-                .fill(Color.primary.opacity(0.5))
+                .fill(Color.onSurface.opacity(0.5))
                 .frame(width: 5, height: 5)
                 .padding(.top, 7)
             Text(text)
                 .font(.callout)
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -119,14 +119,14 @@ struct EditorialNarrativeSummaryView: View {
             Text(quote.text)
                 .font(.callout)
                 .italic()
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attributionLine = quoteAttributionLine(quote) {
                 Text("— \(attributionLine)")
                     .font(.footnote)
                     .fontWeight(.medium)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
             }
         }
         .padding(.leading, 14)

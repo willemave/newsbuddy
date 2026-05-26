@@ -25,7 +25,7 @@ struct DebugMenuView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Current Endpoint")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                         Text(appSettings.baseURL)
                             .font(.system(.caption, design: .monospaced))
                             .foregroundColor(.brandSecondary)
@@ -36,7 +36,7 @@ struct DebugMenuView: View {
                         Text("Host")
                         TextField("localhost", text: $appSettings.serverHost)
                             .multilineTextAlignment(.trailing)
-                            .foregroundColor(.primary)
+                            .foregroundColor(Color.onSurface)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                     }
@@ -45,7 +45,7 @@ struct DebugMenuView: View {
                         Text("Port")
                         TextField("8000", text: $appSettings.serverPort)
                             .multilineTextAlignment(.trailing)
-                            .foregroundColor(.primary)
+                            .foregroundColor(Color.onSurface)
                             .keyboardType(.numberPad)
                     }
 
@@ -156,11 +156,11 @@ struct DebugMenuView: View {
     private var userIdText: some View {
         switch authViewModel.authState {
         case .authenticated(let user):
-            return Text("\(user.id)").foregroundColor(.primary)
+            return Text("\(user.id)").foregroundColor(Color.onSurface)
         case .loading:
-            return Text("—").foregroundColor(.secondary)
+            return Text("—").foregroundColor(Color.onSurfaceSecondary)
         case .unauthenticated:
-            return Text("—").foregroundColor(.secondary)
+            return Text("—").foregroundColor(Color.onSurfaceSecondary)
         }
     }
 

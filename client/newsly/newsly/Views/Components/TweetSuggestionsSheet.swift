@@ -68,7 +68,7 @@ struct TweetSuggestionsSheet: View {
                                 .font(.caption2)
                         }
                         .font(.subheadline)
-                        .foregroundColor(.primary)
+                        .foregroundColor(Color.onSurface)
                     }
                     .disabled(viewModel.isLoading || viewModel.isRegenerating)
                 }
@@ -92,7 +92,7 @@ struct TweetSuggestionsSheet: View {
 
                 Text(viewModel.creativityLabel)
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
                     .background(creativityColor.opacity(0.2))
@@ -103,7 +103,7 @@ struct TweetSuggestionsSheet: View {
             HStack(spacing: 16) {
                 Text("1")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                 Slider(
                     value: Binding(
                         get: { Double(viewModel.creativity) },
@@ -120,7 +120,7 @@ struct TweetSuggestionsSheet: View {
                 .disabled(viewModel.isLoading || viewModel.isRegenerating)
                 Text("10")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
 
                 if viewModel.voiceDictationAvailable {
                     voiceButton
@@ -134,7 +134,7 @@ struct TweetSuggestionsSheet: View {
                         .scaleEffect(0.7)
                     Text("Transcribing...")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                 }
             }
         }
@@ -198,7 +198,7 @@ struct TweetSuggestionsSheet: View {
                 .scaleEffect(1.5)
             Text("Generating tweet suggestions...")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(Color.onSurfaceSecondary)
         }
         .frame(minHeight: 200)
     }
@@ -212,7 +212,7 @@ struct TweetSuggestionsSheet: View {
                 .foregroundColor(.brandPrimary)
             Text(message)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(Color.onSurfaceSecondary)
                 .multilineTextAlignment(.center)
             Button("Retry") {
                 Task {
@@ -277,14 +277,14 @@ struct TweetSuggestionCard: View {
             // Tweet Text
             Text(suggestion.text)
                 .font(.body)
-                .foregroundColor(.primary)
+                .foregroundColor(Color.onSurface)
                 .fixedSize(horizontal: false, vertical: true)
 
             // Character Count
             HStack {
                 Text("\(suggestion.text.count)/280")
                     .font(.caption)
-                    .foregroundColor(suggestion.text.count > 280 ? .statusDestructive : .secondary)
+                    .foregroundColor(suggestion.text.count > 280 ? .statusDestructive : Color.onSurfaceSecondary)
 
                 Spacer()
 
@@ -296,7 +296,7 @@ struct TweetSuggestionCard: View {
                         Image(systemName: "doc.on.doc")
                             .font(.body)
                     }
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
 
                     Button {
                         onShare()

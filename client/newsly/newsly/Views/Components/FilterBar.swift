@@ -22,7 +22,7 @@ struct FilterBar: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Content Type")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                 
                 Picker("Content Type", selection: $selectedContentType) {
                     Text("All").tag("all")
@@ -42,7 +42,7 @@ struct FilterBar: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Date")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                     
                     Picker("Date", selection: $selectedDate) {
                         Text("All Dates").tag("")
@@ -61,7 +61,7 @@ struct FilterBar: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Read Status")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                     
                     Picker("Read Status", selection: $selectedReadFilter) {
                         Text("Unread Only").tag("unread")

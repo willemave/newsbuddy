@@ -93,7 +93,7 @@ private struct ExtraSection: View {
                         Text(section.title)
                             .font(.footnote)
                             .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                             .textCase(.uppercase)
                             .tracking(0.5)
 
@@ -135,12 +135,12 @@ private struct KeyPointList: View {
                         Text(point.heading)
                             .font(.callout)
                             .fontWeight(.semibold)
-                            .foregroundColor(.primary)
+                            .foregroundColor(Color.onSurface)
                             .fixedSize(horizontal: false, vertical: true)
 
                         Text(point.content)
                             .font(.callout)
-                            .foregroundColor(.primary.opacity(0.88))
+                            .foregroundColor(Color.onSurface.opacity(0.88))
                             .lineSpacing(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -160,7 +160,7 @@ private struct TakeawayBanner: View {
             Text(text)
                 .font(.callout)
                 .fontWeight(.medium)
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.onSurface)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -175,7 +175,7 @@ private struct ArtifactQuoteCard: View {
             Text(quote.text)
                 .font(.callout)
                 .italic()
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attribution = quote.attribution?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -183,7 +183,7 @@ private struct ArtifactQuoteCard: View {
                 Text("- \(attribution)")
                     .font(.footnote)
                     .fontWeight(.medium)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
             }
         }
         .padding(.leading, 14)
@@ -202,12 +202,12 @@ private struct ArtifactBulletRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Circle()
-                .fill(Color.primary.opacity(0.5))
+                .fill(Color.onSurface.opacity(0.5))
                 .frame(width: 5, height: 5)
                 .padding(.top, 7)
             Text(text)
                 .font(.callout)
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -233,7 +233,7 @@ private struct ArtifactSectionHeader: View {
             Text(title)
                 .font(.subheadline)
                 .fontWeight(.semibold)
-                .foregroundColor(.secondary)
+                .foregroundColor(Color.onSurfaceSecondary)
                 .textCase(.uppercase)
                 .tracking(0.5)
         }

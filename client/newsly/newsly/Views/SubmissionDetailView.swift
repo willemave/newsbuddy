@@ -25,7 +25,7 @@ struct SubmissionDetailView: View {
                         Text("Last updated")
                         Spacer()
                         Text(date)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.onSurfaceSecondary)
                     }
                 }
 
@@ -41,7 +41,7 @@ struct SubmissionDetailView: View {
                         Text("Title")
                         Spacer()
                         Text(title)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.onSurfaceSecondary)
                     }
                 }
 
@@ -49,7 +49,7 @@ struct SubmissionDetailView: View {
                     Text("Type")
                     Spacer()
                     Text(submission.contentType.capitalized)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.onSurfaceSecondary)
                 }
 
                 if let submittedVia = submission.submittedVia, !submittedVia.isEmpty {
@@ -57,7 +57,7 @@ struct SubmissionDetailView: View {
                         Text("Submitted via")
                         Spacer()
                         Text(submittedVia.replacingOccurrences(of: "_", with: " ").capitalized)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.onSurfaceSecondary)
                     }
                 }
             }
@@ -103,14 +103,14 @@ private struct LinkRow: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.onSurfaceSecondary)
             if let url = URL(string: value) {
                 Link(value, destination: url)
                     .font(.footnote)
             } else {
                 Text(value)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.onSurfaceSecondary)
             }
         }
         .textSelection(.enabled)

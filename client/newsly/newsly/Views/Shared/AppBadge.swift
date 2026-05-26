@@ -10,7 +10,7 @@ import SwiftUI
 /// Numeric count badge (e.g. unread count in More tab).
 struct CountBadge: View {
     let count: Int
-    var color: Color = .secondary
+    var color: Color = .onSurfaceSecondary
 
     var body: some View {
         Text("\(count)")
@@ -23,7 +23,7 @@ struct CountBadge: View {
 /// Text badge with colored background capsule (e.g. "New", "Submitted", status labels).
 struct TextBadge: View {
     let text: String
-    var color: Color = .secondary
+    var color: Color = .onSurfaceSecondary
     var style: Style = .filled
 
     enum Style {

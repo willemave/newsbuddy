@@ -21,7 +21,7 @@ struct NewsGroupCard: View {
                         Text(item.displayTitle)
                             .font(.body)
                             .fontWeight(.medium)
-                            .foregroundColor(item.isRead ? .secondary : .primary)
+                            .foregroundColor(item.isRead ? Color.onSurfaceSecondary : Color.onSurface)
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -36,7 +36,7 @@ struct NewsGroupCard: View {
                                 if let source = item.source {
                                     Text(source)
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        .foregroundColor(Color.onSurfaceSecondary)
                                         .lineLimit(1)
                                 }
                             }
@@ -46,7 +46,7 @@ struct NewsGroupCard: View {
                             // Date
                             ContentTimestampText(rawValue: item.primaryTimestamp, style: .compactRelative)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Color.onSurfaceSecondary)
                         }
                     }
                     .padding(.vertical, 8)

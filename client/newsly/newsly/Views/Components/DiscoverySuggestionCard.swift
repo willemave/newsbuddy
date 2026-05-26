@@ -20,7 +20,7 @@ struct DiscoverySuggestionCard: View {
                 // Headline
                 Text(suggestion.displayTitle)
                     .font(.feedHeadline)
-                    .foregroundColor(.textPrimary)
+                    .foregroundColor(Color.onSurface)
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -34,16 +34,16 @@ struct DiscoverySuggestionCard: View {
                     Text(metadata.label.uppercased())
                         .font(.feedMeta)
                         .tracking(0.4)
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(1)
 
                     Text("\u{00B7}")
                         .font(.feedMeta)
-                        .foregroundColor(.textTertiary)
+                        .foregroundColor(Color.onSurfaceTertiary)
 
                     Text(formattedURL(suggestion.primaryURL))
                         .font(.feedMeta)
-                        .foregroundColor(.textTertiary)
+                        .foregroundColor(Color.onSurfaceTertiary)
                         .lineLimit(1)
 
                     Spacer()

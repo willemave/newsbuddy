@@ -115,7 +115,7 @@ struct QuickMicOverlay: View {
                     if viewModel.activeSession != nil {
                         Text("Tap the close button to end this quick session.")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.onSurfaceSecondary)
                     }
                 }
 
@@ -136,7 +136,7 @@ struct QuickMicOverlay: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.onSurfaceSecondary)
                         .frame(width: 30, height: 30)
                         .background(Color.black.opacity(0.05))
                         .clipShape(Circle())
@@ -201,7 +201,7 @@ struct QuickMicOverlay: View {
                     } label: {
                         Label("Open full chat", systemImage: "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(Color.onSurface)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 9)
                             .background(Color.black.opacity(0.05))
@@ -214,7 +214,7 @@ struct QuickMicOverlay: View {
 
                 Text(viewModel.activeSession == nil ? "Tap the mic to ask." : "Tap the mic to keep the same session going.")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.onSurfaceSecondary)
             }
         }
         .padding(18)
@@ -276,12 +276,12 @@ private struct QuickMicMessageBubble: View {
             VStack(alignment: isUser ? .trailing : .leading, spacing: 5) {
                 Text(isUser ? "You" : "Newsbuddy")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(isUser ? Color.brandPrimary.opacity(0.88) : .secondary)
+                    .foregroundStyle(isUser ? Color.brandPrimary.opacity(0.88) : Color.onSurfaceSecondary)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Self.markdownText(message.content)
                         .font(.system(size: 15, weight: .regular, design: .rounded))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.onSurface)
                         .lineSpacing(2)
                         .multilineTextAlignment(.leading)
 
@@ -324,7 +324,7 @@ private struct QuickMicStatusBubble: View {
     let title: String
     let text: String
     let systemImage: String
-    var accentColor: Color = .secondary
+    var accentColor: Color = .onSurfaceSecondary
     var showsProgress: Bool = false
 
     var body: some View {
@@ -332,7 +332,7 @@ private struct QuickMicStatusBubble: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.onSurfaceSecondary)
 
                 HStack(alignment: .top, spacing: 8) {
                     if showsProgress {
@@ -348,7 +348,7 @@ private struct QuickMicStatusBubble: View {
 
                     Text(text)
                         .font(.system(size: 15, weight: .regular, design: .rounded))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.onSurface)
                         .lineSpacing(2)
                 }
             }

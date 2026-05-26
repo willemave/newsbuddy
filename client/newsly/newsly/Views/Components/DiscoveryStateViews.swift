@@ -80,16 +80,16 @@ struct DiscoveryErrorStateView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 28, weight: .light))
-                .foregroundColor(.textSecondary)
+                .foregroundColor(Color.onSurfaceSecondary)
 
             VStack(spacing: 6) {
                 Text("Something went wrong")
                     .font(.listTitle.weight(.semibold))
-                    .foregroundColor(.textPrimary)
+                    .foregroundColor(Color.onSurface)
 
                 Text(error)
                     .font(.listSubtitle)
-                    .foregroundColor(.textSecondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
@@ -120,16 +120,16 @@ struct DiscoveryProcessingStateView: View {
         VStack(spacing: 24) {
             Image(systemName: "sparkles")
                 .font(.system(size: 32, weight: .light))
-                .foregroundColor(.textSecondary)
+                .foregroundColor(Color.onSurfaceSecondary)
 
             VStack(spacing: 8) {
                 Text("Discovering New Content")
                     .font(.listTitle.weight(.semibold))
-                    .foregroundColor(.textPrimary)
+                    .foregroundColor(Color.onSurface)
 
                 Text(runStatusDescription)
                     .font(.listSubtitle)
-                    .foregroundColor(.textSecondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }

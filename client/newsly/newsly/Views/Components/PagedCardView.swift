@@ -38,13 +38,13 @@ struct PagedCardView: View {
                     VStack(spacing: 16) {
                         Image(systemName: "newspaper")
                             .font(.largeTitle)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                         Text("No more news")
                             .font(.title3)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                         Text("Pull to refresh")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {

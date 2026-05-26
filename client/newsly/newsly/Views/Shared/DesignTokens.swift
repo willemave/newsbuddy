@@ -83,6 +83,9 @@ extension Color {
     static var onSurfaceSecondary: Color {
         Color(UIColor.appOnSurfaceSecondary)
     }
+    static var onSurfaceTertiary: Color {
+        Color(UIColor.appOnSurfaceTertiary)
+    }
 
     // Chat-specific colors - warm ink palette.
     static var chatUserBubble: Color {
@@ -105,10 +108,10 @@ extension Color {
         })
     }
 
-    // Text colors (keep existing for backward compat)
-    static var textPrimary: Color { Color(.label) }
-    static var textSecondary: Color { Color(.secondaryLabel) }
-    static var textTertiary: Color { Color(.tertiaryLabel) }
+    // Backward-compatible text aliases.
+    static var textPrimary: Color { Color.onSurface }
+    static var textSecondary: Color { Color.onSurfaceSecondary }
+    static var textTertiary: Color { Color.onSurfaceTertiary }
 
     // Border colors
     static var borderSubtle: Color {
@@ -130,7 +133,7 @@ extension Color {
     static var statusSuccess: Color { Color.brandSecondary.opacity(0.9) }
     static var statusProcessing: Color { Color.brandPrimary }
     static var statusActive: Color { Color.statusSuccess }
-    static var statusInactive: Color { Color(.tertiaryLabel) }
+    static var statusInactive: Color { Color.onSurfaceTertiary }
     static var statusDestructive: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
@@ -403,6 +406,13 @@ extension UIColor {
             tc.userInterfaceStyle == .dark
                 ? UIColor(red: 0.659, green: 0.639, blue: 0.592, alpha: 1.0)  // #a8a397
                 : UIColor(red: 0.427, green: 0.416, blue: 0.380, alpha: 1.0)  // #6d6a61
+        }
+    }
+    static var appOnSurfaceTertiary: UIColor {
+        UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.514, green: 0.490, blue: 0.431, alpha: 1.0)  // #837d6e
+                : UIColor(red: 0.553, green: 0.529, blue: 0.471, alpha: 1.0)  // #8d8778
         }
     }
     static var appSurfacePrimary: UIColor {

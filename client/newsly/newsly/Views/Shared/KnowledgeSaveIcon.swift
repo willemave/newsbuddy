@@ -9,7 +9,7 @@ struct KnowledgeSaveIcon: View {
     let isSaved: Bool
     var size: CGFloat = 20
     var savedColor: Color = .brandTertiary
-    var unsavedColor: Color = .secondary
+    var unsavedColor: Color = .onSurfaceSecondary
     var badgeColor: Color = .brandTertiary
 
     var body: some View {

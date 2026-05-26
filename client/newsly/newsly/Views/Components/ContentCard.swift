@@ -34,7 +34,7 @@ struct ContentCard: View {
     }
 
     private var titleColor: Color {
-        dimReadState && content.isRead ? .secondary : .primary
+        dimReadState && content.isRead ? .onSurfaceSecondary : .onSurface
     }
 
     var body: some View {
@@ -61,14 +61,14 @@ struct ContentCard: View {
                     if let source = content.source {
                         Text(source)
                             .font(.footnote)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
                     if let processedDate = content.processedDateDisplay {
                         Text(processedDate)
                             .font(.footnote)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -102,12 +102,12 @@ struct ContentCard: View {
 
     private var thumbnailPlaceholder: some View {
         RoundedRectangle(cornerRadius: 8)
-            .fill(Color.secondary.opacity(0.15))
+            .fill(Color.outlineVariant.opacity(0.15))
             .frame(width: thumbnailSize, height: thumbnailSize)
             .overlay(
                 Image(systemName: contentTypeIcon)
                     .font(.system(size: 20))
-                    .foregroundColor(.secondary.opacity(0.6))
+                    .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
             )
     }
 

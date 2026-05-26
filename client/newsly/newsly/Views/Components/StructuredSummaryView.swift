@@ -107,11 +107,11 @@ struct StructuredSummaryView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "tag")
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                         Text("Topics")
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                             .textCase(.uppercase)
                             .tracking(0.5)
                     }
@@ -155,7 +155,7 @@ struct StructuredSummaryView: View {
                         Text(title)
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                            .foregroundColor(.primary)
+                            .foregroundColor(Color.onSurface)
                     }
 
                     Spacer()
@@ -163,7 +163,7 @@ struct StructuredSummaryView: View {
                     Image(systemName: "chevron.right")
                         .font(.caption2)
                         .fontWeight(.bold)
-                        .foregroundColor(.secondary.opacity(0.6))
+                        .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
                         .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
                 }
             }
@@ -183,14 +183,14 @@ struct StructuredSummaryView: View {
             Text(quote.text)
                 .font(.callout)
                 .italic()
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
 
             if let context = quote.context {
                 Text("— \(context)")
                     .font(.footnote)
                     .fontWeight(.medium)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
             }
         }
         .padding(.leading, 14)
@@ -225,7 +225,7 @@ struct StructuredSummaryView: View {
 
             Text(question)
                 .font(.callout)
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -242,7 +242,7 @@ struct StructuredSummaryView: View {
 
             Text(argument)
                 .font(.callout)
-                .foregroundColor(.primary.opacity(0.85))
+                .foregroundColor(Color.onSurface.opacity(0.85))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -253,7 +253,7 @@ struct StructuredSummaryView: View {
         Text(topic)
             .font(.footnote)
             .fontWeight(.medium)
-            .foregroundColor(.secondary)
+            .foregroundColor(Color.onSurfaceSecondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Color.surfaceTertiary)
@@ -354,7 +354,7 @@ struct ModernKeyPointRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(point.text)
                     .font(.callout)
-                    .foregroundColor(.primary.opacity(0.9))
+                    .foregroundColor(Color.onSurface.opacity(0.9))
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let category = point.category {

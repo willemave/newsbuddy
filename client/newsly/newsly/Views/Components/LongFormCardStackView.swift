@@ -234,7 +234,7 @@ struct LongFormCardStackView: View {
             if items.count <= 7 {
                 ForEach(0..<items.count, id: \.self) { index in
                     Circle()
-                        .fill(index == currentIndex ? Color.primary : Color(.tertiaryLabel))
+                        .fill(index == currentIndex ? Color.onSurface : Color.onSurfaceTertiary)
                         .frame(width: index == currentIndex ? 8 : 6, height: index == currentIndex ? 8 : 6)
                         .animation(.easeInOut(duration: 0.2), value: currentIndex)
                 }
@@ -244,7 +244,7 @@ struct LongFormCardStackView: View {
                     ForEach(0..<min(5, items.count), id: \.self) { i in
                         let dotIndex = paginationDotIndex(at: i)
                         Circle()
-                            .fill(dotIndex == currentIndex ? Color.primary : Color(.tertiaryLabel))
+                            .fill(dotIndex == currentIndex ? Color.onSurface : Color.onSurfaceTertiary)
                             .frame(width: dotIndex == currentIndex ? 8 : 6, height: dotIndex == currentIndex ? 8 : 6)
                             .animation(.easeInOut(duration: 0.2), value: currentIndex)
                     }
@@ -252,7 +252,7 @@ struct LongFormCardStackView: View {
 
                 Text("\(currentIndex + 1)/\(items.count)")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                     .monospacedDigit()
             }
         }

@@ -131,14 +131,14 @@ struct KnowledgeDiscoveryView: View {
                         .controlSize(.small)
                     Text("Searching...")
                         .font(.listCaption)
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                 }
                 .padding(.top, 8)
             } else if let error = viewModel.podcastSearchError {
                 HStack {
                     Text(error)
                         .font(.listCaption)
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                     Spacer()
                     Button("Retry") {
                         Task { await viewModel.retryPodcastSearch() }
@@ -149,7 +149,7 @@ struct KnowledgeDiscoveryView: View {
             } else if viewModel.hasPodcastSearchRun && viewModel.podcastSearchResults.isEmpty {
                 Text("No episodes found. Try broader keywords.")
                     .font(.listCaption)
-                    .foregroundColor(.textSecondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                     .padding(.top, 8)
             }
 
@@ -244,7 +244,7 @@ struct KnowledgeDiscoveryView: View {
                 Text("Personalize")
                     .font(.system(size: 15, weight: .semibold))
             }
-            .foregroundColor(.textPrimary)
+            .foregroundColor(Color.onSurface)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .background(Color.surfaceSecondary)
@@ -271,7 +271,7 @@ struct KnowledgeDiscoveryView: View {
 
             Text("Discovering...")
                 .font(.listCaption)
-                .foregroundColor(.textSecondary)
+                .foregroundColor(Color.onSurfaceSecondary)
 
             Spacer()
 
@@ -291,7 +291,7 @@ struct KnowledgeDiscoveryView: View {
 
             Text("New suggestions available")
                 .font(.listCaption)
-                .foregroundColor(.textSecondary)
+                .foregroundColor(Color.onSurfaceSecondary)
 
             Spacer()
         }
@@ -345,7 +345,7 @@ private struct PodcastEpisodeSearchCard: View {
             // Episode title as headline
             Text(result.title)
                 .font(.feedHeadline)
-                .foregroundColor(.textPrimary)
+                .foregroundColor(Color.onSurface)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -359,23 +359,23 @@ private struct PodcastEpisodeSearchCard: View {
                 if let podcastTitle = result.podcastTitle, !podcastTitle.isEmpty {
                     Text(podcastTitle.uppercased())
                         .font(.feedMeta)
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                         .tracking(0.4)
                         .lineLimit(1)
                 } else {
                     Text("PODCAST")
                         .font(.feedMeta)
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                         .tracking(0.4)
                 }
 
                 Text("\u{00B7}")
                     .font(.feedMeta)
-                    .foregroundColor(.textTertiary)
+                    .foregroundColor(Color.onSurfaceTertiary)
 
                 Text(result.source ?? host(from: result.episodeURL))
                     .font(.feedMeta)
-                    .foregroundColor(.textTertiary)
+                    .foregroundColor(Color.onSurfaceTertiary)
                     .lineLimit(1)
 
                 Spacer()
@@ -391,7 +391,7 @@ private struct PodcastEpisodeSearchCard: View {
                 Button(action: onOpen) {
                     Image(systemName: "safari")
                         .font(.listCaption)
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                 }
                 .buttonStyle(.plain)
             }

@@ -30,7 +30,7 @@ struct DetectedFeedCard: View {
                     if let title = feed.title, !title.isEmpty {
                         Text(title)
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                             .lineLimit(1)
                     }
                 }
@@ -67,7 +67,7 @@ struct DetectedFeedCard: View {
             } else {
                 Text("Get new content from this source automatically")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
             }
         }
         .padding(16)

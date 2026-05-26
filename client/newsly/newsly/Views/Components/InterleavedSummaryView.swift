@@ -23,7 +23,7 @@ struct InterleavedSummaryView: View {
             // Hook
             Text(summary.hook)
                 .font(.callout)
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
 
             // Insights
@@ -43,12 +43,12 @@ struct InterleavedSummaryView: View {
                     Text("Takeaway")
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                 }
 
                 Text(summary.takeaway)
                     .font(.callout)
-                    .foregroundColor(.primary.opacity(0.9))
+                    .foregroundColor(Color.onSurface.opacity(0.9))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -62,12 +62,12 @@ struct InterleavedSummaryView: View {
             Text(insight.topic)
                 .font(.subheadline)
                 .fontWeight(.bold)
-                .foregroundColor(.primary)
+                .foregroundColor(Color.onSurface)
 
             // Insight text
             Text(insight.insight)
                 .font(.callout)
-                .foregroundColor(.primary.opacity(0.9))
+                .foregroundColor(Color.onSurface.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
 
             // Quote (if present)
@@ -76,14 +76,14 @@ struct InterleavedSummaryView: View {
                     Text(quote)
                         .font(.callout)
                         .italic()
-                        .foregroundColor(.primary.opacity(0.8))
+                        .foregroundColor(Color.onSurface.opacity(0.8))
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let attribution = insight.quoteAttribution, !attribution.isEmpty {
                         Text("— \(attribution)")
                             .font(.footnote)
                             .fontWeight(.medium)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color.onSurfaceSecondary)
                     }
                 }
                 .padding(.leading, 14)

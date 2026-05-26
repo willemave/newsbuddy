@@ -57,7 +57,7 @@ struct DiscoveryRunSection: View {
             // Uppercase tracking label
             Text(briefingLabel.uppercased())
                 .font(.feedMeta)
-                .foregroundColor(.textSecondary)
+                .foregroundColor(Color.onSurfaceSecondary)
                 .tracking(0.8)
                 .padding(.horizontal, Spacing.screenHorizontal)
                 .padding(.top, Spacing.sectionTop)
@@ -68,7 +68,7 @@ struct DiscoveryRunSection: View {
 
                 Text(parts.headline)
                     .font(.cardHeadline)
-                    .foregroundColor(.textPrimary)
+                    .foregroundColor(Color.onSurface)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Spacing.screenHorizontal)
@@ -77,7 +77,7 @@ struct DiscoveryRunSection: View {
                 if let body = parts.body {
                     Text(body)
                         .font(.subheadline)
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, Spacing.screenHorizontal)

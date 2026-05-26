@@ -34,7 +34,7 @@ struct DownloadMoreMenu: View {
                 Text(title)
                     .font(.subheadline)
             }
-            .foregroundColor(.secondary)
+            .foregroundColor(Color.onSurfaceSecondary)
         }
         .buttonStyle(.plain)
     }

@@ -549,7 +549,8 @@ struct MarkdownNSRenderer {
         attrStr.addAttribute(.font, value: styledHeadingFont, range: range)
         attrStr.addAttribute(.paragraphStyle, value: paragraph, range: range)
         if level == 6 {
-            attrStr.addAttribute(.foregroundColor, value: UIColor.secondaryLabel, range: range)
+            let captionColor = UIColor.appOnSurfaceSecondary.resolvedColor(with: traitCollection)
+            attrStr.addAttribute(.foregroundColor, value: captionColor, range: range)
         }
     }
 

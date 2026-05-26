@@ -58,7 +58,7 @@ struct ArticleCardView: View {
         .cornerRadius(cardCornerRadius)
         .overlay(
             RoundedRectangle(cornerRadius: cardCornerRadius)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                .stroke(Color.onSurface.opacity(0.12), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
         .onAppear {
@@ -116,7 +116,7 @@ struct ArticleCardView: View {
             .overlay(
                 Image(systemName: contentTypeIcon)
                     .font(.system(size: 36, weight: .light))
-                    .foregroundColor(.secondary.opacity(0.4))
+                    .foregroundColor(Color.onSurfaceSecondary.opacity(0.4))
             )
     }
 
@@ -139,7 +139,7 @@ struct ArticleCardView: View {
         Text(content.displayTitle)
             .font(.title2)
             .fontWeight(.bold)
-            .foregroundColor(.primary)
+            .foregroundColor(Color.onSurface)
             .lineLimit(3)
             .multilineTextAlignment(.leading)
     }
@@ -149,19 +149,19 @@ struct ArticleCardView: View {
             if let source = content.source {
                 Text(source)
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                     .lineLimit(1)
             }
 
             if content.source != nil {
                 Circle()
-                    .fill(Color.secondary.opacity(0.5))
+                    .fill(Color.outlineVariant.opacity(0.5))
                     .frame(width: 4, height: 4)
             }
 
             Text(content.formattedDate)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(Color.onSurfaceSecondary)
 
             Spacer()
 
@@ -180,7 +180,7 @@ struct ArticleCardView: View {
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .italic()
-                .foregroundColor(.secondary)
+                .foregroundColor(Color.onSurfaceSecondary)
                 .padding(.vertical, 4)
         }
     }
@@ -209,7 +209,7 @@ struct ArticleCardView: View {
             Text("Key Points")
                 .font(.subheadline)
                 .fontWeight(.semibold)
-                .foregroundColor(.secondary)
+                .foregroundColor(Color.onSurfaceSecondary)
 
             if isLoadingKeyPoints {
                 skeletonKeyPoints
@@ -220,12 +220,12 @@ struct ArticleCardView: View {
             } else if let summary = content.summaryDisplayText {
                 Text(summary)
                     .font(.subheadline)
-                    .foregroundColor(.primary)
+                    .foregroundColor(Color.onSurface)
                     .lineLimit(4)
             } else {
                 Text("No summary available")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
                     .italic()
             }
         }
@@ -240,7 +240,7 @@ struct ArticleCardView: View {
 
             Text(text)
                 .font(.subheadline)
-                .foregroundColor(.primary)
+                .foregroundColor(Color.onSurface)
                 .multilineTextAlignment(.leading)
         }
     }
@@ -270,7 +270,7 @@ struct ArticleCardView: View {
             Button(action: onMarkRead) {
                 Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
                     .font(.system(size: 20, weight: .regular))
-                    .foregroundColor(content.isRead ? .brandTertiary : .secondary)
+                    .foregroundColor(content.isRead ? .brandTertiary : Color.onSurfaceSecondary)
             }
             .frame(width: 44, height: 44)
             .accessibilityLabel(content.isRead ? "Marked as read" : "Mark as read")
@@ -281,7 +281,7 @@ struct ArticleCardView: View {
             Button { showDownloadSheet = true } label: {
                 Image(systemName: "tray.and.arrow.down")
                     .font(.system(size: 20, weight: .regular))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
             }
             .frame(width: 44, height: 44)
             .accessibilityLabel("Download more from this series")
@@ -304,7 +304,7 @@ struct ArticleCardView: View {
         VStack(spacing: 0) {
             // Drag indicator
             Capsule()
-                .fill(Color.secondary.opacity(0.4))
+                .fill(Color.outlineVariant.opacity(0.4))
                 .frame(width: 36, height: 5)
                 .padding(.top, 8)
 
@@ -315,7 +315,7 @@ struct ArticleCardView: View {
                 Button { showDownloadSheet = false } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3)
-                        .foregroundColor(.secondary.opacity(0.6))
+                        .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
                         .frame(width: 44, height: 44)
                 }
             }
@@ -353,10 +353,10 @@ struct ArticleCardView: View {
                     Text("\(count) episodes")
                         .font(.body)
                         .fontWeight(.medium)
-                        .foregroundColor(.primary)
+                        .foregroundColor(Color.onSurface)
                     Text(subtitle)
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color.onSurfaceSecondary)
                 }
 
                 Spacer()

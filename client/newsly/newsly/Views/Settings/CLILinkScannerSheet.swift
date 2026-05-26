@@ -31,7 +31,7 @@ struct CLILinkScannerSheet: View {
 
                         Text("Allow camera access to scan the QR code shown by the Newsbuddy CLI.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.onSurfaceSecondary)
                             .multilineTextAlignment(.center)
 
                         Button("Open Settings") {
