@@ -36,7 +36,7 @@ struct StructuredSummaryView: View {
                 modernSection(
                     title: "Notable Quotes",
                     icon: "quote.opening",
-                    iconColor: .purple,
+                    iconColor: .terracottaDark,
                     isExpanded: $isQuotesExpanded
                 ) {
                     VStack(alignment: .leading, spacing: 16) {
@@ -52,7 +52,7 @@ struct StructuredSummaryView: View {
                 modernSection(
                     title: "Key Points",
                     icon: "list.bullet.rectangle",
-                    iconColor: .blue,
+                    iconColor: .terracottaPrimary,
                     isExpanded: $isKeyPointsExpanded
                 ) {
                     VStack(alignment: .leading, spacing: SummaryDesign.itemSpacing) {
@@ -74,7 +74,7 @@ struct StructuredSummaryView: View {
                 modernSection(
                     title: "Questions to Explore",
                     icon: "questionmark.circle",
-                    iconColor: .orange,
+                    iconColor: .summaryQuestionAccent,
                     isExpanded: $isQuestionsExpanded
                 ) {
                     VStack(alignment: .leading, spacing: SummaryDesign.itemSpacing) {
@@ -90,7 +90,7 @@ struct StructuredSummaryView: View {
                 modernSection(
                     title: "Counter Arguments",
                     icon: "arrow.left.arrow.right",
-                    iconColor: .red,
+                    iconColor: .summaryCounterpointAccent,
                     isExpanded: $isCounterArgsExpanded
                 ) {
                     VStack(alignment: .leading, spacing: SummaryDesign.itemSpacing) {
@@ -151,6 +151,7 @@ struct StructuredSummaryView: View {
                         Image(systemName: icon)
                             .font(.subheadline)
                             .foregroundColor(iconColor)
+                            .accessibilityHidden(true)
                         Text(title)
                             .font(.subheadline)
                             .fontWeight(.semibold)
@@ -198,7 +199,7 @@ struct StructuredSummaryView: View {
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [.purple.opacity(0.8), .purple.opacity(0.4)],
+                        colors: [Color.terracottaPrimary.opacity(0.8), Color.terracottaPrimary.opacity(0.4)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -219,7 +220,7 @@ struct StructuredSummaryView: View {
                 .frame(width: 22, height: 22)
                 .background(
                     Circle()
-                        .fill(Color.orange.opacity(0.8))
+                        .fill(Color.terracottaDark.opacity(0.8))
                 )
 
             Text(question)
@@ -235,7 +236,7 @@ struct StructuredSummaryView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.caption)
-                .foregroundColor(.orange)
+                .foregroundColor(.summaryCounterpointAccent)
                 .frame(width: 16)
                 .padding(.top, 2)
 
@@ -255,7 +256,7 @@ struct StructuredSummaryView: View {
             .foregroundColor(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color(.tertiarySystemFill))
+            .background(Color.surfaceTertiary)
             .clipShape(Capsule())
             .contextMenu {
                 if contentId != nil {
@@ -302,11 +303,11 @@ struct StructuredSummaryView: View {
     private func categoryColor(for category: String) -> Color {
         switch category.lowercased() {
         case "key_finding":
-            return .green
+            return .brandSecondary
         case "warning":
-            return .red
+            return .statusDestructive
         case "recommendation":
-            return .blue
+            return .summaryQuestionAccent
         default:
             return .gray
         }
@@ -325,11 +326,11 @@ struct ModernKeyPointRow: View {
     private func categoryConfig(for category: String) -> (color: Color, icon: String) {
         switch category.lowercased() {
         case "key_finding":
-            return (.green, "checkmark.circle.fill")
+            return (.brandSecondary, "checkmark.circle.fill")
         case "warning":
-            return (.red, "exclamationmark.triangle.fill")
+            return (.statusDestructive, "exclamationmark.triangle.fill")
         case "recommendation":
-            return (.blue, "lightbulb.fill")
+            return (.summaryQuestionAccent, "lightbulb.fill")
         default:
             return (.secondary, "circle.fill")
         }
@@ -339,7 +340,7 @@ struct ModernKeyPointRow: View {
         if let category = point.category {
             return categoryConfig(for: category).color
         }
-        return .blue.opacity(0.7)
+        return Color.terracottaPrimary.opacity(0.7)
     }
 
     var body: some View {

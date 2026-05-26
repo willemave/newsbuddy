@@ -9,6 +9,7 @@ import SwiftUI
 
 struct EditorialMastheadHeader: View {
     let title: String
+    var subtitle: String? = nil
     var date: Date = Date()
     var trailingAccessory: AnyView? = nil
 
@@ -39,6 +40,14 @@ struct EditorialMastheadHeader: View {
                 if let trailingAccessory {
                     trailingAccessory
                 }
+            }
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.terracottaHeadlineSmall)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, Spacing.screenHorizontal)

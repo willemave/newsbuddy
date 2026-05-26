@@ -30,30 +30,30 @@ struct DiscoveryLoadingStateView: View {
         VStack(alignment: .leading, spacing: 10) {
             // Headline skeleton
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(.tertiarySystemFill))
+                .fill(Color.surfaceTertiary)
                 .frame(height: 18)
                 .frame(maxWidth: .infinity)
                 .opacity(shimmer ? 0.4 : 0.8)
 
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(.tertiarySystemFill))
+                .fill(Color.surfaceTertiary)
                 .frame(width: 200, height: 18)
                 .opacity(shimmer ? 0.3 : 0.7)
 
             // Metadata bar skeleton
             HStack(spacing: 6) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(.tertiarySystemFill))
+                    .fill(Color.surfaceTertiary)
                     .frame(width: 10, height: 10)
                     .opacity(shimmer ? 0.4 : 0.7)
 
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(.tertiarySystemFill))
+                    .fill(Color.surfaceTertiary)
                     .frame(width: 50, height: 8)
                     .opacity(shimmer ? 0.3 : 0.6)
 
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(.tertiarySystemFill))
+                    .fill(Color.surfaceTertiary)
                     .frame(width: 80, height: 8)
                     .opacity(shimmer ? 0.3 : 0.6)
 
@@ -61,7 +61,7 @@ struct DiscoveryLoadingStateView: View {
             }
         }
         .padding(16)
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Color.surfaceSecondary)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.editorialBorder, lineWidth: 1)
@@ -164,7 +164,7 @@ struct DiscoveryEmptyStateView: View {
         VStack(spacing: 20) {
             Image(systemName: "sparkles")
                 .font(.system(size: 48, weight: .light))
-                .foregroundStyle(Color.accentColor.opacity(0.7))
+                .foregroundStyle(Color.brandSecondary.opacity(0.72))
 
             VStack(spacing: 6) {
                 Text("Discover New Content")

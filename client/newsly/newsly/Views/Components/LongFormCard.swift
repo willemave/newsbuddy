@@ -10,8 +10,8 @@ import UIKit
 
 private enum LongFormCardDesign {
     static let imageHeight: CGFloat = 220
-    static let headlineFont = UIFont(name: "Newsreader", size: 28) ?? UIFont.systemFont(ofSize: 28, weight: .regular)
-    static let summaryFont = UIFont(name: "Inter", size: 14) ?? UIFont.systemFont(ofSize: 14, weight: .regular)
+    static let headlineFont = UIFont.appEditorialHeadline
+    static let summaryFont = UIFont.appEditorialSummary
 }
 
 struct LongFormCard: View {
@@ -105,14 +105,14 @@ struct LongFormCard: View {
                     HStack(spacing: 8) {
                         Image(systemName: contentTypeIcon)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .foregroundStyle(Color.brandSecondary)
                             .frame(width: 18, height: 18)
                             .accessibilityHidden(true)
 
                         Text(sourceLabel)
                             .font(.terracottaBodySmall)
                             .tracking(0.5)
-                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .foregroundStyle(Color.platformLabel)
                             .lineLimit(1)
                     }
                     .contentShape(Rectangle())
@@ -129,21 +129,24 @@ struct LongFormCard: View {
                         } label: {
                             Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
                                 .font(.system(size: 20))
-                                .foregroundStyle(content.isRead ? Color.onSurfaceSecondary.opacity(0.5) : Color.onSurfaceSecondary)
+                                .foregroundStyle(content.isRead ? Color.brandTertiary : Color.onSurfaceSecondary)
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("long.action.mark_read.\(content.id)")
+                        .accessibilityLabel(content.isRead ? "Marked as read" : "Mark as read")
 
                         Button {
                             onToggleKnowledgeSave?()
                         } label: {
                             KnowledgeSaveIcon(
                                 isSaved: content.isSavedToKnowledge,
-                                unsavedColor: Color.onSurfaceSecondary
+                                unsavedColor: Color.onSurfaceSecondary,
+                                badgeColor: Color.brandTertiary
                             )
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("long.action.knowledge.\(content.id)")
+                        .accessibilityLabel(content.isSavedToKnowledge ? "Remove from Knowledge" : "Save to Knowledge")
                     }
                 }
                 .padding(.top, 4)
@@ -163,7 +166,7 @@ struct LongFormCard: View {
                 if let audioErrorMessage {
                     Text(audioErrorMessage)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.statusDestructive)
                         .lineLimit(2)
                         .padding(.top, 8)
                 }

@@ -38,7 +38,8 @@ struct InterleavedSummaryView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "lightbulb")
                         .font(.subheadline)
-                        .foregroundColor(.orange)
+                        .foregroundColor(.terracottaPrimary)
+                        .accessibilityHidden(true)
                     Text("Takeaway")
                         .font(.subheadline)
                         .fontWeight(.semibold)
@@ -90,7 +91,7 @@ struct InterleavedSummaryView: View {
                     Rectangle()
                         .fill(
                             LinearGradient(
-                                colors: [.purple.opacity(0.8), .purple.opacity(0.4)],
+                                colors: [Color.terracottaPrimary.opacity(0.8), Color.terracottaPrimary.opacity(0.4)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )

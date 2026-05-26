@@ -50,10 +50,10 @@ struct NewsItemDetailView: View {
                         Label("Comments", systemImage: "bubble.left.and.bubble.right")
                             .font(.caption)
                             .fontWeight(.medium)
-                            .foregroundColor(.orange)
+                            .foregroundColor(.brandSecondary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(Color.orange.opacity(0.1))
+                            .background(Color.brandSecondary.opacity(0.12))
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -66,7 +66,7 @@ struct NewsItemDetailView: View {
                     HStack(alignment: .firstTextBaseline, spacing: NewsItemDetailDesign.bulletTextSpacing) {
                         Text(verbatim: "\u{2022}")
                             .font(.callout.weight(.semibold))
-                            .foregroundColor(Color.accentColor.opacity(0.85))
+                            .foregroundColor(Color.brandPrimary.opacity(0.85))
                             .frame(width: NewsItemDetailDesign.bulletMarkerWidth, alignment: .center)
 
                         Text(point)

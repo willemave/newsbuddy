@@ -88,23 +88,23 @@ struct DiscoveryPersonalizeSheet: View {
                     viewModel.skipToDefaults()
                 }
                 .font(.callout)
-                .foregroundColor(.watercolorSlate.opacity(0.5))
+                .foregroundColor(.onboardingText.opacity(0.5))
 
                 Button("Cancel") {
                     viewModel.cancelPersonalization()
                     dismiss()
                 }
                 .font(.callout)
-                .foregroundColor(.watercolorSlate.opacity(0.4))
+                .foregroundColor(.onboardingText.opacity(0.4))
             }
             .padding(.bottom, 16)
 
-            if let error = viewModel.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .padding(.bottom, 8)
-            }
+                if let error = viewModel.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.statusDestructive)
+                        .padding(.bottom, 8)
+                }
         }
         .padding(.horizontal, 24)
         .task {
@@ -116,10 +116,10 @@ struct DiscoveryPersonalizeSheet: View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.2)
-                .tint(.watercolorSlate)
+                .tint(.onboardingText)
             Text("Processing your interests...")
                 .font(.callout)
-                .foregroundColor(.watercolorSlate.opacity(0.6))
+                .foregroundColor(.onboardingText.opacity(0.6))
         }
     }
 
@@ -138,10 +138,10 @@ struct DiscoveryPersonalizeSheet: View {
                 if viewModel.discoveryLanes.isEmpty {
                     ProgressView()
                         .scaleEffect(1.2)
-                        .tint(.watercolorSlate)
+                        .tint(.onboardingText)
                     Text("Preparing search...")
                         .font(.callout)
-                        .foregroundColor(.watercolorSlate.opacity(0.6))
+                        .foregroundColor(.onboardingText.opacity(0.6))
                 } else {
                     VStack(spacing: 12) {
                         ForEach(viewModel.discoveryLanes) { lane in
@@ -158,12 +158,12 @@ struct DiscoveryPersonalizeSheet: View {
             VStack(spacing: 12) {
                 Text("Usually takes under a minute")
                     .font(.caption)
-                    .foregroundColor(.watercolorSlate.opacity(0.5))
+                    .foregroundColor(.onboardingText.opacity(0.5))
 
                 if let message = viewModel.discoveryErrorMessage {
                     Text(message)
                         .font(.caption)
-                        .foregroundColor(.orange)
+                        .foregroundColor(.brandPrimary)
                 }
 
                 Button("Cancel") {
@@ -171,7 +171,7 @@ struct DiscoveryPersonalizeSheet: View {
                     dismiss()
                 }
                 .font(.callout)
-                .foregroundColor(.watercolorSlate.opacity(0.4))
+                .foregroundColor(.onboardingText.opacity(0.4))
             }
             .padding(.bottom, 16)
         }
@@ -187,10 +187,10 @@ struct DiscoveryPersonalizeSheet: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Your picks")
                             .font(.title2.bold())
-                            .foregroundColor(.watercolorSlate)
+                            .foregroundColor(.onboardingText)
                         Text("Tap to deselect any you don't want.")
                             .font(.callout)
-                            .foregroundColor(.watercolorSlate.opacity(0.6))
+                            .foregroundColor(.onboardingText.opacity(0.6))
                     }
                     .padding(.bottom, 20)
 
@@ -200,7 +200,7 @@ struct DiscoveryPersonalizeSheet: View {
                     {
                         Text("No matches found — we'll add popular defaults.")
                             .font(.callout)
-                            .foregroundColor(.watercolorSlate.opacity(0.6))
+                            .foregroundColor(.onboardingText.opacity(0.6))
                             .padding(.vertical, 20)
                     }
 
@@ -248,8 +248,8 @@ struct DiscoveryPersonalizeSheet: View {
                         .font(.callout.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .foregroundColor(.watercolorBase)
-                        .background(Color.watercolorSlate)
+                        .foregroundColor(.onboardingSurface)
+                        .background(Color.onboardingText)
                         .clipShape(RoundedRectangle(cornerRadius: 24))
                 }
                 .buttonStyle(.plain)
@@ -260,12 +260,12 @@ struct DiscoveryPersonalizeSheet: View {
                     dismiss()
                 }
                 .font(.callout)
-                .foregroundColor(.watercolorSlate.opacity(0.4))
+                .foregroundColor(.onboardingText.opacity(0.4))
 
                 if let error = viewModel.errorMessage {
                     Text(error)
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundColor(.statusDestructive)
                 }
             }
             .padding(.horizontal, 24)
@@ -280,10 +280,10 @@ struct DiscoveryPersonalizeSheet: View {
         VStack(spacing: 8) {
             Text(title)
                 .font(.title2.bold())
-                .foregroundColor(.watercolorSlate)
+                .foregroundColor(.onboardingText)
             Text(subtitle)
                 .font(.callout)
-                .foregroundColor(.watercolorSlate.opacity(0.6))
+                .foregroundColor(.onboardingText.opacity(0.6))
         }
         .padding(.top, 48)
     }
@@ -299,10 +299,10 @@ struct DiscoveryPersonalizeSheet: View {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.watercolorSlate.opacity(0.5))
+                    .foregroundColor(.onboardingText.opacity(0.5))
                 Text(title)
                     .font(.editorialMeta)
-                    .foregroundColor(.watercolorSlate.opacity(0.5))
+                    .foregroundColor(.onboardingText.opacity(0.5))
                     .tracking(1.5)
             }
             .padding(.top, 16)

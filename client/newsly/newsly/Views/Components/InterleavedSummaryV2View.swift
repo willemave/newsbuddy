@@ -25,7 +25,7 @@ struct InterleavedSummaryV2View: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if !summary.keyPoints.isEmpty {
-                sectionHeader("Key Points", icon: "list.bullet.rectangle", tint: .blue)
+                sectionHeader("Key Points", icon: "list.bullet.rectangle", tint: .terracottaPrimary)
                 VStack(alignment: .leading, spacing: InterleavedV2Design.itemSpacing) {
                     ForEach(summary.keyPoints, id: \.text) { point in
                         bulletRow(text: point.text)
@@ -34,7 +34,7 @@ struct InterleavedSummaryV2View: View {
             }
 
             if !summary.quotes.isEmpty {
-                sectionHeader("Notable Quotes", icon: "quote.opening", tint: .purple)
+                sectionHeader("Notable Quotes", icon: "quote.opening", tint: .terracottaDark)
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(summary.quotes, id: \.text) { quote in
                         quoteCard(quote)
@@ -43,7 +43,7 @@ struct InterleavedSummaryV2View: View {
             }
 
             if !summary.topics.isEmpty {
-                sectionHeader("Topics", icon: "sparkles", tint: .orange)
+                sectionHeader("Topics", icon: "sparkles", tint: .summaryQuestionAccent)
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(summary.topics) { topic in
                         VStack(alignment: .leading, spacing: 8) {
@@ -63,7 +63,7 @@ struct InterleavedSummaryV2View: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                sectionHeader("Takeaway", icon: "lightbulb", tint: .yellow, uppercase: false)
+                sectionHeader("Takeaway", icon: "lightbulb", tint: .terracottaPrimary, uppercase: false)
                 Text(summary.takeaway)
                     .font(.callout)
                     .foregroundColor(.primary.opacity(0.9))
@@ -83,6 +83,7 @@ struct InterleavedSummaryV2View: View {
             Image(systemName: icon)
                 .font(.subheadline)
                 .foregroundColor(tint)
+                .accessibilityHidden(true)
             Text(title)
                 .font(.subheadline)
                 .fontWeight(.semibold)
@@ -128,7 +129,7 @@ struct InterleavedSummaryV2View: View {
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [.purple.opacity(0.8), .purple.opacity(0.4)],
+                        colors: [Color.terracottaPrimary.opacity(0.8), Color.terracottaPrimary.opacity(0.4)],
                         startPoint: .top,
                         endPoint: .bottom
                     )

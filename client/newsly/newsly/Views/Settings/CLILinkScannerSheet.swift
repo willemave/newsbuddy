@@ -24,7 +24,7 @@ struct CLILinkScannerSheet: View {
                     VStack(spacing: 16) {
                         Image(systemName: "camera.viewfinder")
                             .font(.system(size: 44, weight: .medium))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.brandPrimary)
 
                         Text("Camera access is required")
                             .font(.headline)
@@ -178,4 +178,3 @@ private final class QRCodeScannerViewController: UIViewController, AVCaptureMeta
         onCodeScanned?(code)
     }
 }
-

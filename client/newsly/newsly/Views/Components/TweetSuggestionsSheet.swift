@@ -139,20 +139,20 @@ struct TweetSuggestionsSheet: View {
             }
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color.surfaceSecondary)
         .cornerRadius(12)
     }
 
     private var creativityColor: Color {
         switch viewModel.creativity {
         case 1...3:
-            return .blue
+            return .brandSecondary
         case 4...7:
-            return .orange
+            return .brandPrimary
         case 8...10:
-            return .purple
+            return .brandTertiary
         default:
-            return .orange
+            return .brandPrimary
         }
     }
 
@@ -168,7 +168,7 @@ struct TweetSuggestionsSheet: View {
         } label: {
             Image(systemName: viewModel.isRecording ? "stop.circle.fill" : "mic.circle.fill")
                 .font(.system(size: 40))
-                .foregroundColor(viewModel.isRecording ? .red : .blue)
+                .foregroundColor(viewModel.isRecording ? .statusDestructive : .brandPrimary)
                 .symbolEffect(.pulse, isActive: viewModel.isRecording)
         }
         .disabled(viewModel.isTranscribing || viewModel.isLoading || viewModel.isRegenerating)
@@ -209,7 +209,7 @@ struct TweetSuggestionsSheet: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.largeTitle)
-                .foregroundColor(.orange)
+                .foregroundColor(.brandPrimary)
             Text(message)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
@@ -246,7 +246,7 @@ struct TweetSuggestionsSheet: View {
             .padding()
         }
         .buttonStyle(.borderedProminent)
-        .tint(.blue)
+        .tint(Color.brandPrimary)
         .disabled(viewModel.isLoading || viewModel.isRegenerating)
     }
 }
@@ -284,7 +284,7 @@ struct TweetSuggestionCard: View {
             HStack {
                 Text("\(suggestion.text.count)/280")
                     .font(.caption)
-                    .foregroundColor(suggestion.text.count > 280 ? .red : .secondary)
+                    .foregroundColor(suggestion.text.count > 280 ? .statusDestructive : .secondary)
 
                 Spacer()
 
@@ -309,19 +309,19 @@ struct TweetSuggestionCard: View {
                         .fontWeight(.medium)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.blue)
+                    .tint(Color.brandPrimary)
                 }
             }
         }
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.secondarySystemBackground))
+                .fill(Color.surfaceSecondary)
                 .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+                .stroke(isSelected ? Color.brandPrimary : Color.clear, lineWidth: 2)
         )
         .onTapGesture {
             onSelect()
@@ -331,11 +331,11 @@ struct TweetSuggestionCard: View {
     private func styleColor(for label: String) -> Color {
         let lowercased = label.lowercased()
         if lowercased.contains("insight") || lowercased.contains("factual") {
-            return .blue
+            return .brandSecondary
         } else if lowercased.contains("provocative") || lowercased.contains("bold") {
-            return .purple
+            return .brandTertiary
         } else if lowercased.contains("reflective") || lowercased.contains("thought") {
-            return .teal
+            return .brandPrimary
         } else {
             return .gray
         }

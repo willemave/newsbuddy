@@ -46,7 +46,7 @@ struct CustomNarrationPickerSheet: View {
                         if let loadError {
                             Text(loadError)
                                 .font(.terracottaBodySmall)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(Color.statusDestructive)
                                 .appRow(.compact)
                                 .appListRow()
                         }
@@ -105,11 +105,11 @@ struct CustomNarrationPickerSheet: View {
         VStack(spacing: 12) {
             Image(systemName: "waveform")
                 .font(.system(size: 34, weight: .medium))
-                .foregroundStyle(loadError == nil ? Color.onSurfaceSecondary : .red)
+                .foregroundStyle(loadError == nil ? Color.onSurfaceSecondary : Color.statusDestructive)
 
             Text(loadError ?? "No articles or podcasts")
                 .font(.terracottaHeadlineSmall)
-                .foregroundStyle(loadError == nil ? Color.onSurface : .red)
+                .foregroundStyle(loadError == nil ? Color.onSurface : Color.statusDestructive)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)

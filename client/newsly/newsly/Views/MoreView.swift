@@ -33,7 +33,7 @@ struct MoreView: View {
                             .foregroundStyle(Color.onSurface)
                         Spacer()
                         if submissionsViewModel.unseenCount > 0 {
-                            CountBadge(count: submissionsViewModel.unseenCount, color: .red)
+                            CountBadge(count: submissionsViewModel.unseenCount, color: .brandTertiary)
                         }
                     }
                     .frame(minHeight: RowMetrics.compactHeight)
@@ -48,7 +48,7 @@ struct MoreView: View {
                             .foregroundStyle(Color.onSurface)
                         Spacer()
                         if processingCountService.processingCount > 0 {
-                            CountBadge(count: processingCountService.processingCount, color: .teal)
+                            CountBadge(count: processingCountService.processingCount, color: .brandPrimary)
                         }
                     }
                     .frame(minHeight: RowMetrics.compactHeight)

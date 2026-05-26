@@ -35,7 +35,7 @@ struct SettingsRow<Accessory: View>: View {
 
     init(
         icon: String,
-        iconColor: Color = .accentColor,
+        iconColor: Color = .brandPrimary,
         title: String,
         subtitle: String? = nil,
         @ViewBuilder accessory: @escaping () -> Accessory
@@ -77,7 +77,7 @@ struct SettingsRow<Accessory: View>: View {
 extension SettingsRow where Accessory == NavigationChevron {
     init(
         icon: String,
-        iconColor: Color = .accentColor,
+        iconColor: Color = .brandPrimary,
         title: String,
         subtitle: String? = nil
     ) {
@@ -110,7 +110,7 @@ struct SettingsToggleRow: View {
 
     init(
         icon: String,
-        iconColor: Color = .accentColor,
+        iconColor: Color = .brandPrimary,
         title: String,
         subtitle: String? = nil,
         isOn: Binding<Bool>
@@ -150,7 +150,7 @@ struct SettingsToggleRow: View {
 
 #Preview {
     VStack(spacing: 0) {
-        SettingsRow(icon: "books.vertical", iconColor: .yellow, title: "Saved")
+        SettingsRow(icon: "books.vertical", iconColor: .brandTertiary, title: "Saved")
 
         RowDivider()
 
@@ -160,7 +160,7 @@ struct SettingsToggleRow: View {
 
         SettingsToggleRow(
             icon: "eye",
-            iconColor: .blue,
+            iconColor: .brandSecondary,
             title: "Show Read Articles",
             subtitle: "Display both read and unread",
             isOn: .constant(true)

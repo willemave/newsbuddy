@@ -12,30 +12,18 @@ struct PlatformIcon: View {
     
     var body: some View {
         Group {
-            if let platform = platform {
-                switch platform.lowercased() {
-                case "hackernews":
-                    Text("Y")
+            if let metadata = SourceVisualMetadata.platform(platform) {
+                switch metadata.glyph {
+                case .text(let value):
+                    Text(value)
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.orange)
+                        .foregroundColor(metadata.color)
                         .frame(width: 18, height: 18)
-                        .background(Color.orange.opacity(0.2))
+                        .background(metadata.color.opacity(0.16))
                         .clipShape(RoundedRectangle(cornerRadius: 3))
-                case "reddit":
-                    Image(systemName: "arrow.up.circle.fill")
-                        .foregroundColor(.orange)
-                case "substack":
-                    Image(systemName: "doc.text.fill")
-                        .foregroundColor(.orange)
-                case "podcast":
-                    Image(systemName: "mic.fill")
-                        .foregroundColor(.purple)
-                case "twitter":
-                    Image(systemName: "bird.fill")
-                        .foregroundColor(.blue)
-                default:
-                    Image(systemName: "link.circle.fill")
-                        .foregroundColor(.gray)
+                case .system(let name):
+                    Image(systemName: name)
+                        .foregroundColor(metadata.color)
                 }
             }
         }

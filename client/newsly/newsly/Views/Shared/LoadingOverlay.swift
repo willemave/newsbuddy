@@ -13,10 +13,10 @@ struct LoadingOverlay: View {
     var body: some View {
         VStack(spacing: 10) {
             ProgressView()
-                .tint(.watercolorSlate)
+                .tint(.onboardingText)
             Text(message)
                 .font(.callout)
-                .foregroundColor(.watercolorSlate.opacity(0.6))
+                .foregroundColor(.onboardingText.opacity(0.6))
         }
         .padding(20)
         .glassCard(cornerRadius: 14)

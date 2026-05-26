@@ -67,7 +67,7 @@ struct LongFormActionsView: View {
     private func errorText(_ message: String) -> some View {
         Text(message)
             .font(.terracottaBodySmall)
-            .foregroundStyle(.red)
+            .foregroundStyle(Color.statusDestructive)
             .lineLimit(2)
             .padding(.horizontal, Spacing.screenHorizontal)
     }

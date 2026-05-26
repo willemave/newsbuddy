@@ -8,9 +8,9 @@ import SwiftUI
 struct KnowledgeSaveIcon: View {
     let isSaved: Bool
     var size: CGFloat = 20
-    var savedColor: Color = .terracottaPrimary
+    var savedColor: Color = .brandTertiary
     var unsavedColor: Color = .secondary
-    var badgeColor: Color = .terracottaPrimary
+    var badgeColor: Color = .brandTertiary
 
     var body: some View {
         ZStack(alignment: .topTrailing) {

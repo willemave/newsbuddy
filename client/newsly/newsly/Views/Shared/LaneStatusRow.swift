@@ -19,7 +19,7 @@ struct LaneStatusRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(lane.name)
                         .font(.callout.weight(isCompleted ? .regular : .medium))
-                        .foregroundColor(.watercolorSlate.opacity(isCompleted ? 0.7 : 0.95))
+                        .foregroundColor(.onboardingText.opacity(isCompleted ? 0.7 : 0.95))
                         .lineLimit(1)
 
                     Spacer(minLength: 0)
@@ -28,19 +28,19 @@ struct LaneStatusRow: View {
                         Text("\(lane.completedQueries)/\(lane.queryCount)")
                             .font(.caption2.weight(.semibold))
                             .monospacedDigit()
-                            .foregroundColor(.watercolorSlate.opacity(0.55))
+                            .foregroundColor(.onboardingText.opacity(0.55))
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
                             .background(
                                 Capsule(style: .continuous)
-                                    .fill(Color.watercolorSlate.opacity(0.07))
+                                    .fill(Color.onboardingText.opacity(0.07))
                             )
                             .transition(.opacity)
                     }
                 }
 
                 if showsProgressBar {
-                    WatercolorProgressBar(
+                    OnboardingProgressBar(
                         progress: laneProgress,
                         isActive: lane.status == "processing"
                     )
@@ -49,7 +49,7 @@ struct LaneStatusRow: View {
                 } else if !isCompleted {
                     Text(statusLabel)
                         .font(.caption)
-                        .foregroundColor(.watercolorSlate.opacity(0.55))
+                        .foregroundColor(.onboardingText.opacity(0.55))
                         .transition(.opacity)
                 }
             }
@@ -77,18 +77,18 @@ struct LaneStatusRow: View {
             case "completed":
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.watercolorPaleEmerald)
+                    .foregroundColor(.statusSuccess)
                     .transition(.scale(scale: 0.4).combined(with: .opacity))
             case "failed":
                 Image(systemName: "exclamationmark")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.watercolorDiffusedPeach)
+                    .foregroundColor(.statusDestructive)
             case "processing":
                 LanePulsingDot()
             default:
                 Circle()
                     .strokeBorder(
-                        Color.watercolorSlate.opacity(0.28),
+                        Color.onboardingText.opacity(0.28),
                         style: StrokeStyle(lineWidth: 1.2, dash: [2, 2.5])
                     )
                     .frame(width: 12, height: 12)
@@ -98,10 +98,10 @@ struct LaneStatusRow: View {
 
     private var indicatorBackground: Color {
         switch lane.status {
-        case "completed": return Color.watercolorPaleEmerald.opacity(0.16)
-        case "failed": return Color.watercolorDiffusedPeach.opacity(0.18)
-        case "processing": return Color.watercolorMistyBlue.opacity(0.14)
-        default: return Color.watercolorSlate.opacity(0.05)
+        case "completed": return Color.statusSuccess.opacity(0.16)
+        case "failed": return Color.statusDestructive.opacity(0.14)
+        case "processing": return Color.statusProcessing.opacity(0.14)
+        default: return Color.onboardingText.opacity(0.05)
         }
     }
 
@@ -143,7 +143,7 @@ struct LaneStatusRow: View {
     }
 }
 
-private struct WatercolorProgressBar: View {
+private struct OnboardingProgressBar: View {
     let progress: Double
     let isActive: Bool
 
@@ -157,14 +157,14 @@ private struct WatercolorProgressBar: View {
 
             ZStack(alignment: .leading) {
                 Capsule(style: .continuous)
-                    .fill(Color.watercolorSlate.opacity(0.08))
+                    .fill(Color.onboardingText.opacity(0.08))
 
                 Capsule(style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [
-                                Color.watercolorMistyBlue.opacity(0.85),
-                                Color.watercolorPaleEmerald.opacity(0.9),
+                                Color.statusProcessing.opacity(0.85),
+                                Color.onboardingSelectionAccent.opacity(0.9),
                             ],
                             startPoint: .leading,
                             endPoint: .trailing
@@ -218,13 +218,13 @@ private struct LanePulsingDot: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(Color.watercolorMistyBlue.opacity(0.45))
+                .fill(Color.statusProcessing.opacity(0.45))
                 .frame(width: 14, height: 14)
                 .scaleEffect(isPulsing ? 1.6 : 0.85)
                 .opacity(isPulsing ? 0 : 0.65)
 
             Circle()
-                .fill(Color.watercolorMistyBlue)
+                .fill(Color.statusProcessing)
                 .frame(width: 7, height: 7)
         }
         .onAppear {

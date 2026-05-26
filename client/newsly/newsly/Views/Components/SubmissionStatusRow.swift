@@ -103,9 +103,9 @@ struct SubmissionStatusRow: View {
     private var statusColor: Color {
         switch submission.status.lowercased() {
         case "failed":
-            return .red.opacity(0.85)
+            return .statusDestructive.opacity(0.9)
         case "skipped":
-            return .orange.opacity(0.85)
+            return .brandTertiary.opacity(0.9)
         case "processing":
             return .terracottaPrimary
         case "completed":

@@ -49,7 +49,7 @@ struct RecentlyReadView: View {
                                 } label: {
                                     Label("Mark as Unread", systemImage: "circle")
                                 }
-                                .tint(.orange)
+                                .tint(Color.brandTertiary)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button {
@@ -62,7 +62,7 @@ struct RecentlyReadView: View {
                                         systemImage: content.isSavedToKnowledge ? "books.vertical.fill" : "books.vertical"
                                     )
                                 }
-                                .tint(content.isSavedToKnowledge ? .red : .terracottaPrimary)
+                                .tint(content.isSavedToKnowledge ? Color.brandTertiary : Color.brandPrimary)
                             }
                             .onAppear {
                                 if content.id == viewModel.contents.last?.id {

@@ -28,7 +28,7 @@ struct DebugMenuView: View {
                             .foregroundColor(.secondary)
                         Text(appSettings.baseURL)
                             .font(.system(.caption, design: .monospaced))
-                            .foregroundColor(.blue)
+                            .foregroundColor(.brandSecondary)
                             .textSelection(.enabled)
                     }
 
@@ -69,9 +69,9 @@ struct DebugMenuView: View {
                         Text("Access Token")
                         Spacer()
                         if KeychainManager.shared.getToken(key: .accessToken) != nil {
-                            Text("Stored ✓").foregroundColor(.green)
+                            Text("Stored ✓").foregroundColor(.brandSecondary)
                         } else {
-                            Text("None").foregroundColor(.red)
+                            Text("None").foregroundColor(.statusDestructive)
                         }
                     }
 
@@ -79,9 +79,9 @@ struct DebugMenuView: View {
                         Text("Refresh Token")
                         Spacer()
                         if KeychainManager.shared.getToken(key: .refreshToken) != nil {
-                            Text("Stored ✓").foregroundColor(.green)
+                            Text("Stored ✓").foregroundColor(.brandSecondary)
                         } else {
-                            Text("None").foregroundColor(.red)
+                            Text("None").foregroundColor(.statusDestructive)
                         }
                     }
                 }
@@ -104,7 +104,7 @@ struct DebugMenuView: View {
                     Button("Reset Auth (Clear Tokens)") {
                         resetAuth()
                     }
-                    .foregroundColor(.red)
+                    .foregroundColor(.statusDestructive)
                 }
             }
             .navigationTitle("🐛 Debug Menu")
@@ -145,11 +145,11 @@ struct DebugMenuView: View {
     private var authStateText: some View {
         switch authViewModel.authState {
         case .loading:
-            return Text("Loading...").foregroundColor(.orange)
+            return Text("Loading...").foregroundColor(.brandPrimary)
         case .unauthenticated:
-            return Text("Unauthenticated").foregroundColor(.red)
+            return Text("Unauthenticated").foregroundColor(.statusDestructive)
         case .authenticated(let user):
-            return Text("Authenticated: \(user.email)").foregroundColor(.green)
+            return Text("Authenticated: \(user.email)").foregroundColor(.brandSecondary)
         }
     }
 

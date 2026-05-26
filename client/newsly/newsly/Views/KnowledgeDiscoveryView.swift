@@ -227,7 +227,7 @@ struct KnowledgeDiscoveryView: View {
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(Color.accentColor)
+            .background(Color.brandPrimary)
             .cornerRadius(12)
         }
         .buttonStyle(.plain)
@@ -286,7 +286,7 @@ struct KnowledgeDiscoveryView: View {
     private var newSuggestionsBanner: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(Color.accentColor)
+                .fill(Color.brandTertiary)
                 .frame(width: 6, height: 6)
 
             Text("New suggestions available")
@@ -354,7 +354,7 @@ private struct PodcastEpisodeSearchCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "waveform")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.orange)
+                    .foregroundColor(.brandTertiary)
 
                 if let podcastTitle = result.podcastTitle, !podcastTitle.isEmpty {
                     Text(podcastTitle.uppercased())
@@ -386,7 +386,7 @@ private struct PodcastEpisodeSearchCard: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .tint(.orange)
+                .tint(Color.brandPrimary)
 
                 Button(action: onOpen) {
                     Image(systemName: "safari")

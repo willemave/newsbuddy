@@ -107,7 +107,7 @@ struct ArticleCardView: View {
         Rectangle()
             .fill(
                 LinearGradient(
-                    colors: [Color(.systemGray5), Color(.systemGray6)],
+                    colors: [Color.surfaceTertiary, Color.surfaceContainer],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -168,7 +168,7 @@ struct ArticleCardView: View {
             if content.isRead {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.caption)
-                    .foregroundColor(.green)
+                    .foregroundColor(.brandTertiary)
             }
         }
     }
@@ -193,10 +193,10 @@ struct ArticleCardView: View {
                     Text(topic)
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(.brandSecondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(Color.accentColor.opacity(0.12))
+                        .background(Color.brandSecondary.opacity(0.12))
                         .cornerRadius(12)
                 }
             }
@@ -234,7 +234,7 @@ struct ArticleCardView: View {
     private func keyPointRow(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Circle()
-                .fill(Color.accentColor)
+                .fill(Color.brandPrimary)
                 .frame(width: 6, height: 6)
                 .padding(.top, 6)
 
@@ -249,7 +249,7 @@ struct ArticleCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(0..<3, id: \.self) { index in
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.systemGray4))
+                    .fill(Color.surfaceTertiary)
                     .frame(height: 14)
                     .frame(maxWidth: skeletonWidth(for: index))
             }
@@ -270,9 +270,10 @@ struct ArticleCardView: View {
             Button(action: onMarkRead) {
                 Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
                     .font(.system(size: 20, weight: .regular))
-                    .foregroundColor(content.isRead ? .green : .secondary)
+                    .foregroundColor(content.isRead ? .brandTertiary : .secondary)
             }
             .frame(width: 44, height: 44)
+            .accessibilityLabel(content.isRead ? "Marked as read" : "Mark as read")
 
             Spacer()
 
@@ -283,6 +284,7 @@ struct ArticleCardView: View {
                     .foregroundColor(.secondary)
             }
             .frame(width: 44, height: 44)
+            .accessibilityLabel("Download more from this series")
 
             Spacer()
 
@@ -291,6 +293,7 @@ struct ArticleCardView: View {
                 KnowledgeSaveIcon(isSaved: content.isSavedToKnowledge)
             }
             .frame(width: 44, height: 44)
+            .accessibilityLabel(content.isSavedToKnowledge ? "Remove from Knowledge" : "Save to Knowledge")
         }
         .sheet(isPresented: $showDownloadSheet) {
             downloadSheet
@@ -343,7 +346,7 @@ struct ArticleCardView: View {
             HStack(spacing: 14) {
                 Image(systemName: "arrow.down.circle.fill")
                     .font(.title3)
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(.brandPrimary)
                     .frame(width: 36, height: 36)
 
                 VStack(alignment: .leading, spacing: 2) {

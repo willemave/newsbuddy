@@ -27,7 +27,7 @@ struct WatercolorBackground: View {
                 // Base fill
                 context.fill(
                     Rectangle().path(in: CGRect(origin: .zero, size: size)),
-                    with: .color(Color.watercolorBase)
+                    with: .color(Color.onboardingSurface)
                 )
                 drawBlobs(context: &context, size: size, time: t)
             }
@@ -41,7 +41,7 @@ struct WatercolorBackground: View {
 
     private var staticBackground: some View {
         ZStack {
-            Color.watercolorBase
+            Color.onboardingSurface
             GeometryReader { geo in
                 let cx = geo.size.width / 2
                 let cy = geo.size.height / 2
@@ -50,7 +50,7 @@ struct WatercolorBackground: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [Color.watercolorMistyBlue.opacity(0.5), .clear],
+                            colors: [Color.onboardingAmbientPrimary.opacity(0.5), .clear],
                             center: .center, startRadius: 0, endRadius: r
                         )
                     )
@@ -60,7 +60,7 @@ struct WatercolorBackground: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [Color.watercolorDiffusedPeach.opacity(0.45), .clear],
+                            colors: [Color.onboardingAmbientTertiary.opacity(0.45), .clear],
                             center: .center, startRadius: 0, endRadius: r
                         )
                     )
@@ -70,7 +70,7 @@ struct WatercolorBackground: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [Color.watercolorPaleEmerald.opacity(0.4), .clear],
+                            colors: [Color.onboardingSelectionAccent.opacity(0.4), .clear],
                             center: .center, startRadius: 0, endRadius: r
                         )
                     )
@@ -80,7 +80,7 @@ struct WatercolorBackground: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [Color.watercolorSoftSky.opacity(0.4), .clear],
+                            colors: [Color.onboardingAmbientQuaternary.opacity(0.4), .clear],
                             center: .center, startRadius: 0, endRadius: r
                         )
                     )
@@ -99,10 +99,10 @@ struct WatercolorBackground: View {
         let e = min(1, max(0, energy))
 
         let blobs: [(color: Color, baseRadius: CGFloat, xPhase: Double, yPhase: Double, baseSpeed: Double, drift: Double)] = [
-            (.watercolorMistyBlue,     220, 0,    0,    0.18, 100),
-            (.watercolorDiffusedPeach, 190, 1.8,  2.5,  0.22, 120),
-            (.watercolorPaleEmerald,   180, 3.2,  1.2,  0.20, 110),
-            (.watercolorSoftSky,       200, 4.8,  3.8,  0.25, 130),
+            (.onboardingAmbientPrimary,     220, 0,    0,    0.18, 100),
+            (.onboardingAmbientTertiary, 190, 1.8,  2.5,  0.22, 120),
+            (.onboardingSelectionAccent,   180, 3.2,  1.2,  0.20, 110),
+            (.onboardingAmbientQuaternary,       200, 4.8,  3.8,  0.25, 130),
         ]
 
         for blob in blobs {
@@ -149,9 +149,9 @@ struct WatercolorBackground: View {
 
         // Pick the dominant color
         let maxVal = max(blue, peach, green, sky)
-        if maxVal == blue { return .watercolorMistyBlue }
-        if maxVal == peach { return .watercolorDiffusedPeach }
-        if maxVal == green { return .watercolorPaleEmerald }
-        return .watercolorSoftSky
+        if maxVal == blue { return .onboardingAmbientPrimary }
+        if maxVal == peach { return .onboardingAmbientTertiary }
+        if maxVal == green { return .onboardingSelectionAccent }
+        return .onboardingAmbientQuaternary
     }
 }

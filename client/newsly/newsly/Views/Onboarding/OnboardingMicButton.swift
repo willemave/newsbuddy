@@ -26,7 +26,7 @@ struct OnboardingMicButton: View {
             ZStack {
                 if audioState == .recording {
                     Circle()
-                        .stroke(Color.watercolorDiffusedPeach.opacity(0.45), lineWidth: 2.5)
+                        .stroke(Color.onboardingAmbientTertiary.opacity(0.45), lineWidth: 2.5)
                         .frame(width: 144, height: 144)
                         .scaleEffect(pulseScale)
                         .opacity(2.0 - Double(pulseScale))
@@ -41,7 +41,7 @@ struct OnboardingMicButton: View {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color.watercolorBase, Color.watercolorMistyBlue.opacity(0.42)],
+                            colors: [Color.onboardingSurface, Color.onboardingAmbientPrimary.opacity(0.42)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -58,7 +58,7 @@ struct OnboardingMicButton: View {
                             .offset(x: 18, y: 18)
                     }
                     .frame(width: 128, height: 128)
-                    .shadow(color: Color.watercolorSlate.opacity(0.14), radius: 12, x: 10, y: 10)
+                    .shadow(color: Color.onboardingText.opacity(0.14), radius: 12, x: 10, y: 10)
                     .shadow(color: .white.opacity(0.35), radius: 16, x: -8, y: -8)
 
                 iconStack
@@ -81,20 +81,20 @@ struct OnboardingMicButton: View {
         ZStack {
             Image(systemName: "mic.fill")
                 .font(.system(size: 36, weight: .medium))
-                .foregroundColor(.watercolorSlate)
+                .foregroundColor(.onboardingText)
                 .opacity(audioState == .idle || audioState == .error ? 1 : 0)
                 .scaleEffect(audioState == .idle || audioState == .error ? 1 : 0.25)
                 .blur(radius: audioState == .idle || audioState == .error ? 0 : 4)
 
             Image(systemName: "stop.fill")
                 .font(.system(size: 30, weight: .medium))
-                .foregroundColor(.watercolorDiffusedPeach)
+                .foregroundColor(.onboardingAmbientTertiary)
                 .opacity(audioState == .recording ? 1 : 0)
                 .scaleEffect(audioState == .recording ? 1 : 0.25)
                 .blur(radius: audioState == .recording ? 0 : 4)
 
             ProgressView()
-                .tint(.watercolorSlate)
+                .tint(.onboardingText)
                 .opacity(audioState == .transcribing ? 1 : 0)
                 .scaleEffect(audioState == .transcribing ? 1 : 0.25)
                 .blur(radius: audioState == .transcribing ? 0 : 4)
@@ -107,17 +107,17 @@ struct OnboardingMicButton: View {
             if audioState == .recording {
                 Text(formattedDuration)
                     .font(.title3.monospacedDigit())
-                    .foregroundColor(.watercolorSlate.opacity(0.66))
+                    .foregroundColor(.onboardingText.opacity(0.66))
             }
 
             Text(statusText)
                 .font(.system(size: 11, weight: .medium))
                 .tracking(2.5)
-                .foregroundColor(.watercolorSlate.opacity(0.55))
+                .foregroundColor(.onboardingText.opacity(0.55))
 
             Text(statusDetail)
                 .font(.caption)
-                .foregroundColor(.watercolorSlate.opacity(0.68))
+                .foregroundColor(.onboardingText.opacity(0.68))
                 .multilineTextAlignment(.center)
         }
     }

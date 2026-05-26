@@ -29,21 +29,21 @@ private extension LongformArtifactEnvelope {
     var detailAccent: Color {
         switch artifact.type {
         case "argument":
-            return .indigo
+            return .terracottaPrimary
         case "mental_model":
-            return .teal
+            return .summarySecondaryAccent
         case "playbook":
-            return .green
+            return .summarySecondaryAccent
         case "portrait":
-            return .purple
+            return .summaryQuestionAccent
         case "briefing":
-            return .orange
+            return .terracottaDark
         case "walkthrough":
-            return .cyan
+            return .summaryQuestionAccent
         case "findings":
-            return .red
+            return .summaryCounterpointAccent
         default:
-            return .blue
+            return .terracottaPrimary
         }
     }
 }
@@ -229,6 +229,7 @@ private struct ArtifactSectionHeader: View {
             Image(systemName: icon)
                 .font(.subheadline)
                 .foregroundColor(tint)
+                .accessibilityHidden(true)
             Text(title)
                 .font(.subheadline)
                 .fontWeight(.semibold)

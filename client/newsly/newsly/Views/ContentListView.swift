@@ -55,7 +55,7 @@ struct ContentListView: View {
                                             } label: {
                                                 Label("Mark as Read", systemImage: "checkmark.circle.fill")
                                             }
-                                            .tint(.green)
+                                            .tint(Color.brandTertiary)
                                         }
                                     }
                                 }
@@ -85,8 +85,8 @@ struct ContentListView: View {
                         }) {
                             Image(systemName: "line.3.horizontal.decrease.circle.fill")
                                 .font(.system(size: 44))
-                                .foregroundColor(.accentColor)
-                                .background(Circle().fill(Color(UIColor.systemBackground)))
+                                .foregroundColor(.brandPrimary)
+                                .background(Circle().fill(Color.surfaceSecondary))
                                 .shadow(radius: 4)
                         }
                         .padding()

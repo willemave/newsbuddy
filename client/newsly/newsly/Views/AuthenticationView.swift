@@ -23,7 +23,7 @@ struct AuthenticationView: View {
             VStack(spacing: 8) {
                 Image(systemName: "newspaper.fill")
                     .font(.system(size: 60))
-                    .foregroundColor(.blue)
+                    .foregroundColor(.brandPrimary)
 
                 Text("Newsbuddy")
                     .font(.largeTitle)
@@ -56,7 +56,7 @@ struct AuthenticationView: View {
             // Error message
             if let errorMessage = authViewModel.errorMessage {
                 Text(errorMessage)
-                    .foregroundColor(.red)
+                    .foregroundColor(.statusDestructive)
                     .font(.caption)
                     .padding(.horizontal, 40)
             }

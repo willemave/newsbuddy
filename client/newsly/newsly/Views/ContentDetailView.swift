@@ -62,8 +62,9 @@ private enum DetailDesign {
     static let parallaxHeroHeight: CGFloat = 360
     static let parallaxRate: CGFloat = 0.25
     static let floatingBackButtonSize: CGFloat = 44
-    static let textOnlyNewsBackButtonTopPadding: CGFloat = 8
+    static let textOnlyBackButtonTopPadding: CGFloat = 8
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
+    static let textOnlyStandardHeaderTopSpacer: CGFloat = 58
     static let bulletMarkerWidth: CGFloat = 12
     static let bulletTextSpacing: CGFloat = 8
     static let edgeBackSwipeWidth: CGFloat = 28
@@ -901,7 +902,7 @@ struct ContentDetailView: View {
                     isPodcastAudioActive(for: content)
                         ? "pause.fill"
                         : "person.3.sequence.fill",
-                    color: .orange,
+                    color: .terracottaPrimary,
                     size: 16
                 )
 
@@ -954,7 +955,7 @@ struct ContentDetailView: View {
                 .scaleEffect(0.8)
                 .frame(width: 44, height: 44)
         } else if isPodcastAudioActive(for: content) {
-            minimalActionIcon("speaker.wave.3.fill", color: overlaid ? .white : .blue, overlaid: overlaid)
+            minimalActionIcon("speaker.wave.3.fill", color: overlaid ? .white : .terracottaPrimary, overlaid: overlaid)
         } else {
             minimalActionIcon("speaker.wave.2", color: .secondary, overlaid: overlaid)
         }
@@ -1143,7 +1144,7 @@ struct ContentDetailView: View {
                                 .clipped()
                         } placeholder: {
                             Rectangle()
-                                .fill(Color(.systemGray5))
+                                .fill(Color.surfaceTertiary)
                                 .frame(width: geo.size.width, height: imageHeight)
                                 .overlay(ProgressView())
                         }
@@ -1246,7 +1247,7 @@ struct ContentDetailView: View {
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(.brandSecondary)
 
                         if let source = content.source {
                             Text("·")
@@ -1287,7 +1288,9 @@ struct ContentDetailView: View {
     }
 
     private func textOnlyHeaderTopSpacer(for content: ContentDetail) -> CGFloat {
-        content.contentTypeEnum == .news ? DetailDesign.textOnlyNewsHeaderTopSpacer : 8
+        content.contentTypeEnum == .news
+            ? DetailDesign.textOnlyNewsHeaderTopSpacer
+            : DetailDesign.textOnlyStandardHeaderTopSpacer
     }
 
     private var floatingBackButton: some View {
@@ -1327,10 +1330,10 @@ struct ContentDetailView: View {
         }
 
         if viewModel.content?.contentTypeEnum == .news {
-            return DetailDesign.textOnlyNewsBackButtonTopPadding
+            return DetailDesign.textOnlyBackButtonTopPadding
         }
 
-        return proxy.safeAreaInsets.top + 8
+        return proxy.safeAreaInsets.top + DetailDesign.textOnlyBackButtonTopPadding
     }
 
     @ViewBuilder
@@ -1339,8 +1342,8 @@ struct ContentDetailView: View {
             .fill(
                 LinearGradient(
                     colors: [
-                        Color(.systemGray4),
-                        Color(.systemGray5)
+                        Color.surfaceContainer,
+                        Color.surfaceTertiary
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -1372,7 +1375,7 @@ struct ContentDetailView: View {
                 Button {
                     openInAppBrowser(url)
                 } label: {
-                    minimalActionIcon("safari", color: overlaid ? .white : .accentColor, overlaid: overlaid)
+                    minimalActionIcon("safari", color: overlaid ? .white : .brandPrimary, overlaid: overlaid)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("content.action.open_external")
@@ -1413,6 +1416,7 @@ struct ContentDetailView: View {
                     minimalActionIcon("tray.and.arrow.down", overlaid: overlaid)
                 }
                 .accessibilityIdentifier("content.action.download_more")
+                .accessibilityLabel("Download more from this series")
             }
 
             // Save linked article (news only)
@@ -1448,6 +1452,7 @@ struct ContentDetailView: View {
                     knowledgeActionIcon(isSaved: content.isSavedToKnowledge, overlaid: overlaid)
                 }
                 .accessibilityIdentifier("content.action.knowledge")
+                .accessibilityLabel(content.isSavedToKnowledge ? "Remove from Knowledge" : "Save to Knowledge")
             }
 
             if supportsPodcastAudio(for: content) {
@@ -1491,7 +1496,7 @@ struct ContentDetailView: View {
                 if isStartingChat {
                     Image(systemName: "brain.head.profile")
                         .font(.system(size: 20, weight: .regular))
-                        .foregroundColor(overlaid ? .white : .accentColor)
+                        .foregroundColor(overlaid ? .white : .brandPrimary)
                         .shadow(color: overlaid ? .black.opacity(0.4) : .clear, radius: 3, x: 0, y: 1)
                         .frame(width: 44, height: 44)
                         .symbolEffect(.pulse, options: .repeating)
@@ -1501,6 +1506,7 @@ struct ContentDetailView: View {
             }
             .disabled(isCheckingChatSession)
             .accessibilityIdentifier("content.action.deep_dive")
+            .accessibilityLabel("Start deep dive")
         }
         .frame(height: 44)
     }
@@ -1548,7 +1554,7 @@ struct ContentDetailView: View {
                         .fontWeight(.semibold)
                         .foregroundColor(.secondary)
                         .frame(width: 44, height: 44)
-                        .background(Color(.tertiarySystemBackground))
+                        .background(Color.surfaceTertiary)
                         .clipShape(Circle())
                 }
             }
@@ -1561,7 +1567,7 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func sheetOptionRow(
         icon: String,
-        iconColor: Color = .accentColor,
+        iconColor: Color = .brandPrimary,
         title: String,
         subtitle: String,
         badge: String? = nil,
@@ -1742,20 +1748,20 @@ struct ContentDetailView: View {
                 if let chatError {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundColor(.red)
+                            .foregroundColor(.statusDestructive)
                         Text(chatError)
                             .font(.footnote)
-                            .foregroundColor(.red)
+                            .foregroundColor(.statusDestructive)
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.1))
+                    .background(Color.statusDestructive.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
 
                 sheetOptionRow(
                     icon: "message",
-                    iconColor: .accentColor,
+                    iconColor: .brandPrimary,
                     title: "Start chat",
                     subtitle: "Ask your own question about this story",
                     disabled: isStartingChat,
@@ -1770,7 +1776,7 @@ struct ContentDetailView: View {
                 )
                 sheetOptionRow(
                     icon: "doc.text.magnifyingglass",
-                    iconColor: .blue,
+                    iconColor: .brandSecondary,
                     title: "Dig deeper",
                     subtitle: "Explore key points in detail",
                     disabled: isStartingChat,
@@ -1786,7 +1792,7 @@ struct ContentDetailView: View {
                 )
                 sheetOptionRow(
                     icon: "person.3.sequence.fill",
-                    iconColor: .orange,
+                    iconColor: .brandTertiary,
                     title: "Council Chat",
                     subtitle: "Compare four saved perspectives",
                     disabled: isStartingChat,
@@ -1802,7 +1808,7 @@ struct ContentDetailView: View {
                 )
                 sheetOptionRow(
                     icon: "magnifyingglass.circle.fill",
-                    iconColor: .purple,
+                    iconColor: .brandPrimary,
                     title: "Deep Research",
                     subtitle: "Comprehensive analysis with sources",
                     badge: "~2-5 min",
@@ -2314,7 +2320,7 @@ struct ContentDetailView: View {
             HStack(alignment: .firstTextBaseline, spacing: DetailDesign.bulletTextSpacing) {
                 Text(verbatim: "\u{2022}")
                     .font(.callout.weight(.semibold))
-                    .foregroundColor(Color.accentColor.opacity(0.85))
+                    .foregroundColor(Color.brandPrimary.opacity(0.85))
                     .frame(width: DetailDesign.bulletMarkerWidth, alignment: .center)
 
                 Text(topic.summary)
@@ -2531,10 +2537,10 @@ struct ContentDetailView: View {
                                     Text("+\(childCount)")
                                         .font(.caption2)
                                         .fontWeight(.semibold)
-                                        .foregroundColor(.orange)
+                                        .foregroundColor(.terracottaPrimary)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 1)
-                                        .background(Color.orange.opacity(0.12))
+                                        .background(Color.terracottaPrimary.opacity(0.12))
                                         .clipShape(Capsule())
 
                                     Image(systemName: "chevron.right")
@@ -2549,7 +2555,7 @@ struct ContentDetailView: View {
                         .overlay(alignment: .leading) {
                             if comment.depth > 0 {
                                 RoundedRectangle(cornerRadius: 1.5)
-                                    .fill(Color.orange)
+                                    .fill(Color.terracottaPrimary)
                                     .frame(width: 3)
                                     .padding(.vertical, 4)
                             }
@@ -2622,7 +2628,7 @@ struct ContentDetailView: View {
                                     Text(link.source)
                                         .font(.caption2)
                                 }
-                                .foregroundColor(.accentColor)
+                                .foregroundColor(.brandSecondary)
                             }
 
                             HStack(spacing: 10) {
@@ -2779,7 +2785,7 @@ struct ContentDetailView: View {
                         }
                     }
                     .font(.subheadline.weight(.medium))
-                    .foregroundColor(state == .added ? .accentColor : .secondary.opacity(0.78))
+                    .foregroundColor(state == .added ? .brandTertiary : .secondary.opacity(0.78))
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
                 }
@@ -2930,6 +2936,7 @@ struct ContentDetailView: View {
             Image(systemName: icon)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
+                .accessibilityHidden(true)
             Text(title)
                 .font(.subheadline)
                 .fontWeight(.semibold)
@@ -2967,7 +2974,7 @@ struct ContentDetailView: View {
                     .frame(width: 44, height: 44)
                     .background(
                         Circle()
-                            .fill(Color.accentColor.opacity(0.9))
+                            .fill(Color.brandPrimary.opacity(0.9))
                     )
                     .scaleEffect(0.8 + (progress * 0.4))
                     .opacity(Double(progress))
@@ -2996,11 +3003,11 @@ struct ContentDetailView: View {
         guard let content = viewModel.content else { return .secondary }
         switch content.status {
         case "completed":
-            return .green
+            return .statusActive
         case "failed":
-            return .red
+            return .statusDestructive
         case "processing":
-            return .orange
+            return .terracottaPrimary
         default:
             return .secondary
         }

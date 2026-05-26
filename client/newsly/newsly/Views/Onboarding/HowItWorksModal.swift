@@ -77,19 +77,19 @@ struct HowItWorksModal: View {
                     Text("LAST STEP")
                         .font(.editorialMeta)
                         .tracking(1.8)
-                        .foregroundColor(.watercolorSlate.opacity(0.58))
+                        .foregroundColor(.onboardingText.opacity(0.58))
                         .opacity(appeared ? 1 : 0)
                         .offset(y: appeared ? 0 : 10)
 
                     Text("What to expect")
                         .font(.title2.bold())
-                        .foregroundColor(.watercolorSlate)
+                        .foregroundColor(.onboardingText)
                         .opacity(appeared ? 1 : 0)
                         .offset(y: appeared ? 0 : 10)
 
                     Text("A quick handoff before you dive in.")
                         .font(.callout)
-                        .foregroundColor(.watercolorSlate.opacity(0.68))
+                        .foregroundColor(.onboardingText.opacity(0.68))
                         .opacity(appeared ? 1 : 0)
                         .offset(y: appeared ? 0 : 10)
 
@@ -97,12 +97,12 @@ struct HowItWorksModal: View {
                         Text("\(feedCount) sources on deck")
                             .font(.caption.weight(.semibold))
                             .monospacedDigit()
-                            .foregroundColor(.watercolorSlate)
+                            .foregroundColor(.onboardingText)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .background(
                                 Capsule()
-                                    .fill(Color.watercolorBase.opacity(0.84))
+                                    .fill(Color.onboardingSurface.opacity(0.84))
                                     .shadow(color: .black.opacity(0.05), radius: 12, x: 0, y: 8)
                             )
                             .opacity(appeared ? 1 : 0)
@@ -131,7 +131,7 @@ struct HowItWorksModal: View {
                         .font(.callout.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .foregroundColor(.watercolorBase)
+                        .foregroundColor(.onboardingSurface)
                         .background(primaryButtonBackground)
                 }
                 .buttonStyle(.plain)
@@ -154,24 +154,24 @@ struct HowItWorksModal: View {
         HStack(spacing: 14) {
             Image(systemName: tip.icon)
                 .font(.body.weight(.medium))
-                .foregroundColor(tip.isFeatured ? .watercolorBase : .watercolorSlate)
+                .foregroundColor(tip.isFeatured ? .onboardingSurface : .onboardingText)
                 .frame(width: 42, height: 42)
                 .background(
                     Circle()
                         .fill(
                             tip.isFeatured
-                                ? Color.watercolorSlate
-                                : Color.watercolorSlate.opacity(0.08)
+                                ? Color.onboardingText
+                                : Color.onboardingText.opacity(0.08)
                         )
                 )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(tip.title)
                     .font(.callout.weight(.semibold))
-                    .foregroundColor(.watercolorSlate)
+                    .foregroundColor(.onboardingText)
                 Text(tip.detail)
                     .font(.caption)
-                    .foregroundColor(.watercolorSlate.opacity(0.62))
+                    .foregroundColor(.onboardingText.opacity(0.62))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -182,12 +182,12 @@ struct HowItWorksModal: View {
             RoundedRectangle(cornerRadius: 18)
                 .fill(
                     tip.isFeatured
-                        ? Color.watercolorBase.opacity(0.94)
-                        : Color.watercolorBase.opacity(0.82)
+                        ? Color.onboardingSurface.opacity(0.94)
+                        : Color.onboardingSurface.opacity(0.82)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 18)
-                        .stroke(Color.watercolorSlate.opacity(tip.isFeatured ? 0.14 : 0.08), lineWidth: 0.5)
+                        .stroke(Color.onboardingText.opacity(tip.isFeatured ? 0.14 : 0.08), lineWidth: 0.5)
                 )
                 .shadow(color: .black.opacity(tip.isFeatured ? 0.08 : 0.04), radius: 14, x: 0, y: 10)
         )
@@ -199,7 +199,7 @@ struct HowItWorksModal: View {
 
     private var primaryButtonBackground: some View {
         RoundedRectangle(cornerRadius: 24)
-            .fill(Color.watercolorSlate)
+            .fill(Color.onboardingText)
             .shadow(color: .black.opacity(0.10), radius: 18, x: 0, y: 12)
     }
 }

@@ -44,10 +44,23 @@ struct ShortFormView: View {
                 } else if isEmpty {
                     shortFormEmptyState
                 } else {
-                    EditorialMastheadHeader(title: "Fast Read")
+                    EditorialMastheadHeader(
+                        title: "Fast Read",
+                        subtitle: "The day's essential stories, summarized.",
+                        trailingAccessory: AnyView(FastReadMastheadGlyph())
+                    )
 
                     shortNewsQuickActions(items: items)
-                        .padding(.bottom, shouldShowFastNewsAudioControls ? 8 : 20)
+                        .padding(.bottom, shouldShowFastNewsAudioControls ? 10 : 16)
+
+                    BriefingStackCard(
+                        items: items,
+                        isPreparing: isPreparingFastNewsAudio,
+                        isPlaying: isPlayingFastNewsAudio,
+                        onPlay: handleFastNewsAudioEpisode
+                    )
+                    .padding(.horizontal, Spacing.screenHorizontal)
+                    .padding(.bottom, 22)
 
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         // Day delimiter: show when this item starts a new day
@@ -69,7 +82,6 @@ struct ShortFormView: View {
                         )
                             .equatable()
                             .contentShape(Rectangle())
-                            .accessibilityIdentifier("short.row.\(item.id)")
                             .id(item.id)
                             .highPriorityGesture(
                                 TapGesture().onEnded {
@@ -93,11 +105,16 @@ struct ShortFormView: View {
                             showMarkAllConfirmation = true
                         } label: {
                             Text("Mark All as Read")
-                                .font(.subheadline.weight(.semibold))
+                                .font(.terracottaBodyMedium.weight(.semibold))
+                                .foregroundStyle(Color.onSurface)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(Color.surfaceSecondary)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .padding(.vertical, 13)
+                                .background(Color.surfaceSecondary.opacity(0.78))
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(Color.outlineVariant.opacity(0.42), lineWidth: 1)
+                                }
                         }
                         .buttonStyle(.plain)
                         .padding(.horizontal, Spacing.screenHorizontal)
@@ -279,14 +296,14 @@ struct ShortFormView: View {
             if let fastNewsAudioErrorMessage {
                 Text(fastNewsAudioErrorMessage)
                     .font(.terracottaBodySmall)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.statusDestructive)
                     .padding(.horizontal, Spacing.screenHorizontal)
             }
 
             if let quickActionErrorMessage {
                 Text(quickActionErrorMessage)
                     .font(.terracottaBodySmall)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.statusDestructive)
                     .padding(.horizontal, Spacing.screenHorizontal)
             }
         }
@@ -304,7 +321,7 @@ struct ShortFormView: View {
                 prompt: InterestingUnreadNewsAssistantAction.prompt,
                 screenContext: InterestingUnreadNewsAssistantAction.screenContext(
                     screenType: "short_news_feed",
-                    screenTitle: "Fast read"
+                    screenTitle: "Fast Read"
                 )
             ),
             ShortNewsQuickAction(
@@ -314,7 +331,7 @@ struct ShortFormView: View {
                 prompt: "Summarize the top 15 news items in my short news feed right now.",
                 screenContext: AssistantScreenContext(
                     screenType: "short_news_feed",
-                    screenTitle: "Fast read",
+                    screenTitle: "Fast Read",
                     visibleContentIds: visibleItemIds,
                     query: "top 15 news items in my short news feed",
                     note: "Summarize the most important items from the fast news feed. Prefer the in-app short news feed over web search."
@@ -327,7 +344,7 @@ struct ShortFormView: View {
                 prompt: "What's the latest news in my short news feed right now?",
                 screenContext: AssistantScreenContext(
                     screenType: "short_news_feed",
-                    screenTitle: "Fast read",
+                    screenTitle: "Fast Read",
                     visibleContentIds: visibleItemIds,
                     query: "latest news in my short news feed",
                     note: "Focus on the newest important developments from the fast news feed."
@@ -340,7 +357,7 @@ struct ShortFormView: View {
                 prompt: "What are the spiciest discussions in my short news feed right now?",
                 screenContext: AssistantScreenContext(
                     screenType: "short_news_feed",
-                    screenTitle: "Fast read",
+                    screenTitle: "Fast Read",
                     visibleContentIds: visibleItemIds,
                     query: "spiciest discussions in my short news feed",
                     note: "Pull out the sharpest disagreements, surprising takes, and most interesting discussion threads from the fast news feed."
@@ -463,78 +480,6 @@ private struct ShortFormSetupEmptyState: View {
     }
 }
 
-private struct ShortNewsAudioActionChip: View {
-    let isLoading: Bool
-    let isPlaying: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(Color.terracottaPrimary)
-            } else {
-                Image(systemName: isPlaying ? "pause.fill" : "waveform")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.terracottaPrimary)
-            }
-
-            Text("Audio Brief")
-                .font(.terracottaBodyMedium.weight(.semibold))
-                .foregroundStyle(Color.onSurface)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.surfaceSecondary)
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-        }
-    }
-}
-
-private struct ShortNewsQuickAction: Identifiable {
-    let id: String
-    let title: String
-    let systemImage: String
-    let prompt: String
-    let screenContext: AssistantScreenContext
-}
-
-private struct ShortNewsQuickActionChip: View {
-    let action: ShortNewsQuickAction
-    let isLoading: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(Color.terracottaPrimary)
-            } else {
-                Image(systemName: action.systemImage)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.terracottaPrimary)
-            }
-
-            Text(action.title)
-                .font(.terracottaBodyMedium.weight(.semibold))
-                .foregroundStyle(Color.onSurface)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.surfaceSecondary)
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-        }
-    }
-}
-
 // MARK: - Short News Row
 
 private struct ShortNewsRow: View, Equatable {
@@ -550,20 +495,21 @@ private struct ShortNewsRow: View, Equatable {
     }
 
     private var titleUIFont: UIFont {
-        .systemFont(ofSize: 18, weight: .regular)
+        .appEditorialHeadline
     }
 
-    private var platformPillText: String? {
-        guard let platform = item.platform, !platform.isEmpty else { return nil }
-        return platform.uppercased()
+    private var summaryUIFont: UIFont {
+        .appEditorialSummary
     }
 
-    /// Secondary meta after the platform pill (source if distinct, then time).
-    private var secondaryMetaParts: [String] {
+    private var summaryText: String? {
+        FastReadPresentation.summaryText(for: item)
+    }
+
+    private var metadataParts: [String] {
         var parts: [String] = []
-        if let source = item.source, !source.isEmpty,
-           source.caseInsensitiveCompare(item.platform ?? "") != .orderedSame {
-            parts.append(source.lowercased())
+        if let source = FastReadPresentation.sourceLabel(for: item) {
+            parts.append(source)
         }
         if let time = item.relativeTimeDisplay {
             parts.append(time.uppercased())
@@ -572,84 +518,93 @@ private struct ShortNewsRow: View, Equatable {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Headline
-            SelectableText(
-                item.displayTitle,
-                textColor: titleUIColor,
-                font: titleUIFont,
-                lineLimit: 3,
-                lineBreakMode: .byTruncatingTail,
-                onDigDeeper: onDigDeeper
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
+        let metadata = metadataParts
 
-            let secondary = secondaryMetaParts
-            if platformPillText != nil || !secondary.isEmpty || item.commentCountDisplay != nil {
-                HStack(spacing: 8) {
-                    if let pillText = platformPillText {
-                        SourcePill(text: pillText)
-                    }
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 9) {
+                SelectableText(
+                    item.displayTitle,
+                    textColor: titleUIColor,
+                    font: titleUIFont,
+                    lineLimit: 3,
+                    lineBreakMode: .byTruncatingTail,
+                    onDigDeeper: onDigDeeper
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
 
-                    if !secondary.isEmpty {
-                        Text(secondary.joined(separator: " · "))
-                            .font(.feedMeta)
-                            .tracking(0.4)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    if let comments = item.commentCountDisplay {
-                        HStack(spacing: 4) {
-                            Image(systemName: "bubble.left")
-                                .font(.system(size: 10, weight: .medium))
-                            Text(comments)
-                                .font(.feedMeta)
-                                .tracking(0.4)
-                        }
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .fixedSize()
-                    }
+                if !metadata.isEmpty || item.commentCountDisplay != nil {
+                    metadataRow(parts: metadata)
                 }
-                .lineLimit(1)
+
+                if let summaryText {
+                    SelectableText(
+                        summaryText,
+                        textColor: .appOnSurfaceSecondary,
+                        font: summaryUIFont,
+                        lineLimit: 2,
+                        lineBreakMode: .byTruncatingTail,
+                        onDigDeeper: onDigDeeper
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if !item.isRead {
+                Circle()
+                    .fill(Color.brandTertiary)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: Color.brandTertiary.opacity(0.34), radius: 7, x: 0, y: 0)
+                    .padding(.top, 10)
+                    .accessibilityLabel("Unread")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Spacing.rowHorizontal)
-        .padding(.vertical, 16)
+        .padding(.vertical, 18)
         .overlay(alignment: .bottom) {
-            Divider()
+            Rectangle()
+                .fill(Color.borderSubtle.opacity(0.48))
+                .frame(height: 1)
+                .padding(.horizontal, Spacing.rowHorizontal)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("short.row.\(item.id)")
     }
-}
 
-// MARK: - Source Pill
+    private func metadataRow(parts metadataParts: [String]) -> some View {
+        HStack(spacing: 7) {
+            if !metadataParts.isEmpty {
+                Text(metadataParts.joined(separator: "  •  "))
+                    .font(.terracottaCategoryPill)
+                    .tracking(1.5)
+                    .foregroundStyle(Color.platformLabel)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
 
-private struct SourcePill: View {
-    let text: String
+            if let comments = item.commentCountDisplay {
+                if !metadataParts.isEmpty {
+                    Text("•")
+                        .font(.terracottaCategoryPill)
+                        .foregroundStyle(Color.sectionDelimiter.opacity(0.8))
+                        .accessibilityHidden(true)
+                }
 
-    var body: some View {
-        Text(text)
-            .font(.terracottaCategoryPill)
-            .tracking(0.8)
-            .foregroundStyle(Color.onSurface.opacity(0.85))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(Color.surfaceContainer)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .stroke(Color.outlineVariant.opacity(0.4), lineWidth: 0.5)
-            )
-            .fixedSize()
+                Image(systemName: "bubble.left")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.brandSecondary.opacity(0.82))
+                    .accessibilityHidden(true)
+
+                Text(comments)
+                    .font(.terracottaCategoryPill)
+                    .tracking(1.1)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .monospacedDigit()
+            }
+        }
+        .lineLimit(1)
     }
 }
 
@@ -680,22 +635,18 @@ private struct DayDelimiter: View, Equatable {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 10) {
             Text(dayLabel)
-                .font(.system(size: 12, weight: .bold))
-                .tracking(1.0)
+                .font(.terracottaCategoryPill)
+                .tracking(1.9)
                 .foregroundStyle(Color.sectionDelimiter)
-            Spacer()
+
+            Rectangle()
+                .fill(Color.brandTertiary.opacity(0.36))
+                .frame(height: 1)
         }
         .padding(.horizontal, Spacing.rowHorizontal)
-        .padding(.top, isFirst ? 12 : 24)
-        .padding(.bottom, 8)
-        .overlay(alignment: .top) {
-            if !isFirst {
-                Rectangle()
-                    .fill(Color.borderSubtle.opacity(0.4))
-                    .frame(height: 6)
-            }
-        }
+        .padding(.top, isFirst ? 14 : 26)
+        .padding(.bottom, 10)
     }
 }

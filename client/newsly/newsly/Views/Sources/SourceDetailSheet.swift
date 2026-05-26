@@ -231,7 +231,7 @@ struct SourceDetailSheet: View {
             .padding(.vertical, 12)
         }
         .buttonStyle(.bordered)
-        .tint(.red)
+        .tint(Color.statusDestructive)
     }
 
     // MARK: - Save Button

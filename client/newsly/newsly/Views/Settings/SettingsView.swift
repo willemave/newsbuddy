@@ -155,7 +155,7 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             icon: "qrcode.viewfinder",
-                            iconColor: .green,
+                            iconColor: .brandSecondary,
                             title: "Link CLI"
                         ) {
                             if isApprovingCLILink {
@@ -196,7 +196,7 @@ struct SettingsView: View {
             } label: {
                 SettingsRow(
                     icon: "bubble.left.and.bubble.right",
-                    iconColor: .blue,
+                    iconColor: .brandSecondary,
                     title: "Give Feedback"
                 ) {
                     NavigationChevron()
@@ -220,7 +220,7 @@ struct SettingsView: View {
                 } label: {
                     SettingsRow(
                         icon: "at",
-                        iconColor: .blue,
+                        iconColor: .brandSecondary,
                         title: "X / Twitter",
                         subtitle: xConnection?.settingsSubtitle
                     )
@@ -250,7 +250,7 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
-                    SettingsIcon(systemName: "person.3.sequence.fill", color: .orange)
+                    SettingsIcon(systemName: "person.3.sequence.fill", color: .brandPrimary)
                         .frame(width: 36, height: 36, alignment: .leading)
 
                     Text("Your Experts")
@@ -308,7 +308,7 @@ struct SettingsView: View {
                         } label: {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 24))
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color.brandPrimary)
                         }
                         .buttonStyle(.plain)
                         .disabled(newExpertName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -358,7 +358,7 @@ struct SettingsView: View {
     }
 
     private func expertColor(for index: Int) -> Color {
-        let colors: [Color] = [.orange, .blue, .purple]
+        let colors: [Color] = [.brandPrimary, .brandSecondary, .brandTertiary]
         return colors[index % colors.count]
     }
 
@@ -384,7 +384,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             textSizeSlider(
                 icon: "textformat.size",
-                iconColor: .orange,
+                iconColor: .brandPrimary,
                 title: "App Text Size",
                 value: Binding(
                     get: { Double(settings.appTextSizeIndex) },
@@ -397,7 +397,7 @@ struct SettingsView: View {
 
             textSizeSlider(
                 icon: "book",
-                iconColor: .purple,
+                iconColor: .brandTertiary,
                 title: "Content Text Size",
                 value: Binding(
                     get: { Double(settings.contentTextSizeIndex) },
@@ -434,7 +434,7 @@ struct SettingsView: View {
                     .foregroundStyle(Color.onSurfaceSecondary)
 
                 Slider(value: value, in: range, step: 1)
-                    .tint(.accentColor)
+                    .tint(Color.brandPrimary)
 
                 Text("A")
                     .font(.system(size: 22, weight: .medium))
@@ -458,7 +458,7 @@ struct SettingsView: View {
                 } label: {
                     SettingsRow(
                         icon: "list.bullet.rectangle",
-                        iconColor: .blue,
+                        iconColor: .brandSecondary,
                         title: "Feed Sources"
                     )
                 }
@@ -471,7 +471,7 @@ struct SettingsView: View {
                 } label: {
                     SettingsRow(
                         icon: "waveform",
-                        iconColor: .purple,
+                        iconColor: .brandTertiary,
                         title: "Podcast Sources"
                     )
                 }
@@ -492,7 +492,7 @@ struct SettingsView: View {
             } label: {
                 SettingsRow(
                     icon: "checkmark.circle",
-                    iconColor: .green,
+                    iconColor: .brandTertiary,
                     title: "Mark All As Read"
                 ) {
                     if isProcessingMarkAll {
@@ -519,7 +519,7 @@ struct SettingsView: View {
             } label: {
                 SettingsRow(
                     icon: "ladybug",
-                    iconColor: .red,
+                    iconColor: .statusDestructive,
                     title: "Debug Menu"
                 ) {
                     EmptyView()

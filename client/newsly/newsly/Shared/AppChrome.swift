@@ -21,8 +21,9 @@ enum AppChrome {
         itemAppearance.normal.titleTextAttributes = [.foregroundColor: unselected]
 
         let tabAppearance = UITabBarAppearance()
-        tabAppearance.configureWithDefaultBackground()
-        tabAppearance.backgroundColor = surface.withAlphaComponent(0.9)
+        tabAppearance.configureWithTransparentBackground()
+        tabAppearance.backgroundColor = surface.withAlphaComponent(0.92)
+        tabAppearance.shadowColor = UIColor.appAccent.withAlphaComponent(0.18)
         tabAppearance.stackedLayoutAppearance = itemAppearance
         tabAppearance.inlineLayoutAppearance = itemAppearance
         tabAppearance.compactInlineLayoutAppearance = itemAppearance
@@ -30,8 +31,9 @@ enum AppChrome {
         UITabBar.appearance().scrollEdgeAppearance = tabAppearance
 
         let navigationAppearance = UINavigationBarAppearance()
-        navigationAppearance.configureWithDefaultBackground()
-        navigationAppearance.backgroundColor = surface.withAlphaComponent(0.9)
+        navigationAppearance.configureWithTransparentBackground()
+        navigationAppearance.backgroundColor = surface.withAlphaComponent(0.92)
+        navigationAppearance.shadowColor = UIColor.appAccent.withAlphaComponent(0.12)
         UINavigationBar.appearance().standardAppearance = navigationAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navigationAppearance
         UINavigationBar.appearance().tintColor = accent

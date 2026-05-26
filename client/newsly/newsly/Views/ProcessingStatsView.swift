@@ -22,14 +22,14 @@ struct ProcessingStatsView: View {
                     subtitle: "Pending or running",
                     count: processingCountService.longFormProcessingCount,
                     icon: "clock.arrow.circlepath",
-                    color: .teal
+                    color: .brandPrimary
                 )
                 statRow(
                     title: "Unread",
                     subtitle: "Ready to read",
                     count: unreadCountService.longFormCount,
                     icon: "tray",
-                    color: .blue
+                    color: .brandSecondary
                 )
             } header: {
                 Text("Long-form")
@@ -142,7 +142,7 @@ struct ProcessingStatsView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
-                .background(Color.orange.gradient)
+                .background(Color.brandTertiary.gradient)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)

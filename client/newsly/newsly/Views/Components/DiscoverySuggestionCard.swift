@@ -10,39 +10,8 @@ struct DiscoverySuggestionCard: View {
     let suggestionType: String
     let onTap: () -> Void
 
-    private struct SuggestionMetadata {
-        let icon: String
-        let color: Color
-        let sourceName: String
-    }
-
-    private var metadata: SuggestionMetadata {
-        switch suggestionType {
-        case "feed", "rss":
-            return SuggestionMetadata(
-                icon: "dot.radiowaves.up.forward",
-                color: .blue,
-                sourceName: "Feed"
-            )
-        case "podcast_rss", "podcast":
-            return SuggestionMetadata(
-                icon: "waveform",
-                color: .orange,
-                sourceName: "Podcast"
-            )
-        case "youtube":
-            return SuggestionMetadata(
-                icon: "play.circle.fill",
-                color: .red,
-                sourceName: "YouTube"
-            )
-        default:
-            return SuggestionMetadata(
-                icon: "doc.text",
-                color: .blue,
-                sourceName: "Feed"
-            )
-        }
+    private var metadata: SourceVisualMetadata {
+        SourceVisualMetadata.suggestionType(suggestionType)
     }
 
     var body: some View {
@@ -58,11 +27,11 @@ struct DiscoverySuggestionCard: View {
 
                 // Metadata bar: type icon + source name + dot + URL
                 HStack(spacing: 6) {
-                    Image(systemName: metadata.icon)
+                    Image(systemName: metadata.systemImageName)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(metadata.color)
 
-                    Text(metadata.sourceName.uppercased())
+                    Text(metadata.label.uppercased())
                         .font(.feedMeta)
                         .tracking(0.4)
                         .foregroundColor(.textSecondary)
@@ -82,7 +51,7 @@ struct DiscoverySuggestionCard: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground))
+            .background(Color.surfaceSecondary)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Color.editorialBorder, lineWidth: 1)

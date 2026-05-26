@@ -58,13 +58,13 @@ struct LandingView: View {
                 VStack(spacing: 10) {
                     Text("Newsbuddy")
                         .font(.watercolorDisplay)
-                        .foregroundColor(.watercolorSlate)
+                        .foregroundColor(.onboardingText)
                         .shadow(color: glowColor.opacity(0.6), radius: 16, x: 0, y: 0)
                         .shadow(color: glowColor.opacity(0.3), radius: 32, x: 0, y: 0)
 
                     Text("Your cuddly news companion.\nQuiet clarity in a noisy world.")
                         .font(.watercolorSubtitle)
-                        .foregroundColor(.watercolorSlate.opacity(0.7))
+                        .foregroundColor(.onboardingText.opacity(0.7))
                         .multilineTextAlignment(.center)
                 }
             }
@@ -80,7 +80,7 @@ struct LandingView: View {
                 ZStack {
                     if isLoading {
                         ProgressView()
-                            .tint(.watercolorBase)
+                            .tint(.onboardingSurface)
                     } else {
                         HStack(spacing: 8) {
                             Image(systemName: "apple.logo")
@@ -88,12 +88,12 @@ struct LandingView: View {
                             Text("Continue with Apple")
                                 .font(.callout.weight(.semibold))
                         }
-                        .foregroundColor(.watercolorBase)
+                        .foregroundColor(.onboardingSurface)
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(Color.watercolorSlate)
+                .background(Color.onboardingText)
                 .clipShape(RoundedRectangle(cornerRadius: 24))
             }
             .buttonStyle(.plain)
@@ -103,7 +103,7 @@ struct LandingView: View {
             if let errorMessage = authViewModel.errorMessage {
                 Text(errorMessage)
                     .font(.caption)
-                    .foregroundColor(.red)
+                    .foregroundColor(.statusDestructive)
                     .multilineTextAlignment(.center)
             }
         }

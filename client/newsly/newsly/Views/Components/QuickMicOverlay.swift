@@ -67,11 +67,11 @@ struct QuickMicOverlay: View {
     private var statusAccentColor: Color {
         switch viewModel.state {
         case .failed:
-            return .red
+            return .statusDestructive
         case .recordingWaveform:
-            return .accentColor
+            return .brandPrimary
         case .finalizingTranscript, .submittingTurn:
-            return .orange
+            return .brandTertiary
         case .idle, .modalActive:
             return .secondary
         }
@@ -124,10 +124,10 @@ struct QuickMicOverlay: View {
                 if viewModel.isRecording {
                     Text("Live")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.brandPrimary)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(Color.accentColor.opacity(0.12))
+                        .background(Color.brandPrimary.opacity(0.12))
                         .clipShape(Capsule())
                 }
 
@@ -149,11 +149,11 @@ struct QuickMicOverlay: View {
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage)
                     .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.statusDestructive)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.08))
+                    .background(Color.statusDestructive.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
@@ -173,7 +173,7 @@ struct QuickMicOverlay: View {
                                 ? "Speak naturally. Tap the mic when done."
                                 : viewModel.activeTranscript,
                             systemImage: "waveform",
-                            accentColor: .accentColor
+                            accentColor: .brandPrimary
                         )
                     }
 
@@ -184,7 +184,7 @@ struct QuickMicOverlay: View {
                                 ? "Transcribing your message..."
                                 : "Thinking through a concise answer...",
                             systemImage: "sparkles",
-                            accentColor: .orange,
+                            accentColor: .brandTertiary,
                             showsProgress: true
                         )
                     }
@@ -276,7 +276,7 @@ private struct QuickMicMessageBubble: View {
             VStack(alignment: isUser ? .trailing : .leading, spacing: 5) {
                 Text(isUser ? "You" : "Newsbuddy")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(isUser ? Color.accentColor.opacity(0.88) : .secondary)
+                    .foregroundStyle(isUser ? Color.brandPrimary.opacity(0.88) : .secondary)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Self.markdownText(message.content)
@@ -301,12 +301,12 @@ private struct QuickMicMessageBubble: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isUser ? Color.accentColor.opacity(0.1) : Color(white: 0.95))
+                    .fill(isUser ? Color.brandPrimary.opacity(0.1) : Color.surfaceSecondary)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(
-                        isUser ? Color.accentColor.opacity(0.18) : Color.black.opacity(0.06),
+                        isUser ? Color.brandPrimary.opacity(0.18) : Color.outlineVariant.opacity(0.5),
                         lineWidth: 0.5
                     )
             )
@@ -356,11 +356,11 @@ private struct QuickMicStatusBubble: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(white: 0.95))
+                    .fill(Color.surfaceSecondary)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.black.opacity(0.06), lineWidth: 0.5)
+                    .stroke(Color.outlineVariant.opacity(0.5), lineWidth: 0.5)
             )
             .frame(maxWidth: 292, alignment: .leading)
 
@@ -374,7 +374,7 @@ struct TapToTalkMicButton: View {
     let isRecording: Bool
     let isBusy: Bool
     let size: CGFloat
-    var tint: Color = .accentColor
+    var tint: Color = .brandPrimary
     let action: () -> Void
 
     var body: some View {

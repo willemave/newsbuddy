@@ -83,39 +83,21 @@ struct SourceRow: View {
 struct SourceTypeIcon: View {
     let type: String
 
-    private var iconName: String {
-        switch type.lowercased() {
-        case "podcast_rss", "podcast":
-            return "waveform"
-        case "youtube":
-            return "play.rectangle.fill"
-        case "substack":
-            return "newspaper"
-        case "atom", "rss":
-            return "dot.radiowaves.left.and.right"
-        default:
-            return "list.bullet.rectangle"
-        }
-    }
-
-    private var iconColor: Color {
-        switch type.lowercased() {
-        case "podcast_rss", "podcast":
-            return .purple
-        case "youtube":
-            return .red
-        case "substack":
-            return .orange
-        default:
-            return .blue
-        }
-    }
+    private var metadata: SourceVisualMetadata { .sourceType(type) }
 
     var body: some View {
-        Image(systemName: iconName)
-            .font(.system(size: 17, weight: .medium))
-            .foregroundStyle(iconColor)
-            .frame(width: Spacing.iconSize, height: Spacing.iconSize)
+        switch metadata.glyph {
+        case .system(let name):
+            Image(systemName: name)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(metadata.color)
+                .frame(width: Spacing.iconSize, height: Spacing.iconSize)
+        case .text(let value):
+            Text(value)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(metadata.color)
+                .frame(width: Spacing.iconSize, height: Spacing.iconSize)
+        }
     }
 }
 

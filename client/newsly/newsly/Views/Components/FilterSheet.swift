@@ -58,7 +58,7 @@ struct FilterSheet: View {
                         NavigationLink(destination: SettingsView()) {
                             HStack {
                                 Image(systemName: "gear")
-                                    .foregroundColor(.accentColor)
+                                    .foregroundColor(.brandPrimary)
                                 Text("Settings")
                             }
                         }

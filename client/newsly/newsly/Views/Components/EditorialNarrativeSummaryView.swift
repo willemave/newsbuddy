@@ -32,7 +32,7 @@ struct EditorialNarrativeSummaryView: View {
             }
 
             if !summary.keyPoints.isEmpty {
-                sectionHeader("Key Points", icon: "list.bullet.rectangle", tint: .blue)
+                sectionHeader("Key Points", icon: "list.bullet.rectangle", tint: .terracottaPrimary)
                 VStack(alignment: .leading, spacing: EditorialNarrativeDesign.itemSpacing) {
                     ForEach(summary.keyPoints) { point in
                         bulletRow(text: point.point)
@@ -44,7 +44,7 @@ struct EditorialNarrativeSummaryView: View {
                 sectionHeader(
                     summary.sourceTemplateDisplayName ?? "Structured Details",
                     icon: "square.stack.3d.up",
-                    tint: .teal,
+                    tint: .summarySecondaryAccent,
                     uppercase: false
                 )
                 VStack(alignment: .leading, spacing: 14) {
@@ -68,7 +68,7 @@ struct EditorialNarrativeSummaryView: View {
             }
 
             if !summary.quotes.isEmpty {
-                sectionHeader("Notable Quotes", icon: "quote.opening", tint: .purple)
+                sectionHeader("Notable Quotes", icon: "quote.opening", tint: .terracottaDark)
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(summary.quotes, id: \.text) { quote in
                         quoteCard(quote)
@@ -89,6 +89,7 @@ struct EditorialNarrativeSummaryView: View {
             Image(systemName: icon)
                 .font(.subheadline)
                 .foregroundColor(tint)
+                .accessibilityHidden(true)
             Text(title)
                 .font(.subheadline)
                 .fontWeight(.semibold)
@@ -134,7 +135,7 @@ struct EditorialNarrativeSummaryView: View {
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [.purple.opacity(0.8), .purple.opacity(0.4)],
+                        colors: [Color.terracottaPrimary.opacity(0.8), Color.terracottaPrimary.opacity(0.4)],
                         startPoint: .top,
                         endPoint: .bottom
                     )

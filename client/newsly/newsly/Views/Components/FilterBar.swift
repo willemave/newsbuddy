@@ -77,7 +77,7 @@ struct FilterBar: View {
             }
         }
         .padding()
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(Color.surfaceSecondary)
         .cornerRadius(12)
     }
 }

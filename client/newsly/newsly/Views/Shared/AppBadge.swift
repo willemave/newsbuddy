@@ -45,14 +45,14 @@ struct TextBadge: View {
 #Preview {
     VStack(spacing: 16) {
         HStack(spacing: 12) {
-            CountBadge(count: 5, color: .red)
-            CountBadge(count: 12, color: .teal)
+            CountBadge(count: 5, color: .brandTertiary)
+            CountBadge(count: 12, color: .brandPrimary)
         }
         HStack(spacing: 12) {
-            TextBadge(text: "New", color: .green)
-            TextBadge(text: "Processing", color: .blue)
-            TextBadge(text: "Failed", color: .red)
-            TextBadge(text: "Submitted", color: .blue, style: .outlined)
+            TextBadge(text: "New", color: .brandTertiary)
+            TextBadge(text: "Processing", color: .brandPrimary)
+            TextBadge(text: "Failed", color: .statusDestructive)
+            TextBadge(text: "Submitted", color: .brandSecondary, style: .outlined)
         }
     }
     .padding()

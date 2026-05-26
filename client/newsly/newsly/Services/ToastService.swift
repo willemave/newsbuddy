@@ -23,9 +23,9 @@ enum ToastType {
 
     var color: Color {
         switch self {
-        case .success: return .green
-        case .error: return .red
-        case .info: return .blue
+        case .success: return .brandSecondary
+        case .error: return .statusDestructive
+        case .info: return .brandPrimary
         }
     }
 }

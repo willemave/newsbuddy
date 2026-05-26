@@ -82,8 +82,8 @@ struct OnboardingFlowView: View {
                 Capsule()
                     .fill(
                         index < currentStepInfo.number
-                            ? Color.watercolorSlate.opacity(0.55)
-                            : Color.watercolorSlate.opacity(0.14)
+                            ? Color.onboardingText.opacity(0.55)
+                            : Color.onboardingText.opacity(0.14)
                     )
                     .frame(height: 4)
             }
@@ -118,14 +118,14 @@ struct OnboardingFlowView: View {
                     Text("MEET YOUR GUIDE")
                         .font(.editorialMeta)
                         .tracking(1.8)
-                        .foregroundColor(.watercolorSlate.opacity(0.55))
+                        .foregroundColor(.onboardingText.opacity(0.55))
                     Text("Newsbuddy")
                         .font(.watercolorDisplay)
-                        .foregroundColor(.watercolorSlate)
+                        .foregroundColor(.onboardingText)
                         .multilineTextAlignment(.center)
                     Text("I'm going to help you get onboarded.\nLet's get going.")
                         .font(.watercolorSubtitle)
-                        .foregroundColor(.watercolorSlate.opacity(0.74))
+                        .foregroundColor(.onboardingText.opacity(0.74))
                         .multilineTextAlignment(.center)
                         .lineSpacing(3)
                 }
@@ -147,7 +147,7 @@ struct OnboardingFlowView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .foregroundColor(.watercolorBase)
+                    .foregroundColor(.onboardingSurface)
                     .background(primaryButtonBackground)
                 }
                 .buttonStyle(OnboardingPrimaryPressStyle())
@@ -158,7 +158,7 @@ struct OnboardingFlowView: View {
                 } label: {
                     Text("Skip - use popular defaults")
                         .font(.callout.weight(.medium))
-                        .foregroundColor(.watercolorSlate.opacity(0.72))
+                        .foregroundColor(.onboardingText.opacity(0.72))
                 }
                 .buttonStyle(OnboardingTextButtonStyle())
                 .accessibilityIdentifier("onboarding.choice.defaults")
@@ -169,7 +169,7 @@ struct OnboardingFlowView: View {
             if let error = viewModel.errorMessage {
                 Text(error)
                     .font(.caption)
-                    .foregroundColor(.red)
+                    .foregroundColor(.statusDestructive)
                     .padding(.top, 8)
             }
         }
@@ -209,7 +209,7 @@ struct OnboardingFlowView: View {
                     viewModel.chooseDefaults()
                 }
                 .font(.callout.weight(.medium))
-                .foregroundColor(.watercolorSlate.opacity(0.72))
+                .foregroundColor(.onboardingText.opacity(0.72))
                 .buttonStyle(OnboardingTextButtonStyle())
                 .padding(.bottom, 8)
                 .accessibilityIdentifier("onboarding.audio.skip")
@@ -218,7 +218,7 @@ struct OnboardingFlowView: View {
             if let error = viewModel.errorMessage {
                 Text(error)
                     .font(.caption)
-                    .foregroundColor(.red)
+                    .foregroundColor(.statusDestructive)
                     .padding(.bottom, 8)
             }
         }
@@ -233,10 +233,10 @@ struct OnboardingFlowView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.2)
-                .tint(.watercolorSlate)
+                .tint(.onboardingText)
             Text("Processing your interests...")
                 .font(.callout)
-                .foregroundColor(.watercolorSlate.opacity(0.7))
+                .foregroundColor(.onboardingText.opacity(0.7))
 
             if hasTopicPreview {
                 topicPreviewCard(
@@ -265,17 +265,17 @@ struct OnboardingFlowView: View {
                 if viewModel.discoveryLanes.isEmpty {
                     ProgressView()
                         .scaleEffect(1.2)
-                        .tint(.watercolorSlate)
+                        .tint(.onboardingText)
                     Text("Preparing search...")
                         .font(.callout)
-                        .foregroundColor(.watercolorSlate.opacity(0.7))
+                        .foregroundColor(.onboardingText.opacity(0.7))
                 } else {
                     VStack(spacing: 14) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text("LIVE PROGRESS")
                                 .font(.editorialMeta)
                                 .tracking(1.6)
-                                .foregroundColor(.watercolorSlate.opacity(0.55))
+                                .foregroundColor(.onboardingText.opacity(0.55))
 
                             Spacer()
 
@@ -283,11 +283,11 @@ struct OnboardingFlowView: View {
                                 Text("\(completedLaneCount)")
                                     .font(.footnote.weight(.semibold))
                                     .monospacedDigit()
-                                    .foregroundColor(.watercolorSlate.opacity(0.78))
+                                    .foregroundColor(.onboardingText.opacity(0.78))
                                 Text("/\(viewModel.discoveryLanes.count)")
                                     .font(.caption.weight(.medium))
                                     .monospacedDigit()
-                                    .foregroundColor(.watercolorSlate.opacity(0.42))
+                                    .foregroundColor(.onboardingText.opacity(0.42))
                             }
                             .contentTransition(.numericText())
                         }
@@ -304,7 +304,7 @@ struct OnboardingFlowView: View {
 
                                 if index < viewModel.discoveryLanes.count - 1 || isFinalizingLanes {
                                     Rectangle()
-                                        .fill(Color.watercolorSlate.opacity(0.06))
+                                        .fill(Color.onboardingText.opacity(0.06))
                                         .frame(height: 0.5)
                                 }
                             }
@@ -329,17 +329,17 @@ struct OnboardingFlowView: View {
             VStack(spacing: 14) {
                 Text(loadingFootnote)
                     .font(.caption)
-                    .foregroundColor(.watercolorSlate.opacity(0.62))
+                    .foregroundColor(.onboardingText.opacity(0.62))
 
                 if let message = viewModel.discoveryErrorMessage {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.watercolorSlate.opacity(0.78))
+                            .foregroundColor(.onboardingText.opacity(0.78))
                             .padding(.top, 1)
                         Text(message)
                             .font(.footnote)
-                            .foregroundColor(.watercolorSlate.opacity(0.84))
+                            .foregroundColor(.onboardingText.opacity(0.84))
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -348,10 +348,10 @@ struct OnboardingFlowView: View {
                     .padding(.vertical, 11)
                     .background(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color.watercolorDiffusedPeach.opacity(0.18))
+                            .fill(Color.onboardingAmbientTertiary.opacity(0.18))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(Color.watercolorDiffusedPeach.opacity(0.32), lineWidth: 0.5)
+                                    .stroke(Color.onboardingAmbientTertiary.opacity(0.32), lineWidth: 0.5)
                             )
                     )
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -369,7 +369,7 @@ struct OnboardingFlowView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .foregroundColor(.watercolorBase)
+                        .foregroundColor(.onboardingSurface)
                         .background(primaryButtonBackground)
                     }
                     .buttonStyle(OnboardingPrimaryPressStyle())
@@ -391,13 +391,13 @@ struct OnboardingFlowView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
-                        .foregroundColor(.watercolorSlate)
+                        .foregroundColor(.onboardingText)
                         .background(
                             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .fill(Color.watercolorSlate.opacity(0.08))
+                                .fill(Color.onboardingText.opacity(0.08))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                        .stroke(Color.watercolorSlate.opacity(0.14), lineWidth: 0.5)
+                                        .stroke(Color.onboardingText.opacity(0.14), lineWidth: 0.5)
                                 )
                         )
                     }
@@ -410,7 +410,7 @@ struct OnboardingFlowView: View {
                     viewModel.chooseDefaults()
                 }
                 .font(.footnote.weight(.medium))
-                .foregroundColor(.watercolorSlate.opacity(0.6))
+                .foregroundColor(.onboardingText.opacity(0.6))
                 .buttonStyle(OnboardingTextButtonStyle())
                 .accessibilityIdentifier("onboarding.loading.use_defaults")
                 .padding(.top, 2)
@@ -451,7 +451,7 @@ struct OnboardingFlowView: View {
                     {
                         Text(emptyStateMessage)
                             .font(.callout)
-                            .foregroundColor(.watercolorSlate.opacity(0.7))
+                            .foregroundColor(.onboardingText.opacity(0.7))
                             .padding(.vertical, 20)
                     }
 
@@ -485,7 +485,7 @@ struct OnboardingFlowView: View {
                     Text("\(selectedLongformCount) selected")
                         .font(.caption.weight(.semibold))
                         .monospacedDigit()
-                        .foregroundColor(.watercolorSlate.opacity(0.65))
+                        .foregroundColor(.onboardingText.opacity(0.65))
                 }
 
                 primaryButton("Continue") {
@@ -503,7 +503,7 @@ struct OnboardingFlowView: View {
                         }
                     }
                     .font(.callout.weight(.medium))
-                    .foregroundColor(.watercolorSlate.opacity(0.78))
+                    .foregroundColor(.onboardingText.opacity(0.78))
                     .buttonStyle(OnboardingTextButtonStyle())
                     .accessibilityIdentifier("onboarding.suggestions.retry")
                 } else if viewModel.isShowingDefaultConfirmation {
@@ -513,7 +513,7 @@ struct OnboardingFlowView: View {
                         }
                     }
                     .font(.callout.weight(.medium))
-                    .foregroundColor(.watercolorSlate.opacity(0.78))
+                    .foregroundColor(.onboardingText.opacity(0.78))
                     .buttonStyle(OnboardingTextButtonStyle())
                     .accessibilityIdentifier("onboarding.suggestions.personalize")
                 }
@@ -521,7 +521,7 @@ struct OnboardingFlowView: View {
                 if let error = viewModel.errorMessage {
                     Text(error)
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundColor(.statusDestructive)
                 }
             }
             .padding(.horizontal, 24)
@@ -567,7 +567,7 @@ struct OnboardingFlowView: View {
                 Text("\(selectedFastNewsCount) selected")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundColor(.watercolorSlate.opacity(0.65))
+                    .foregroundColor(.onboardingText.opacity(0.65))
 
                 primaryButton(fastNewsPrimaryTitle) {
                     Task { await viewModel.completeOnboarding() }
@@ -581,14 +581,14 @@ struct OnboardingFlowView: View {
                     }
                 }
                 .font(.callout.weight(.medium))
-                .foregroundColor(.watercolorSlate.opacity(0.72))
+                .foregroundColor(.onboardingText.opacity(0.72))
                 .buttonStyle(OnboardingTextButtonStyle())
                 .accessibilityIdentifier("onboarding.fastnews.back")
 
                 if let error = viewModel.errorMessage {
                     Text(error)
                         .font(.caption)
-                        .foregroundColor(.red)
+                        .foregroundColor(.statusDestructive)
                 }
             }
             .padding(.horizontal, 24)
@@ -604,10 +604,10 @@ struct OnboardingFlowView: View {
             HStack(spacing: 6) {
                 Image(systemName: "bolt.horizontal")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.watercolorSlate.opacity(0.55))
+                    .foregroundColor(.onboardingText.opacity(0.55))
                 Text("AGGREGATORS")
                     .font(.editorialMeta)
-                    .foregroundColor(.watercolorSlate.opacity(0.55))
+                    .foregroundColor(.onboardingText.opacity(0.55))
                     .tracking(1.5)
 
                 Spacer()
@@ -615,10 +615,10 @@ struct OnboardingFlowView: View {
                 Text("\(viewModel.selectedAggregators.count)/\(onboardingAggregatorOptions.count)")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundColor(.watercolorSlate.opacity(0.68))
+                    .foregroundColor(.onboardingText.opacity(0.68))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.watercolorSlate.opacity(0.08)))
+                    .background(Capsule().fill(Color.onboardingText.opacity(0.08)))
             }
             .padding(.top, 16)
             .padding(.bottom, 4)
@@ -641,20 +641,20 @@ struct OnboardingFlowView: View {
                 HStack(spacing: 12) {
                     ZStack {
                         Circle()
-                            .fill(Color.watercolorSlate.opacity(isSelected ? 0.16 : 0.08))
+                            .fill(Color.onboardingText.opacity(isSelected ? 0.16 : 0.08))
                             .frame(width: 36, height: 36)
                         Image(systemName: option.icon)
                             .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(.watercolorSlate)
+                            .foregroundColor(.onboardingText)
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(option.title)
                             .font(.callout.weight(.semibold))
-                            .foregroundColor(.watercolorSlate)
+                            .foregroundColor(.onboardingText)
                         Text(option.subtitle)
                             .font(.caption)
-                            .foregroundColor(.watercolorSlate.opacity(0.62))
+                            .foregroundColor(.onboardingText.opacity(0.62))
                             .lineLimit(2)
                     }
 
@@ -665,13 +665,13 @@ struct OnboardingFlowView: View {
                 .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: 18)
-                        .fill(Color.watercolorBase.opacity(isSelected ? 0.92 : 0.7))
+                        .fill(Color.onboardingSurface.opacity(isSelected ? 0.92 : 0.7))
                         .overlay(
                             RoundedRectangle(cornerRadius: 18)
                                 .stroke(
                                     isSelected
-                                        ? Color.watercolorPaleEmerald.opacity(0.4)
-                                        : Color.watercolorSlate.opacity(0.10),
+                                        ? Color.onboardingSelectionAccent.opacity(0.4)
+                                        : Color.onboardingText.opacity(0.10),
                                     lineWidth: isSelected ? 1 : 0.5
                                 )
                         )
@@ -699,7 +699,7 @@ struct OnboardingFlowView: View {
             Text("TOPICS")
                 .font(.editorialMeta)
                 .tracking(1.4)
-                .foregroundColor(.watercolorSlate.opacity(0.55))
+                .foregroundColor(.onboardingText.opacity(0.55))
 
             FlowLayout(spacing: 6) {
                 ForEach(onboardingBrutalistTopics, id: \.self) { topic in
@@ -711,8 +711,8 @@ struct OnboardingFlowView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundColor(
                                 isOn
-                                    ? Color.watercolorSlate.opacity(0.95)
-                                    : Color.watercolorSlate.opacity(0.62)
+                                    ? Color.onboardingText.opacity(0.95)
+                                    : Color.onboardingText.opacity(0.62)
                             )
                             .padding(.horizontal, 11)
                             .padding(.vertical, 6)
@@ -720,15 +720,15 @@ struct OnboardingFlowView: View {
                                 Capsule(style: .continuous)
                                     .fill(
                                         isOn
-                                            ? Color.watercolorPaleEmerald.opacity(0.22)
+                                            ? Color.onboardingSelectionAccent.opacity(0.22)
                                             : Color.clear
                                     )
                                     .overlay(
                                         Capsule(style: .continuous)
                                             .strokeBorder(
                                                 isOn
-                                                    ? Color.watercolorPaleEmerald.opacity(0.4)
-                                                    : Color.watercolorSlate.opacity(0.18),
+                                                    ? Color.onboardingSelectionAccent.opacity(0.4)
+                                                    : Color.onboardingText.opacity(0.18),
                                                 lineWidth: 0.75
                                             )
                                     )
@@ -749,13 +749,13 @@ struct OnboardingFlowView: View {
                 .fill(.ultraThinMaterial)
 
             LinearGradient(
-                colors: [.clear, Color.watercolorBase.opacity(0.28)],
+                colors: [.clear, Color.onboardingSurface.opacity(0.28)],
                 startPoint: .top,
                 endPoint: .bottom
             )
 
             Rectangle()
-                .fill(Color.watercolorSlate.opacity(0.08))
+                .fill(Color.onboardingText.opacity(0.08))
                 .frame(height: 0.5)
         }
         .ignoresSafeArea(edges: .bottom)
@@ -772,10 +772,10 @@ struct OnboardingFlowView: View {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.watercolorSlate.opacity(0.55))
+                    .foregroundColor(.onboardingText.opacity(0.55))
                 Text(title)
                     .font(.editorialMeta)
-                    .foregroundColor(.watercolorSlate.opacity(0.55))
+                    .foregroundColor(.onboardingText.opacity(0.55))
                     .tracking(1.5)
 
                 Spacer()
@@ -783,10 +783,10 @@ struct OnboardingFlowView: View {
                 Text("\(items.count)")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundColor(.watercolorSlate.opacity(0.68))
+                    .foregroundColor(.onboardingText.opacity(0.68))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.watercolorSlate.opacity(0.08)))
+                    .background(Capsule().fill(Color.onboardingText.opacity(0.08)))
             }
             .padding(.top, 16)
             .padding(.bottom, 4)
@@ -811,7 +811,7 @@ struct OnboardingFlowView: View {
                 .font(.callout.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .foregroundColor(.watercolorBase)
+                .foregroundColor(.onboardingSurface)
                 .background(primaryButtonBackground)
         }
         .buttonStyle(OnboardingPrimaryPressStyle())
@@ -831,16 +831,16 @@ struct OnboardingFlowView: View {
             Text(eyebrow)
                 .font(.editorialMeta)
                 .tracking(1.8)
-                .foregroundColor(.watercolorSlate.opacity(0.58))
+                .foregroundColor(.onboardingText.opacity(0.58))
 
             Text(title)
                 .font(.title2.bold())
-                .foregroundColor(.watercolorSlate)
+                .foregroundColor(.onboardingText)
                 .multilineTextAlignment(textAlignment)
 
             Text(subtitle)
                 .font(.callout)
-                .foregroundColor(.watercolorSlate.opacity(0.72))
+                .foregroundColor(.onboardingText.opacity(0.72))
                 .multilineTextAlignment(textAlignment)
                 .lineSpacing(2)
         }
@@ -852,11 +852,11 @@ struct OnboardingFlowView: View {
             Text(eyebrow)
                 .font(.editorialMeta)
                 .tracking(1.6)
-                .foregroundColor(.watercolorSlate.opacity(0.58))
+                .foregroundColor(.onboardingText.opacity(0.58))
 
             Text(title)
                 .font(.callout.weight(.semibold))
-                .foregroundColor(.watercolorSlate)
+                .foregroundColor(.onboardingText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if !viewModel.inferredTopics.isEmpty {
@@ -865,10 +865,10 @@ struct OnboardingFlowView: View {
                         ForEach(Array(viewModel.inferredTopics.prefix(6)), id: \.self) { topic in
                             Text(topic)
                                 .font(.caption.weight(.semibold))
-                                .foregroundColor(.watercolorSlate)
+                                .foregroundColor(.onboardingText)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
-                                .background(Capsule().fill(Color.watercolorSlate.opacity(0.08)))
+                                .background(Capsule().fill(Color.onboardingText.opacity(0.08)))
                         }
                     }
                 }
@@ -880,17 +880,17 @@ struct OnboardingFlowView: View {
 
     private func cardSurface(cornerRadius: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: cornerRadius)
-            .fill(Color.watercolorBase.opacity(0.76))
+            .fill(Color.onboardingSurface.opacity(0.76))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius)
-                    .stroke(Color.watercolorSlate.opacity(0.10), lineWidth: 0.5)
+                    .stroke(Color.onboardingText.opacity(0.10), lineWidth: 0.5)
             )
             .shadow(color: .black.opacity(0.05), radius: 16, x: 0, y: 10)
     }
 
     private var primaryButtonBackground: some View {
         RoundedRectangle(cornerRadius: 24)
-            .fill(Color.watercolorSlate)
+            .fill(Color.onboardingText)
             .shadow(color: .black.opacity(0.10), radius: 18, x: 0, y: 12)
     }
 
@@ -921,8 +921,8 @@ struct OnboardingFlowView: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                Color.watercolorMistyBlue.opacity(0.22),
-                                Color.watercolorPaleEmerald.opacity(0.22),
+                                Color.onboardingAmbientPrimary.opacity(0.22),
+                                Color.onboardingSelectionAccent.opacity(0.22),
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -936,10 +936,10 @@ struct OnboardingFlowView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Finalizing")
                     .font(.callout.weight(.medium))
-                    .foregroundColor(.watercolorSlate.opacity(0.95))
+                    .foregroundColor(.onboardingText.opacity(0.95))
                 Text("Shaping your first picks")
                     .font(.caption)
-                    .foregroundColor(.watercolorSlate.opacity(0.55))
+                    .foregroundColor(.onboardingText.opacity(0.55))
             }
 
             Spacer()
@@ -1027,15 +1027,15 @@ struct OnboardingSelectionDot: View {
             Circle()
                 .fill(
                     isSelected
-                        ? Color.watercolorPaleEmerald.opacity(0.22)
+                        ? Color.onboardingSelectionAccent.opacity(0.22)
                         : Color.clear
                 )
                 .overlay(
                     Circle()
                         .strokeBorder(
                             isSelected
-                                ? Color.watercolorPaleEmerald.opacity(0.55)
-                                : Color.watercolorSlate.opacity(0.28),
+                                ? Color.onboardingSelectionAccent.opacity(0.55)
+                                : Color.onboardingText.opacity(0.28),
                             lineWidth: isSelected ? 1.2 : 1
                         )
                 )
@@ -1044,7 +1044,7 @@ struct OnboardingSelectionDot: View {
             if isSelected {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.watercolorPaleEmerald)
+                    .foregroundColor(.onboardingSelectionAccent)
                     .transition(.scale(scale: 0.4).combined(with: .opacity))
             }
         }
@@ -1061,7 +1061,7 @@ private struct FinalizingSparkle: View {
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(
                 LinearGradient(
-                    colors: [.watercolorMistyBlue, .watercolorPaleEmerald],
+                    colors: [.onboardingAmbientPrimary, .onboardingSelectionAccent],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )

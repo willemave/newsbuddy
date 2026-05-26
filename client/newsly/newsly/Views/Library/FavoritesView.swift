@@ -78,7 +78,7 @@ struct KnowledgeLibraryView: View {
         VStack(spacing: 20) {
             Image(systemName: "books.vertical")
                 .font(.system(size: 48, weight: .light))
-                .foregroundStyle(Color.accentColor.opacity(0.7))
+                .foregroundStyle(Color.brandTertiary.opacity(0.78))
 
             VStack(spacing: 6) {
                 Text("No saved items yet")
@@ -125,7 +125,7 @@ struct KnowledgeLibraryView: View {
                         } label: {
                             Label("Mark as Read", systemImage: "checkmark.circle.fill")
                         }
-                        .tint(.green)
+                        .tint(Color.brandTertiary)
                     }
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -139,7 +139,7 @@ struct KnowledgeLibraryView: View {
                     } label: {
                         Label("Remove", systemImage: "books.vertical.fill")
                     }
-                    .tint(.red)
+                    .tint(Color.brandTertiary)
                 }
             }
 
@@ -236,7 +236,7 @@ struct KnowledgeLibraryView: View {
                     }
                 }
                 .font(.terracottaBodySmall.weight(.semibold))
-                .foregroundStyle(Color.terracottaPrimary)
+                .foregroundStyle(Color.brandPrimary)
                 .padding(.horizontal, 2)
             }
         }
@@ -262,7 +262,7 @@ struct KnowledgeLibraryView: View {
                 }
             }
             .font(.terracottaBodySmall.weight(.semibold))
-            .foregroundStyle(Color.terracottaPrimary)
+            .foregroundStyle(Color.brandPrimary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
@@ -300,7 +300,7 @@ private struct SavedLibraryRow: View {
             if content.savedSource == "x_bookmark" {
                 Image(systemName: "bookmark.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.terracottaPrimary)
+                    .foregroundStyle(Color.brandTertiary)
                     .padding(.top, 4)
                     .accessibilityLabel("X bookmark")
             }
@@ -331,7 +331,7 @@ private struct LibraryFilterPill: View {
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurface)
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
-            .background(isSelected ? Color.onSurface : Color.surfaceSecondary, in: Capsule())
+            .background(isSelected ? Color.brandPrimary : Color.surfaceSecondary, in: Capsule())
             .overlay(
                 Capsule()
                     .stroke(Color.outlineVariant.opacity(isSelected ? 0 : 0.45), lineWidth: 1)

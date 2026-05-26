@@ -17,7 +17,7 @@ struct SubmissionDetailView: View {
                     Text("State")
                     Spacer()
                     Text(submission.statusLabel)
-                        .foregroundStyle(submission.isError ? .red : .secondary)
+                        .foregroundStyle(submission.isError ? Color.statusDestructive : Color.onSurfaceSecondary)
                 }
 
                 if let date = submission.statusDateDisplay {
@@ -31,7 +31,7 @@ struct SubmissionDetailView: View {
 
                 if let error = submission.errorDisplayText {
                     Text(error)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.statusDestructive)
                 }
             }
 

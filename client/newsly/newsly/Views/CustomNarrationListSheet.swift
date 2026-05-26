@@ -17,7 +17,7 @@ struct CustomNarrationListSheet: View {
                 if let errorMessage = viewModel.errorMessage {
                     Text(errorMessage)
                         .font(.terracottaBodySmall)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.statusDestructive)
                         .appListRow()
                 }
 
@@ -143,7 +143,7 @@ struct CustomNarrationListSheet: View {
         } else if episode.isFailed {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.red)
+                .foregroundStyle(Color.statusDestructive)
         } else {
             Image(systemName: viewModel.isPlaying(episode) ? "speaker.wave.3.fill" : "waveform")
                 .font(.system(size: 14, weight: .semibold))

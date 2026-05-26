@@ -24,28 +24,28 @@ struct OnboardingSuggestionCard: View {
         case "substack", "newsletter":
             return SuggestionMetadata(
                 icon: "envelope.open",
-                accentColor: .watercolorMistyBlue,
+                accentColor: .onboardingAmbientPrimary,
                 label: "Newsletter",
                 hidesLabel: false
             )
         case "podcast_rss", "podcast":
             return SuggestionMetadata(
                 icon: "waveform",
-                accentColor: .watercolorDiffusedPeach,
+                accentColor: .onboardingAmbientTertiary,
                 label: "Podcast",
                 hidesLabel: false
             )
         case "reddit":
             return SuggestionMetadata(
                 icon: "bubble.left.and.text.bubble.right",
-                accentColor: .watercolorPaleEmerald,
+                accentColor: .onboardingSelectionAccent,
                 label: "Reddit",
                 hidesLabel: true
             )
         default:
             return SuggestionMetadata(
                 icon: "doc.text",
-                accentColor: .watercolorSoftSky,
+                accentColor: .onboardingAmbientQuaternary,
                 label: "Feed",
                 hidesLabel: false
             )
@@ -66,19 +66,19 @@ struct OnboardingSuggestionCard: View {
                                 Text(metadata.label.uppercased())
                                     .font(.caption.weight(.semibold))
                                     .tracking(1.0)
-                                    .foregroundColor(.watercolorSlate.opacity(0.55))
+                                    .foregroundColor(.onboardingText.opacity(0.55))
                             }
 
                             if let sourceDetail, !sourceDetail.isEmpty {
                                 if !metadata.hidesLabel {
                                     Circle()
-                                        .fill(Color.watercolorSlate.opacity(0.28))
+                                        .fill(Color.onboardingText.opacity(0.28))
                                         .frame(width: 2, height: 2)
                                 }
 
                                 Text(sourceDetail)
                                     .font(.caption)
-                                    .foregroundColor(.watercolorSlate.opacity(0.55))
+                                    .foregroundColor(.onboardingText.opacity(0.55))
                                     .lineLimit(1)
                             }
                         }
@@ -86,14 +86,14 @@ struct OnboardingSuggestionCard: View {
 
                     Text(suggestion.displayTitle)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.watercolorSlate)
+                        .foregroundColor(.onboardingText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
 
                     if let rationale = suggestion.rationale, !rationale.isEmpty {
                         Text(rationale)
                             .font(.caption)
-                            .foregroundColor(.watercolorSlate.opacity(0.62))
+                            .foregroundColor(.onboardingText.opacity(0.62))
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
@@ -135,15 +135,15 @@ struct OnboardingSuggestionCard: View {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
             .fill(
                 isSelected
-                    ? Color.watercolorBase.opacity(0.94)
-                    : Color.watercolorBase.opacity(0.86)
+                    ? Color.onboardingSurface.opacity(0.94)
+                    : Color.onboardingSurface.opacity(0.86)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(
                         isSelected
-                            ? Color.watercolorPaleEmerald.opacity(0.32)
-                            : Color.watercolorSlate.opacity(0.08),
+                            ? Color.onboardingSelectionAccent.opacity(0.32)
+                            : Color.onboardingText.opacity(0.08),
                         lineWidth: isSelected ? 0.75 : 0.5
                     )
             )

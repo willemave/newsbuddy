@@ -85,7 +85,7 @@ struct BulletedSummaryView: View {
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [.purple.opacity(0.8), .purple.opacity(0.4)],
+                        colors: [Color.terracottaPrimary.opacity(0.8), Color.terracottaPrimary.opacity(0.4)],
                         startPoint: .top,
                         endPoint: .bottom
                     )

@@ -167,11 +167,11 @@ struct KnowledgeView: View {
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage)
                     .font(.terracottaBodySmall)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.statusDestructive)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
-                    .background(Color.red.opacity(0.08))
+                    .background(Color.statusDestructive.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .padding(.horizontal, Spacing.screenHorizontal)
                     .padding(.bottom, 24)
@@ -192,6 +192,7 @@ struct KnowledgeView: View {
                 libraryButton(
                     title: "Saved",
                     systemImage: "books.vertical.fill",
+                    accent: .brandTertiary,
                     action: {
                         onShowKnowledgeLibrary?()
                     }
@@ -201,6 +202,7 @@ struct KnowledgeView: View {
                 libraryButton(
                     title: "Narration",
                     systemImage: "waveform",
+                    accent: .brandPrimary,
                     action: {
                         showNarrationList = true
                     }
@@ -221,15 +223,16 @@ struct KnowledgeView: View {
     private func libraryButton(
         title: String,
         systemImage: String,
+        accent: Color,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: systemImage)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.terracottaPrimary)
+                    .foregroundStyle(accent)
                     .frame(width: 40, height: 40)
-                    .background(Color.terracottaPrimary.opacity(0.14))
+                    .background(accent.opacity(0.14))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 HStack(alignment: .lastTextBaseline, spacing: 8) {
@@ -300,7 +303,14 @@ struct KnowledgeView: View {
             startAction(action)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                actionIcon(action.icon, size: 40, iconSize: 17, cornerRadius: 12, isRunning: isRunning)
+                actionIcon(
+                    action.icon,
+                    accent: actionColor(for: action.id),
+                    size: 40,
+                    iconSize: 17,
+                    cornerRadius: 12,
+                    isRunning: isRunning
+                )
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(action.title)
@@ -335,6 +345,7 @@ struct KnowledgeView: View {
 
     private func actionIcon(
         _ systemName: String,
+        accent: Color,
         size: CGFloat,
         iconSize: CGFloat,
         cornerRadius: CGFloat,
@@ -344,16 +355,29 @@ struct KnowledgeView: View {
             if isRunning {
                 ProgressView()
                     .controlSize(.small)
-                    .tint(.terracottaPrimary)
+                    .tint(accent)
             } else {
                 Image(systemName: systemName)
                     .font(.system(size: iconSize, weight: .semibold))
-                    .foregroundColor(.terracottaPrimary)
+                    .foregroundColor(accent)
             }
         }
         .frame(width: size, height: size)
-        .background(Color.terracottaPrimary.opacity(0.14))
+        .background(accent.opacity(0.14))
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    }
+
+    private func actionColor(for id: HubActionID) -> Color {
+        switch id {
+        case .summary:
+            return .brandPrimary
+        case .topComments:
+            return .brandTertiary
+        case .findArticles:
+            return .brandSecondary
+        case .findFeeds:
+            return .brandSecondary
+        }
     }
 
     private func startAction(_ action: HubAction) {

@@ -18,7 +18,7 @@ struct SuggestionDetailSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             // Drag indicator
             Capsule()
-                .fill(Color(.tertiarySystemFill))
+                .fill(Color.outlineVariant.opacity(0.6))
                 .frame(width: 36, height: 5)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 10)
@@ -26,9 +26,9 @@ struct SuggestionDetailSheet: View {
 
             // Type icon + source title
             HStack(spacing: 10) {
-                Image(systemName: typeIcon)
+                Image(systemName: metadata.systemImageName)
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(typeColor)
+                    .foregroundColor(metadata.color)
 
                 Text(suggestion.displayTitle)
                     .font(.system(size: 17, weight: .semibold))
@@ -81,7 +81,7 @@ struct SuggestionDetailSheet: View {
                             .padding(.vertical, 12)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(typeColor)
+                    .tint(metadata.color)
                 }
 
                 Button(action: {
@@ -133,30 +133,8 @@ struct SuggestionDetailSheet: View {
 
     // MARK: - Type Helpers
 
-    private var typeIcon: String {
-        switch suggestion.suggestionType {
-        case "feed", "rss":
-            return "dot.radiowaves.up.forward"
-        case "podcast_rss", "podcast":
-            return "waveform"
-        case "youtube":
-            return "play.circle.fill"
-        default:
-            return "doc.text"
-        }
-    }
-
-    private var typeColor: Color {
-        switch suggestion.suggestionType {
-        case "feed", "rss":
-            return .blue
-        case "podcast_rss", "podcast":
-            return .orange
-        case "youtube":
-            return .red
-        default:
-            return .blue
-        }
+    private var metadata: SourceVisualMetadata {
+        SourceVisualMetadata.suggestionType(suggestion.suggestionType)
     }
 
     private func formattedURL(_ urlString: String) -> String {
