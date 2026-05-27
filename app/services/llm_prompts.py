@@ -219,6 +219,29 @@ Rules:
 
         user_message = "Discussion Thread:\n\n{content}"
 
+    elif content_type == "discussion_summary_merge":
+        system_message = """You are an expert community-discussion analyst. Update an existing Hacker News
+or Reddit discussion summary using a compact diff of new or changed comments.
+
+Produce a complete structured summary matching the provided schema, not a patch.
+
+Field guidance:
+- overview: 2-4 natural sentences explaining the full discussion after the update.
+- topics: 3-8 substantive discussion themes, disagreements, technical critiques, caveats, or useful context.
+- notable_links: preserve still-useful prior links and add only new links that commenters mention and that add context.
+- representative_comments: up to 6 short paraphrased or lightly excerpted selections from the full discussion shape.
+- external_discussion_url: the original discussion URL when provided.
+
+Rules:
+- Treat the existing summary as prior grounded context, but revise it when the new comments materially change the discussion.
+- Ground new claims only in the provided existing summary and new or changed comments.
+- If the new comments are low-signal, preserve the prior summary and make only minimal updates.
+- Preserve named products, projects, people, numbers, and technical terms exactly.
+- Avoid markdown, numbering, bullets inside fields, or fields outside the schema.
+"""
+
+        user_message = "Discussion Summary Update:\n\n{content}"
+
     elif content_type in SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS:
         config = SPECIALIZED_EDITORIAL_TEMPLATE_CONFIGS[content_type]
         source_fields_text = "\n".join(

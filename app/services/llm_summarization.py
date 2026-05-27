@@ -47,6 +47,7 @@ SummarizationPromptType = Literal[
     "long_bullets",
     "news",
     "discussion_summary",
+    "discussion_summary_merge",
     "editorial_narrative",
     "editorial_podcast",
     "editorial_substack",
@@ -129,6 +130,8 @@ def resolve_summarization_output_type(
         return LongformArtifactEnvelope
     if prompt_type == "discussion_summary":
         return DiscussionSummary
+    if prompt_type == "discussion_summary_merge":
+        return DiscussionSummary
     if prompt_type == "news":
         return GeneratedNewsSummary
     if is_editorial_prompt_type(prompt_type):
@@ -166,6 +169,12 @@ def resolve_summarization_spec(
             "discussion_summary",
             models.get("news", default_article_model),
         )
+    elif normalized_type == "discussion_summary_merge":
+        prompt_type = "discussion_summary_merge"
+        default_model_spec = models.get(
+            "discussion_summary_merge",
+            models.get("discussion_summary", models.get("news", default_article_model)),
+        )
     elif normalized_type == "longform_artifact":
         prompt_type = "longform_artifact"
         default_model_spec = models.get("longform_artifact", editorial_default_model)
@@ -180,6 +189,7 @@ def resolve_summarization_spec(
         "long_bullets",
         "news",
         "discussion_summary",
+        "discussion_summary_merge",
         "structured",
         "longform_artifact",
     }:
@@ -231,6 +241,7 @@ def _clip_payload(payload: str, max_chars: int) -> tuple[str, bool]:
 DEFAULT_SUMMARIZATION_MODELS: dict[str, str] = {
     "news": CHEAP_MODEL_SPEC,
     "discussion_summary": CHEAP_MODEL_SPEC,
+    "discussion_summary_merge": CHEAP_MODEL_SPEC,
     "article": ARTICLE_PODCAST_SUMMARY_MODEL_SPEC,
     "podcast": ARTICLE_PODCAST_SUMMARY_MODEL_SPEC,
     "interleaved": SMART_MODEL_SPEC,

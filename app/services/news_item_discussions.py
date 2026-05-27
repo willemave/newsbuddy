@@ -21,7 +21,6 @@ from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
 from app.models.db import NewsItem, NewsItemDiscussion, User, UserScraperConfig
-from app.models.metadata.summaries import DiscussionSummary
 from app.services.discussion_fetcher import (
     DiscussionFetchError,
     _clean_html_text,
@@ -40,7 +39,16 @@ from app.services.gateways.object_storage_gateway import (
     ObjectStorageGateway,
     get_object_storage_gateway,
 )
-from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
+from app.services.llm_summarization import ContentSummarizer
+from app.services.news_discussion_summaries import (
+    DISCUSSION_SUMMARY_MATERIAL_COMMENT_THRESHOLD,
+    DiscussionSummaryPlanMode,
+    build_discussion_summary_input,
+    execute_discussion_summary_plan,
+    plan_discussion_summary,
+    store_seen_summary_tracking,
+    store_summarized_summary_tracking,
+)
 from app.utils.news_titles import get_news_article_title, get_news_summary_title
 from app.utils.url_utils import normalize_http_url
 
@@ -54,8 +62,6 @@ REFRESH_EMPTY_FETCH_BLOCK_STATUSES = ("failed", REFRESH_STATUS_PROCESSING)
 NEWS_DISCUSSION_SUMMARY_VERSION = 1
 DEFAULT_DISCUSSION_REFRESH_ENQUEUE_LIMIT = 100
 MAX_STORED_COMMENTS = 1_000
-MAX_SUMMARY_COMMENTS = 200
-MAX_SUMMARY_LINKS = 50
 
 HN_ALGOLIA_ITEM_URL = "https://hn.algolia.com/api/v1/items/{item_id}"
 HN_FIREBASE_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{item_id}.json"
@@ -777,95 +783,6 @@ def _persist_raw_comments(
     )
 
 
-def _build_summary_prompt(
-    *,
-    row: NewsItemDiscussion,
-    raw_payload: dict[str, Any],
-) -> str:
-    comments = raw_payload.get("comments")
-    comment_items = comments if isinstance(comments, list) else []
-    links = raw_payload.get("links")
-    link_items = links if isinstance(links, list) else []
-    raw_stats = raw_payload.get("stats")
-    stats = raw_stats if isinstance(raw_stats, dict) else {}
-
-    lines = [
-        f"Platform: {row.platform}",
-        f"Discussion URL: {row.discussion_url or ''}",
-    ]
-    if row.title:
-        lines.append(f"Thread title: {row.title}")
-    if row.comment_count is not None:
-        lines.append(f"Declared comment count: {row.comment_count}")
-    if stats.get("fetched_count") is not None:
-        lines.append(f"Fetched comments: {stats.get('fetched_count')}")
-
-    lines.append("")
-    lines.append("Comments:")
-    for comment in comment_items[:MAX_SUMMARY_COMMENTS]:
-        if not isinstance(comment, dict):
-            continue
-        comment_id = _clean_string(comment.get("comment_id")) or "unknown"
-        author = _clean_string(comment.get("author")) or "unknown"
-        depth = _coerce_non_negative_int(comment.get("depth")) or 0
-        text = _clean_string(comment.get("compact_text") or comment.get("text"))
-        if not text:
-            continue
-        lines.append(f"- [{comment_id}] {author} depth={depth}: {text}")
-
-    if link_items:
-        lines.append("")
-        lines.append("Extracted links:")
-        for link in link_items[:MAX_SUMMARY_LINKS]:
-            if not isinstance(link, dict):
-                continue
-            url = _clean_string(link.get("url"))
-            if not url:
-                continue
-            title = _clean_string(link.get("title"))
-            link_comment_id = _clean_string(link.get("comment_id"))
-            label = f" ({title})" if title else ""
-            source = f" from comment {link_comment_id}" if link_comment_id else ""
-            lines.append(f"- {url}{label}{source}")
-
-    return "\n".join(lines)
-
-
-def _summarize_discussion(
-    db: Session,
-    *,
-    row: NewsItemDiscussion,
-    news_item: NewsItem,
-    raw_payload: dict[str, Any],
-    summarizer: ContentSummarizer | None,
-) -> DiscussionSummary:
-    content_summarizer = summarizer or get_content_summarizer()
-    summary = content_summarizer.summarize(
-        _build_summary_prompt(row=row, raw_payload=raw_payload),
-        content_type="discussion_summary",
-        title=row.title,
-        content_id=f"news_item_discussion:{row.news_item_id}",
-        db=db,
-        usage_persist={
-            "feature": "news_discussions",
-            "operation": "news_discussions.summarize",
-            "source": "discussion_scraper",
-            "user_id": news_item.owner_user_id,
-            "metadata": {
-                "news_item_id": row.news_item_id,
-                "news_item_discussion_id": row.id,
-                "platform": row.platform,
-            },
-        },
-    )
-    if not isinstance(summary, DiscussionSummary):
-        raise TypeError(
-            "Discussion summarizer returned an invalid payload: "
-            f"{type(summary).__name__ if summary is not None else 'None'}"
-        )
-    return summary
-
-
 def _mark_refresh_failure(
     db: Session,
     *,
@@ -1045,17 +962,49 @@ def refresh_news_item_discussion(
     row.last_refresh_status = "completed"
     row.last_refresh_error = None
 
-    should_summarize = bool(raw_payload.get("comments")) and (
-        row.summary is None or row.summary_status != "completed" or previous_sha != raw_sha
-    )
     summarized = False
-    if should_summarize:
+    summary_input = build_discussion_summary_input(row=row, raw_payload=raw_payload)
+    summary_plan = plan_discussion_summary(
+        row=row,
+        summary_input=summary_input,
+        previous_raw_sha=previous_sha,
+        current_raw_sha=raw_sha,
+    )
+
+    if summary_input.comment_count == 0 and row.summary is None:
+        row.summary_status = "not_ready"
+    elif summary_plan.mode == DiscussionSummaryPlanMode.TRACK_SUMMARIZED:
+        store_summarized_summary_tracking(
+            row=row,
+            summary_input=summary_input,
+            incremental_update_count=row.summary_incremental_update_count or 0,
+        )
+        store_seen_summary_tracking(row=row, summary_input=summary_input)
+    elif summary_plan.mode == DiscussionSummaryPlanMode.TRACK_SEEN:
+        store_seen_summary_tracking(row=row, summary_input=summary_input)
+        logger.info(
+            "Skipping discussion summary update below material comment threshold",
+            extra={
+                "component": "news_item_discussions",
+                "operation": "refresh.summarize.skip",
+                "item_id": str(news_item_id),
+                "context_data": {
+                    "platform": row.platform,
+                    "changed_comment_count": len(summary_plan.changed_comments),
+                    "threshold": DISCUSSION_SUMMARY_MATERIAL_COMMENT_THRESHOLD,
+                    "summary_input_sha256": summary_input.input_sha256,
+                },
+            },
+        )
+
+    if summary_plan.mode in {DiscussionSummaryPlanMode.FULL, DiscussionSummaryPlanMode.MERGE}:
         try:
-            summary = _summarize_discussion(
+            summary = execute_discussion_summary_plan(
                 db,
                 row=row,
                 news_item=item,
-                raw_payload=raw_payload,
+                summary_input=summary_input,
+                plan=summary_plan,
                 summarizer=summarizer,
             )
         except Exception as exc:  # noqa: BLE001
@@ -1088,9 +1037,15 @@ def refresh_news_item_discussion(
         row.summary_version = NEWS_DISCUSSION_SUMMARY_VERSION
         row.summary_model = getattr(summarizer, "model_hint", None) if summarizer else None
         row.summary_generated_at = _utcnow_naive()
+        store_summarized_summary_tracking(
+            row=row,
+            summary_input=summary_input,
+            incremental_update_count=(row.summary_incremental_update_count or 0) + 1
+            if summary_plan.mode == DiscussionSummaryPlanMode.MERGE
+            else 0,
+        )
+        store_seen_summary_tracking(row=row, summary_input=summary_input)
         summarized = True
-    elif row.summary is None:
-        row.summary_status = "not_ready"
 
     db.commit()
     return NewsItemDiscussionRefreshResult(

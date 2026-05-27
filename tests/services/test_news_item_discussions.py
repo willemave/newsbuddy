@@ -39,11 +39,19 @@ class _FakeSummarizer:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.content_types: list[str] = []
+        self.prompts: list[str] = []
 
     def summarize(self, content, content_type, **kwargs):
         self.calls += 1
-        assert content_type == "discussion_summary"
-        assert "Comments:" in content
+        self.content_types.append(content_type)
+        self.prompts.append(content)
+        assert content_type in {"discussion_summary", "discussion_summary_merge"}
+        if content_type == "discussion_summary":
+            assert "Comments:" in content
+        else:
+            assert "Existing summary JSON:" in content
+            assert "New or changed comments:" in content
         assert kwargs["usage_persist"]["feature"] == "news_discussions"
         return DiscussionSummary(
             overview="Commenters focused on the technical tradeoffs and deployment risks.",
@@ -59,7 +67,35 @@ class _FakeSummarizer:
         )
 
 
-def _fake_hn_payload(*, external_id: str, discussion_url: str) -> dict:
+def _fake_hn_payload(
+    *,
+    external_id: str,
+    discussion_url: str,
+    extra_comments: list[dict] | None = None,
+) -> dict:
+    comments = [
+        {
+            "comment_id": "c1",
+            "parent_id": None,
+            "author": "bob",
+            "text": "The operational issue is rollout safety.",
+            "compact_text": "The operational issue is rollout safety.",
+            "depth": 0,
+            "created_at": None,
+            "source_url": discussion_url,
+        },
+        {
+            "comment_id": "c2",
+            "parent_id": "c1",
+            "author": "carol",
+            "text": "A simpler queue would be easier to reason about.",
+            "compact_text": "A simpler queue would be easier to reason about.",
+            "depth": 1,
+            "created_at": None,
+            "source_url": discussion_url,
+        },
+    ]
+    comments.extend(extra_comments or [])
     return {
         "platform": "hackernews",
         "external_id": external_id,
@@ -68,37 +104,37 @@ def _fake_hn_payload(*, external_id: str, discussion_url: str) -> dict:
             "title": "Example thread",
             "author": "alice",
             "score": 99,
-            "comment_count": 2,
+            "comment_count": len(comments),
         },
-        "comments": [
-            {
-                "comment_id": "c1",
-                "parent_id": None,
-                "author": "bob",
-                "text": "The operational issue is rollout safety.",
-                "compact_text": "The operational issue is rollout safety.",
-                "depth": 0,
-                "created_at": None,
-                "source_url": discussion_url,
-            },
-            {
-                "comment_id": "c2",
-                "parent_id": "c1",
-                "author": "carol",
-                "text": "A simpler queue would be easier to reason about.",
-                "compact_text": "A simpler queue would be easier to reason about.",
-                "depth": 1,
-                "created_at": None,
-                "source_url": discussion_url,
-            },
-        ],
+        "comments": comments,
         "links": [],
         "stats": {
             "provider": "algolia",
-            "declared_comment_count": 2,
-            "fetched_count": 2,
+            "declared_comment_count": len(comments),
+            "fetched_count": len(comments),
         },
     }
+
+
+def _extra_hn_comments(
+    *,
+    discussion_url: str,
+    count: int,
+    start: int = 3,
+) -> list[dict]:
+    return [
+        {
+            "comment_id": f"c{index}",
+            "parent_id": None,
+            "author": f"user{index}",
+            "text": f"Additional material comment {index} about deployment details.",
+            "compact_text": f"Additional material comment {index} about deployment details.",
+            "depth": 0,
+            "created_at": None,
+            "source_url": discussion_url,
+        }
+        for index in range(start, start + count)
+    ]
 
 
 def _add_aggregator_subscription(db_session, *, user_id: int, key: str) -> None:
@@ -429,6 +465,14 @@ def test_refresh_news_item_discussion_stores_raw_summary_and_honors_ttl(
     assert row.comment_count == 2
     assert row.fetched_comment_count == 2
     assert row.raw_comments_ref["storage_key"] in gateway.objects
+    assert row.summary_input_sha256 is not None
+    assert row.summary_comment_count == 2
+    assert row.summary_comment_fingerprints is not None
+    assert sorted(row.summary_comment_fingerprints) == ["c1", "c2"]
+    assert row.summary_seen_input_sha256 == row.summary_input_sha256
+    assert row.summary_seen_comment_count == 2
+    assert row.summary_seen_comment_fingerprints == row.summary_comment_fingerprints
+    assert row.summary_incremental_update_count == 0
 
     skipped = refresh_news_item_discussion(
         db_session,
@@ -452,6 +496,147 @@ def test_refresh_news_item_discussion_stores_raw_summary_and_honors_ttl(
     assert refreshed_same_hash.success is True
     assert fetch_calls == 2
     assert summarizer.calls == 1
+
+
+def test_refresh_news_item_discussion_skips_small_comment_delta(
+    db_session,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    discussion_url = "https://news.ycombinator.com/item?id=124"
+    item = news_item_factory(
+        ingest_key="hn-refresh-small-delta",
+        platform="hackernews",
+        source_external_id="124",
+        discussion_url=discussion_url,
+        raw_metadata={"platform": "hackernews"},
+    )
+    small_delta_payload = _fake_hn_payload(
+        external_id="124",
+        discussion_url=discussion_url,
+        extra_comments=_extra_hn_comments(discussion_url=discussion_url, count=10),
+    )
+    payloads = [
+        _fake_hn_payload(external_id="124", discussion_url=discussion_url),
+        small_delta_payload,
+        small_delta_payload,
+    ]
+
+    def _fake_fetch(*, external_id: str, discussion_url: str):
+        return payloads.pop(0)
+
+    monkeypatch.setattr(
+        "app.services.news_item_discussions._fetch_hackernews_comments",
+        _fake_fetch,
+    )
+    gateway = _FakeGateway()
+    summarizer = _FakeSummarizer()
+
+    first = refresh_news_item_discussion(
+        db_session,
+        news_item_id=item.id,
+        gateway=cast(ObjectStorageGateway, gateway),
+        summarizer=cast(ContentSummarizer, summarizer),
+    )
+    row = (
+        db_session.query(NewsItemDiscussion)
+        .filter(NewsItemDiscussion.news_item_id == item.id)
+        .one()
+    )
+    previous_summary_input_sha256 = row.summary_input_sha256
+
+    second = refresh_news_item_discussion(
+        db_session,
+        news_item_id=item.id,
+        force=True,
+        gateway=cast(ObjectStorageGateway, gateway),
+        summarizer=cast(ContentSummarizer, summarizer),
+    )
+    db_session.refresh(row)
+    seen_input_sha256 = row.summary_seen_input_sha256
+
+    third = refresh_news_item_discussion(
+        db_session,
+        news_item_id=item.id,
+        force=True,
+        gateway=cast(ObjectStorageGateway, gateway),
+        summarizer=cast(ContentSummarizer, summarizer),
+    )
+    db_session.refresh(row)
+
+    assert first.summarized is True
+    assert second.success is True
+    assert second.summarized is False
+    assert third.success is True
+    assert third.summarized is False
+    assert summarizer.content_types == ["discussion_summary"]
+    assert row.fetched_comment_count == 12
+    assert row.summary_comment_count == 2
+    assert row.summary_input_sha256 == previous_summary_input_sha256
+    assert row.summary_seen_comment_count == 12
+    assert row.summary_seen_input_sha256 == seen_input_sha256
+    assert row.summary_seen_input_sha256 != row.summary_input_sha256
+
+
+def test_refresh_news_item_discussion_merges_large_comment_delta(
+    db_session,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    discussion_url = "https://news.ycombinator.com/item?id=125"
+    item = news_item_factory(
+        ingest_key="hn-refresh-large-delta",
+        platform="hackernews",
+        source_external_id="125",
+        discussion_url=discussion_url,
+        raw_metadata={"platform": "hackernews"},
+    )
+    payloads = [
+        _fake_hn_payload(external_id="125", discussion_url=discussion_url),
+        _fake_hn_payload(
+            external_id="125",
+            discussion_url=discussion_url,
+            extra_comments=_extra_hn_comments(discussion_url=discussion_url, count=11),
+        ),
+    ]
+
+    def _fake_fetch(*, external_id: str, discussion_url: str):
+        return payloads.pop(0)
+
+    monkeypatch.setattr(
+        "app.services.news_item_discussions._fetch_hackernews_comments",
+        _fake_fetch,
+    )
+    gateway = _FakeGateway()
+    summarizer = _FakeSummarizer()
+
+    first = refresh_news_item_discussion(
+        db_session,
+        news_item_id=item.id,
+        gateway=cast(ObjectStorageGateway, gateway),
+        summarizer=cast(ContentSummarizer, summarizer),
+    )
+    second = refresh_news_item_discussion(
+        db_session,
+        news_item_id=item.id,
+        force=True,
+        gateway=cast(ObjectStorageGateway, gateway),
+        summarizer=cast(ContentSummarizer, summarizer),
+    )
+    row = (
+        db_session.query(NewsItemDiscussion)
+        .filter(NewsItemDiscussion.news_item_id == item.id)
+        .one()
+    )
+
+    assert first.summarized is True
+    assert second.summarized is True
+    assert summarizer.content_types == ["discussion_summary", "discussion_summary_merge"]
+    assert "Additional material comment 13" in summarizer.prompts[-1]
+    assert row.summary_comment_count == 13
+    assert row.summary_seen_input_sha256 == row.summary_input_sha256
+    assert row.summary_seen_comment_count == 13
+    assert row.summary_incremental_update_count == 1
 
 
 def test_refresh_news_item_discussion_claim_suppresses_concurrent_fetch(
