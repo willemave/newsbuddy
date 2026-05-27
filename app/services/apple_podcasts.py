@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import feedparser
@@ -15,6 +16,7 @@ from app.services.http import HttpService
 logger = get_logger(__name__)
 
 APPLE_PODCAST_ID_REGEX = re.compile(r"/id(?P<podcast_id>\d+)")
+APPLE_PODCAST_HOSTS = ("podcasts.apple.com", "itunes.apple.com")
 DEFAULT_EPISODE_LIMIT = 200
 STOPWORDS = {"the", "and", "of", "a", "an", "to", "in", "on", "for", "with"}
 
@@ -39,7 +41,7 @@ def resolve_apple_podcast_episode(url: str) -> ApplePodcastResolution:
     Returns:
         ApplePodcastResolution with feed_url, episode_title, and audio_url when available.
     """
-    show_id = _extract_show_id(url)
+    show_id = extract_apple_podcast_id(url)
     if not show_id:
         return ApplePodcastResolution(feed_url=None, episode_title=None, audio_url=None)
 
@@ -60,11 +62,30 @@ def resolve_apple_podcast_episode(url: str) -> ApplePodcastResolution:
     )
 
 
-def _extract_show_id(url: str) -> str | None:
+def resolve_apple_podcast_feed_url(url: str) -> str | None:
+    """Resolve the publisher RSS feed URL for an Apple Podcasts show URL."""
+    show_id = extract_apple_podcast_id(url)
+    if not show_id:
+        return None
+    country = (get_settings().discovery_itunes_country or "").lower()
+    return _lookup_podcast_feed_url(show_id, country)
+
+
+def extract_apple_podcast_id(url: str) -> str | None:
+    """Extract the podcast show id from an Apple Podcasts URL."""
     parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if not any(host.endswith(domain) for domain in APPLE_PODCAST_HOSTS):
+        return None
+
     match = APPLE_PODCAST_ID_REGEX.search(parsed.path)
     if match:
         return match.group("podcast_id")
+
+    query_id = parse_qs(parsed.query).get("id", [None])[0]
+    if query_id and query_id.isdigit():
+        return query_id
+
     return None
 
 
@@ -113,6 +134,38 @@ def _lookup_feed_and_episode(show_id: str, episode_id: str | None) -> tuple[str 
                 episode_title = item.get("trackName")
 
     return feed_url, episode_title
+
+
+@lru_cache(maxsize=256)
+def _lookup_podcast_feed_url(show_id: str, country: str) -> str | None:
+    params = {
+        "id": show_id,
+        "entity": "podcast",
+    }
+    if country:
+        params["country"] = country
+    lookup_url = f"https://itunes.apple.com/lookup?{urlencode(params)}"
+
+    try:
+        response = HTTP_SERVICE.fetch(lookup_url, headers={"Accept": "application/json"})
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Apple Podcasts show lookup failed: %s",
+            exc,
+            extra={
+                "component": "apple_podcasts",
+                "operation": "itunes_show_lookup",
+                "context_data": {"show_id": show_id},
+            },
+        )
+        return None
+
+    for item in payload.get("results", []):
+        feed_url = item.get("feedUrl")
+        if isinstance(feed_url, str) and feed_url.strip():
+            return feed_url
+    return None
 
 
 def _resolve_episode_audio_url(feed_url: str, episode_title: str) -> str | None:

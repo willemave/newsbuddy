@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.services.assistant_feed_finder import find_feed_options
 from app.services.exa_client import ExaContentResult, ExaSearchResult
 from app.services.feed_detection import FeedClassificationResult
+
+FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
+SEQUOIA_TRAINING_DATA_HTML = (FIXTURES_DIR / "sequoia_training_data_podcast_links.html").read_text()
+SEQUOIA_TRAINING_DATA_FEED = "https://feeds.megaphone.fm/trainingdata"
 
 
 def test_find_feed_options_extracts_and_validates_feed_urls(monkeypatch) -> None:
@@ -270,6 +276,98 @@ def test_find_feed_options_uses_live_youtube_detection_over_stale_exa_feed(monke
         == "https://www.youtube.com/feeds/videos.xml?channel_id=UC-yRDvpR99LUc5l7i7jLzew"
     )
     assert option.site_url == "https://www.youtube.com/@bg2pod"
+
+
+def test_find_feed_options_prefers_live_apple_podcast_link_over_generic_feed(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.assistant_feed_finder.exa_search",
+        lambda query, num_results, max_characters=1200, **_kwargs: [
+            ExaSearchResult(
+                title="Training Data",
+                url="https://sequoiacap.com/series/training-data/",
+                snippet="Training Data is a podcast by Sequoia Capital.",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "app.services.assistant_feed_finder.exa_get_contents",
+        lambda urls, max_characters=5000, **_kwargs: [
+            ExaContentResult(
+                title="Training Data",
+                url=urls[0],
+                text="Stale generic feed: https://sequoiacap.com/feed",
+            )
+        ],
+    )
+
+    def _resolve_apple_feed(url: str) -> str | None:
+        if "podcasts.apple.com" not in url and "itunes.apple.com" not in url:
+            return None
+        return SEQUOIA_TRAINING_DATA_FEED
+
+    monkeypatch.setattr(
+        "app.services.feed_detection.resolve_apple_podcast_feed_url",
+        _resolve_apple_feed,
+    )
+
+    class _Response:
+        def __init__(
+            self,
+            url: str,
+            text: str,
+            *,
+            content_type: str = "text/html; charset=utf-8",
+        ) -> None:
+            self.url = url
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.status_code = 200
+            self.headers = {"content-type": content_type}
+
+    fetched_urls: list[str] = []
+
+    def _fake_head(self, url, **_kwargs):  # noqa: ANN001
+        return _Response(url, "", content_type="application/rss+xml")
+
+    def _fake_fetch(self, url, headers=None, **_kwargs):  # noqa: ANN001
+        del headers
+        fetched_urls.append(url)
+        if url == SEQUOIA_TRAINING_DATA_FEED:
+            return _Response(
+                url,
+                (
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    "<rss><channel><title>Training Data</title></channel></rss>"
+                ),
+                content_type="application/rss+xml",
+            )
+        if url == "https://sequoiacap.com/feed":
+            return _Response(
+                url,
+                (
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    "<rss><channel><title>Sequoia Capital</title></channel></rss>"
+                ),
+                content_type="application/rss+xml",
+            )
+        return _Response(
+            url,
+            SEQUOIA_TRAINING_DATA_HTML,
+        )
+
+    monkeypatch.setattr("app.services.http.HttpService.head", _fake_head)
+    monkeypatch.setattr("app.services.http.HttpService.fetch", _fake_fetch)
+
+    result = find_feed_options("Training Data Sequoia Capital podcast RSS feed", limit=1)
+
+    assert len(result.options) == 1
+    option = result.options[0]
+    assert option.title == "Training Data"
+    assert option.feed_url == SEQUOIA_TRAINING_DATA_FEED
+    assert option.feed_type == "podcast_rss"
+    assert "https://sequoiacap.com/feed" not in fetched_urls
 
 
 def test_find_feed_options_prefers_podcast_rss_for_podcast_queries(monkeypatch) -> None:

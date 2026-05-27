@@ -1,30 +1,37 @@
 from app.models.llm.feed_discovery import DiscoveryCandidate
-from app.services import feed_discovery
+from app.services import apple_podcasts, feed_discovery
 
 
 def test_extract_apple_podcast_id():
     assert (
-        feed_discovery._extract_apple_podcast_id(
+        apple_podcasts.extract_apple_podcast_id(
             "https://itunes.apple.com/podcast/state-trance-official-podcast/id260190086"
         )
         == "260190086"
     )
     assert (
-        feed_discovery._extract_apple_podcast_id(
+        apple_podcasts.extract_apple_podcast_id(
             "https://podcasts.apple.com/us/podcast/founders-fears-failures/id1669777442?i=100"
         )
         == "1669777442"
     )
-    assert feed_discovery._extract_apple_podcast_id("https://example.com") is None
+    assert (
+        apple_podcasts.extract_apple_podcast_id(
+            "https://itunes.apple.com/lookup?id=260190086&entity=podcast"
+        )
+        == "260190086"
+    )
+    assert apple_podcasts.extract_apple_podcast_id("https://example.com") is None
 
 
 def test_normalize_candidate_resolves_apple_podcast_feed(monkeypatch):
-    def _stub_lookup(podcast_id: str, country: str) -> str:
-        assert podcast_id == "1669777442"
+    def _stub_resolve(url: str) -> str:
+        assert url == (
+            "https://podcasts.apple.com/us/podcast/founders-fears-failures/id1669777442?i=100"
+        )
         return "https://example.com/feed.xml"
 
-    feed_discovery._itunes_lookup_feed_url.cache_clear()
-    monkeypatch.setattr(feed_discovery, "_itunes_lookup_feed_url", _stub_lookup)
+    monkeypatch.setattr(feed_discovery, "resolve_apple_podcast_feed_url", _stub_resolve)
 
     candidate = DiscoveryCandidate(
         title="Founders Fears Failures",

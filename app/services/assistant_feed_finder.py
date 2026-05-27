@@ -47,6 +47,7 @@ def find_feed_options(
     )
     content_by_url = _content_results_by_url(search_results, user_id=user_id)
     detector = FeedDetector(use_exa_search=True, use_llm=True)
+    prefer_site_discovery = _looks_like_podcast_query(normalized_query)
 
     options: list[AssistantFeedOption] = []
     seen_feed_urls: set[str] = set()
@@ -57,6 +58,7 @@ def find_feed_options(
             content_result=content_by_url.get(search_result.url),
             detector=detector,
             seen_feed_urls=seen_feed_urls,
+            prefer_site_discovery=prefer_site_discovery,
         )
         if option is None:
             continue
@@ -93,6 +95,7 @@ def _build_option_from_result(
     content_result: ExaContentResult | None,
     detector: FeedDetector,
     seen_feed_urls: set[str],
+    prefer_site_discovery: bool,
 ) -> AssistantFeedOption | None:
     site_url = _normalize_url(search_result.url)
     if site_url is None:
@@ -124,6 +127,8 @@ def _build_option_from_result(
         site_url=site_url,
         candidate_feed_urls=extract_candidate_feed_urls(site_url, page_text),
         source="assistant_feed_finder",
+        content_type="podcast" if prefer_site_discovery else "article",
+        prefer_site_discovery=prefer_site_discovery,
     )
     if resolved is None:
         return None

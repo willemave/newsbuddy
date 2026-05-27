@@ -5,6 +5,7 @@ Detects RSS/Atom feed links in HTML and uses LLM to classify the feed type.
 
 from __future__ import annotations
 
+import html as html_lib
 import re
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -17,6 +18,7 @@ from app.constants import SELF_SUBMISSION_SOURCE
 from app.core.logging import get_logger
 from app.core.model_defaults import SMART_MODEL_SPEC
 from app.models.contracts import ContentType
+from app.services.apple_podcasts import resolve_apple_podcast_feed_url
 from app.services.exa_client import ExaClientError, exa_search
 from app.services.http import HttpService, fetch_quiet_compat, head_quiet_compat
 from app.services.llm_agents import get_basic_agent
@@ -120,7 +122,6 @@ PODCAST_HOST_MARKERS = (
     "omny.fm",
     "soundcloud.com",
 )
-
 PODCAST_PATH_HINTS = (
     "/podcast",
     "/podcasts",
@@ -247,6 +248,40 @@ def extract_feed_links_from_anchors(html_content: str, page_url: str) -> list[di
                 "feed_url": feed_url,
                 "feed_format": feed_format,
                 "title": anchor_text_raw or "",
+            }
+        )
+
+    return feeds
+
+
+def extract_podcast_feed_links_from_anchors(
+    html_content: str,
+    page_url: str,
+) -> list[dict[str, str]]:
+    """Extract publisher podcast RSS feeds from podcast platform links."""
+    feeds: list[dict[str, str]] = []
+    seen_feed_urls: set[str] = set()
+    anchor_pattern = re.compile(
+        r"<a\b[^>]*\shref=[\"']([^\"']+)[\"'][^>]*>",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    for match in anchor_pattern.finditer(html_content):
+        href = html_lib.unescape(match.group(1).strip())
+        if not href or href.startswith(("javascript:", "mailto:")):
+            continue
+
+        absolute_url = _resolve_url(href, page_url)
+        feed_url = resolve_apple_podcast_feed_url(absolute_url)
+        if not feed_url or feed_url in seen_feed_urls:
+            continue
+
+        seen_feed_urls.add(feed_url)
+        feeds.append(
+            {
+                "feed_url": feed_url,
+                "feed_format": "rss",
+                "title": "",
             }
         )
 
@@ -738,6 +773,11 @@ class FeedDetector:
             validated_explicit_feeds = self._validate_feed_links(feed_links)
             if validated_explicit_feeds:
                 return validated_explicit_feeds
+
+            podcast_feeds = extract_podcast_feed_links_from_anchors(html_content, page_url)
+            validated_podcast_feeds = self._validate_feed_links(podcast_feeds)
+            if validated_podcast_feeds:
+                return validated_podcast_feeds
 
         candidate_urls: list[str] = []
         candidate_page_urls = [page_url]

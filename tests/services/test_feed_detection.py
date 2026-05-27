@@ -1,8 +1,45 @@
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 from app.models.db import VendorUsageRecord
 from app.services import feed_detection
+
+FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
+SEQUOIA_TRAINING_DATA_HTML = (FIXTURES_DIR / "sequoia_training_data_podcast_links.html").read_text()
+SEQUOIA_TRAINING_DATA_FEED = "https://feeds.megaphone.fm/trainingdata"
+SEQUOIA_APPLE_SHOW_URL = "https://podcasts.apple.com/us/podcast/training-data/id1750736528"
+SEQUOIA_APPLE_EPISODE_URL = (
+    "https://podcasts.apple.com/us/podcast/"
+    "delphis-dara-ladjevardian-how-ai-digital-minds-can/"
+    "id1750736528?i=1000721630464"
+)
+SEQUOIA_FEED_LINK = {
+    "feed_url": SEQUOIA_TRAINING_DATA_FEED,
+    "feed_format": "rss",
+    "title": "",
+}
+
+
+def _extract_podcast_links_with_stubbed_apple_lookup(
+    monkeypatch,
+    html: str,
+) -> tuple[list[dict[str, str]], list[str]]:
+    resolved_urls: list[str] = []
+
+    def _resolve(url: str) -> str | None:
+        if "podcasts.apple.com" not in url and "itunes.apple.com" not in url:
+            return None
+        resolved_urls.append(url)
+        return SEQUOIA_TRAINING_DATA_FEED
+
+    monkeypatch.setattr(feed_detection, "resolve_apple_podcast_feed_url", _resolve)
+
+    links = feed_detection.extract_podcast_feed_links_from_anchors(
+        html,
+        "https://sequoiacap.com/series/training-data/",
+    )
+    return links, resolved_urls
 
 
 def test_extract_feed_links_from_anchors_resolves_relative_url() -> None:
@@ -19,6 +56,94 @@ def test_extract_feed_links_from_anchors_resolves_relative_url() -> None:
             "title": "RSS",
         }
     ]
+
+
+def test_extract_podcast_feed_links_handles_sequoia_stream_links_structure(
+    monkeypatch,
+) -> None:
+    html = SEQUOIA_TRAINING_DATA_HTML.split('<div class="podcast-card__platforms">')[0]
+    links, resolved_urls = _extract_podcast_links_with_stubbed_apple_lookup(monkeypatch, html)
+
+    assert links == [SEQUOIA_FEED_LINK]
+    assert resolved_urls == [SEQUOIA_APPLE_SHOW_URL]
+
+
+def test_extract_podcast_feed_links_handles_sequoia_episode_card_structure(
+    monkeypatch,
+) -> None:
+    html = SEQUOIA_TRAINING_DATA_HTML.split('<div class="podcast-card__platforms">')[1]
+    links, resolved_urls = _extract_podcast_links_with_stubbed_apple_lookup(monkeypatch, html)
+
+    assert links == [SEQUOIA_FEED_LINK]
+    assert resolved_urls == [SEQUOIA_APPLE_EPISODE_URL]
+
+
+def test_extract_podcast_feed_links_dedupes_sequoia_show_and_episode_links(
+    monkeypatch,
+) -> None:
+    links, resolved_urls = _extract_podcast_links_with_stubbed_apple_lookup(
+        monkeypatch,
+        SEQUOIA_TRAINING_DATA_HTML,
+    )
+
+    assert links == [SEQUOIA_FEED_LINK]
+    assert resolved_urls == [
+        SEQUOIA_APPLE_SHOW_URL,
+        SEQUOIA_APPLE_EPISODE_URL,
+    ]
+
+
+def test_detect_from_html_resolves_sequoia_fixture_before_generic_candidates(
+    monkeypatch,
+) -> None:
+    rss_payload = b'<?xml version="1.0"?><rss><channel><title>Training Data</title></channel></rss>'
+    fetched_urls: list[str] = []
+
+    monkeypatch.setattr(
+        feed_detection,
+        "resolve_apple_podcast_feed_url",
+        lambda url: (
+            SEQUOIA_TRAINING_DATA_FEED
+            if "podcasts.apple.com" in url or "itunes.apple.com" in url
+            else None
+        ),
+    )
+
+    class DummyHttpService:
+        def head(self, url: str, allow_statuses=None, **_kwargs):  # noqa: ANN001
+            return SimpleNamespace(status_code=200)
+
+        def fetch(self, url: str, **_kwargs):  # noqa: ANN001
+            fetched_urls.append(url)
+            return SimpleNamespace(
+                url=url,
+                headers={"content-type": "application/rss+xml"},
+                content=rss_payload,
+            )
+
+    detector = feed_detection.FeedDetector(
+        use_llm=False,
+        use_exa_search=False,
+        http_service=cast(Any, DummyHttpService()),
+    )
+
+    result = detector.detect_from_html(
+        SEQUOIA_TRAINING_DATA_HTML,
+        "https://sequoiacap.com/series/training-data/",
+        page_title="Training Data",
+        force_detect=True,
+    )
+
+    assert result == {
+        "detected_feed": {
+            "url": SEQUOIA_TRAINING_DATA_FEED,
+            "type": "podcast_rss",
+            "title": "Training Data",
+            "format": "rss",
+        },
+        "all_detected_feeds": None,
+    }
+    assert fetched_urls == [SEQUOIA_TRAINING_DATA_FEED]
 
 
 def test_build_candidate_feed_urls_includes_root_and_section() -> None:

@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from time import perf_counter
 from typing import Any, cast
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import Agent, RunContext
@@ -36,10 +36,10 @@ from app.models.llm.feed_discovery import (
     DiscoveryLane,
     DiscoveryLanePlan,
 )
+from app.services.apple_podcasts import extract_apple_podcast_id, resolve_apple_podcast_feed_url
 from app.services.content_submission import normalize_url
 from app.services.exa_client import ExaSearchResult, exa_search
 from app.services.feed_detection import FeedDetector
-from app.services.http import HttpService
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_models import build_pydantic_model
 from app.services.vendor_usage import (
@@ -54,8 +54,6 @@ logger = get_logger(__name__)
 FEED_TYPES = {"atom", "substack"}
 PODCAST_TYPES = {"podcast_rss"}
 YOUTUBE_TYPE = "youtube"
-APPLE_PODCAST_HOSTS = ("podcasts.apple.com", "itunes.apple.com")
-APPLE_PODCAST_ID_REGEX = re.compile(r"/id(?P<podcast_id>\d+)")
 DISCOVERY_SKIP_HOSTS = {
     "link.chtbl.com",
     "podcasts.apple.com",
@@ -69,7 +67,6 @@ DISCOVERY_SKIP_HOSTS = {
 }
 DISCOVERY_DOMAIN_ATTEMPT_LIMIT = 3
 MARKDOWN_URL_REGEX = re.compile(r"\((https?://[^)]+)\)")
-HTTP_SERVICE = HttpService()
 
 
 class FeedDiscoveryRequest(BaseModel):
@@ -1075,17 +1072,14 @@ def _normalize_apple_podcast_candidate(
     candidate: DiscoveryCandidate,
 ) -> DiscoveryCandidate | None:
     url = candidate.feed_url or candidate.site_url
-    if not url or not _is_apple_podcast_url(url):
+    if not url:
         return candidate
 
-    podcast_id = _extract_apple_podcast_id(url)
+    podcast_id = extract_apple_podcast_id(url)
     if not podcast_id:
         return candidate
 
-    settings = get_settings()
-    feed_url = _resolve_apple_podcast_feed_url(
-        podcast_id, country=settings.discovery_itunes_country
-    )
+    feed_url = resolve_apple_podcast_feed_url(url)
     if not feed_url:
         return candidate
 
@@ -1114,60 +1108,6 @@ def _normalize_apple_podcast_candidate(
         },
     )
     return candidate
-
-
-def _is_apple_podcast_url(url: str) -> bool:
-    host = urlparse(url).netloc.lower()
-    return any(host.endswith(domain) for domain in APPLE_PODCAST_HOSTS)
-
-
-def _extract_apple_podcast_id(url: str) -> str | None:
-    parsed = urlparse(url)
-    host = (parsed.netloc or "").lower()
-    if not any(host.endswith(domain) for domain in APPLE_PODCAST_HOSTS):
-        return None
-
-    match = APPLE_PODCAST_ID_REGEX.search(parsed.path)
-    if match:
-        return match.group("podcast_id")
-
-    query_id = parse_qs(parsed.query).get("id", [None])[0]
-    if query_id and query_id.isdigit():
-        return query_id
-
-    return None
-
-
-def _resolve_apple_podcast_feed_url(podcast_id: str, *, country: str | None) -> str | None:
-    country_value = (country or "").lower()
-    try:
-        return _itunes_lookup_feed_url(podcast_id, country_value)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug(
-            "Apple Podcasts lookup failed",
-            extra={
-                "component": "feed_discovery",
-                "operation": "apple_podcast_lookup",
-                "context_data": {"podcast_id": podcast_id, "error": str(exc)},
-            },
-        )
-        return None
-
-
-@lru_cache(maxsize=256)
-def _itunes_lookup_feed_url(podcast_id: str, country: str) -> str | None:
-    params = {"id": podcast_id, "entity": "podcast"}
-    if country:
-        params["country"] = country
-    lookup_url = f"https://itunes.apple.com/lookup?{urlencode(params)}"
-    response = HTTP_SERVICE.fetch(lookup_url, headers={"Accept": "application/json"})
-    payload = response.json()
-    results = payload.get("results", [])
-    for item in results:
-        feed_url = item.get("feedUrl")
-        if feed_url:
-            return feed_url
-    return None
 
 
 def _parse_youtube_identifiers(url: str) -> tuple[str | None, str | None, str]:
