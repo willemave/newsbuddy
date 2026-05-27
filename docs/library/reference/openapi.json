@@ -5790,6 +5790,231 @@
         "title": "SendMessageResponse",
         "type": "object"
       },
+      "SubmissionFeedInitialDownloadResponse": {
+        "description": "Initial download result for a newly subscribed feed.",
+        "properties": {
+          "base_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Original scraper limit",
+            "title": "Base Limit"
+          },
+          "config_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Feed config used for the download",
+            "title": "Config Id"
+          },
+          "duplicates": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of duplicate items ignored",
+            "title": "Duplicates"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Initial download failure reason",
+            "title": "Error"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of scraper item errors",
+            "title": "Errors"
+          },
+          "ran": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether initial download was attempted",
+            "title": "Ran"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reason initial download was skipped",
+            "title": "Reason"
+          },
+          "requested_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of recent feed items requested for initial download",
+            "title": "Requested Count"
+          },
+          "saved": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of items saved",
+            "title": "Saved"
+          },
+          "scraped": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of items scraped",
+            "title": "Scraped"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Initial download status",
+            "title": "Status"
+          },
+          "target_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Temporary scraper limit used",
+            "title": "Target Limit"
+          }
+        },
+        "title": "SubmissionFeedInitialDownloadResponse",
+        "type": "object"
+      },
+      "SubmissionFeedSubscriptionResponse": {
+        "description": "Feed subscription outcome attached to a submission status row.",
+        "properties": {
+          "config_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Created feed config identifier",
+            "title": "Config Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether a new feed config was created",
+            "title": "Created"
+          },
+          "feed_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Subscribed feed type",
+            "title": "Feed Type"
+          },
+          "feed_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Subscribed feed URL",
+            "title": "Feed Url"
+          },
+          "initial_download": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubmissionFeedInitialDownloadResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Initial recent-item download result"
+          },
+          "status": {
+            "description": "Raw feed subscription status",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "SubmissionFeedSubscriptionResponse",
+        "type": "object"
+      },
       "SubmissionStatusListResponse": {
         "description": "Response for user submission status list.",
         "properties": {
@@ -5825,6 +6050,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "detected_feed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DetectedFeed"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RSS/Atom feed detected while handling a feed subscription request"
+          },
           "error_message": {
             "anyOf": [
               {
@@ -5837,6 +6073,17 @@
             "description": "Failure reason when status=failed/skipped",
             "title": "Error Message"
           },
+          "feed_subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubmissionFeedSubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Feed subscription result for Add Feed submissions"
+          },
           "id": {
             "description": "Unique identifier",
             "title": "Id",
@@ -5847,6 +6094,24 @@
             "description": "Whether this content was submitted by the current user",
             "title": "Is Self Submission",
             "type": "boolean"
+          },
+          "outcome": {
+            "default": "processing",
+            "description": "Semantic submission outcome for user-facing display",
+            "enum": [
+              "queued",
+              "processing",
+              "completed",
+              "failed",
+              "skipped",
+              "subscribed",
+              "already_subscribed",
+              "feed_not_found",
+              "feed_fetch_failed",
+              "feed_subscription_failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
           },
           "processed_at": {
             "anyOf": [
@@ -5875,6 +6140,16 @@
           "status": {
             "$ref": "#/components/schemas/ContentStatus",
             "description": "Processing status"
+          },
+          "submission_kind": {
+            "default": "content",
+            "description": "Semantic submission kind for user-facing display",
+            "enum": [
+              "content",
+              "feed_subscription"
+            ],
+            "title": "Submission Kind",
+            "type": "string"
           },
           "submitted_via": {
             "anyOf": [
@@ -11183,7 +11458,7 @@
     },
     "/api/content/{content_id}/tweet-suggestions": {
       "post": {
-        "description": "Generate 3 tweet suggestions for a content item using Gemini. Supports all content types. Requires JWT authentication.",
+        "description": "Generate 3 tweet suggestions for a content item using the selected LLM provider. Supports all content types. Requires JWT authentication.",
         "operationId": "getContentTweetSuggestions",
         "parameters": [
           {

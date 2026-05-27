@@ -3451,6 +3451,69 @@ func (o OptNilAgentOnboardingStartRequestPreferences) Or(d AgentOnboardingStartR
 	return d
 }
 
+// NewOptNilBool returns new OptNilBool with value set to v.
+func NewOptNilBool(v bool) OptNilBool {
+	return OptNilBool{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilBool is optional nullable bool.
+type OptNilBool struct {
+	Value bool
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilBool was set.
+func (o OptNilBool) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilBool) Reset() {
+	var v bool
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilBool) SetTo(v bool) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilBool) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilBool) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v bool
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilBool) Get() (v bool, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilBool) Or(d bool) bool {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptNilContentDetailResponseFeedPreview returns new OptNilContentDetailResponseFeedPreview with value set to v.
 func NewOptNilContentDetailResponseFeedPreview(v ContentDetailResponseFeedPreview) OptNilContentDetailResponseFeedPreview {
 	return OptNilContentDetailResponseFeedPreview{
@@ -4282,6 +4345,190 @@ func (o OptString) Or(d string) string {
 	return d
 }
 
+// NewOptSubmissionFeedInitialDownloadResponse returns new OptSubmissionFeedInitialDownloadResponse with value set to v.
+func NewOptSubmissionFeedInitialDownloadResponse(v SubmissionFeedInitialDownloadResponse) OptSubmissionFeedInitialDownloadResponse {
+	return OptSubmissionFeedInitialDownloadResponse{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptSubmissionFeedInitialDownloadResponse is optional SubmissionFeedInitialDownloadResponse.
+type OptSubmissionFeedInitialDownloadResponse struct {
+	Value SubmissionFeedInitialDownloadResponse
+	Set   bool
+}
+
+// IsSet returns true if OptSubmissionFeedInitialDownloadResponse was set.
+func (o OptSubmissionFeedInitialDownloadResponse) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptSubmissionFeedInitialDownloadResponse) Reset() {
+	var v SubmissionFeedInitialDownloadResponse
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptSubmissionFeedInitialDownloadResponse) SetTo(v SubmissionFeedInitialDownloadResponse) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptSubmissionFeedInitialDownloadResponse) Get() (v SubmissionFeedInitialDownloadResponse, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptSubmissionFeedInitialDownloadResponse) Or(d SubmissionFeedInitialDownloadResponse) SubmissionFeedInitialDownloadResponse {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptSubmissionFeedSubscriptionResponse returns new OptSubmissionFeedSubscriptionResponse with value set to v.
+func NewOptSubmissionFeedSubscriptionResponse(v SubmissionFeedSubscriptionResponse) OptSubmissionFeedSubscriptionResponse {
+	return OptSubmissionFeedSubscriptionResponse{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptSubmissionFeedSubscriptionResponse is optional SubmissionFeedSubscriptionResponse.
+type OptSubmissionFeedSubscriptionResponse struct {
+	Value SubmissionFeedSubscriptionResponse
+	Set   bool
+}
+
+// IsSet returns true if OptSubmissionFeedSubscriptionResponse was set.
+func (o OptSubmissionFeedSubscriptionResponse) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptSubmissionFeedSubscriptionResponse) Reset() {
+	var v SubmissionFeedSubscriptionResponse
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptSubmissionFeedSubscriptionResponse) SetTo(v SubmissionFeedSubscriptionResponse) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptSubmissionFeedSubscriptionResponse) Get() (v SubmissionFeedSubscriptionResponse, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptSubmissionFeedSubscriptionResponse) Or(d SubmissionFeedSubscriptionResponse) SubmissionFeedSubscriptionResponse {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptSubmissionStatusResponseOutcome returns new OptSubmissionStatusResponseOutcome with value set to v.
+func NewOptSubmissionStatusResponseOutcome(v SubmissionStatusResponseOutcome) OptSubmissionStatusResponseOutcome {
+	return OptSubmissionStatusResponseOutcome{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptSubmissionStatusResponseOutcome is optional SubmissionStatusResponseOutcome.
+type OptSubmissionStatusResponseOutcome struct {
+	Value SubmissionStatusResponseOutcome
+	Set   bool
+}
+
+// IsSet returns true if OptSubmissionStatusResponseOutcome was set.
+func (o OptSubmissionStatusResponseOutcome) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptSubmissionStatusResponseOutcome) Reset() {
+	var v SubmissionStatusResponseOutcome
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptSubmissionStatusResponseOutcome) SetTo(v SubmissionStatusResponseOutcome) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptSubmissionStatusResponseOutcome) Get() (v SubmissionStatusResponseOutcome, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptSubmissionStatusResponseOutcome) Or(d SubmissionStatusResponseOutcome) SubmissionStatusResponseOutcome {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptSubmissionStatusResponseSubmissionKind returns new OptSubmissionStatusResponseSubmissionKind with value set to v.
+func NewOptSubmissionStatusResponseSubmissionKind(v SubmissionStatusResponseSubmissionKind) OptSubmissionStatusResponseSubmissionKind {
+	return OptSubmissionStatusResponseSubmissionKind{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptSubmissionStatusResponseSubmissionKind is optional SubmissionStatusResponseSubmissionKind.
+type OptSubmissionStatusResponseSubmissionKind struct {
+	Value SubmissionStatusResponseSubmissionKind
+	Set   bool
+}
+
+// IsSet returns true if OptSubmissionStatusResponseSubmissionKind was set.
+func (o OptSubmissionStatusResponseSubmissionKind) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptSubmissionStatusResponseSubmissionKind) Reset() {
+	var v SubmissionStatusResponseSubmissionKind
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptSubmissionStatusResponseSubmissionKind) SetTo(v SubmissionStatusResponseSubmissionKind) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptSubmissionStatusResponseSubmissionKind) Get() (v SubmissionStatusResponseSubmissionKind, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptSubmissionStatusResponseSubmissionKind) Or(d SubmissionStatusResponseSubmissionKind) SubmissionStatusResponseSubmissionKind {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptSummaryKind returns new OptSummaryKind with value set to v.
 func NewOptSummaryKind(v SummaryKind) OptSummaryKind {
 	return OptSummaryKind{
@@ -4648,6 +4895,232 @@ func (s *ScraperConfigStatsResponse) SetUnreadCount(val int) {
 	s.UnreadCount = val
 }
 
+// Initial download result for a newly subscribed feed.
+// Ref: #/components/schemas/SubmissionFeedInitialDownloadResponse
+type SubmissionFeedInitialDownloadResponse struct {
+	// Original scraper limit.
+	BaseLimit OptNilInt `json:"base_limit"`
+	// Feed config used for the download.
+	ConfigID OptNilInt `json:"config_id"`
+	// Number of duplicate items ignored.
+	Duplicates OptNilInt `json:"duplicates"`
+	// Initial download failure reason.
+	Error OptNilString `json:"error"`
+	// Number of scraper item errors.
+	Errors OptNilInt `json:"errors"`
+	// Whether initial download was attempted.
+	Ran OptNilBool `json:"ran"`
+	// Reason initial download was skipped.
+	Reason OptNilString `json:"reason"`
+	// Number of recent feed items requested for initial download.
+	RequestedCount OptNilInt `json:"requested_count"`
+	// Number of items saved.
+	Saved OptNilInt `json:"saved"`
+	// Number of items scraped.
+	Scraped OptNilInt `json:"scraped"`
+	// Initial download status.
+	Status OptNilString `json:"status"`
+	// Temporary scraper limit used.
+	TargetLimit OptNilInt `json:"target_limit"`
+}
+
+// GetBaseLimit returns the value of BaseLimit.
+func (s *SubmissionFeedInitialDownloadResponse) GetBaseLimit() OptNilInt {
+	return s.BaseLimit
+}
+
+// GetConfigID returns the value of ConfigID.
+func (s *SubmissionFeedInitialDownloadResponse) GetConfigID() OptNilInt {
+	return s.ConfigID
+}
+
+// GetDuplicates returns the value of Duplicates.
+func (s *SubmissionFeedInitialDownloadResponse) GetDuplicates() OptNilInt {
+	return s.Duplicates
+}
+
+// GetError returns the value of Error.
+func (s *SubmissionFeedInitialDownloadResponse) GetError() OptNilString {
+	return s.Error
+}
+
+// GetErrors returns the value of Errors.
+func (s *SubmissionFeedInitialDownloadResponse) GetErrors() OptNilInt {
+	return s.Errors
+}
+
+// GetRan returns the value of Ran.
+func (s *SubmissionFeedInitialDownloadResponse) GetRan() OptNilBool {
+	return s.Ran
+}
+
+// GetReason returns the value of Reason.
+func (s *SubmissionFeedInitialDownloadResponse) GetReason() OptNilString {
+	return s.Reason
+}
+
+// GetRequestedCount returns the value of RequestedCount.
+func (s *SubmissionFeedInitialDownloadResponse) GetRequestedCount() OptNilInt {
+	return s.RequestedCount
+}
+
+// GetSaved returns the value of Saved.
+func (s *SubmissionFeedInitialDownloadResponse) GetSaved() OptNilInt {
+	return s.Saved
+}
+
+// GetScraped returns the value of Scraped.
+func (s *SubmissionFeedInitialDownloadResponse) GetScraped() OptNilInt {
+	return s.Scraped
+}
+
+// GetStatus returns the value of Status.
+func (s *SubmissionFeedInitialDownloadResponse) GetStatus() OptNilString {
+	return s.Status
+}
+
+// GetTargetLimit returns the value of TargetLimit.
+func (s *SubmissionFeedInitialDownloadResponse) GetTargetLimit() OptNilInt {
+	return s.TargetLimit
+}
+
+// SetBaseLimit sets the value of BaseLimit.
+func (s *SubmissionFeedInitialDownloadResponse) SetBaseLimit(val OptNilInt) {
+	s.BaseLimit = val
+}
+
+// SetConfigID sets the value of ConfigID.
+func (s *SubmissionFeedInitialDownloadResponse) SetConfigID(val OptNilInt) {
+	s.ConfigID = val
+}
+
+// SetDuplicates sets the value of Duplicates.
+func (s *SubmissionFeedInitialDownloadResponse) SetDuplicates(val OptNilInt) {
+	s.Duplicates = val
+}
+
+// SetError sets the value of Error.
+func (s *SubmissionFeedInitialDownloadResponse) SetError(val OptNilString) {
+	s.Error = val
+}
+
+// SetErrors sets the value of Errors.
+func (s *SubmissionFeedInitialDownloadResponse) SetErrors(val OptNilInt) {
+	s.Errors = val
+}
+
+// SetRan sets the value of Ran.
+func (s *SubmissionFeedInitialDownloadResponse) SetRan(val OptNilBool) {
+	s.Ran = val
+}
+
+// SetReason sets the value of Reason.
+func (s *SubmissionFeedInitialDownloadResponse) SetReason(val OptNilString) {
+	s.Reason = val
+}
+
+// SetRequestedCount sets the value of RequestedCount.
+func (s *SubmissionFeedInitialDownloadResponse) SetRequestedCount(val OptNilInt) {
+	s.RequestedCount = val
+}
+
+// SetSaved sets the value of Saved.
+func (s *SubmissionFeedInitialDownloadResponse) SetSaved(val OptNilInt) {
+	s.Saved = val
+}
+
+// SetScraped sets the value of Scraped.
+func (s *SubmissionFeedInitialDownloadResponse) SetScraped(val OptNilInt) {
+	s.Scraped = val
+}
+
+// SetStatus sets the value of Status.
+func (s *SubmissionFeedInitialDownloadResponse) SetStatus(val OptNilString) {
+	s.Status = val
+}
+
+// SetTargetLimit sets the value of TargetLimit.
+func (s *SubmissionFeedInitialDownloadResponse) SetTargetLimit(val OptNilInt) {
+	s.TargetLimit = val
+}
+
+// Feed subscription outcome attached to a submission status row.
+// Ref: #/components/schemas/SubmissionFeedSubscriptionResponse
+type SubmissionFeedSubscriptionResponse struct {
+	// Created feed config identifier.
+	ConfigID OptNilInt `json:"config_id"`
+	// Whether a new feed config was created.
+	Created OptNilBool `json:"created"`
+	// Subscribed feed type.
+	FeedType OptNilString `json:"feed_type"`
+	// Subscribed feed URL.
+	FeedURL OptNilString `json:"feed_url"`
+	// Initial recent-item download result.
+	InitialDownload OptSubmissionFeedInitialDownloadResponse `json:"initial_download"`
+	// Raw feed subscription status.
+	Status string `json:"status"`
+}
+
+// GetConfigID returns the value of ConfigID.
+func (s *SubmissionFeedSubscriptionResponse) GetConfigID() OptNilInt {
+	return s.ConfigID
+}
+
+// GetCreated returns the value of Created.
+func (s *SubmissionFeedSubscriptionResponse) GetCreated() OptNilBool {
+	return s.Created
+}
+
+// GetFeedType returns the value of FeedType.
+func (s *SubmissionFeedSubscriptionResponse) GetFeedType() OptNilString {
+	return s.FeedType
+}
+
+// GetFeedURL returns the value of FeedURL.
+func (s *SubmissionFeedSubscriptionResponse) GetFeedURL() OptNilString {
+	return s.FeedURL
+}
+
+// GetInitialDownload returns the value of InitialDownload.
+func (s *SubmissionFeedSubscriptionResponse) GetInitialDownload() OptSubmissionFeedInitialDownloadResponse {
+	return s.InitialDownload
+}
+
+// GetStatus returns the value of Status.
+func (s *SubmissionFeedSubscriptionResponse) GetStatus() string {
+	return s.Status
+}
+
+// SetConfigID sets the value of ConfigID.
+func (s *SubmissionFeedSubscriptionResponse) SetConfigID(val OptNilInt) {
+	s.ConfigID = val
+}
+
+// SetCreated sets the value of Created.
+func (s *SubmissionFeedSubscriptionResponse) SetCreated(val OptNilBool) {
+	s.Created = val
+}
+
+// SetFeedType sets the value of FeedType.
+func (s *SubmissionFeedSubscriptionResponse) SetFeedType(val OptNilString) {
+	s.FeedType = val
+}
+
+// SetFeedURL sets the value of FeedURL.
+func (s *SubmissionFeedSubscriptionResponse) SetFeedURL(val OptNilString) {
+	s.FeedURL = val
+}
+
+// SetInitialDownload sets the value of InitialDownload.
+func (s *SubmissionFeedSubscriptionResponse) SetInitialDownload(val OptSubmissionFeedInitialDownloadResponse) {
+	s.InitialDownload = val
+}
+
+// SetStatus sets the value of Status.
+func (s *SubmissionFeedSubscriptionResponse) SetStatus(val string) {
+	s.Status = val
+}
+
 // Response for user submission status list.
 // Ref: #/components/schemas/SubmissionStatusListResponse
 type SubmissionStatusListResponse struct {
@@ -4686,18 +5159,26 @@ type SubmissionStatusResponse struct {
 	ContentType ContentType `json:"content_type"`
 	// ISO timestamp when content was created.
 	CreatedAt string `json:"created_at"`
+	// RSS/Atom feed detected while handling a feed subscription request.
+	DetectedFeed OptDetectedFeed `json:"detected_feed"`
 	// Failure reason when status=failed/skipped.
 	ErrorMessage OptNilString `json:"error_message"`
+	// Feed subscription result for Add Feed submissions.
+	FeedSubscription OptSubmissionFeedSubscriptionResponse `json:"feed_subscription"`
 	// Unique identifier.
 	ID int `json:"id"`
 	// Whether this content was submitted by the current user.
 	IsSelfSubmission OptBool `json:"is_self_submission"`
+	// Semantic submission outcome for user-facing display.
+	Outcome OptSubmissionStatusResponseOutcome `json:"outcome"`
 	// ISO timestamp when content was processed.
 	ProcessedAt OptNilString `json:"processed_at"`
 	// Original submitted URL.
 	SourceURL OptNilString `json:"source_url"`
 	// Processing status.
 	Status ContentStatus `json:"status"`
+	// Semantic submission kind for user-facing display.
+	SubmissionKind OptSubmissionStatusResponseSubmissionKind `json:"submission_kind"`
 	// Submission channel (share_sheet, etc.).
 	SubmittedVia OptNilString `json:"submitted_via"`
 	// Content title (if detected).
@@ -4716,9 +5197,19 @@ func (s *SubmissionStatusResponse) GetCreatedAt() string {
 	return s.CreatedAt
 }
 
+// GetDetectedFeed returns the value of DetectedFeed.
+func (s *SubmissionStatusResponse) GetDetectedFeed() OptDetectedFeed {
+	return s.DetectedFeed
+}
+
 // GetErrorMessage returns the value of ErrorMessage.
 func (s *SubmissionStatusResponse) GetErrorMessage() OptNilString {
 	return s.ErrorMessage
+}
+
+// GetFeedSubscription returns the value of FeedSubscription.
+func (s *SubmissionStatusResponse) GetFeedSubscription() OptSubmissionFeedSubscriptionResponse {
+	return s.FeedSubscription
 }
 
 // GetID returns the value of ID.
@@ -4729,6 +5220,11 @@ func (s *SubmissionStatusResponse) GetID() int {
 // GetIsSelfSubmission returns the value of IsSelfSubmission.
 func (s *SubmissionStatusResponse) GetIsSelfSubmission() OptBool {
 	return s.IsSelfSubmission
+}
+
+// GetOutcome returns the value of Outcome.
+func (s *SubmissionStatusResponse) GetOutcome() OptSubmissionStatusResponseOutcome {
+	return s.Outcome
 }
 
 // GetProcessedAt returns the value of ProcessedAt.
@@ -4744,6 +5240,11 @@ func (s *SubmissionStatusResponse) GetSourceURL() OptNilString {
 // GetStatus returns the value of Status.
 func (s *SubmissionStatusResponse) GetStatus() ContentStatus {
 	return s.Status
+}
+
+// GetSubmissionKind returns the value of SubmissionKind.
+func (s *SubmissionStatusResponse) GetSubmissionKind() OptSubmissionStatusResponseSubmissionKind {
+	return s.SubmissionKind
 }
 
 // GetSubmittedVia returns the value of SubmittedVia.
@@ -4771,9 +5272,19 @@ func (s *SubmissionStatusResponse) SetCreatedAt(val string) {
 	s.CreatedAt = val
 }
 
+// SetDetectedFeed sets the value of DetectedFeed.
+func (s *SubmissionStatusResponse) SetDetectedFeed(val OptDetectedFeed) {
+	s.DetectedFeed = val
+}
+
 // SetErrorMessage sets the value of ErrorMessage.
 func (s *SubmissionStatusResponse) SetErrorMessage(val OptNilString) {
 	s.ErrorMessage = val
+}
+
+// SetFeedSubscription sets the value of FeedSubscription.
+func (s *SubmissionStatusResponse) SetFeedSubscription(val OptSubmissionFeedSubscriptionResponse) {
+	s.FeedSubscription = val
 }
 
 // SetID sets the value of ID.
@@ -4784,6 +5295,11 @@ func (s *SubmissionStatusResponse) SetID(val int) {
 // SetIsSelfSubmission sets the value of IsSelfSubmission.
 func (s *SubmissionStatusResponse) SetIsSelfSubmission(val OptBool) {
 	s.IsSelfSubmission = val
+}
+
+// SetOutcome sets the value of Outcome.
+func (s *SubmissionStatusResponse) SetOutcome(val OptSubmissionStatusResponseOutcome) {
+	s.Outcome = val
 }
 
 // SetProcessedAt sets the value of ProcessedAt.
@@ -4801,6 +5317,11 @@ func (s *SubmissionStatusResponse) SetStatus(val ContentStatus) {
 	s.Status = val
 }
 
+// SetSubmissionKind sets the value of SubmissionKind.
+func (s *SubmissionStatusResponse) SetSubmissionKind(val OptSubmissionStatusResponseSubmissionKind) {
+	s.SubmissionKind = val
+}
+
 // SetSubmittedVia sets the value of SubmittedVia.
 func (s *SubmissionStatusResponse) SetSubmittedVia(val OptNilString) {
 	s.SubmittedVia = val
@@ -4814,6 +5335,146 @@ func (s *SubmissionStatusResponse) SetTitle(val OptNilString) {
 // SetURL sets the value of URL.
 func (s *SubmissionStatusResponse) SetURL(val string) {
 	s.URL = val
+}
+
+// Semantic submission outcome for user-facing display.
+type SubmissionStatusResponseOutcome string
+
+const (
+	SubmissionStatusResponseOutcomeQueued                 SubmissionStatusResponseOutcome = "queued"
+	SubmissionStatusResponseOutcomeProcessing             SubmissionStatusResponseOutcome = "processing"
+	SubmissionStatusResponseOutcomeCompleted              SubmissionStatusResponseOutcome = "completed"
+	SubmissionStatusResponseOutcomeFailed                 SubmissionStatusResponseOutcome = "failed"
+	SubmissionStatusResponseOutcomeSkipped                SubmissionStatusResponseOutcome = "skipped"
+	SubmissionStatusResponseOutcomeSubscribed             SubmissionStatusResponseOutcome = "subscribed"
+	SubmissionStatusResponseOutcomeAlreadySubscribed      SubmissionStatusResponseOutcome = "already_subscribed"
+	SubmissionStatusResponseOutcomeFeedNotFound           SubmissionStatusResponseOutcome = "feed_not_found"
+	SubmissionStatusResponseOutcomeFeedFetchFailed        SubmissionStatusResponseOutcome = "feed_fetch_failed"
+	SubmissionStatusResponseOutcomeFeedSubscriptionFailed SubmissionStatusResponseOutcome = "feed_subscription_failed"
+)
+
+// AllValues returns all SubmissionStatusResponseOutcome values.
+func (SubmissionStatusResponseOutcome) AllValues() []SubmissionStatusResponseOutcome {
+	return []SubmissionStatusResponseOutcome{
+		SubmissionStatusResponseOutcomeQueued,
+		SubmissionStatusResponseOutcomeProcessing,
+		SubmissionStatusResponseOutcomeCompleted,
+		SubmissionStatusResponseOutcomeFailed,
+		SubmissionStatusResponseOutcomeSkipped,
+		SubmissionStatusResponseOutcomeSubscribed,
+		SubmissionStatusResponseOutcomeAlreadySubscribed,
+		SubmissionStatusResponseOutcomeFeedNotFound,
+		SubmissionStatusResponseOutcomeFeedFetchFailed,
+		SubmissionStatusResponseOutcomeFeedSubscriptionFailed,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s SubmissionStatusResponseOutcome) MarshalText() ([]byte, error) {
+	switch s {
+	case SubmissionStatusResponseOutcomeQueued:
+		return []byte(s), nil
+	case SubmissionStatusResponseOutcomeProcessing:
+		return []byte(s), nil
+	case SubmissionStatusResponseOutcomeCompleted:
+		return []byte(s), nil
+	case SubmissionStatusResponseOutcomeFailed:
+		return []byte(s), nil
+	case SubmissionStatusResponseOutcomeSkipped:
+		return []byte(s), nil
+	case SubmissionStatusResponseOutcomeSubscribed:
+		return []byte(s), nil
+	case SubmissionStatusResponseOutcomeAlreadySubscribed:
+		return []byte(s), nil
+	case SubmissionStatusResponseOutcomeFeedNotFound:
+		return []byte(s), nil
+	case SubmissionStatusResponseOutcomeFeedFetchFailed:
+		return []byte(s), nil
+	case SubmissionStatusResponseOutcomeFeedSubscriptionFailed:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *SubmissionStatusResponseOutcome) UnmarshalText(data []byte) error {
+	switch SubmissionStatusResponseOutcome(data) {
+	case SubmissionStatusResponseOutcomeQueued:
+		*s = SubmissionStatusResponseOutcomeQueued
+		return nil
+	case SubmissionStatusResponseOutcomeProcessing:
+		*s = SubmissionStatusResponseOutcomeProcessing
+		return nil
+	case SubmissionStatusResponseOutcomeCompleted:
+		*s = SubmissionStatusResponseOutcomeCompleted
+		return nil
+	case SubmissionStatusResponseOutcomeFailed:
+		*s = SubmissionStatusResponseOutcomeFailed
+		return nil
+	case SubmissionStatusResponseOutcomeSkipped:
+		*s = SubmissionStatusResponseOutcomeSkipped
+		return nil
+	case SubmissionStatusResponseOutcomeSubscribed:
+		*s = SubmissionStatusResponseOutcomeSubscribed
+		return nil
+	case SubmissionStatusResponseOutcomeAlreadySubscribed:
+		*s = SubmissionStatusResponseOutcomeAlreadySubscribed
+		return nil
+	case SubmissionStatusResponseOutcomeFeedNotFound:
+		*s = SubmissionStatusResponseOutcomeFeedNotFound
+		return nil
+	case SubmissionStatusResponseOutcomeFeedFetchFailed:
+		*s = SubmissionStatusResponseOutcomeFeedFetchFailed
+		return nil
+	case SubmissionStatusResponseOutcomeFeedSubscriptionFailed:
+		*s = SubmissionStatusResponseOutcomeFeedSubscriptionFailed
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Semantic submission kind for user-facing display.
+type SubmissionStatusResponseSubmissionKind string
+
+const (
+	SubmissionStatusResponseSubmissionKindContent          SubmissionStatusResponseSubmissionKind = "content"
+	SubmissionStatusResponseSubmissionKindFeedSubscription SubmissionStatusResponseSubmissionKind = "feed_subscription"
+)
+
+// AllValues returns all SubmissionStatusResponseSubmissionKind values.
+func (SubmissionStatusResponseSubmissionKind) AllValues() []SubmissionStatusResponseSubmissionKind {
+	return []SubmissionStatusResponseSubmissionKind{
+		SubmissionStatusResponseSubmissionKindContent,
+		SubmissionStatusResponseSubmissionKindFeedSubscription,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s SubmissionStatusResponseSubmissionKind) MarshalText() ([]byte, error) {
+	switch s {
+	case SubmissionStatusResponseSubmissionKindContent:
+		return []byte(s), nil
+	case SubmissionStatusResponseSubmissionKindFeedSubscription:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *SubmissionStatusResponseSubmissionKind) UnmarshalText(data []byte) error {
+	switch SubmissionStatusResponseSubmissionKind(data) {
+	case SubmissionStatusResponseSubmissionKindContent:
+		*s = SubmissionStatusResponseSubmissionKindContent
+		return nil
+	case SubmissionStatusResponseSubmissionKindFeedSubscription:
+		*s = SubmissionStatusResponseSubmissionKindFeedSubscription
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 type SubmitContentCreated ContentSubmissionResponse

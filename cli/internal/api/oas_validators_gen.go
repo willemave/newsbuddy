@@ -1323,6 +1323,24 @@ func (s *SubmissionStatusResponse) Validate() error {
 		})
 	}
 	if err := func() error {
+		if value, ok := s.Outcome.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "outcome",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if err := s.Status.Validate(); err != nil {
 			return err
 		}
@@ -1333,10 +1351,66 @@ func (s *SubmissionStatusResponse) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if value, ok := s.SubmissionKind.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "submission_kind",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s SubmissionStatusResponseOutcome) Validate() error {
+	switch s {
+	case "queued":
+		return nil
+	case "processing":
+		return nil
+	case "completed":
+		return nil
+	case "failed":
+		return nil
+	case "skipped":
+		return nil
+	case "subscribed":
+		return nil
+	case "already_subscribed":
+		return nil
+	case "feed_not_found":
+		return nil
+	case "feed_fetch_failed":
+		return nil
+	case "feed_subscription_failed":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s SubmissionStatusResponseSubmissionKind) Validate() error {
+	switch s {
+	case "content":
+		return nil
+	case "feed_subscription":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s *SubmitContentCreated) Validate() error {

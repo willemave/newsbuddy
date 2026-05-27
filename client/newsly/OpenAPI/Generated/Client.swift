@@ -6917,7 +6917,7 @@ internal struct Client: APIProtocol {
     }
     /// Generate tweet suggestions for content
     ///
-    /// Generate 3 tweet suggestions for a content item using Gemini. Supports all content types. Requires JWT authentication.
+    /// Generate 3 tweet suggestions for a content item using the selected LLM provider. Supports all content types. Requires JWT authentication.
     ///
     /// - Remark: HTTP `POST /api/content/{content_id}/tweet-suggestions`.
     /// - Remark: Generated from `#/paths//api/content/{content_id}/tweet-suggestions/post(getContentTweetSuggestions)`.

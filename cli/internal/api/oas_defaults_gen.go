@@ -144,6 +144,14 @@ func (s *SubmissionStatusResponse) setDefaults() {
 		val := bool(true)
 		s.IsSelfSubmission.SetTo(val)
 	}
+	{
+		val := SubmissionStatusResponseOutcome("processing")
+		s.Outcome.SetTo(val)
+	}
+	{
+		val := SubmissionStatusResponseSubmissionKind("content")
+		s.SubmissionKind.SetTo(val)
+	}
 }
 
 // setDefaults set default value of fields.

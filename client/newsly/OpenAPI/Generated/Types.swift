@@ -560,7 +560,7 @@ internal protocol APIProtocol: Sendable {
     func markContentUnread(_ input: Operations.MarkContentUnread.Input) async throws -> Operations.MarkContentUnread.Output
     /// Generate tweet suggestions for content
     ///
-    /// Generate 3 tweet suggestions for a content item using Gemini. Supports all content types. Requires JWT authentication.
+    /// Generate 3 tweet suggestions for a content item using the selected LLM provider. Supports all content types. Requires JWT authentication.
     ///
     /// - Remark: HTTP `POST /api/content/{content_id}/tweet-suggestions`.
     /// - Remark: Generated from `#/paths//api/content/{content_id}/tweet-suggestions/post(getContentTweetSuggestions)`.
@@ -2042,7 +2042,7 @@ extension APIProtocol {
     }
     /// Generate tweet suggestions for content
     ///
-    /// Generate 3 tweet suggestions for a content item using Gemini. Supports all content types. Requires JWT authentication.
+    /// Generate 3 tweet suggestions for a content item using the selected LLM provider. Supports all content types. Requires JWT authentication.
     ///
     /// - Remark: HTTP `POST /api/content/{content_id}/tweet-suggestions`.
     /// - Remark: Generated from `#/paths//api/content/{content_id}/tweet-suggestions/post(getContentTweetSuggestions)`.
@@ -6727,6 +6727,32 @@ internal enum Components {
                 case userMessage = "user_message"
             }
         }
+        /// Initial download result for a newly subscribed feed.
+        ///
+        /// - Remark: Generated from `#/components/schemas/SubmissionFeedInitialDownloadResponse`.
+        internal struct SubmissionFeedInitialDownloadResponse: Codable, Hashable, Sendable {
+            /// Creates a new `SubmissionFeedInitialDownloadResponse`.
+            internal init() {}
+        }
+        /// Feed subscription outcome attached to a submission status row.
+        ///
+        /// - Remark: Generated from `#/components/schemas/SubmissionFeedSubscriptionResponse`.
+        internal struct SubmissionFeedSubscriptionResponse: Codable, Hashable, Sendable {
+            /// Raw feed subscription status
+            ///
+            /// - Remark: Generated from `#/components/schemas/SubmissionFeedSubscriptionResponse/status`.
+            internal var status: Swift.String
+            /// Creates a new `SubmissionFeedSubscriptionResponse`.
+            ///
+            /// - Parameters:
+            ///   - status: Raw feed subscription status
+            internal init(status: Swift.String) {
+                self.status = status
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case status
+            }
+        }
         /// Response for user submission status list.
         ///
         /// - Remark: Generated from `#/components/schemas/SubmissionStatusListResponse`.
@@ -6776,10 +6802,40 @@ internal enum Components {
             ///
             /// - Remark: Generated from `#/components/schemas/SubmissionStatusResponse/is_self_submission`.
             internal var isSelfSubmission: Swift.Bool?
+            /// Semantic submission outcome for user-facing display
+            ///
+            /// - Remark: Generated from `#/components/schemas/SubmissionStatusResponse/outcome`.
+            internal enum OutcomePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case queued = "queued"
+                case processing = "processing"
+                case completed = "completed"
+                case failed = "failed"
+                case skipped = "skipped"
+                case subscribed = "subscribed"
+                case alreadySubscribed = "already_subscribed"
+                case feedNotFound = "feed_not_found"
+                case feedFetchFailed = "feed_fetch_failed"
+                case feedSubscriptionFailed = "feed_subscription_failed"
+            }
+            /// Semantic submission outcome for user-facing display
+            ///
+            /// - Remark: Generated from `#/components/schemas/SubmissionStatusResponse/outcome`.
+            internal var outcome: Components.Schemas.SubmissionStatusResponse.OutcomePayload?
             /// Processing status
             ///
             /// - Remark: Generated from `#/components/schemas/SubmissionStatusResponse/status`.
             internal var status: Components.Schemas.ContentStatus
+            /// Semantic submission kind for user-facing display
+            ///
+            /// - Remark: Generated from `#/components/schemas/SubmissionStatusResponse/submission_kind`.
+            internal enum SubmissionKindPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case content = "content"
+                case feedSubscription = "feed_subscription"
+            }
+            /// Semantic submission kind for user-facing display
+            ///
+            /// - Remark: Generated from `#/components/schemas/SubmissionStatusResponse/submission_kind`.
+            internal var submissionKind: Components.Schemas.SubmissionStatusResponse.SubmissionKindPayload?
             /// Canonical URL of the content
             ///
             /// - Remark: Generated from `#/components/schemas/SubmissionStatusResponse/url`.
@@ -6791,21 +6847,27 @@ internal enum Components {
             ///   - createdAt: ISO timestamp when content was created
             ///   - id: Unique identifier
             ///   - isSelfSubmission: Whether this content was submitted by the current user
+            ///   - outcome: Semantic submission outcome for user-facing display
             ///   - status: Processing status
+            ///   - submissionKind: Semantic submission kind for user-facing display
             ///   - url: Canonical URL of the content
             internal init(
                 contentType: Components.Schemas.ContentType,
                 createdAt: Swift.String,
                 id: Swift.Int,
                 isSelfSubmission: Swift.Bool? = nil,
+                outcome: Components.Schemas.SubmissionStatusResponse.OutcomePayload? = nil,
                 status: Components.Schemas.ContentStatus,
+                submissionKind: Components.Schemas.SubmissionStatusResponse.SubmissionKindPayload? = nil,
                 url: Swift.String
             ) {
                 self.contentType = contentType
                 self.createdAt = createdAt
                 self.id = id
                 self.isSelfSubmission = isSelfSubmission
+                self.outcome = outcome
                 self.status = status
+                self.submissionKind = submissionKind
                 self.url = url
             }
             internal enum CodingKeys: String, CodingKey {
@@ -6813,7 +6875,9 @@ internal enum Components {
                 case createdAt = "created_at"
                 case id
                 case isSelfSubmission = "is_self_submission"
+                case outcome
                 case status
+                case submissionKind = "submission_kind"
                 case url
             }
         }
@@ -23341,7 +23405,7 @@ internal enum Operations {
     }
     /// Generate tweet suggestions for content
     ///
-    /// Generate 3 tweet suggestions for a content item using Gemini. Supports all content types. Requires JWT authentication.
+    /// Generate 3 tweet suggestions for a content item using the selected LLM provider. Supports all content types. Requires JWT authentication.
     ///
     /// - Remark: HTTP `POST /api/content/{content_id}/tweet-suggestions`.
     /// - Remark: Generated from `#/paths//api/content/{content_id}/tweet-suggestions/post(getContentTweetSuggestions)`.

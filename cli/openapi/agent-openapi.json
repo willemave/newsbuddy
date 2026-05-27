@@ -4549,6 +4549,129 @@
         "title": "SendMessageResponse",
         "type": "object"
       },
+      "SubmissionFeedInitialDownloadResponse": {
+        "description": "Initial download result for a newly subscribed feed.",
+        "properties": {
+          "base_limit": {
+            "description": "Original scraper limit",
+            "nullable": true,
+            "title": "Base Limit",
+            "type": "integer"
+          },
+          "config_id": {
+            "description": "Feed config used for the download",
+            "nullable": true,
+            "title": "Config Id",
+            "type": "integer"
+          },
+          "duplicates": {
+            "description": "Number of duplicate items ignored",
+            "nullable": true,
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "error": {
+            "description": "Initial download failure reason",
+            "nullable": true,
+            "title": "Error",
+            "type": "string"
+          },
+          "errors": {
+            "description": "Number of scraper item errors",
+            "nullable": true,
+            "title": "Errors",
+            "type": "integer"
+          },
+          "ran": {
+            "description": "Whether initial download was attempted",
+            "nullable": true,
+            "title": "Ran",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Reason initial download was skipped",
+            "nullable": true,
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested_count": {
+            "description": "Number of recent feed items requested for initial download",
+            "nullable": true,
+            "title": "Requested Count",
+            "type": "integer"
+          },
+          "saved": {
+            "description": "Number of items saved",
+            "nullable": true,
+            "title": "Saved",
+            "type": "integer"
+          },
+          "scraped": {
+            "description": "Number of items scraped",
+            "nullable": true,
+            "title": "Scraped",
+            "type": "integer"
+          },
+          "status": {
+            "description": "Initial download status",
+            "nullable": true,
+            "title": "Status",
+            "type": "string"
+          },
+          "target_limit": {
+            "description": "Temporary scraper limit used",
+            "nullable": true,
+            "title": "Target Limit",
+            "type": "integer"
+          }
+        },
+        "title": "SubmissionFeedInitialDownloadResponse",
+        "type": "object"
+      },
+      "SubmissionFeedSubscriptionResponse": {
+        "description": "Feed subscription outcome attached to a submission status row.",
+        "properties": {
+          "config_id": {
+            "description": "Created feed config identifier",
+            "nullable": true,
+            "title": "Config Id",
+            "type": "integer"
+          },
+          "created": {
+            "description": "Whether a new feed config was created",
+            "nullable": true,
+            "title": "Created",
+            "type": "boolean"
+          },
+          "feed_type": {
+            "description": "Subscribed feed type",
+            "nullable": true,
+            "title": "Feed Type",
+            "type": "string"
+          },
+          "feed_url": {
+            "description": "Subscribed feed URL",
+            "nullable": true,
+            "title": "Feed Url",
+            "type": "string"
+          },
+          "initial_download": {
+            "$ref": "#/components/schemas/SubmissionFeedInitialDownloadResponse",
+            "description": "Initial recent-item download result",
+            "nullable": true
+          },
+          "status": {
+            "description": "Raw feed subscription status",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "SubmissionFeedSubscriptionResponse",
+        "type": "object"
+      },
       "SubmissionStatusListResponse": {
         "description": "Response for user submission status list.",
         "properties": {
@@ -4584,11 +4707,21 @@
             "title": "Created At",
             "type": "string"
           },
+          "detected_feed": {
+            "$ref": "#/components/schemas/DetectedFeed",
+            "description": "RSS/Atom feed detected while handling a feed subscription request",
+            "nullable": true
+          },
           "error_message": {
             "description": "Failure reason when status=failed/skipped",
             "nullable": true,
             "title": "Error Message",
             "type": "string"
+          },
+          "feed_subscription": {
+            "$ref": "#/components/schemas/SubmissionFeedSubscriptionResponse",
+            "description": "Feed subscription result for Add Feed submissions",
+            "nullable": true
           },
           "id": {
             "description": "Unique identifier",
@@ -4600,6 +4733,24 @@
             "description": "Whether this content was submitted by the current user",
             "title": "Is Self Submission",
             "type": "boolean"
+          },
+          "outcome": {
+            "default": "processing",
+            "description": "Semantic submission outcome for user-facing display",
+            "enum": [
+              "queued",
+              "processing",
+              "completed",
+              "failed",
+              "skipped",
+              "subscribed",
+              "already_subscribed",
+              "feed_not_found",
+              "feed_fetch_failed",
+              "feed_subscription_failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
           },
           "processed_at": {
             "description": "ISO timestamp when content was processed",
@@ -4616,6 +4767,16 @@
           "status": {
             "$ref": "#/components/schemas/ContentStatus",
             "description": "Processing status"
+          },
+          "submission_kind": {
+            "default": "content",
+            "description": "Semantic submission kind for user-facing display",
+            "enum": [
+              "content",
+              "feed_subscription"
+            ],
+            "title": "Submission Kind",
+            "type": "string"
           },
           "submitted_via": {
             "description": "Submission channel (share_sheet, etc.)",

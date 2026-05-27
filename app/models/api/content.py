@@ -178,6 +178,73 @@ class NarrationResponse(BaseModel):
     narration_text: str = Field(..., description="Plain-text narration script for voice playback")
 
 
+class DetectedFeed(BaseModel):
+    """Detected RSS/Atom feed from content page."""
+
+    url: str = Field(..., description="Feed URL")
+    type: str = Field(..., description="Feed type: substack, podcast_rss, or atom")
+    title: str | None = Field(None, description="Feed title from link tag")
+    format: str = Field("rss", description="Feed format: rss or atom")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "url": "https://example.substack.com/feed",
+                "type": "substack",
+                "title": "Example Newsletter",
+                "format": "rss",
+            }
+        }
+    )
+
+
+class SubmissionFeedInitialDownloadResponse(BaseModel):
+    """Initial download result for a newly subscribed feed."""
+
+    requested_count: int | None = Field(
+        None, description="Number of recent feed items requested for initial download"
+    )
+    ran: bool | None = Field(None, description="Whether initial download was attempted")
+    status: str | None = Field(None, description="Initial download status")
+    reason: str | None = Field(None, description="Reason initial download was skipped")
+    error: str | None = Field(None, description="Initial download failure reason")
+    config_id: int | None = Field(None, description="Feed config used for the download")
+    base_limit: int | None = Field(None, description="Original scraper limit")
+    target_limit: int | None = Field(None, description="Temporary scraper limit used")
+    scraped: int | None = Field(None, description="Number of items scraped")
+    saved: int | None = Field(None, description="Number of items saved")
+    duplicates: int | None = Field(None, description="Number of duplicate items ignored")
+    errors: int | None = Field(None, description="Number of scraper item errors")
+
+
+class SubmissionFeedSubscriptionResponse(BaseModel):
+    """Feed subscription outcome attached to a submission status row."""
+
+    status: str = Field(..., description="Raw feed subscription status")
+    feed_url: str | None = Field(None, description="Subscribed feed URL")
+    feed_type: str | None = Field(None, description="Subscribed feed type")
+    created: bool | None = Field(None, description="Whether a new feed config was created")
+    config_id: int | None = Field(None, description="Created feed config identifier")
+    initial_download: SubmissionFeedInitialDownloadResponse | None = Field(
+        None, description="Initial recent-item download result"
+    )
+
+
+SubmissionKind = Literal["content", "feed_subscription"]
+SubmissionOutcome = Literal[
+    "queued",
+    "processing",
+    "completed",
+    "failed",
+    "skipped",
+    "subscribed",
+    "already_subscribed",
+    "feed_not_found",
+    "feed_fetch_failed",
+    "feed_subscription_failed",
+]
+
+
 class SubmissionStatusResponse(BaseModel):
     """Status information for a user-submitted content item."""
 
@@ -195,6 +262,18 @@ class SubmissionStatusResponse(BaseModel):
     submitted_via: str | None = Field(None, description="Submission channel (share_sheet, etc.)")
     is_self_submission: bool = Field(
         True, description="Whether this content was submitted by the current user"
+    )
+    submission_kind: SubmissionKind = Field(
+        "content", description="Semantic submission kind for user-facing display"
+    )
+    outcome: SubmissionOutcome = Field(
+        "processing", description="Semantic submission outcome for user-facing display"
+    )
+    detected_feed: DetectedFeed | None = Field(
+        None, description="RSS/Atom feed detected while handling a feed subscription request"
+    )
+    feed_subscription: SubmissionFeedSubscriptionResponse | None = Field(
+        None, description="Feed subscription result for Add Feed submissions"
     )
 
 
@@ -248,26 +327,6 @@ class MixedSearchResponse(BaseModel):
     content: list[ContentSummaryResponse] = Field(default_factory=list)
     feeds: list[MixedSearchFeedResultResponse] = Field(default_factory=list)
     podcasts: list[PodcastEpisodeSearchResultResponse] = Field(default_factory=list)
-
-
-class DetectedFeed(BaseModel):
-    """Detected RSS/Atom feed from content page."""
-
-    url: str = Field(..., description="Feed URL")
-    type: str = Field(..., description="Feed type: substack, podcast_rss, or atom")
-    title: str | None = Field(None, description="Feed title from link tag")
-    format: str = Field("rss", description="Feed format: rss or atom")
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "url": "https://example.substack.com/feed",
-                "type": "substack",
-                "title": "Example Newsletter",
-                "format": "rss",
-            }
-        }
-    )
 
 
 class ContentDetailResponse(BaseModel):
