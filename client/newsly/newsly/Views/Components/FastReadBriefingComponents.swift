@@ -42,37 +42,15 @@ enum FastReadPresentation {
     }
 }
 
-struct FastReadMastheadGlyph: View {
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.surfaceSecondary.opacity(0.54))
-                .frame(width: 44, height: 44)
-                .overlay {
-                    Circle()
-                        .stroke(Color.brandPrimary.opacity(0.28), lineWidth: 1)
-                }
-
-            Image(systemName: "sun.max")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(Color.brandSecondary)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
 struct BriefingStackCard: View {
     let items: [ContentSummary]
+    let durationSeconds: Int?
     let isPreparing: Bool
     let isPlaying: Bool
     let onPlay: () -> Void
 
     private var unreadItems: [ContentSummary] {
         items.filter { !$0.isRead }
-    }
-
-    private var displayItems: [ContentSummary] {
-        Array((unreadItems.isEmpty ? items : unreadItems).prefix(3))
     }
 
     private var includedCount: Int {
@@ -88,12 +66,15 @@ struct BriefingStackCard: View {
     }
 
     private var durationText: String {
-        let estimatedMinutes = min(max(Int(ceil(Double(max(includedCount, 1)) * 0.42)), 3), 8)
-        return "~\(estimatedMinutes) MIN"
+        guard let durationSeconds, durationSeconds > 0 else {
+            return "~1 MIN"
+        }
+        let minutes = max(1, Int((Double(durationSeconds) / 60.0).rounded()))
+        return "~\(minutes) MIN"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 14) {
                 Image(systemName: "square.stack.3d.up.fill")
                     .font(.system(size: 28, weight: .semibold))
@@ -146,22 +127,6 @@ struct BriefingStackCard: View {
                 .accessibilityIdentifier("short.audio.briefing_stack")
             }
 
-            VStack(alignment: .leading, spacing: 15) {
-                ForEach(displayItems) { item in
-                    HStack(alignment: .firstTextBaseline, spacing: 14) {
-                        Circle()
-                            .fill(Color.brandTertiary.opacity(0.72))
-                            .frame(width: 7, height: 7)
-
-                        Text(item.displayTitle)
-                            .font(.terracottaHeadlineSmall)
-                            .foregroundStyle(Color.onSurface)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-
             HStack {
                 Text(isPreparing ? "PREPARING YOUR BRIEFING" : "TAP PLAY TO HEAR YOUR BRIEFING")
                     .font(.terracottaCategoryPill)
@@ -181,7 +146,7 @@ struct BriefingStackCard: View {
             }
         }
         .padding(.horizontal, 22)
-        .padding(.vertical, 22)
+        .padding(.vertical, 18)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.surfaceSecondary.opacity(0.58))

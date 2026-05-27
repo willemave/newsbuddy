@@ -1171,8 +1171,8 @@ struct ContentDetailView: View {
                 // Layer 3: Title + metadata + action bar
                 VStack(alignment: .leading, spacing: 8) {
                     Text(content.displayTitle)
-                        .font(.title3)
-                        .fontWeight(.bold)
+                        .font(detailTitleFont(for: content))
+                        .fontWeight(detailTitleWeight(for: content))
                         .foregroundColor(.white)
                         .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1233,8 +1233,8 @@ struct ContentDetailView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(content.displayTitle)
-                        .font(.title3)
-                        .fontWeight(.bold)
+                        .font(detailTitleFont(for: content))
+                        .fontWeight(detailTitleWeight(for: content))
                         .foregroundColor(Color.onSurface)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("content.detail.title.\(content.id)")
@@ -1291,6 +1291,14 @@ struct ContentDetailView: View {
         content.contentTypeEnum == .news
             ? DetailDesign.textOnlyNewsHeaderTopSpacer
             : DetailDesign.textOnlyStandardHeaderTopSpacer
+    }
+
+    private func detailTitleFont(for content: ContentDetail) -> Font {
+        content.contentTypeEnum == .news ? .terracottaHeadlineCompact : .title3
+    }
+
+    private func detailTitleWeight(for content: ContentDetail) -> Font.Weight {
+        content.contentTypeEnum == .news ? .medium : .bold
     }
 
     private var floatingBackButton: some View {

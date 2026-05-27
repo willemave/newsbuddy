@@ -45,9 +45,7 @@ struct ShortFormView: View {
                     shortFormEmptyState
                 } else {
                     EditorialMastheadHeader(
-                        title: "Fast Read",
-                        subtitle: "The day's essential stories, summarized.",
-                        trailingAccessory: AnyView(FastReadMastheadGlyph())
+                        title: "Fast Read"
                     )
 
                     shortNewsQuickActions(items: items)
@@ -55,6 +53,7 @@ struct ShortFormView: View {
 
                     BriefingStackCard(
                         items: items,
+                        durationSeconds: fastNewsAudioEpisode?.durationSeconds,
                         isPreparing: isPreparingFastNewsAudio,
                         isPlaying: isPlayingFastNewsAudio,
                         onPlay: handleFastNewsAudioEpisode
@@ -495,11 +494,15 @@ private struct ShortNewsRow: View, Equatable {
     }
 
     private var titleUIFont: UIFont {
-        .appEditorialHeadline
+        .appTerracottaHeadlineCompact
     }
 
     private var summaryUIFont: UIFont {
         .appEditorialSummary
+    }
+
+    private var metadataColor: Color {
+        Color.platformLabel.opacity(0.9)
     }
 
     private var summaryText: String? {
@@ -520,49 +523,38 @@ private struct ShortNewsRow: View, Equatable {
     var body: some View {
         let metadata = metadataParts
 
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 7) {
+            SelectableText(
+                item.displayTitle,
+                textColor: titleUIColor,
+                font: titleUIFont,
+                lineLimit: 3,
+                lineBreakMode: .byTruncatingTail,
+                onDigDeeper: onDigDeeper
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if !metadata.isEmpty || item.commentCountDisplay != nil {
+                metadataRow(parts: metadata)
+            }
+
+            if let summaryText {
                 SelectableText(
-                    item.displayTitle,
-                    textColor: titleUIColor,
-                    font: titleUIFont,
-                    lineLimit: 3,
+                    summaryText,
+                    textColor: .appOnSurfaceSecondary,
+                    font: summaryUIFont,
+                    lineLimit: 2,
                     lineBreakMode: .byTruncatingTail,
                     onDigDeeper: onDigDeeper
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-
-                if !metadata.isEmpty || item.commentCountDisplay != nil {
-                    metadataRow(parts: metadata)
-                }
-
-                if let summaryText {
-                    SelectableText(
-                        summaryText,
-                        textColor: .appOnSurfaceSecondary,
-                        font: summaryUIFont,
-                        lineLimit: 2,
-                        lineBreakMode: .byTruncatingTail,
-                        onDigDeeper: onDigDeeper
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            if !item.isRead {
-                Circle()
-                    .fill(Color.brandTertiary)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: Color.brandTertiary.opacity(0.34), radius: 7, x: 0, y: 0)
-                    .padding(.top, 10)
-                    .accessibilityLabel("Unread")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Spacing.rowHorizontal)
-        .padding(.vertical, 18)
+        .padding(.vertical, 14)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.borderSubtle.opacity(0.48))
@@ -574,12 +566,12 @@ private struct ShortNewsRow: View, Equatable {
     }
 
     private func metadataRow(parts metadataParts: [String]) -> some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             if !metadataParts.isEmpty {
                 Text(metadataParts.joined(separator: "  •  "))
                     .font(.terracottaCategoryPill)
                     .tracking(1.5)
-                    .foregroundStyle(Color.platformLabel)
+                    .foregroundStyle(metadataColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -588,19 +580,19 @@ private struct ShortNewsRow: View, Equatable {
                 if !metadataParts.isEmpty {
                     Text("•")
                         .font(.terracottaCategoryPill)
-                        .foregroundStyle(Color.sectionDelimiter.opacity(0.8))
+                        .foregroundStyle(metadataColor)
                         .accessibilityHidden(true)
                 }
 
                 Image(systemName: "bubble.left")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.brandSecondary.opacity(0.82))
+                    .foregroundStyle(metadataColor)
                     .accessibilityHidden(true)
 
                 Text(comments)
                     .font(.terracottaCategoryPill)
                     .tracking(1.1)
-                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .foregroundStyle(metadataColor)
                     .monospacedDigit()
             }
         }
@@ -646,7 +638,7 @@ private struct DayDelimiter: View, Equatable {
                 .frame(height: 1)
         }
         .padding(.horizontal, Spacing.rowHorizontal)
-        .padding(.top, isFirst ? 14 : 26)
-        .padding(.bottom, 10)
+        .padding(.top, isFirst ? 12 : 20)
+        .padding(.bottom, 7)
     }
 }

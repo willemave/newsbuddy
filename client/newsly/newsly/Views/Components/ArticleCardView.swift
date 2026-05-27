@@ -137,8 +137,8 @@ struct ArticleCardView: View {
 
     private var titleSection: some View {
         Text(content.displayTitle)
-            .font(.title2)
-            .fontWeight(.bold)
+            .font(.terracottaHeadlineCompact)
+            .fontWeight(.medium)
             .foregroundColor(Color.onSurface)
             .lineLimit(3)
             .multilineTextAlignment(.leading)
