@@ -52,14 +52,14 @@ struct SubmissionStatusRow: View {
                         }
                     }
 
-                    // Error — muted, with icon
-                    if let error = submission.errorDisplayText {
+                    // Status detail — muted, with icon
+                    if let detail = submission.statusDetailText {
                         HStack(alignment: .top, spacing: 4) {
-                            Image(systemName: "info.circle")
+                            Image(systemName: submission.isError ? "info.circle" : "checkmark.circle")
                                 .font(.caption2)
                                 .foregroundStyle(statusColor.opacity(0.7))
                                 .padding(.top, 1)
-                            Text(error)
+                            Text(detail)
                                 .font(.caption)
                                 .foregroundStyle(Color.onSurfaceSecondary)
                                 .lineLimit(2)
@@ -84,7 +84,24 @@ struct SubmissionStatusRow: View {
     }
 
     private var statusIconName: String {
-        switch submission.status.lowercased() {
+        if submission.isFeedSubscription {
+            switch submission.effectiveOutcome {
+            case "subscribed":
+                return "checkmark.circle.fill"
+            case "already_subscribed":
+                return "checkmark.circle"
+            case "feed_not_found", "feed_fetch_failed", "feed_subscription_failed", "failed":
+                return "exclamationmark.triangle.fill"
+            case "processing":
+                return "arrow.triangle.2.circlepath"
+            case "queued":
+                return "clock.fill"
+            default:
+                return submission.detectedFeed?.systemIcon ?? "antenna.radiowaves.left.and.right"
+            }
+        }
+
+        switch submission.effectiveOutcome {
         case "failed":
             return "exclamationmark.triangle.fill"
         case "skipped":
@@ -101,16 +118,16 @@ struct SubmissionStatusRow: View {
     }
 
     private var statusColor: Color {
-        switch submission.status.lowercased() {
-        case "failed":
+        switch submission.effectiveOutcome {
+        case "failed", "feed_not_found", "feed_fetch_failed", "feed_subscription_failed":
             return .statusDestructive.opacity(0.9)
         case "skipped":
             return .brandTertiary.opacity(0.9)
+        case "subscribed", "already_subscribed", "completed":
+            return .statusActive
         case "processing":
             return .terracottaPrimary
-        case "completed":
-            return .statusActive
-        case "new", "pending":
+        case "queued", "new", "pending":
             return .onSurfaceSecondary
         default:
             return .onSurfaceSecondary
