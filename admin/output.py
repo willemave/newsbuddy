@@ -360,10 +360,16 @@ def _format_usage_totals(totals: dict[str, Any]) -> str:
 def _format_usage_units(values: dict[str, Any]) -> str:
     parts: list[str] = []
     total_tokens = int(values.get("total_tokens") or 0)
+    cache_read_tokens = int(values.get("cache_read_tokens") or 0)
+    cache_write_tokens = int(values.get("cache_write_tokens") or 0)
     request_count = int(values.get("request_count") or 0)
     resource_count = int(values.get("resource_count") or 0)
     if total_tokens:
         parts.append(f"{total_tokens} tokens")
+    if cache_read_tokens:
+        parts.append(f"{cache_read_tokens} cache-read tokens")
+    if cache_write_tokens:
+        parts.append(f"{cache_write_tokens} cache-write tokens")
     if request_count:
         parts.append(f"{request_count} requests")
     if resource_count:

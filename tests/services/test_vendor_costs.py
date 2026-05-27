@@ -1,6 +1,7 @@
 """Tests for vendor usage persistence helpers."""
 
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 from sqlalchemy import text
 
@@ -27,7 +28,13 @@ def test_record_vendor_usage_persists_row_and_cost(db_session, monkeypatch) -> N
         feature="chat",
         operation="chat.async",
         source="realtime",
-        usage={"input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500},
+        usage={
+            "input_tokens": 1000,
+            "cache_read_tokens": 256,
+            "cache_write_tokens": 128,
+            "output_tokens": 500,
+            "total_tokens": 1500,
+        },
         content_id=42,
         session_id=7,
         message_id=9,
@@ -38,7 +45,31 @@ def test_record_vendor_usage_persists_row_and_cost(db_session, monkeypatch) -> N
 
     persisted = db_session.query(VendorUsageRecord).filter(VendorUsageRecord.id == record.id).one()
     assert persisted.total_tokens == 1500
+    assert persisted.cache_read_tokens == 256
+    assert persisted.cache_write_tokens == 128
     assert persisted.cost_usd == 0.006
+
+
+def test_extract_usage_from_result_reads_provider_cache_details() -> None:
+    class Result:
+        def usage(self):
+            return SimpleNamespace(
+                input_tokens=1000,
+                output_tokens=100,
+                total_tokens=1100,
+                input_tokens_details={"cached_tokens": 768},
+                cache_creation_input_tokens=128,
+            )
+
+    usage = vendor_costs.extract_usage_from_result(Result())
+
+    assert usage == {
+        "input_tokens": 1000,
+        "cache_read_tokens": 768,
+        "cache_write_tokens": 128,
+        "output_tokens": 100,
+        "total_tokens": 1100,
+    }
 
 
 def test_record_vendor_usage_allows_unknown_pricing(db_session, monkeypatch) -> None:

@@ -14,7 +14,16 @@ _USAGE_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar("vendor_usage_con
 def start_usage_context() -> Token:
     """Start a new usage aggregation context."""
     return _USAGE_CONTEXT.set(
-        {"total": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}, "steps": {}}
+        {
+            "total": {
+                "input_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+            },
+            "steps": {},
+        }
     )
 
 
@@ -47,13 +56,26 @@ def record_model_usage(
     if usage_context is not None:
         step_entry = usage_context["steps"].setdefault(
             step,
-            {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0},
+            {
+                "input_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "calls": 0,
+            },
         )
         if model_spec:
             step_entry["model_spec"] = model_spec
 
         step_entry["calls"] += 1
-        for key in ("input_tokens", "output_tokens", "total_tokens"):
+        for key in (
+            "input_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "output_tokens",
+            "total_tokens",
+        ):
             value = usage.get(key)
             if value is None:
                 continue

@@ -35,6 +35,8 @@ class VendorUsageRecord(Base):
     message_id = Column(Integer, nullable=True, index=True)
     user_id = Column(Integer, nullable=True, index=True)
     input_tokens = Column(Integer, nullable=True)
+    cache_read_tokens = Column(Integer, nullable=True)
+    cache_write_tokens = Column(Integer, nullable=True)
     output_tokens = Column(Integer, nullable=True)
     total_tokens = Column(Integer, nullable=True)
     request_count = Column(Integer, nullable=True)

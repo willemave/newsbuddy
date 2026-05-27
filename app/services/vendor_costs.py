@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -122,21 +123,55 @@ def extract_usage_from_result(result: object) -> dict[str, int | None] | None:
     if not usage:
         return None
 
-    input_tokens = _coerce_int(
-        getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", None)
-    )
+    input_tokens = _coerce_int(_first_usage_value(usage, ("input_tokens",), ("prompt_tokens",)))
     output_tokens = _coerce_int(
-        getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", None)
+        _first_usage_value(usage, ("output_tokens",), ("completion_tokens",))
     )
-    total_tokens = _coerce_int(getattr(usage, "total_tokens", None))
+    total_tokens = _coerce_int(_first_usage_value(usage, ("total_tokens",)))
+    cache_read_tokens = _coerce_int(
+        _first_usage_value(
+            usage,
+            ("cache_read_tokens",),
+            ("cache_read_input_tokens",),
+            ("cached_tokens",),
+            ("input_tokens_details", "cached_tokens"),
+            ("prompt_tokens_details", "cached_tokens"),
+            ("details", "cache_read_tokens"),
+            ("details", "cache_read_input_tokens"),
+            ("details", "cached_tokens"),
+            ("details", "input_tokens_details", "cached_tokens"),
+            ("details", "prompt_tokens_details", "cached_tokens"),
+        )
+    )
+    cache_write_tokens = _coerce_int(
+        _first_usage_value(
+            usage,
+            ("cache_write_tokens",),
+            ("cache_creation_input_tokens",),
+            ("input_tokens_details", "cache_creation_tokens"),
+            ("prompt_tokens_details", "cache_creation_tokens"),
+            ("details", "cache_write_tokens"),
+            ("details", "cache_creation_input_tokens"),
+            ("details", "input_tokens_details", "cache_creation_tokens"),
+            ("details", "prompt_tokens_details", "cache_creation_tokens"),
+        )
+    )
     if total_tokens is None and input_tokens is not None and output_tokens is not None:
         total_tokens = input_tokens + output_tokens
 
-    if input_tokens is None and output_tokens is None and total_tokens is None:
+    if (
+        input_tokens is None
+        and output_tokens is None
+        and total_tokens is None
+        and cache_read_tokens is None
+        and cache_write_tokens is None
+    ):
         return None
 
     return {
         "input_tokens": input_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cache_write_tokens": cache_write_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
     }
@@ -184,6 +219,8 @@ def record_vendor_usage(
         message_id=message_id,
         user_id=user_id,
         input_tokens=normalized_usage.get("input_tokens"),
+        cache_read_tokens=normalized_usage.get("cache_read_tokens"),
+        cache_write_tokens=normalized_usage.get("cache_write_tokens"),
         output_tokens=normalized_usage.get("output_tokens"),
         total_tokens=normalized_usage.get("total_tokens"),
         request_count=normalized_usage.get("request_count"),
@@ -242,6 +279,8 @@ def record_vendor_usage(
             context_data={
                 "feature": feature,
                 "input_tokens": normalized_usage.get("input_tokens"),
+                "cache_read_tokens": normalized_usage.get("cache_read_tokens"),
+                "cache_write_tokens": normalized_usage.get("cache_write_tokens"),
                 "output_tokens": normalized_usage.get("output_tokens"),
                 "total_tokens": normalized_usage.get("total_tokens"),
                 "request_count": normalized_usage.get("request_count"),
@@ -503,6 +542,12 @@ def _normalize_usage(usage: dict[str, int | None] | None) -> dict[str, int | Non
         return None
 
     input_tokens = _coerce_int(usage.get("input_tokens", usage.get("input")))
+    cache_read_tokens = _coerce_int(
+        usage.get("cache_read_tokens", usage.get("cache_read_input_tokens"))
+    )
+    cache_write_tokens = _coerce_int(
+        usage.get("cache_write_tokens", usage.get("cache_creation_input_tokens"))
+    )
     output_tokens = _coerce_int(usage.get("output_tokens", usage.get("output")))
     total_tokens = _coerce_int(usage.get("total_tokens", usage.get("total")))
     request_count = _coerce_int(usage.get("request_count", usage.get("requests")))
@@ -513,6 +558,8 @@ def _normalize_usage(usage: dict[str, int | None] | None) -> dict[str, int | Non
 
     if (
         input_tokens is None
+        and cache_read_tokens is None
+        and cache_write_tokens is None
         and output_tokens is None
         and total_tokens is None
         and request_count is None
@@ -522,6 +569,8 @@ def _normalize_usage(usage: dict[str, int | None] | None) -> dict[str, int | Non
 
     return {
         "input_tokens": input_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cache_write_tokens": cache_write_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "request_count": request_count,
@@ -563,3 +612,20 @@ def _coerce_int(value: object | None) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _first_usage_value(usage: object, *paths: tuple[str, ...]) -> object | None:
+    for path in paths:
+        value = _usage_path_value(usage, path)
+        if value is not None:
+            return value
+    return None
+
+
+def _usage_path_value(usage: object, path: tuple[str, ...]) -> object | None:
+    value: object | None = usage
+    for key in path:
+        if value is None:
+            return None
+        value = value.get(key) if isinstance(value, Mapping) else getattr(value, key, None)
+    return value

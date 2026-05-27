@@ -71,6 +71,8 @@ def remote_context(tmp_path) -> Iterator[RemoteContext]:
                         user_id=1,
                         content_id=7,
                         input_tokens=10,
+                        cache_read_tokens=3,
+                        cache_write_tokens=2,
                         output_tokens=5,
                         total_tokens=15,
                         cost_usd=cast(Any, Decimal("0.12")),
@@ -134,11 +136,15 @@ def test_usage_summary_groups_by_feature(remote_context):
 
     assert summary["totals"]["call_count"] == 2
     assert summary["totals"]["total_tokens"] == 25
+    assert summary["totals"]["cache_read_tokens"] == 3
+    assert summary["totals"]["cache_write_tokens"] == 2
     assert summary["groups"] == [
         {
             "key": "summarization",
             "call_count": 2,
             "input_tokens": 16,
+            "cache_read_tokens": 3,
+            "cache_write_tokens": 2,
             "output_tokens": 9,
             "total_tokens": 25,
             "request_count": 0,
@@ -308,7 +314,7 @@ def test_sanitize_content_metadata_updates_row(remote_context):
         harness.close()
 
 
-def test_preview_regenerate_images_returns_failed_candidates(remote_context):
+def test_preview_regenerate_images_returns_failed_candidates(remote_context, monkeypatch):
     harness = create_temporary_postgres_harness(
         schema_prefix="newsly_fix_regen_preview",
         tables=[Content.__table__, ContentStatusEntry.__table__, ProcessingTask.__table__],
@@ -343,6 +349,11 @@ def test_preview_regenerate_images_returns_failed_candidates(remote_context):
                 )
                 """
             )
+
+        monkeypatch.setattr(
+            "admin.remote_ops.has_generated_long_form_image",
+            lambda _content: False,
+        )
 
         result = preview_regenerate_images(
             RemoteContext(
@@ -434,6 +445,10 @@ def test_regenerate_images_creates_completed_task_and_updates_metadata(
         monkeypatch.setattr(
             "admin.remote_ops.build_thumbnail_url",
             lambda content_id: f"/thumbs/{content_id}.png",
+        )
+        monkeypatch.setattr(
+            "admin.remote_ops.has_generated_long_form_image",
+            lambda _content: False,
         )
 
         result = regenerate_images(

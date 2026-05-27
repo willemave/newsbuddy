@@ -1006,6 +1006,8 @@ def _serialize_usage_row(row: VendorUsageRecord, *, unsafe_raw: bool) -> dict[st
         "message_id": row.message_id,
         "user_id": row.user_id,
         "input_tokens": row.input_tokens,
+        "cache_read_tokens": row.cache_read_tokens,
+        "cache_write_tokens": row.cache_write_tokens,
         "output_tokens": row.output_tokens,
         "total_tokens": row.total_tokens,
         "request_count": row.request_count,
@@ -1036,6 +1038,8 @@ def _usage_totals() -> dict[str, Any]:
     return {
         "call_count": 0,
         "input_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
         "request_count": 0,
@@ -1047,6 +1051,8 @@ def _usage_totals() -> dict[str, Any]:
 def _accumulate_usage(bucket: dict[str, Any], row: VendorUsageRecord) -> None:
     bucket["call_count"] += 1
     bucket["input_tokens"] += int(row.input_tokens or 0)
+    bucket["cache_read_tokens"] += int(row.cache_read_tokens or 0)
+    bucket["cache_write_tokens"] += int(row.cache_write_tokens or 0)
     bucket["output_tokens"] += int(row.output_tokens or 0)
     bucket["total_tokens"] += int(row.total_tokens or 0)
     bucket["request_count"] += int(row.request_count or 0)

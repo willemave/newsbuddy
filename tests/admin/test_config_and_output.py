@@ -231,6 +231,8 @@ def test_emit_text_usage_summary_includes_vendor_units():
                 "totals": {
                     "call_count": 2,
                     "total_tokens": 100,
+                    "cache_read_tokens": 40,
+                    "cache_write_tokens": 10,
                     "request_count": 2,
                     "resource_count": 9,
                     "cost_usd": 0.42,
@@ -248,6 +250,8 @@ def test_emit_text_usage_summary_includes_vendor_units():
                         "key": "openai",
                         "call_count": 1,
                         "total_tokens": 100,
+                        "cache_read_tokens": 40,
+                        "cache_write_tokens": 10,
                         "request_count": 0,
                         "resource_count": 0,
                         "cost_usd": 0.14,
@@ -260,9 +264,14 @@ def test_emit_text_usage_summary_includes_vendor_units():
     )
 
     rendered = stream.getvalue()
-    assert "Totals: 2 calls, 100 tokens, 2 requests, 9 resources, $0.4200" in rendered
+    assert (
+        "Totals: 2 calls, 100 tokens, 40 cache-read tokens, "
+        "10 cache-write tokens, 2 requests, 9 resources, $0.4200"
+    ) in rendered
     assert "- exa: 1 calls, 1 requests, 8 resources, $0.2800" in rendered
-    assert "- openai: 1 calls, 100 tokens, $0.1400" in rendered
+    assert (
+        "- openai: 1 calls, 100 tokens, 40 cache-read tokens, 10 cache-write tokens, $0.1400"
+    ) in rendered
 
 
 def test_emit_text_health_config_summarizes_redacted_groups():
