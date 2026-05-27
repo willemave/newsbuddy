@@ -58,6 +58,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     private let chatPromptLabel = UILabel()
     private let chatPromptTextView = UITextView()
     private let submitButton = UIButton(type: .system)
+    private let keyboardSubmitButton = UIBarButtonItem(title: "Start chat", style: .plain, target: nil, action: nil)
 
     private var chatInitialMessage: String {
         chatPromptTextView.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -162,9 +163,22 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         chatPromptTextView.layer.borderColor = UIColor.separator.cgColor
         chatPromptTextView.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
         chatPromptTextView.heightAnchor.constraint(equalToConstant: 104).isActive = true
+        chatPromptTextView.inputAccessoryView = makeChatKeyboardAccessory()
 
         chatPromptStack.addArrangedSubview(chatPromptLabel)
         chatPromptStack.addArrangedSubview(chatPromptTextView)
+    }
+
+    private func makeChatKeyboardAccessory() -> UIToolbar {
+        let toolbar = UIToolbar()
+        toolbar.sizeToFit()
+        keyboardSubmitButton.target = self
+        keyboardSubmitButton.action = #selector(handleSubmitTapped)
+        toolbar.items = [
+            UIBarButtonItem(systemItem: .flexibleSpace),
+            keyboardSubmitButton,
+        ]
+        return toolbar
     }
 
     private func configureSubmitButton() {
@@ -187,7 +201,9 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
     private func updateSubmitState() {
         let hasRequiredMessage = linkHandlingMode != .chat || !chatInitialMessage.isEmpty
-        submitButton.isEnabled = sharedURL != nil && hasRequiredMessage
+        let isSubmittable = sharedURL != nil && hasRequiredMessage
+        submitButton.isEnabled = isSubmittable
+        keyboardSubmitButton.isEnabled = isSubmittable
     }
 
     @objc private func handleOptionTapped(_ sender: OptionRowView) {
@@ -296,8 +312,10 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
     private func updateSubmitButtonTitle() {
         var configuration = submitButton.configuration ?? UIButton.Configuration.filled()
-        configuration.title = linkHandlingMode == .chat ? "Start chat" : "Submit"
+        let title = linkHandlingMode == .chat ? "Start chat" : "Submit"
+        configuration.title = title
         submitButton.configuration = configuration
+        keyboardSubmitButton.title = title
     }
 
     // MARK: - API Submission
