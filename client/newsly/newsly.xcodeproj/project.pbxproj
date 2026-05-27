@@ -70,6 +70,7 @@
 				Services/APIClient.swift,
 				Services/AppSettings.swift,
 				Services/KeychainManager.swift,
+				Shared/ReaderPalette.swift,
 				Shared/SharedContainer.swift,
 			);
 			target = E61B938D2EF910AC0006676A /* ShareExtension */;

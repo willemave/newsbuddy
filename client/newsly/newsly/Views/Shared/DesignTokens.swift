@@ -11,63 +11,39 @@ import UIKit
 // MARK: - Colors
 
 extension Color {
-    // Editorial surface colors - Brass & Graphite reader palette.
+    // Editorial surface colors - selected reader palette.
     static var surfacePrimary: Color {
         Color(UIColor.appSurfacePrimary)
     }
     static var surfaceSecondary: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.098, green: 0.098, blue: 0.086, alpha: 1.0)  // #191916
-                : UIColor(red: 1.000, green: 0.992, blue: 0.973, alpha: 1.0)  // #fffdf8
-        })
+        Color(ReaderPalette.selectedUIColor(\.surfaceSecondary))
     }
     static var surfaceTertiary: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.145, green: 0.141, blue: 0.122, alpha: 1.0)  // #25241f
-                : UIColor(red: 0.906, green: 0.886, blue: 0.831, alpha: 1.0)  // #e7e2d4
-        })
+        Color(ReaderPalette.selectedUIColor(\.surfaceTertiary))
     }
     static var surfaceContainer: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.180, green: 0.169, blue: 0.145, alpha: 1.0)  // #2e2b25
-                : UIColor(red: 0.867, green: 0.835, blue: 0.761, alpha: 1.0)  // #ddd5c2
-        })
+        Color(ReaderPalette.selectedUIColor(\.surfaceContainer))
     }
     static var surfaceContainerHigh: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.220, green: 0.208, blue: 0.176, alpha: 1.0)  // #38352d
-                : UIColor(red: 0.820, green: 0.780, blue: 0.698, alpha: 1.0)  // #d1c7b2
-        })
+        Color(ReaderPalette.selectedUIColor(\.surfaceContainerHigh))
     }
     static var surfaceContainerHighest: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.271, green: 0.251, blue: 0.208, alpha: 1.0)  // #454035
-                : UIColor(red: 0.769, green: 0.722, blue: 0.600, alpha: 1.0)  // #c4b899
-        })
+        Color(ReaderPalette.selectedUIColor(\.surfaceContainerHighest))
     }
 
     // Palette roles.
-    // Primary brass: active controls, date labels, audio/play affordances.
+    // Primary: active controls, date labels, audio/play affordances.
     static var brandPrimary: Color {
         Color(UIColor.appAccent)
     }
     static var brandPrimaryStrong: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.706, green: 0.576, blue: 0.333, alpha: 1.0)  // #b49355
-                : UIColor(red: 0.506, green: 0.400, blue: 0.216, alpha: 1.0)  // #816637
-        })
+        Color(ReaderPalette.selectedUIColor(\.brandPrimaryStrong))
     }
-    // Secondary mineral blue: metadata, sources, categories, informational emphasis.
+    // Secondary: metadata, sources, categories, informational emphasis.
     static var brandSecondary: Color {
         Color(UIColor.appSecondaryAccent)
     }
-    // Tertiary muted rose: saved/read states, unread markers, quiet dividers.
+    // Tertiary: saved/read states, unread markers, quiet dividers.
     static var brandTertiary: Color {
         Color(UIColor.appTertiaryAccent)
     }
@@ -87,25 +63,17 @@ extension Color {
         Color(UIColor.appOnSurfaceTertiary)
     }
 
-    // Chat-specific colors - warm ink palette.
+    // Chat-specific colors.
     static var chatUserBubble: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.259, green: 0.220, blue: 0.137, alpha: 1.0)  // #423823
-                : UIColor(red: 0.478, green: 0.365, blue: 0.176, alpha: 1.0)  // #7a5d2d
-        })
+        Color(ReaderPalette.selectedUIColor(\.chatUserBubble))
     }
     static var chatAccent: Color {
         Color.brandPrimary
     }
 
-    // Outline - low-contrast warm linework.
+    // Outline - low-contrast linework.
     static var outlineVariant: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.298, green: 0.282, blue: 0.239, alpha: 1.0)  // #4c483d
-                : UIColor(red: 0.788, green: 0.757, blue: 0.682, alpha: 1.0)  // #c9c1ae
-        })
+        Color(ReaderPalette.selectedUIColor(\.outlineVariant))
     }
 
     // Backward-compatible text aliases.
@@ -115,18 +83,10 @@ extension Color {
 
     // Border colors
     static var borderSubtle: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.220, green: 0.208, blue: 0.176, alpha: 1.0)  // #38352d
-                : UIColor(red: 0.831, green: 0.804, blue: 0.733, alpha: 1.0)  // #d4cdbb
-        })
+        Color(ReaderPalette.selectedUIColor(\.borderSubtle))
     }
     static var borderStrong: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.463, green: 0.443, blue: 0.369, alpha: 1.0)  // #76715e
-                : UIColor(red: 0.651, green: 0.592, blue: 0.443, alpha: 1.0)  // #a69771
-        })
+        Color(ReaderPalette.selectedUIColor(\.borderStrong))
     }
 
     // Status colors (reader-palette muted)
@@ -209,6 +169,7 @@ extension Font {
     static let terracottaHeadlineLarge = Font.custom("Newsreader", size: 28)
     static let terracottaHeadlineMedium = Font.custom("Newsreader", size: 22).weight(.semibold)
     static let terracottaHeadlineSmall = Font.custom("Newsreader", size: 18)
+    static let terracottaHeadlineCompact = Font.custom("Newsreader", size: 22)
     static let terracottaHeadlineItalic = Font.custom("Newsreader-Italic", size: 18)
 
     // Terracotta typography — Inter (sans-serif) for body/labels/UI
@@ -220,6 +181,10 @@ extension Font {
 }
 
 extension UIFont {
+    static var appTerracottaHeadlineCompact: UIFont {
+        UIFont(name: "Newsreader", size: 22) ?? UIFont.systemFont(ofSize: 22, weight: .regular)
+    }
+
     static var appEditorialHeadline: UIFont {
         UIFont(name: "Newsreader", size: 28) ?? UIFont.systemFont(ofSize: 28, weight: .regular)
     }
@@ -374,52 +339,24 @@ extension View {
 
 extension UIColor {
     static var appAccent: UIColor {
-        UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.824, green: 0.706, blue: 0.455, alpha: 1.0)  // #d2b474
-                : UIColor(red: 0.725, green: 0.604, blue: 0.365, alpha: 1.0)  // #b99a5d
-        }
+        ReaderPalette.selectedUIColor(\.brandPrimary)
     }
     static var appSecondaryAccent: UIColor {
-        UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.580, green: 0.706, blue: 0.761, alpha: 1.0)  // #94b4c2
-                : UIColor(red: 0.486, green: 0.604, blue: 0.659, alpha: 1.0)  // #7c9aa8
-        }
+        ReaderPalette.selectedUIColor(\.brandSecondary)
     }
     static var appTertiaryAccent: UIColor {
-        UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.753, green: 0.620, blue: 0.616, alpha: 1.0)  // #c09e9d
-                : UIColor(red: 0.663, green: 0.529, blue: 0.529, alpha: 1.0)  // #a98787
-        }
+        ReaderPalette.selectedUIColor(\.brandTertiary)
     }
     static var appOnSurface: UIColor {
-        UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.925, green: 0.910, blue: 0.863, alpha: 1.0)  // #ece8dc
-                : UIColor(red: 0.141, green: 0.137, blue: 0.122, alpha: 1.0)  // #24231f
-        }
+        ReaderPalette.selectedUIColor(\.onSurface)
     }
     static var appOnSurfaceSecondary: UIColor {
-        UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.659, green: 0.639, blue: 0.592, alpha: 1.0)  // #a8a397
-                : UIColor(red: 0.427, green: 0.416, blue: 0.380, alpha: 1.0)  // #6d6a61
-        }
+        ReaderPalette.selectedUIColor(\.onSurfaceSecondary)
     }
     static var appOnSurfaceTertiary: UIColor {
-        UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.514, green: 0.490, blue: 0.431, alpha: 1.0)  // #837d6e
-                : UIColor(red: 0.553, green: 0.529, blue: 0.471, alpha: 1.0)  // #8d8778
-        }
+        ReaderPalette.selectedUIColor(\.onSurfaceTertiary)
     }
     static var appSurfacePrimary: UIColor {
-        UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.063, green: 0.063, blue: 0.055, alpha: 1.0)  // #10100e
-                : UIColor(red: 0.961, green: 0.949, blue: 0.918, alpha: 1.0)  // #f5f2ea
-        }
+        ReaderPalette.selectedUIColor(\.surfacePrimary)
     }
 }

@@ -239,6 +239,10 @@ struct SettingsView: View {
 
             VStack(spacing: 0) {
                 textSizeRow
+
+                RowDivider()
+
+                paletteRow
             }
             .settingsCard()
         }
@@ -406,6 +410,20 @@ struct SettingsView: View {
                 range: 0...4
             )
         }
+    }
+
+    private var paletteRow: some View {
+        NavigationLink {
+            ReaderPaletteSettingsView()
+        } label: {
+            SettingsRow(
+                icon: "paintpalette",
+                iconColor: .brandSecondary,
+                title: "Color Theme",
+                subtitle: settings.readerPalette.displayName
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func textSizeSlider(
@@ -748,17 +766,6 @@ private struct FeedbackSheet: View {
             errorMessage = error.localizedDescription
         }
         isSubmitting = false
-    }
-}
-
-// MARK: - Settings Card Modifier
-
-private extension View {
-    func settingsCard() -> some View {
-        self
-            .background(Color.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal, Spacing.screenHorizontal)
     }
 }
 

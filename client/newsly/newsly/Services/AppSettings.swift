@@ -94,6 +94,8 @@ class AppSettings: ObservableObject {
     @AppStorage("useHTTPS", store: SharedContainer.userDefaults) var useHTTPS: Bool = false
     @AppStorage("appTextSizeIndex", store: SharedContainer.userDefaults) var appTextSizeIndex: Int = 1
     @AppStorage("contentTextSizeIndex", store: SharedContainer.userDefaults) var contentTextSizeIndex: Int = 2
+    @AppStorage(ReaderPalette.storageKey, store: SharedContainer.userDefaults)
+    var readerPaletteId: String = ReaderPalette.defaultPalette.rawValue
     @AppStorage("useLongFormCardStack", store: SharedContainer.userDefaults) var useLongFormCardStack: Bool = true
     @AppStorage("backendTranscriptionAvailable", store: SharedContainer.userDefaults) var backendTranscriptionAvailable: Bool = false
     private var hasExplicitServerConfiguration: Bool {
@@ -117,6 +119,16 @@ class AppSettings: ObservableObject {
         }
         let scheme = useHTTPS ? "https" : "http"
         return "\(scheme)://\(normalizedHost):\(serverPort)"
+    }
+
+    var readerPalette: ReaderPalette {
+        ReaderPalette(rawValue: readerPaletteId) ?? ReaderPalette.defaultPalette
+    }
+
+    func setReaderPalette(_ palette: ReaderPalette) {
+        guard readerPaletteId != palette.rawValue else { return }
+        objectWillChange.send()
+        readerPaletteId = palette.rawValue
     }
 
     func setBackendTranscriptionAvailable(_ isAvailable: Bool) {
