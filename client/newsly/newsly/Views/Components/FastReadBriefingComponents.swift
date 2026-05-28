@@ -9,22 +9,6 @@ import Foundation
 import SwiftUI
 
 enum FastReadPresentation {
-    static func summaryText(for item: ContentSummary) -> String? {
-        if let newsSummary = normalizedText(item.newsSummary) {
-            return newsSummary
-        }
-
-        if let keyPoints = item.newsKeyPoints?.compactMap({ normalizedText($0) }), !keyPoints.isEmpty {
-            return keyPoints.prefix(2).joined(separator: " ")
-        }
-
-        if let previewBullets = item.previewBullets?.compactMap({ normalizedText($0) }), !previewBullets.isEmpty {
-            return previewBullets.prefix(2).joined(separator: " ")
-        }
-
-        return normalizedText(item.shortSummary)
-    }
-
     static func sourceLabel(for item: ContentSummary) -> String? {
         if let platform = normalizedText(item.platform) {
             return platform.uppercased()

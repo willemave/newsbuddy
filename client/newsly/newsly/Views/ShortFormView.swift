@@ -497,16 +497,8 @@ private struct ShortNewsRow: View, Equatable {
         .appTerracottaHeadlineCompact
     }
 
-    private var summaryUIFont: UIFont {
-        .appEditorialSummary
-    }
-
     private var metadataColor: Color {
         Color.platformLabel.opacity(0.9)
-    }
-
-    private var summaryText: String? {
-        FastReadPresentation.summaryText(for: item)
     }
 
     private var metadataParts: [String] {
@@ -537,19 +529,6 @@ private struct ShortNewsRow: View, Equatable {
 
             if !metadata.isEmpty || item.commentCountDisplay != nil {
                 metadataRow(parts: metadata)
-            }
-
-            if let summaryText {
-                SelectableText(
-                    summaryText,
-                    textColor: .appOnSurfaceSecondary,
-                    font: summaryUIFont,
-                    lineLimit: 2,
-                    lineBreakMode: .byTruncatingTail,
-                    onDigDeeper: onDigDeeper
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
