@@ -68,7 +68,19 @@ def resolve_apple_podcast_feed_url(url: str) -> str | None:
     if not show_id:
         return None
     country = (get_settings().discovery_itunes_country or "").lower()
-    return _lookup_podcast_feed_url(show_id, country)
+    try:
+        return _lookup_podcast_feed_url(show_id, country)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Apple Podcasts show lookup failed: %s",
+            exc,
+            extra={
+                "component": "apple_podcasts",
+                "operation": "itunes_show_lookup",
+                "context_data": {"show_id": show_id},
+            },
+        )
+        return None
 
 
 def extract_apple_podcast_id(url: str) -> str | None:
@@ -146,21 +158,8 @@ def _lookup_podcast_feed_url(show_id: str, country: str) -> str | None:
         params["country"] = country
     lookup_url = f"https://itunes.apple.com/lookup?{urlencode(params)}"
 
-    try:
-        response = HTTP_SERVICE.fetch(lookup_url, headers={"Accept": "application/json"})
-        payload = response.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Apple Podcasts show lookup failed: %s",
-            exc,
-            extra={
-                "component": "apple_podcasts",
-                "operation": "itunes_show_lookup",
-                "context_data": {"show_id": show_id},
-            },
-        )
-        return None
-
+    response = HTTP_SERVICE.fetch(lookup_url, headers={"Accept": "application/json"})
+    payload = response.json()
     for item in payload.get("results", []):
         feed_url = item.get("feedUrl")
         if isinstance(feed_url, str) and feed_url.strip():
