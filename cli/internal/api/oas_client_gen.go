@@ -1953,6 +1953,23 @@ func (c *Client) sendListScraperConfigs(ctx context.Context, params ListScraperC
 			return res, errors.Wrap(err, "encode query")
 		}
 	}
+	{
+		// Encode "include_stats" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "include_stats",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.IncludeStats.Get(); ok {
+				return e.EncodeValue(conv.BoolToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
 	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"

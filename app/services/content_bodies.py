@@ -19,6 +19,7 @@ from app.services.gateways.object_storage_gateway import (
     ObjectStorageGateway,
     get_object_storage_gateway,
 )
+from app.services.source_metadata import SOURCE_METADATA_KEY, dump_source_metadata
 from app.utils.summary_utils import extract_short_summary, extract_summary_text
 
 LEGACY_RAW_METADATA_KEYS: tuple[str, ...] = (
@@ -32,6 +33,7 @@ LEGACY_RAW_METADATA_KEYS: tuple[str, ...] = (
 API_METADATA_REDACT_KEYS: tuple[str, ...] = LEGACY_RAW_METADATA_KEYS + (
     "storage_key",
     "storage_bucket",
+    "article_body_ref",
 )
 API_METADATA_INTERNAL_KEYS: tuple[str, ...] = (
     "domain",
@@ -62,6 +64,7 @@ API_METADATA_LARGE_VALUE_ALLOWLIST: frozenset[str] = frozenset(
         "summary_version",
         "summarization_date",
         "interesting_external_links",
+        SOURCE_METADATA_KEY,
     }
 )
 API_METADATA_MAX_VALUE_CHARS = 12_000
@@ -228,6 +231,12 @@ def sanitize_metadata_for_api(metadata: dict[str, Any]) -> dict[str, Any]:
         summary_copy = dict(summary)
         summary_copy.pop("full_markdown", None)
         sanitized["summary"] = summary_copy
+
+    source_metadata = dump_source_metadata(sanitized.get(SOURCE_METADATA_KEY))
+    if source_metadata is not None:
+        sanitized[SOURCE_METADATA_KEY] = source_metadata
+    else:
+        sanitized.pop(SOURCE_METADATA_KEY, None)
 
     for key in list(sanitized.keys()):
         if key in API_METADATA_LARGE_VALUE_ALLOWLIST:

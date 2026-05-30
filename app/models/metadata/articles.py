@@ -44,7 +44,7 @@ class ArticleMetadata(BaseContentMetadata):
         }
     )
 
-    content: str | None = Field(None, description="Full article text content")
+    content: str | None = Field(default=None, description="Full article text content")
 
     @field_validator("content")
     @classmethod
@@ -54,10 +54,10 @@ class ArticleMetadata(BaseContentMetadata):
             return None
         return v
 
-    author: str | None = Field(None, max_length=200)
+    author: str | None = Field(default=None, max_length=200)
     publication_date: datetime | None = None
     content_type: str = Field(default="html", pattern="^(pdf|html|text|markdown|image)$")
-    final_url_after_redirects: str | None = Field(None, max_length=2000)
+    final_url_after_redirects: str | None = Field(default=None, max_length=2000)
     interesting_external_links: list[InterestingExternalLink] = Field(
         default_factory=list,
         max_length=8,

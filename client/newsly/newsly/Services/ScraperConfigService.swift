@@ -47,15 +47,19 @@ class ScraperConfigService {
 
     private init() {}
 
-    func listConfigs(types: [String]? = nil) async throws -> [ScraperConfig] {
-        var path = APIEndpoints.scraperConfigs
+    func listConfigs(types: [String]? = nil, includeStats: Bool = true) async throws -> [ScraperConfig] {
+        var queryItems: [URLQueryItem] = []
         if let types, !types.isEmpty {
             let typeParam = types.joined(separator: ",")
-            path = "\(path)?types=\(typeParam)"
+            queryItems.append(URLQueryItem(name: "types", value: typeParam))
         }
-        print("DEBUG: ScraperConfigService.listConfigs() - calling \(path)")
-        let configs: [ScraperConfig] = try await client.request(path)
-        print("DEBUG: ScraperConfigService.listConfigs() - received \(configs.count) configs")
+        if !includeStats {
+            queryItems.append(URLQueryItem(name: "include_stats", value: "false"))
+        }
+        let configs: [ScraperConfig] = try await client.request(
+            APIEndpoints.scraperConfigs,
+            queryItems: queryItems.isEmpty ? nil : queryItems
+        )
         return configs
     }
 

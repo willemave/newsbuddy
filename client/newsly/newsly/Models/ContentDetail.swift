@@ -262,6 +262,16 @@ struct ContentDetail: Codable, Identifiable {
         return nil
     }
 
+    var sourceMetadata: SourceMetadata? {
+        if let articleMetadata = articleMetadata?.sourceMetadata, articleMetadata.isDisplayable {
+            return articleMetadata
+        }
+        if let newsMetadata = newsMetadata?.sourceMetadata, newsMetadata.isDisplayable {
+            return newsMetadata
+        }
+        return nil
+    }
+
     private func normalizedText(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

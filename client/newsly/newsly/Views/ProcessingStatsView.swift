@@ -142,7 +142,7 @@ struct ProcessingStatsView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
-                .background(Color.brandTertiary.gradient)
+                .background(Color.brandPrimary.gradient)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)

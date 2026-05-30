@@ -46,7 +46,7 @@ enum ReaderPalette: String, CaseIterable, Identifiable {
     case porcelainGreen
 
     static let storageKey = "readerPaletteId"
-    static let defaultPalette: ReaderPalette = .graphiteSlate
+    static let defaultPalette: ReaderPalette = .newspaperOxblood
 
     var id: String { rawValue }
 

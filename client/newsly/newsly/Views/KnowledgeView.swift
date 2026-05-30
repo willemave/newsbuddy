@@ -24,9 +24,11 @@ struct KnowledgeView: View {
 
     @StateObject private var viewModel = KnowledgeHubViewModel()
     @StateObject private var customNarrationLibrary = CustomNarrationLibraryViewModel()
+    @StateObject private var learningDecksViewModel = LearningDecksViewModel()
     @ObservedObject private var settings = AppSettings.shared
     @State private var searchText = ""
     @State private var showNarrationList = false
+    @State private var showLearningDeckList = false
     @State private var runningActionID: HubActionID?
     @FocusState private var isSearchFocused: Bool
 
@@ -34,7 +36,6 @@ struct KnowledgeView: View {
         id: .summary,
         icon: "doc.text.magnifyingglass",
         title: "Today's Summary",
-        subtitle: "Recap of the last day's content",
         run: { viewModel in await viewModel.startSummaryChat() }
     )
 
@@ -43,21 +44,18 @@ struct KnowledgeView: View {
             id: .topComments,
             icon: "bubble.left.and.text.bubble.right",
             title: "Top Comments",
-            subtitle: "Most interesting discussions",
             run: { viewModel in await viewModel.startCommentsChat() }
         ),
         HubAction(
             id: .findArticles,
             icon: "newspaper.fill",
             title: "Find Articles",
-            subtitle: "Fresh reads based on your history",
             run: { viewModel in await viewModel.startFindArticlesChat() }
         ),
         HubAction(
             id: .findFeeds,
             icon: "dot.radiowaves.left.and.right",
             title: "Find Feeds",
-            subtitle: "Sources and podcasts to add next",
             run: { viewModel in await viewModel.startFindFeedsChat() }
         ),
     ]
@@ -116,6 +114,9 @@ struct KnowledgeView: View {
                 playbackService: customNarrationLibrary.playbackService
             )
         }
+        .sheet(isPresented: $showLearningDeckList) {
+            learningDeckListSheet
+        }
         .onChange(of: viewModel.completedVoiceRoute) { _, route in
             guard let route else { return }
             viewModel.clearCompletedVoiceRoute()
@@ -128,6 +129,15 @@ struct KnowledgeView: View {
         .onDisappear {
             viewModel.cancelVoiceRecording()
         }
+    }
+
+    // MARK: - Learning Decks
+
+    private var learningDeckListSheet: some View {
+        LearningDeckListSheet(
+            viewModel: learningDecksViewModel,
+            isPresented: $showLearningDeckList
+        )
     }
 
     // MARK: - Header
@@ -191,13 +201,13 @@ struct KnowledgeView: View {
     // MARK: - Saved and Narrations
 
     private var savedAndNarrationsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Library")
                 .font(.terracottaHeadlineSmall)
                 .foregroundStyle(Color.onSurface)
                 .padding(.horizontal, Spacing.screenHorizontal)
 
-            LazyVGrid(columns: twoColumnGrid, spacing: 10) {
+            LazyVGrid(columns: twoColumnGrid, spacing: 8) {
                 libraryButton(
                     title: "Saved",
                     systemImage: "books.vertical.fill",
@@ -216,16 +226,25 @@ struct KnowledgeView: View {
                         showNarrationList = true
                     }
                 )
+
+                libraryButton(
+                    title: "Learning Decks",
+                    systemImage: "rectangle.stack.fill",
+                    accent: .brandSecondary,
+                    action: {
+                        showLearningDeckList = true
+                    }
+                )
             }
             .padding(.horizontal, Spacing.screenHorizontal)
         }
-        .padding(.bottom, 22)
+        .padding(.bottom, 16)
     }
 
     private var twoColumnGrid: [GridItem] {
         [
-            GridItem(.flexible(), spacing: 10),
-            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 8),
+            GridItem(.flexible(), spacing: 8),
         ]
     }
 
@@ -236,20 +255,20 @@ struct KnowledgeView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(accent)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 30, height: 30)
                     .background(accent.opacity(0.14))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                HStack(alignment: .lastTextBaseline, spacing: 8) {
+                HStack(alignment: .lastTextBaseline, spacing: 6) {
                     Text(title)
-                        .font(.terracottaHeadlineSmall)
+                        .font(.terracottaBodyLarge.weight(.semibold))
                         .foregroundStyle(Color.onSurface)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                        .minimumScaleFactor(0.8)
 
                     Spacer(minLength: 0)
 
@@ -258,9 +277,9 @@ struct KnowledgeView: View {
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 80, alignment: .topLeading)
             .background(Color.surfaceSecondary)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
@@ -294,7 +313,7 @@ struct KnowledgeView: View {
                 .foregroundStyle(Color.onSurface)
                 .padding(.horizontal, Spacing.screenHorizontal)
 
-            LazyVGrid(columns: twoColumnGrid, spacing: 10) {
+            LazyVGrid(columns: twoColumnGrid, spacing: 8) {
                 compactActionButton(primaryAction)
                 ForEach(secondaryActions) { action in
                     compactActionButton(action)
@@ -302,7 +321,7 @@ struct KnowledgeView: View {
             }
             .padding(.horizontal, Spacing.screenHorizontal)
         }
-        .padding(.bottom, 22)
+        .padding(.bottom, 16)
     }
 
     private func compactActionButton(_ action: HubAction) -> some View {
@@ -311,35 +330,27 @@ struct KnowledgeView: View {
         return Button {
             startAction(action)
         } label: {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 7) {
                 actionIcon(
                     action.icon,
                     accent: actionColor(for: action.id),
-                    size: 40,
-                    iconSize: 17,
-                    cornerRadius: 12,
+                    size: 32,
+                    iconSize: 15,
+                    cornerRadius: 9,
                     isRunning: isRunning
                 )
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(action.title)
-                        .font(.terracottaBodyLarge.weight(.semibold))
-                        .foregroundColor(.onSurface)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.84)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(action.subtitle)
-                        .font(.terracottaBodySmall)
-                        .foregroundColor(.onSurfaceSecondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(action.title)
+                    .font(.terracottaBodyLarge.weight(.semibold))
+                    .foregroundColor(.onSurface)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.84)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Spacer(minLength: 0)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
             .background(Color.surfaceSecondary)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
@@ -532,6 +543,7 @@ struct KnowledgeView: View {
     private func loadKnowledgeScreen() async {
         await viewModel.loadHub()
         await customNarrationLibrary.load()
+        await learningDecksViewModel.load()
     }
 }
 
@@ -546,7 +558,6 @@ private struct HubAction: Identifiable {
     let id: HubActionID
     let icon: String
     let title: String
-    let subtitle: String
     let run: @MainActor (KnowledgeHubViewModel) async -> ChatSessionRoute?
 }
 

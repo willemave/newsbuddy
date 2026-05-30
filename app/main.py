@@ -31,6 +31,7 @@ from app.routers.api import (
     feedback,
     integrations,
     interactions,
+    learning_decks,
     news,
     onboarding,
     openai,
@@ -342,6 +343,8 @@ app.include_router(admin_auth_router)
 app.include_router(admin_web_router)
 app.include_router(api_content.router, prefix="/api/content")
 app.include_router(news.router, prefix="/api/news")
+app.include_router(learning_decks.router, prefix="/api")
+app.include_router(learning_decks.public_router)
 app.include_router(interactions.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(scraper_configs.router, prefix="/api")

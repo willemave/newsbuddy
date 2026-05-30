@@ -231,6 +231,13 @@ class TestContentWorker:
             "publication_date": None,
             "content_type": "html",
             "final_url_after_redirects": "https://example.com/article",
+            "source_metadata": {
+                "schema_version": 1,
+                "kind": "research_paper",
+                "provider": "arxiv",
+                "source_id": "2509.15194v2",
+                "brief_synopsis": "A brief source synopsis.",
+            },
         }
         mock_strategy.prepare_for_llm.return_value = {
             "content_to_summarize": "This is test content."
@@ -254,6 +261,7 @@ class TestContentWorker:
         mock_db.commit.assert_called()
         # Content is stored in metadata for the SUMMARIZE task
         assert content_data.metadata.get("content") is not None
+        assert content_data.metadata["source_metadata"]["source_id"] == "2509.15194v2"
 
     def test_process_article_sync_no_strategy(self, mock_dependencies):
         """Test article processing when no strategy available."""

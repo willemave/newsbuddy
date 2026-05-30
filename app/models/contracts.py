@@ -58,6 +58,7 @@ class TaskType(StrEnum):
     SYNC_INTEGRATION = "sync_integration"
     GENERATE_INSIGHT_REPORT = "generate_insight_report"
     GENERATE_AUDIO_EPISODE = "generate_audio_episode"
+    GENERATE_LEARNING_DECK = "generate_learning_deck"
 
 
 class TaskQueue(StrEnum):
@@ -72,6 +73,7 @@ class TaskQueue(StrEnum):
     DISCUSSION = "discussion"
     TWITTER = "twitter"
     CHAT = "chat"
+    LEARNING = "learning"
 
 
 class TaskStatus(StrEnum):
@@ -116,6 +118,40 @@ class NewsItemStatus(StrEnum):
     PROCESSING = "processing"
     READY = "ready"
     FAILED = "failed"
+
+
+class LearningDeckSourceKind(StrEnum):
+    """Supported source kinds for Learning Deck generation."""
+
+    CONTENT = "content"
+    GITHUB_REPO = "github_repo"
+
+
+class LearningDeckRunStatus(StrEnum):
+    """Lifecycle statuses for one Learning Deck generation run."""
+
+    QUEUED = "queued"
+    PREPARING = "preparing"
+    GENERATING = "generating"
+    VALIDATING = "validating"
+    PUBLISHING = "publishing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class LearningDeckStatus(StrEnum):
+    """Client-facing Learning Deck status values."""
+
+    READY = "ready"
+    QUEUED = LearningDeckRunStatus.QUEUED.value
+    PREPARING = LearningDeckRunStatus.PREPARING.value
+    GENERATING = LearningDeckRunStatus.GENERATING.value
+    VALIDATING = LearningDeckRunStatus.VALIDATING.value
+    PUBLISHING = LearningDeckRunStatus.PUBLISHING.value
+    COMPLETED = LearningDeckRunStatus.COMPLETED.value
+    FAILED = LearningDeckRunStatus.FAILED.value
+    CANCELLED = LearningDeckRunStatus.CANCELLED.value
 
 
 class MessageProcessingStatus(StrEnum):

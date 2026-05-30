@@ -12,11 +12,13 @@ from app.core.model_defaults import CHEAP_GOOGLE_MODEL_NAME
 from app.core.settings import get_settings
 from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
+from app.services.arxiv_metadata import fetch_arxiv_source_metadata
 from app.services.langfuse_tracing import (
     extract_google_usage_details,
     langfuse_generation_context,
 )
 from app.services.pdf_text_extraction import extract_pdf_text
+from app.services.source_metadata import attach_source_metadata, dump_source_metadata
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -122,15 +124,17 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
         """
         del context
         logger.info("ArxivStrategy: Preparing PDF data for LLM processing for URL: %s", url)
+        source_metadata = self._source_metadata_payload(url)
 
         if not content:
             logger.warning(f"ArxivStrategy: No PDF content provided for {url}")
-            return {
+            extracted_data = {
                 "title": "Extraction Failed (No PDF Content)",
                 "text_content": None,
                 "content_type": "pdf",
                 "final_url_after_redirects": url,
             }
+            return attach_source_metadata(extracted_data, source_metadata)
 
         google_api_key = getattr(settings, "google_api_key", None)
         model_name = getattr(settings, "pdf_gemini_model", CHEAP_GOOGLE_MODEL_NAME)
@@ -168,6 +172,7 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
                         text_content,
                         url=url,
                         default_title="ArXiv PDF Document",
+                        source_metadata=source_metadata,
                     )
             except Exception as exc:  # noqa: BLE001
                 error_message = str(exc).lower()
@@ -201,6 +206,7 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
                 fallback_text,
                 url=url,
                 default_title="ArXiv PDF Document",
+                source_metadata=source_metadata,
             )
 
         parsed_url = urlparse(url)
@@ -213,7 +219,7 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
             url,
             filename,
         )
-        return {
+        extracted_data = {
             "title": filename,  # Fallback title - LLM will extract the real title
             "author": None,
             "publication_date": None,
@@ -221,6 +227,7 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
             "content_type": "pdf",
             "final_url_after_redirects": url,
         }
+        return attach_source_metadata(extracted_data, source_metadata)
 
     def prepare_for_llm(self, extracted_data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -257,6 +264,7 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
         *,
         url: str,
         default_title: str,
+        source_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         lines = text_content.strip().split("\n")
         title = lines[0][:200] if lines else default_title
@@ -265,7 +273,7 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
             url,
             title[:50],
         )
-        return {
+        extracted_data = {
             "title": title,
             "author": None,
             "publication_date": None,
@@ -273,3 +281,11 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
             "content_type": "pdf",
             "final_url_after_redirects": url,
         }
+        return attach_source_metadata(extracted_data, source_metadata)
+
+    def _source_metadata_payload(self, url: str) -> dict[str, Any] | None:
+        """Return optional arXiv source metadata for display-only API surfaces."""
+        source_metadata = fetch_arxiv_source_metadata(url, http_client=self.http_client)
+        if source_metadata is None:
+            return None
+        return dump_source_metadata(source_metadata)

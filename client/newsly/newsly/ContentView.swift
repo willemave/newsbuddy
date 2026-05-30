@@ -158,7 +158,6 @@ struct ContentView: View {
             }
             .badge(moreBadge != nil ? Int(moreBadge!) ?? 0 : 0)
         }
-        .tint(Color.brandPrimary)
         .dynamicTypeSize(AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize)
         .environmentObject(readingStateStore)
         .onAppear {
@@ -167,9 +166,6 @@ struct ContentView: View {
             restoreIfNeeded()
             applyE2EOpenContentRouteIfNeeded()
             applyE2EOpenChatRouteIfNeeded()
-        }
-        .onChange(of: settings.readerPaletteId) { _, _ in
-            AppChrome.configure()
         }
         .onChange(of: tabCoordinator.selectedTab) { _, newValue in
             logger.info("[TabChange] selectedTab=\(String(describing: newValue), privacy: .public)")

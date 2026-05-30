@@ -10,6 +10,7 @@ from pydantic import (
 )
 
 from app.models.metadata.longform_artifacts import LongformArtifactEnvelope
+from app.models.metadata.source import SourceMetadataEnvelope
 from app.models.metadata.summaries import (
     BulletedSummary,
     DiscussionSummary,
@@ -31,18 +32,25 @@ class BaseContentMetadata(BaseModel):
 
     # NEW: Source field to track content origin
     source: str | None = Field(
-        None, description="Source of content (e.g., substack name, podcast name, subreddit name)"
+        default=None,
+        description="Source of content (e.g., substack name, podcast name, subreddit name)",
     )
 
     summary_kind: str | None = Field(
-        None,
+        default=None,
         description=("Summary discriminator (e.g., long_interleaved, long_structured, short_news)"),
     )
     summary_version: int | None = Field(
-        None, ge=1, description="Summary schema version for the current summary_kind"
+        default=None,
+        ge=1,
+        description="Summary schema version for the current summary_kind",
     )
-    summary: SummaryPayload | None = Field(None, description="AI-generated summary payload")
-    word_count: int | None = Field(None, ge=0)
+    summary: SummaryPayload | None = Field(default=None, description="AI-generated summary payload")
+    word_count: int | None = Field(default=None, ge=0)
+    source_metadata: SourceMetadataEnvelope | None = Field(
+        default=None,
+        description="Display-only source metadata such as paper authors and provider details",
+    )
 
     @field_validator("summary", mode="before")
     @classmethod

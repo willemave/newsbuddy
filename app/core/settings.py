@@ -153,6 +153,9 @@ class ProviderSettingsView(BaseModel):
     firecrawl_api_key_configured: bool
     chat_sandbox_provider: str
     chat_sandbox_e2b_api_key_configured: bool
+    learning_deck_model: str
+    learning_sandbox_provider: str
+    learning_sandbox_e2b_api_key_configured: bool
 
 
 class DiscoverySettingsView(BaseModel):
@@ -439,6 +442,22 @@ class Settings(BaseSettings):
     chat_sandbox_allow_internet_access: bool = True
     chat_sandbox_library_root: str = "/workspace/personal_markdown"
     chat_sandbox_max_output_chars: int = Field(default=12_000, ge=1_000, le=100_000)
+    learning_deck_model: str = SMART_MODEL_SPEC
+    learning_sandbox_provider: Literal["disabled", "e2b"] = "e2b"
+    learning_sandbox_e2b_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LEARNING_SANDBOX_E2B_API_KEY", "E2B_API_KEY"),
+    )
+    learning_sandbox_template: str | None = None
+    learning_sandbox_timeout_seconds: int = Field(default=1800, ge=60, le=86_400)
+    learning_sandbox_allow_internet_access: bool = True
+    learning_sandbox_workdir: str = "/tmp/newsly_learning_deck"
+    learning_sandbox_max_output_chars: int = Field(default=20_000, ge=1_000, le=200_000)
+    learning_deck_signed_url_ttl_seconds: int = Field(default=900, ge=60, le=86_400)
+    learning_deck_max_index_html_bytes: int = Field(default=2_000_000, ge=10_000)
+    learning_deck_max_source_notes_bytes: int = Field(default=1_000_000, ge=1_000)
+    learning_deck_max_asset_count: int = Field(default=40, ge=0, le=200)
+    learning_deck_max_asset_bytes: int = Field(default=5_000_000, ge=1_000)
 
     # crawl4ai table extraction
     crawl4ai_enable_table_extraction: bool = False
@@ -591,6 +610,9 @@ class Settings(BaseSettings):
             firecrawl_api_key_configured=bool(self.firecrawl_api_key),
             chat_sandbox_provider=self.chat_sandbox_provider,
             chat_sandbox_e2b_api_key_configured=bool(self.chat_sandbox_e2b_api_key),
+            learning_deck_model=self.learning_deck_model,
+            learning_sandbox_provider=self.learning_sandbox_provider,
+            learning_sandbox_e2b_api_key_configured=bool(self.learning_sandbox_e2b_api_key),
         )
 
     @property

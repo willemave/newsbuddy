@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from app.http_client.robust_http_client import RobustHttpClient
+from app.models.metadata.source import SourceMetadataEnvelope
 from app.processing_strategies import arxiv_strategy as arxiv_mod
 from app.processing_strategies.arxiv_strategy import ArxivProcessorStrategy
 
@@ -78,3 +79,27 @@ def test_extract_data_falls_back_to_local_pdf_text(mocker, monkeypatch) -> None:
     assert data["text_content"] == "Recovered Arxiv Title\nRecovered body"
     assert llm_input["content_to_summarize"] == "Recovered Arxiv Title\nRecovered body"
     assert llm_input["is_pdf"] is True
+
+
+def test_extract_data_includes_source_metadata(mocker, monkeypatch) -> None:
+    monkeypatch.setattr(arxiv_mod, "settings", SimpleNamespace(google_api_key=None))
+    monkeypatch.setattr(
+        "app.processing_strategies.arxiv_strategy.extract_pdf_text",
+        lambda _content: "Arxiv Title\nRecovered body",
+    )
+    monkeypatch.setattr(
+        arxiv_mod,
+        "fetch_arxiv_source_metadata",
+        lambda _url, http_client: SourceMetadataEnvelope(
+            source_id="1234.5678",
+            canonical_abs_url="https://arxiv.org/abs/1234.5678",
+            title="Arxiv Title",
+            brief_synopsis="A brief source synopsis.",
+        ),
+    )
+
+    strategy = arxiv_mod.ArxivProcessorStrategy(Mock(spec=RobustHttpClient))
+    data = strategy.extract_data(b"%PDF-1.4", "https://arxiv.org/pdf/1234.5678.pdf")
+
+    assert data["source_metadata"]["source_id"] == "1234.5678"
+    assert data["source_metadata"]["brief_synopsis"] == "A brief source synopsis."

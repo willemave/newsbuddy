@@ -119,6 +119,147 @@ final class ContentDetailTests: XCTestCase {
         XCTAssertEqual(detail.resolvedNewsKeyPoints, ["Metadata point"])
     }
 
+    func testNewsDetailDecodesSourceMetadata() throws {
+        let detail = try decodeDetail(
+            from: """
+            {
+              "id": 10,
+              "content_type": "news",
+              "url": "https://arxiv.org/abs/2509.15194v2",
+              "source_url": "https://news.ycombinator.com/item?id=10",
+              "discussion_url": "https://news.ycombinator.com/item?id=10",
+              "title": "Paper title",
+              "display_title": "Paper title",
+              "source": "Hacker News",
+              "status": "completed",
+              "error_message": null,
+              "retry_count": 0,
+              "metadata": {
+                "source_metadata": {
+                  "schema_version": 1,
+                  "kind": "research_paper",
+                  "provider": "arxiv",
+                  "source_id": "2509.15194v2",
+                  "canonical_abs_url": "https://arxiv.org/abs/2509.15194v2",
+                  "brief_synopsis": "A compact synopsis.",
+                  "authors": [
+                    {
+                      "name": "Ada Lovelace",
+                      "affiliation": "Analytical Engines Lab",
+                      "affiliation_source": "arxiv_api",
+                      "confidence": "direct"
+                    }
+                  ],
+                  "categories": [{"term": "cs.AI", "primary": true}],
+                  "published_at": "2026-01-01T00:00:00Z"
+                }
+              },
+              "created_at": "2026-04-02T10:00:00Z",
+              "updated_at": null,
+              "processed_at": "2026-04-02T10:05:00Z",
+              "checked_out_by": null,
+              "checked_out_at": null,
+              "publication_date": "2026-04-02T09:00:00Z",
+              "is_read": false,
+              "is_saved_to_knowledge": false,
+              "summary": "Top level summary",
+              "short_summary": "Top level summary",
+              "summary_kind": null,
+              "summary_version": null,
+              "structured_summary": null,
+              "bullet_points": [],
+              "quotes": [],
+              "topics": [],
+              "full_markdown": null,
+              "body_available": false,
+              "body_kind": null,
+              "body_format": null,
+              "news_article_url": "https://arxiv.org/abs/2509.15194v2",
+              "news_discussion_url": "https://news.ycombinator.com/item?id=10",
+              "news_key_points": ["Point one"],
+              "news_summary": "Top level summary",
+              "image_url": null,
+              "thumbnail_url": null,
+              "detected_feed": null,
+              "can_subscribe": false
+            }
+            """
+        )
+
+        let metadata = try XCTUnwrap(detail.sourceMetadata)
+        XCTAssertEqual(metadata.sourceID, "2509.15194v2")
+        XCTAssertEqual(metadata.displaySynopsis, "A compact synopsis.")
+        XCTAssertEqual(metadata.displayAuthors.first?.displayAffiliation, "Analytical Engines Lab")
+        XCTAssertEqual(metadata.categoryLine, "cs.AI")
+        XCTAssertEqual(metadata.arxivURL, "https://arxiv.org/abs/2509.15194v2")
+    }
+
+    func testArticleDetailDecodesSourceMetadata() throws {
+        let detail = try decodeDetail(
+            from: """
+            {
+              "id": 11,
+              "content_type": "article",
+              "url": "https://arxiv.org/abs/2509.15194v2",
+              "source_url": "https://arxiv.org/abs/2509.15194v2",
+              "discussion_url": null,
+              "title": "Paper title",
+              "display_title": "Paper title",
+              "source": "arxiv.org",
+              "status": "completed",
+              "error_message": null,
+              "retry_count": 0,
+              "metadata": {
+                "source_metadata": {
+                  "schema_version": 1,
+                  "kind": "research_paper",
+                  "provider": "arxiv",
+                  "source_id": "2509.15194v2",
+                  "canonical_abs_url": "https://arxiv.org/abs/2509.15194v2",
+                  "brief_synopsis": "A compact article synopsis.",
+                  "authors": [{"name": "Grace Hopper"}],
+                  "categories": [{"term": "cs.CL", "primary": true}]
+                }
+              },
+              "created_at": "2026-04-02T10:00:00Z",
+              "updated_at": null,
+              "processed_at": "2026-04-02T10:05:00Z",
+              "checked_out_by": null,
+              "checked_out_at": null,
+              "publication_date": "2026-04-02T09:00:00Z",
+              "is_read": false,
+              "is_saved_to_knowledge": false,
+              "summary": "Top level summary",
+              "short_summary": "Top level summary",
+              "summary_kind": null,
+              "summary_version": null,
+              "structured_summary": null,
+              "bullet_points": [],
+              "quotes": [],
+              "topics": [],
+              "full_markdown": null,
+              "body_available": false,
+              "body_kind": null,
+              "body_format": null,
+              "news_article_url": null,
+              "news_discussion_url": null,
+              "news_key_points": null,
+              "news_summary": null,
+              "image_url": null,
+              "thumbnail_url": null,
+              "detected_feed": null,
+              "can_subscribe": false
+            }
+            """
+        )
+
+        let metadata = try XCTUnwrap(detail.sourceMetadata)
+        XCTAssertEqual(metadata.sourceID, "2509.15194v2")
+        XCTAssertEqual(metadata.displaySynopsis, "A compact article synopsis.")
+        XCTAssertEqual(metadata.displayAuthors.first?.displayName, "Grace Hopper")
+        XCTAssertEqual(metadata.categoryLine, "cs.CL")
+    }
+
     func testPrimaryTimestampPrefersPublicationDate() throws {
         let detail = try decodeDetail(
             from: """

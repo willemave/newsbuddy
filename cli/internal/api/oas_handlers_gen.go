@@ -2494,6 +2494,10 @@ func (s *Server) handleListScraperConfigsRequest(args [0]string, argsEscaped boo
 					Name: "types",
 					In:   "query",
 				}: params.Types,
+				{
+					Name: "include_stats",
+					In:   "query",
+				}: params.IncludeStats,
 			},
 			Raw: r,
 		}

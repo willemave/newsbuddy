@@ -4262,6 +4262,405 @@
         "title": "LLMProvider",
         "type": "string"
       },
+      "LearningDeckCreateRequest": {
+        "description": "Create or rerun a Learning Deck from one source.",
+        "properties": {
+          "content_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Id"
+          },
+          "interests_prompt": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interests Prompt"
+          },
+          "news_item_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News Item Id"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "title": "LearningDeckCreateRequest",
+        "type": "object"
+      },
+      "LearningDeckListResponse": {
+        "description": "List response for current user's Learning Decks.",
+        "properties": {
+          "decks": {
+            "items": {
+              "$ref": "#/components/schemas/LearningDeckResponse"
+            },
+            "title": "Decks",
+            "type": "array"
+          }
+        },
+        "title": "LearningDeckListResponse",
+        "type": "object"
+      },
+      "LearningDeckResponse": {
+        "description": "Client-visible Learning Deck state.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "latest_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LearningDeckRunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest_successful_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Successful Run Id"
+          },
+          "share_enabled": {
+            "default": false,
+            "title": "Share Enabled",
+            "type": "boolean"
+          },
+          "source_content_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Content Id"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/LearningDeckSourceKind"
+          },
+          "source_metadata": {
+            "additionalProperties": true,
+            "title": "Source Metadata",
+            "type": "object"
+          },
+          "source_notes_available": {
+            "default": false,
+            "title": "Source Notes Available",
+            "type": "boolean"
+          },
+          "source_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Title"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LearningDeckStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "viewer_available": {
+            "default": false,
+            "title": "Viewer Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "source_kind",
+          "created_at"
+        ],
+        "title": "LearningDeckResponse",
+        "type": "object"
+      },
+      "LearningDeckRunResponse": {
+        "description": "Client-visible generation attempt state.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "interests_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interests Prompt"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LearningDeckRunStatus"
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/LearningDeckTimelineEntry"
+            },
+            "title": "Timeline",
+            "type": "array"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "LearningDeckRunResponse",
+        "type": "object"
+      },
+      "LearningDeckRunStatus": {
+        "description": "Lifecycle statuses for one Learning Deck generation run.",
+        "enum": [
+          "queued",
+          "preparing",
+          "generating",
+          "validating",
+          "publishing",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "LearningDeckRunStatus",
+        "type": "string"
+      },
+      "LearningDeckShareResponse": {
+        "description": "Share state and stable public URL for one deck.",
+        "properties": {
+          "share_enabled": {
+            "title": "Share Enabled",
+            "type": "boolean"
+          },
+          "share_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Url"
+          }
+        },
+        "required": [
+          "share_enabled"
+        ],
+        "title": "LearningDeckShareResponse",
+        "type": "object"
+      },
+      "LearningDeckSourceKind": {
+        "description": "Supported source kinds for Learning Deck generation.",
+        "enum": [
+          "content",
+          "github_repo"
+        ],
+        "title": "LearningDeckSourceKind",
+        "type": "string"
+      },
+      "LearningDeckStatus": {
+        "description": "Client-facing Learning Deck status values.",
+        "enum": [
+          "ready",
+          "queued",
+          "preparing",
+          "generating",
+          "validating",
+          "publishing",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "LearningDeckStatus",
+        "type": "string"
+      },
+      "LearningDeckTimelineEntry": {
+        "description": "One coarse user-visible generation note.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LearningDeckRunStatus"
+          }
+        },
+        "required": [
+          "status",
+          "note",
+          "created_at"
+        ],
+        "title": "LearningDeckTimelineEntry",
+        "type": "object"
+      },
+      "LearningDeckUrlResponse": {
+        "description": "A URL the client can open in Safari.",
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "LearningDeckUrlResponse",
+        "type": "object"
+      },
       "LongFormStatsResponse": {
         "description": "Response containing unread long-form count for a user.",
         "properties": {
@@ -9980,6 +10379,16 @@
               ],
               "title": "Types"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_stats",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Stats",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -12257,6 +12666,361 @@
         ]
       }
     },
+    "/api/learning/decks": {
+      "get": {
+        "description": "Return current Learning Decks for the authenticated user.",
+        "operationId": "listLearningDecks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningDeckListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List current user's Learning Decks",
+        "tags": [
+          "learning"
+        ]
+      },
+      "post": {
+        "description": "Create or rerun a Learning Deck from one supported source.",
+        "operationId": "createLearningDeck",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LearningDeckCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningDeckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create or rerun a Learning Deck",
+        "tags": [
+          "learning"
+        ]
+      }
+    },
+    "/api/learning/decks/{deck_id}": {
+      "delete": {
+        "description": "Soft-delete a Learning Deck and remove known artifact objects.",
+        "operationId": "deleteLearningDeck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deck_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Deck Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete a Learning Deck",
+        "tags": [
+          "learning"
+        ]
+      },
+      "get": {
+        "description": "Return one Learning Deck for the authenticated user.",
+        "operationId": "getLearningDeck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deck_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Deck Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningDeckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get one Learning Deck",
+        "tags": [
+          "learning"
+        ]
+      }
+    },
+    "/api/learning/decks/{deck_id}/share": {
+      "delete": {
+        "description": "Disable public sharing for a Learning Deck.",
+        "operationId": "disableLearningDecksShare",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deck_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Deck Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningDeckShareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Disable public sharing for a Learning Deck",
+        "tags": [
+          "learning"
+        ]
+      },
+      "post": {
+        "description": "Enable sharing and return the stable public URL.",
+        "operationId": "enableLearningDecksShare",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deck_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Deck Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningDeckShareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Enable public sharing for a Learning Deck",
+        "tags": [
+          "learning"
+        ]
+      }
+    },
+    "/api/learning/decks/{deck_id}/source-notes-url": {
+      "post": {
+        "description": "Return a short-lived URL for rendered source notes.",
+        "operationId": "createLearningDecksSourceNotesUrl",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deck_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Deck Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningDeckUrlResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a short-lived private source-notes URL",
+        "tags": [
+          "learning"
+        ]
+      }
+    },
+    "/api/learning/decks/{deck_id}/viewer-url": {
+      "post": {
+        "description": "Return a short-lived URL for opening the raw Reveal.js deck.",
+        "operationId": "createLearningDecksViewerUrl",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deck_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Deck Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningDeckUrlResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a short-lived private viewer URL",
+        "tags": [
+          "learning"
+        ]
+      }
+    },
     "/api/news/items": {
       "get": {
         "description": "Return the visible representative news feed for the current user.",
@@ -13153,6 +13917,16 @@
                 }
               ],
               "title": "Types"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_stats",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Stats",
+              "type": "boolean"
             }
           }
         ],

@@ -38,8 +38,16 @@ class ObjectStorageGateway(ABC):
         """Persist UTF-8 text."""
 
     @abstractmethod
+    def put_bytes(self, *, key: str, data: bytes, content_type: str) -> StoredObjectMetadata:
+        """Persist binary data."""
+
+    @abstractmethod
     def get_text(self, *, key: str) -> str:
         """Fetch UTF-8 text."""
+
+    @abstractmethod
+    def get_bytes(self, *, key: str) -> bytes:
+        """Fetch binary data."""
 
     @abstractmethod
     def exists(self, *, key: str) -> bool:
@@ -71,10 +79,13 @@ class LocalObjectStorageGateway(ObjectStorageGateway):
         return (self._root_dir / key).resolve()
 
     def put_text(self, *, key: str, text: str, content_type: str) -> StoredObjectMetadata:
+        return self.put_bytes(key=key, data=text.encode("utf-8"), content_type=content_type)
+
+    def put_bytes(self, *, key: str, data: bytes, content_type: str) -> StoredObjectMetadata:
         del content_type
         path = self._resolve_path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path.write_bytes(data)
         return StoredObjectMetadata(
             provider=self.provider,
             bucket=None,
@@ -84,6 +95,9 @@ class LocalObjectStorageGateway(ObjectStorageGateway):
 
     def get_text(self, *, key: str) -> str:
         return self._resolve_path(key).read_text(encoding="utf-8")
+
+    def get_bytes(self, *, key: str) -> bytes:
+        return self._resolve_path(key).read_bytes()
 
     def exists(self, *, key: str) -> bool:
         return self._resolve_path(key).exists()
@@ -172,17 +186,20 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
 
     def put_text(self, *, key: str, text: str, content_type: str) -> StoredObjectMetadata:
         body = text.encode("utf-8")
+        return self.put_bytes(key=key, data=body, content_type=content_type)
+
+    def put_bytes(self, *, key: str, data: bytes, content_type: str) -> StoredObjectMetadata:
         self._client.put_object(
             Bucket=self._bucket,
             Key=key,
-            Body=body,
+            Body=data,
             ContentType=content_type,
         )
         self._record_usage(
             model="put_object",
-            operation="object_storage.put_text",
+            operation="object_storage.put",
             key=key,
-            size_bytes=len(body),
+            size_bytes=len(data),
         )
         return self._head(key=key, record_usage=False) or StoredObjectMetadata(
             provider=self.provider,
@@ -191,15 +208,18 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
         )
 
     def get_text(self, *, key: str) -> str:
+        return self.get_bytes(key=key).decode("utf-8")
+
+    def get_bytes(self, *, key: str) -> bytes:
         response = self._client.get_object(Bucket=self._bucket, Key=key)
         body = response["Body"].read()
         self._record_usage(
             model="get_object",
-            operation="object_storage.get_text",
+            operation="object_storage.get",
             key=key,
             size_bytes=len(body),
         )
-        return body.decode("utf-8")
+        return body
 
     def exists(self, *, key: str) -> bool:
         return self.head(key=key) is not None

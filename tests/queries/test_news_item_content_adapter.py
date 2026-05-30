@@ -103,6 +103,30 @@ def test_present_news_item_detail_can_advertise_article_body() -> None:
     assert response.body_format == "text"
 
 
+def test_present_news_item_detail_exposes_source_metadata_without_body_ref() -> None:
+    item = _news_item()
+    assert isinstance(item.raw_metadata, dict)
+    item.raw_metadata = {
+        **item.raw_metadata,
+        "article_body_ref": {
+            "kind": "storage",
+            "storage_key": "content-bodies/news-items/42/source.txt",
+        },
+        "source_metadata": {
+            "schema_version": 1,
+            "kind": "research_paper",
+            "provider": "arxiv",
+            "source_id": "2509.15194v2",
+            "brief_synopsis": "A brief synopsis.",
+        },
+    }
+
+    response = present_news_item_detail(item, is_read=False)
+
+    assert "article_body_ref" not in response.metadata
+    assert response.metadata["source_metadata"]["source_id"] == "2509.15194v2"
+
+
 def test_present_news_item_detail_projects_relevant_links_without_related_links() -> None:
     item = _news_item()
     item.raw_metadata = {

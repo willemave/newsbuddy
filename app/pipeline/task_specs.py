@@ -55,6 +55,10 @@ class AudioEpisodePayload(TaskPayload):
     audio_episode_id: int
 
 
+class LearningDeckRunPayload(RequiredUserPayload):
+    learning_deck_run_id: int
+
+
 class SyncIntegrationPayload(RequiredUserPayload):
     provider: str = "x"
     trigger: str = "cron"
@@ -161,6 +165,11 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         TaskQueue.AUDIO_EPISODE,
         AudioEpisodePayload,
         True,
+    ),
+    TaskType.GENERATE_LEARNING_DECK: TaskSpec(
+        TaskType.GENERATE_LEARNING_DECK,
+        TaskQueue.LEARNING,
+        LearningDeckRunPayload,
     ),
 }
 

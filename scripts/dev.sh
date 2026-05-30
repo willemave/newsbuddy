@@ -236,6 +236,7 @@ for service in "${SERVICES[@]}"; do
             start_service "workers-discussion" "python scripts/run_workers.py --queue discussion --worker-slot 1 --stats-interval 60"
             start_service "workers-twitter" "python scripts/run_workers.py --queue twitter --worker-slot 1 --stats-interval 60"
             start_service "workers-chat" "python scripts/run_workers.py --queue chat --worker-slot 1 --stats-interval 60"
+            start_service "workers-learning" "python scripts/run_workers.py --queue learning --worker-slot 1 --stats-interval 60"
             ;;
         scrapers)
             start_service "scrapers" "python scripts/run_scrapers.py"

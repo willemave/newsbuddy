@@ -119,6 +119,7 @@ struct NewsMetadata: Codable {
     let aggregator: NewsAggregatorMetadata?
     let discussionURL: String?
     let discoveryTime: String?
+    let sourceMetadata: SourceMetadata?
 
     enum CodingKeys: String, CodingKey {
         case source
@@ -128,6 +129,7 @@ struct NewsMetadata: Codable {
         case aggregator
         case discussionURL = "discussion_url"
         case discoveryTime = "discovery_time"
+        case sourceMetadata = "source_metadata"
     }
 }
 

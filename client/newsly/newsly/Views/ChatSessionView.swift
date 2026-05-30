@@ -1,4 +1,10 @@
 import SwiftUI
+import UIKit
+
+private enum ChatSessionDesign {
+    static let edgeBackSwipeWidth: CGFloat = 28
+    static let edgeBackSwipeThreshold: CGFloat = 80
+}
 
 struct ChatSessionView: View {
     @EnvironmentObject private var authViewModel: AuthenticationViewModel
@@ -9,6 +15,7 @@ struct ChatSessionView: View {
     @State private var shareContent: ShareContent?
     @State private var scrollToBottomRequest = 0
     @State private var isCouncilSettingsPresented = false
+    @State private var edgeBackDragOffset: CGFloat = 0
     private let route: ChatSessionRoute
     private let dependencies: ChatDependencies
 
@@ -38,9 +45,13 @@ struct ChatSessionView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomDock
             }
+            .overlay(alignment: .leading) {
+                edgeBackSwipeZone
+            }
             .overlay(alignment: .topLeading) {
                 floatingBackButton
             }
+            .offset(x: edgeBackDragOffset)
             .sheet(isPresented: $isCouncilSettingsPresented) {
                 NavigationStack {
                     SettingsView(scrollToCouncilOnAppear: true)
@@ -123,6 +134,37 @@ struct ChatSessionView: View {
         .accessibilityLabel("Back")
         .padding(.leading, 16)
         .padding(.top, 12)
+    }
+
+    private var edgeBackSwipeZone: some View {
+        Color.clear
+            .frame(width: ChatSessionDesign.edgeBackSwipeWidth)
+            .contentShape(Rectangle())
+            .gesture(edgeBackSwipeGesture)
+            .accessibilityHidden(true)
+    }
+
+    private var edgeBackSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 20, coordinateSpace: .global)
+            .onChanged { value in
+                guard isHorizontalBackSwipe(value) else { return }
+                edgeBackDragOffset = min(value.translation.width * 0.45, 140)
+            }
+            .onEnded { value in
+                guard isCompletedBackSwipe(value) else {
+                    snapBackFromEdgeSwipe()
+                    return
+                }
+
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.easeOut(duration: 0.18)) {
+                    edgeBackDragOffset = UIScreen.main.bounds.width
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    dismiss()
+                    edgeBackDragOffset = 0
+                }
+            }
     }
 
     private func presentShareSheet(for content: String) {
@@ -230,4 +272,20 @@ private extension ChatSessionView {
     }
 
     func cancelCouncilSelection() { viewModel.cancelCouncilSelection() }
+
+    func isHorizontalBackSwipe(_ value: DragGesture.Value) -> Bool {
+        value.translation.width > 0
+            && value.translation.width > abs(value.translation.height) * 1.4
+    }
+
+    func isCompletedBackSwipe(_ value: DragGesture.Value) -> Bool {
+        isHorizontalBackSwipe(value)
+            && value.translation.width > ChatSessionDesign.edgeBackSwipeThreshold
+    }
+
+    func snapBackFromEdgeSwipe() {
+        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82)) {
+            edgeBackDragOffset = 0
+        }
+    }
 }

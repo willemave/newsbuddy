@@ -99,6 +99,7 @@ struct ContentDetailView: View {
     @State private var activeAlert: ViewAlert?
     @State private var activeReaderContent: ContentDetail?
     @State private var activeBrowserDestination: BrowserDestination?
+    @State private var showLearningDeckCreateSheet = false
     // Full image viewer
     @State private var selectedImageAsset: DetailImageAsset?
     // Discussion sheet
@@ -271,6 +272,15 @@ struct ContentDetailView: View {
                                         insightCount: 0
                                     )
                                 }
+                        }
+
+                        if let sourceMetadata = content.sourceMetadata {
+                            SourceMetadataSection(
+                                metadata: sourceMetadata,
+                                openURL: openInAppBrowser
+                            )
+                                .padding(.horizontal, DetailDesign.horizontalPadding)
+                                .padding(.top, DetailDesign.sectionSpacing)
                         }
 
                         let relevantLinks = content.relevantLinks
@@ -594,6 +604,19 @@ struct ContentDetailView: View {
                         .presentationDragIndicator(.hidden)
                         .presentationCornerRadius(24)
                 }
+            }
+        }
+        .sheet(isPresented: $showLearningDeckCreateSheet) {
+            if let content = viewModel.content {
+                LearningDeckContentCreateSheet(
+                    content: content,
+                    onOpenURL: { url in
+                        activeBrowserDestination = BrowserDestination(url: url)
+                    },
+                    onNotice: { title, message in
+                        activeAlert = ViewAlert(title: title, message: message)
+                    }
+                )
             }
         }
         .fullScreenCover(item: $activeReaderContent) { content in
@@ -1328,6 +1351,7 @@ struct ContentDetailView: View {
                 )
         }
         .buttonStyle(.plain)
+        .textSelection(.disabled)
         .accessibilityLabel("Back")
     }
 
@@ -1337,11 +1361,7 @@ struct ContentDetailView: View {
             return max(proxy.safeAreaInsets.top, fallbackTopInset) + 8
         }
 
-        if viewModel.content?.contentTypeEnum == .news {
-            return DetailDesign.textOnlyBackButtonTopPadding
-        }
-
-        return proxy.safeAreaInsets.top + DetailDesign.textOnlyBackButtonTopPadding
+        return DetailDesign.textOnlyBackButtonTopPadding
     }
 
     @ViewBuilder
@@ -1488,6 +1508,16 @@ struct ContentDetailView: View {
 
             Spacer()
 
+            Button {
+                showLearningDeckCreateSheet = true
+            } label: {
+                minimalActionIcon("rectangle.stack", overlaid: overlaid)
+            }
+            .accessibilityIdentifier("content.action.learning_deck")
+            .accessibilityLabel("Create Learning Deck")
+
+            Spacer()
+
             // Deep Dive chat
             Button(action: {
                 Task {
@@ -1517,6 +1547,7 @@ struct ContentDetailView: View {
             .accessibilityLabel("Start deep dive")
         }
         .frame(height: 44)
+        .textSelection(.disabled)
     }
 
     @ViewBuilder

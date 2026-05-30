@@ -1514,8 +1514,9 @@ func decodeListNewsItemsParams(args [0]string, argsEscaped bool, r *http.Request
 
 // ListScraperConfigsParams is parameters of listScraperConfigs operation.
 type ListScraperConfigsParams struct {
-	Type  OptNilString `json:",omitempty,omitzero"`
-	Types OptNilString `json:",omitempty,omitzero"`
+	Type         OptNilString `json:",omitempty,omitzero"`
+	Types        OptNilString `json:",omitempty,omitzero"`
+	IncludeStats OptBool      `json:",omitempty,omitzero"`
 }
 
 func unpackListScraperConfigsParams(packed middleware.Parameters) (params ListScraperConfigsParams) {
@@ -1535,6 +1536,15 @@ func unpackListScraperConfigsParams(packed middleware.Parameters) (params ListSc
 		}
 		if v, ok := packed[key]; ok {
 			params.Types = v.(OptNilString)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "include_stats",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.IncludeStats = v.(OptBool)
 		}
 	}
 	return params
@@ -1620,6 +1630,52 @@ func decodeListScraperConfigsParams(args [0]string, argsEscaped bool, r *http.Re
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "types",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Set default value for query: include_stats.
+	{
+		val := bool(true)
+		params.IncludeStats.SetTo(val)
+	}
+	// Decode query: include_stats.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "include_stats",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotIncludeStatsVal bool
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToBool(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotIncludeStatsVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.IncludeStats.SetTo(paramsDotIncludeStatsVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "include_stats",
 			In:   "query",
 			Err:  err,
 		}

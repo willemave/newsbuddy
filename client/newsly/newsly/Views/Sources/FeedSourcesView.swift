@@ -6,7 +6,9 @@
 import SwiftUI
 
 struct FeedSourcesView: View {
-    @StateObject private var viewModel = ScraperSettingsViewModel(filterTypes: ["substack", "atom", "youtube"])
+    @StateObject private var viewModel = ScraperSettingsViewModel(
+        filterTypes: ["substack", "atom", "youtube"]
+    )
     @State private var selectedConfig: ScraperConfig?
     @State private var showAddSheet = false
     @State private var newFeedURL: String = ""
@@ -37,7 +39,7 @@ struct FeedSourcesView: View {
                     }
                 }
             }
-            .refreshable { await viewModel.loadConfigs() }
+            .refreshable { await viewModel.loadConfigsWithDeferredStats() }
 
             // Floating add button
             if !viewModel.configs.isEmpty {
@@ -48,7 +50,7 @@ struct FeedSourcesView: View {
         .background(Color.surfacePrimary)
         .navigationTitle("Feed Sources")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await viewModel.loadConfigs() }
+        .task { await viewModel.loadConfigsWithDeferredStats() }
         .sheet(item: $selectedConfig) { config in
             SourceDetailSheet(viewModel: viewModel, config: config)
         }

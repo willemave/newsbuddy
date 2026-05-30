@@ -20,6 +20,7 @@ from app.services.news_article_bodies import (
     NEWS_ARTICLE_EXTRACTION_KEY,
     persist_news_item_article_body,
 )
+from app.services.source_metadata import SOURCE_METADATA_KEY, attach_source_metadata
 from app.services.twitter_share import extract_tweet_id
 from app.services.x_tweet_metadata import build_resolved_tweet_content, hydrate_tweet_from_metadata
 from app.utils.title_utils import clean_title
@@ -249,6 +250,12 @@ def enrich_news_item_article(
     if existing_article is not None:
         existing_text = get_content_body_resolver().resolve_text(db, content=existing_article)
         if existing_text:
+            existing_metadata = (
+                existing_article.content_metadata
+                if isinstance(existing_article.content_metadata, dict)
+                else {}
+            )
+            attach_source_metadata(raw_metadata, existing_metadata.get(SOURCE_METADATA_KEY))
             raw_metadata[NEWS_ARTICLE_BODY_REF_KEY] = {
                 "kind": "content",
                 "content_id": _require_content_id(existing_article),
@@ -321,6 +328,8 @@ def enrich_news_item_article(
         extraction_error = _clean_string(extracted_data.get("extraction_error"))
         if extraction_error:
             raise ValueError(extraction_error)
+
+        attach_source_metadata(raw_metadata, extracted_data.get(SOURCE_METADATA_KEY))
 
         llm_data = _run_strategy_method(strategy.prepare_for_llm, extracted_data) or {}
         source_text = _clean_body_text(llm_data.get("content_to_summarize"))

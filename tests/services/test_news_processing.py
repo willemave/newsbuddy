@@ -12,7 +12,9 @@ from app.http_client.robust_http_client import RobustHttpClient
 from app.models.contracts import ContentType
 from app.models.db import Content, NewsItem
 from app.models.metadata.summaries import NewsSummary
+from app.processing_strategies.base_strategy import UrlProcessorStrategy
 from app.processing_strategies.plain_text_strategy import PlainTextProcessorStrategy
+from app.processing_strategies.registry import StrategyRegistry
 from app.services import news_article_enrichment as news_article_enrichment_module
 from app.services import news_processing as news_processing_module
 from app.services.news_article_bodies import (
@@ -1077,6 +1079,101 @@ def test_enrich_news_item_article_uses_direct_article_url_for_no_discussion_aggr
     assert extraction["status"] == "completed"
     assert extraction["source"] == "storage"
     assert extraction["article_url"] == "https://finance.yahoo.com/example/story.html"
+
+
+def test_enrich_news_item_article_persists_source_metadata(db_session) -> None:
+    item = NewsItem(
+        ingest_key="news-item-arxiv-source-metadata",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="hn-arxiv-source-metadata-1",
+        canonical_item_url="https://news.ycombinator.com/item?id=48178391",
+        canonical_story_url="https://arxiv.org/abs/2509.15194v2",
+        article_url="https://arxiv.org/abs/2509.15194v2",
+        article_title="Research paper",
+        article_domain="arxiv.org",
+        discussion_url="https://news.ycombinator.com/item?id=48178391",
+        raw_metadata={"excerpt": "HN discussion only."},
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    class _FakeStrategy(UrlProcessorStrategy):
+        def __init__(self) -> None:
+            super().__init__(Mock(spec=RobustHttpClient))
+
+        def can_handle_url(self, url: str, response_headers: httpx.Headers | None = None) -> bool:
+            return True
+
+        def preprocess_url(self, url: str) -> str:
+            return "https://arxiv.org/pdf/2509.15194v2"
+
+        def download_content(self, url: str) -> bytes:
+            return b"%PDF-1.4"
+
+        def extract_data(
+            self,
+            _content: bytes,
+            url: str,
+            context: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            assert context is not None
+            return {
+                "title": "Research paper",
+                "text_content": "Research paper body.",
+                "content_type": "pdf",
+                "source": "arxiv.org",
+                "final_url_after_redirects": url,
+                "source_metadata": {
+                    "schema_version": 1,
+                    "kind": "research_paper",
+                    "provider": "arxiv",
+                    "source_id": "2509.15194v2",
+                    "brief_synopsis": "A brief arXiv synopsis.",
+                    "authors": [
+                        {
+                            "name": "Ada Lovelace",
+                            "affiliation": "Analytical Engines Lab",
+                            "affiliation_source": "arxiv_api",
+                            "confidence": "direct",
+                        }
+                    ],
+                },
+            }
+
+        def prepare_for_llm(self, extracted_data: dict[str, Any]) -> dict[str, Any]:
+            return {"content_to_summarize": extracted_data["text_content"]}
+
+    class _FakeRegistry(StrategyRegistry):
+        def __init__(self) -> None:
+            pass
+
+        def get_strategy(
+            self,
+            url: str,
+            headers: dict[str, str] | None = None,
+        ) -> UrlProcessorStrategy | None:
+            assert url == "https://arxiv.org/abs/2509.15194v2"
+            return _FakeStrategy()
+
+    result = enrich_news_item_article(
+        db_session,
+        news_item_id=_require_id(item.id),
+        strategy_registry=_FakeRegistry(),
+    )
+
+    db_session.refresh(item)
+    item_metadata = _metadata(item.raw_metadata)
+
+    assert result.success is True
+    assert item_metadata["source_metadata"]["source_id"] == "2509.15194v2"
+    assert item_metadata["source_metadata"]["authors"][0]["affiliation"] == (
+        "Analytical Engines Lab"
+    )
 
 
 def test_enrich_news_item_article_persists_plain_text_article_body(db_session) -> None:

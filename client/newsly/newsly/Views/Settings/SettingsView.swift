@@ -401,7 +401,7 @@ struct SettingsView: View {
 
             textSizeSlider(
                 icon: "book",
-                iconColor: .brandTertiary,
+                iconColor: .brandPrimary,
                 title: "Content Text Size",
                 value: Binding(
                     get: { Double(settings.contentTextSizeIndex) },
@@ -489,7 +489,7 @@ struct SettingsView: View {
                 } label: {
                     SettingsRow(
                         icon: "waveform",
-                        iconColor: .brandTertiary,
+                        iconColor: .brandSecondary,
                         title: "Podcast Sources"
                     )
                 }
@@ -510,7 +510,7 @@ struct SettingsView: View {
             } label: {
                 SettingsRow(
                     icon: "checkmark.circle",
-                    iconColor: .brandTertiary,
+                    iconColor: .brandPrimary,
                     title: "Mark All As Read"
                 ) {
                     if isProcessingMarkAll {

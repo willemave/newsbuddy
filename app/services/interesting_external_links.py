@@ -23,6 +23,7 @@ logger = get_logger(__name__)
 MAX_CANDIDATE_LINKS = 30
 MAX_SELECTED_LINKS = 6
 MAX_CONTEXT_CHARS = 240
+LINK_SELECTION_TIMEOUT_SECONDS = 30.0
 LINK_SELECTION_MODEL = CHEAP_MODEL_SPEC
 
 MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]{1,300})\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
@@ -187,7 +188,10 @@ def select_interesting_external_links(
             LINK_SELECTION_SYSTEM_PROMPT,
         )
         prompt = _build_selection_prompt(candidates, source_url=source_url, title=title)
-        result = agent.run_sync(prompt)
+        result = agent.run_sync(
+            prompt,
+            model_settings={"timeout": LINK_SELECTION_TIMEOUT_SECONDS},
+        )
         record_model_usage(
             "interesting_external_links",
             result,

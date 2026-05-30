@@ -8,6 +8,7 @@ from typing import Any
 from app.models.api.content import ContentDetailResponse, ContentSummaryResponse
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
 from app.models.db import NewsItem
+from app.services.content_bodies import sanitize_metadata_for_api
 from app.services.news_relevant_links import NEWS_RELEVANT_LINKS_KEY, build_news_relevant_links
 from app.utils.news_titles import (
     get_news_article_title,
@@ -232,7 +233,7 @@ def present_news_item_detail(
         status=_content_status(item),
         error_message=None,
         retry_count=0,
-        metadata=metadata,
+        metadata=sanitize_metadata_for_api(metadata),
         created_at=_require_news_item_created_at(item).isoformat(),
         updated_at=item.updated_at.isoformat() if item.updated_at else None,
         processed_at=item.processed_at.isoformat() if item.processed_at else None,

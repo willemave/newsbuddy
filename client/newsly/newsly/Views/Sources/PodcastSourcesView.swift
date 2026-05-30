@@ -6,7 +6,9 @@
 import SwiftUI
 
 struct PodcastSourcesView: View {
-    @StateObject private var viewModel = ScraperSettingsViewModel(filterTypes: ["podcast_rss"])
+    @StateObject private var viewModel = ScraperSettingsViewModel(
+        filterTypes: ["podcast_rss"]
+    )
     @State private var selectedConfig: ScraperConfig?
     @State private var showAddSheet = false
     @State private var newFeedURL: String = ""
@@ -38,7 +40,7 @@ struct PodcastSourcesView: View {
                     }
                 }
             }
-            .refreshable { await viewModel.loadConfigs() }
+            .refreshable { await viewModel.loadConfigsWithDeferredStats() }
 
             // Floating add button
             if !viewModel.configs.isEmpty {
@@ -49,7 +51,7 @@ struct PodcastSourcesView: View {
         .background(Color.surfacePrimary)
         .navigationTitle("Podcast Sources")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await viewModel.loadConfigs() }
+        .task { await viewModel.loadConfigsWithDeferredStats() }
         .sheet(item: $selectedConfig) { config in
             SourceDetailSheet(viewModel: viewModel, config: config)
         }

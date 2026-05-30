@@ -68,6 +68,10 @@ def test_scraper_configs_crud(client, db_session, test_user):
     assert data[0]["config"]["feed_url"] == "https://example.com/feed"
     assert data[0]["feed_url"] == "https://example.com/feed"
 
+    list_without_stats_resp = client.get("/api/scrapers?include_stats=false")
+    assert list_without_stats_resp.status_code == 200
+    assert list_without_stats_resp.json()[0]["stats"] is None
+
     update_resp = client.put(f"/api/scrapers/{config_id}", json={"is_active": False})
     assert update_resp.status_code == 200
     assert update_resp.json()["is_active"] is False

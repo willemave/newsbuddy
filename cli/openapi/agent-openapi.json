@@ -3314,6 +3314,299 @@
         "title": "LLMProvider",
         "type": "string"
       },
+      "LearningDeckCreateRequest": {
+        "description": "Create or rerun a Learning Deck from one source.",
+        "properties": {
+          "content_id": {
+            "exclusiveMinimum": true,
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "interests_prompt": {
+            "maxLength": 4000,
+            "nullable": true,
+            "title": "Interests Prompt",
+            "type": "string"
+          },
+          "news_item_id": {
+            "exclusiveMinimum": true,
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "News Item Id",
+            "type": "integer"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "nullable": true,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "title": "LearningDeckCreateRequest",
+        "type": "object"
+      },
+      "LearningDeckListResponse": {
+        "description": "List response for current user's Learning Decks.",
+        "properties": {
+          "decks": {
+            "items": {
+              "$ref": "#/components/schemas/LearningDeckResponse"
+            },
+            "title": "Decks",
+            "type": "array"
+          }
+        },
+        "title": "LearningDeckListResponse",
+        "type": "object"
+      },
+      "LearningDeckResponse": {
+        "description": "Client-visible Learning Deck state.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "latest_run": {
+            "$ref": "#/components/schemas/LearningDeckRunResponse",
+            "nullable": true
+          },
+          "latest_successful_run_id": {
+            "nullable": true,
+            "title": "Latest Successful Run Id",
+            "type": "integer"
+          },
+          "share_enabled": {
+            "default": false,
+            "title": "Share Enabled",
+            "type": "boolean"
+          },
+          "source_content_id": {
+            "nullable": true,
+            "title": "Source Content Id",
+            "type": "integer"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/LearningDeckSourceKind"
+          },
+          "source_metadata": {
+            "additionalProperties": true,
+            "title": "Source Metadata",
+            "type": "object"
+          },
+          "source_notes_available": {
+            "default": false,
+            "title": "Source Notes Available",
+            "type": "boolean"
+          },
+          "source_title": {
+            "nullable": true,
+            "title": "Source Title",
+            "type": "string"
+          },
+          "source_url": {
+            "nullable": true,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LearningDeckStatus",
+            "nullable": true
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Updated At",
+            "type": "string"
+          },
+          "viewer_available": {
+            "default": false,
+            "title": "Viewer Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "source_kind",
+          "created_at"
+        ],
+        "title": "LearningDeckResponse",
+        "type": "object"
+      },
+      "LearningDeckRunResponse": {
+        "description": "Client-visible generation attempt state.",
+        "properties": {
+          "completed_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Completed At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_message": {
+            "nullable": true,
+            "title": "Error Message",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "interests_prompt": {
+            "nullable": true,
+            "title": "Interests Prompt",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LearningDeckRunStatus"
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/LearningDeckTimelineEntry"
+            },
+            "title": "Timeline",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "LearningDeckRunResponse",
+        "type": "object"
+      },
+      "LearningDeckRunStatus": {
+        "description": "Lifecycle statuses for one Learning Deck generation run.",
+        "enum": [
+          "queued",
+          "preparing",
+          "generating",
+          "validating",
+          "publishing",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "LearningDeckRunStatus",
+        "type": "string"
+      },
+      "LearningDeckShareResponse": {
+        "description": "Share state and stable public URL for one deck.",
+        "properties": {
+          "share_enabled": {
+            "title": "Share Enabled",
+            "type": "boolean"
+          },
+          "share_url": {
+            "nullable": true,
+            "title": "Share Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "share_enabled"
+        ],
+        "title": "LearningDeckShareResponse",
+        "type": "object"
+      },
+      "LearningDeckSourceKind": {
+        "description": "Supported source kinds for Learning Deck generation.",
+        "enum": [
+          "content",
+          "github_repo"
+        ],
+        "title": "LearningDeckSourceKind",
+        "type": "string"
+      },
+      "LearningDeckStatus": {
+        "description": "Client-facing Learning Deck status values.",
+        "enum": [
+          "ready",
+          "queued",
+          "preparing",
+          "generating",
+          "validating",
+          "publishing",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "LearningDeckStatus",
+        "type": "string"
+      },
+      "LearningDeckTimelineEntry": {
+        "description": "One coarse user-visible generation note.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LearningDeckRunStatus"
+          }
+        },
+        "required": [
+          "status",
+          "note",
+          "created_at"
+        ],
+        "title": "LearningDeckTimelineEntry",
+        "type": "object"
+      },
+      "LearningDeckUrlResponse": {
+        "description": "A URL the client can open in Safari.",
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Expires At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "LearningDeckUrlResponse",
+        "type": "object"
+      },
       "LongFormStatsResponse": {
         "description": "Response containing unread long-form count for a user.",
         "properties": {
@@ -6707,6 +7000,16 @@
               "nullable": true,
               "title": "Types",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_stats",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Stats",
+              "type": "boolean"
             }
           }
         ],

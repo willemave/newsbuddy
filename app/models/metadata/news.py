@@ -19,8 +19,8 @@ class NewsArticleMetadata(BaseModel):
     """Details about the linked article for a news item."""
 
     url: HttpUrl = Field(..., description="Canonical article URL to summarize")
-    title: str | None = Field(None, max_length=500)
-    source_domain: str | None = Field(None, max_length=200)
+    title: str | None = Field(default=None, max_length=500)
+    source_domain: str | None = Field(default=None, max_length=200)
 
     @field_validator("title", mode="before")
     @classmethod
@@ -32,10 +32,10 @@ class NewsArticleMetadata(BaseModel):
 class NewsAggregatorMetadata(BaseModel):
     """Context about the upstream aggregator (HN, Techmeme, Twitter)."""
 
-    name: str | None = Field(None, max_length=120)
-    title: str | None = Field(None, max_length=500)
-    external_id: str | None = Field(None, max_length=200)
-    author: str | None = Field(None, max_length=200)
+    name: str | None = Field(default=None, max_length=120)
+    title: str | None = Field(default=None, max_length=500)
+    external_id: str | None = Field(default=None, max_length=200)
+    author: str | None = Field(default=None, max_length=200)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("title", mode="before")
@@ -87,24 +87,28 @@ class NewsMetadata(BaseContentMetadata):
 
     article: NewsArticleMetadata = Field(..., description="Primary article information")
     aggregator: NewsAggregatorMetadata | None = Field(
-        None, description="Upstream aggregator context"
+        default=None, description="Upstream aggregator context"
     )
     discussion_url: HttpUrl | None = Field(
-        None, description="Aggregator discussion link (HN thread, tweet, etc.)"
+        default=None,
+        description="Aggregator discussion link (HN thread, tweet, etc.)",
     )
     discovery_time: datetime | None = Field(
         default_factory=lambda: datetime.now(UTC),
         description="When the item was discovered",
     )
     top_comment: dict[str, str] | None = Field(
-        None, description="First non-bot discussion comment {author, text} for feed preview"
+        default=None,
+        description="First non-bot discussion comment {author, text} for feed preview",
     )
     comment_count: int | None = Field(
-        None, ge=0, description="Discussion comment count denormalized by discussion fetcher"
+        default=None,
+        ge=0,
+        description="Discussion comment count denormalized by discussion fetcher",
     )
     has_video: bool = False
-    video_duration_ms: int | None = Field(None, ge=0)
-    video_audio_path: str | None = Field(None, max_length=2000)
+    video_duration_ms: int | None = Field(default=None, ge=0)
+    video_audio_path: str | None = Field(default=None, max_length=2000)
     video_transcript: str | None = None
 
 

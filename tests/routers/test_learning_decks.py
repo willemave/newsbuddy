@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+from app.models.contracts import ContentType, TaskType
+from app.models.db import LearningDeck, LearningDeckRun, ProcessingTask
+from app.services.gateways.object_storage_gateway import LocalObjectStorageGateway
+from tests.support.builders import create_content_status_entry_row
+
+
+def _create_visible_article(db_session, test_user, content_factory):
+    content = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Learning Deck API Source",
+        content_metadata={"content": "API source body for a learning deck."},
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=content)
+    return content
+
+
+def test_create_learning_deck_endpoint_enqueues_generation(
+    client,
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = _create_visible_article(db_session, test_user, content_factory)
+
+    response = client.post(
+        "/api/learning/decks",
+        json={"content_id": content.id, "interests_prompt": "Teach the architecture"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["source_content_id"] == content.id
+    assert payload["status"] == "queued"
+    assert payload["latest_run"]["interests_prompt"] == "Teach the architecture"
+    task = db_session.query(ProcessingTask).one()
+    assert task.task_type == TaskType.GENERATE_LEARNING_DECK.value
+    assert task.queue_name == "learning"
+
+
+def test_private_viewer_url_requires_completed_deck(
+    client,
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = _create_visible_article(db_session, test_user, content_factory)
+    create_response = client.post("/api/learning/decks", json={"content_id": content.id})
+    deck_id = create_response.json()["id"]
+
+    not_ready = client.post(f"/api/learning/decks/{deck_id}/viewer-url")
+    assert not_ready.status_code == 409
+
+    deck = db_session.query(LearningDeck).filter_by(id=deck_id).one()
+    run = db_session.query(LearningDeckRun).filter_by(deck_id=deck_id).one()
+    run.status = "completed"
+    deck.latest_successful_run_id = run.id
+    deck.deck_object_key = "learning/test/index.html"
+    db_session.commit()
+
+    ready = client.post(f"/api/learning/decks/{deck_id}/viewer-url")
+    assert ready.status_code == 200
+    assert "/learning/signed/" in ready.json()["url"]
+    assert ready.json()["expires_at"]
+
+
+def test_public_share_route_serves_latest_artifact_and_disable_revokes(
+    client,
+    db_session,
+    test_user,
+    content_factory,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    gateway = LocalObjectStorageGateway(tmp_path)
+    monkeypatch.setattr(
+        "app.services.learning_deck_artifacts.get_object_storage_gateway",
+        lambda: gateway,
+    )
+    content = _create_visible_article(db_session, test_user, content_factory)
+    create_response = client.post("/api/learning/decks", json={"content_id": content.id})
+    deck_id = create_response.json()["id"]
+    deck = db_session.query(LearningDeck).filter_by(id=deck_id).one()
+    run = db_session.query(LearningDeckRun).filter_by(deck_id=deck_id).one()
+    gateway.put_text(
+        key="learning/deck/index.html",
+        text="<html><body>Shared Learning Deck</body></html>",
+        content_type="text/html",
+    )
+    gateway.put_text(
+        key="learning/deck/source-notes.html",
+        text="<html><body>Shared Source Notes</body></html>",
+        content_type="text/html",
+    )
+    gateway.put_text(
+        key="learning/deck/assets/theme.css",
+        text=".reveal { color: rgb(20 20 20); }",
+        content_type="text/css",
+    )
+    run.status = "completed"
+    deck.latest_successful_run_id = run.id
+    deck.artifact_storage_prefix = "learning/deck"
+    deck.deck_object_key = "learning/deck/index.html"
+    deck.source_notes_html_object_key = "learning/deck/source-notes.html"
+    deck.artifact_object_keys = [
+        "learning/deck/index.html",
+        "learning/deck/source-notes.html",
+        "learning/deck/assets/theme.css",
+    ]
+    db_session.commit()
+
+    share_response = client.post(f"/api/learning/decks/{deck_id}/share")
+    assert share_response.status_code == 200
+    share_url = share_response.json()["share_url"]
+    assert share_url is not None
+
+    shared = client.get(share_url)
+    assert shared.status_code == 200
+    assert "Shared Learning Deck" in shared.text
+    assert 'data-newsly-learning-deck-controls="controls"' in shared.text
+    assert "data-newsly-learning-deck-next" in shared.text
+    notes = client.get(f"{share_url.rstrip('/')}/source-notes")
+    assert notes.status_code == 200
+    assert "Shared Source Notes" in notes.text
+    assert "data-newsly-learning-deck-controls" not in notes.text
+    shared_asset = client.get(f"{share_url.rstrip('/')}/assets/theme.css")
+    assert shared_asset.status_code == 200
+    assert "rgb(20 20 20)" in shared_asset.text
+
+    private_url = client.post(f"/api/learning/decks/{deck_id}/viewer-url").json()["url"]
+    private = client.get(private_url)
+    assert private.status_code == 200
+    assert "data-newsly-learning-deck-prev" in private.text
+    private_asset = client.get(f"{private_url.rstrip('/')}/assets/theme.css")
+    assert private_asset.status_code == 200
+    assert "rgb(20 20 20)" in private_asset.text
+    assert client.get(f"{private_url.rstrip('/')}/assets/missing.css").status_code == 404
+
+    disable_response = client.delete(f"/api/learning/decks/{deck_id}/share")
+    assert disable_response.status_code == 200
+    assert disable_response.json() == {"share_enabled": False, "share_url": None}
+    assert client.get(share_url).status_code == 404
+    assert client.get(f"{share_url.rstrip('/')}/assets/theme.css").status_code == 404

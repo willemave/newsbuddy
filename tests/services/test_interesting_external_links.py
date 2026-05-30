@@ -16,9 +16,11 @@ class FakeAgent:
     def __init__(self, output: object) -> None:
         self.output = output
         self.prompt: str | None = None
+        self.model_settings: dict[str, object] | None = None
 
-    def run_sync(self, prompt: str) -> FakeResult:
+    def run_sync(self, prompt: str, model_settings=None) -> FakeResult:  # noqa: ANN001
         self.prompt = prompt
+        self.model_settings = model_settings
         return FakeResult(self.output)
 
 
@@ -78,3 +80,22 @@ def test_select_interesting_external_links_rejects_non_candidate_model_urls(
     assert selected[0].title == "Original model paper"
     assert fake_agent.prompt is not None
     assert "https://papers.example.org/model" in fake_agent.prompt
+    assert fake_agent.model_settings == {"timeout": links.LINK_SELECTION_TIMEOUT_SECONDS}
+
+
+def test_select_interesting_external_links_fails_closed_on_timeout(monkeypatch) -> None:
+    class TimeoutAgent:
+        def run_sync(self, prompt: str, model_settings=None) -> FakeResult:  # noqa: ANN001
+            del model_settings
+            raise TimeoutError("selection timed out")
+
+    monkeypatch.setattr(links, "resolve_model", lambda *_args: ("openai", "openai:test"))
+    monkeypatch.setattr(links, "get_basic_agent", lambda *_args: TimeoutAgent())
+
+    selected = links.select_interesting_external_links(
+        "See [the paper](https://papers.example.org/model) for details.",
+        source_url="https://example.com/post",
+        title="Example article",
+    )
+
+    assert selected == []

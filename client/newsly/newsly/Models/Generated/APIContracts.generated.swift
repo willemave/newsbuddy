@@ -48,6 +48,7 @@ enum APITaskType: String, Codable, CaseIterable {
     case sync_integration = "sync_integration"
     case generate_insight_report = "generate_insight_report"
     case generate_audio_episode = "generate_audio_episode"
+    case generate_learning_deck = "generate_learning_deck"
 }
 
 enum APITaskStatus: String, Codable, CaseIterable {

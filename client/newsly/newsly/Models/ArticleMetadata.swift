@@ -18,6 +18,7 @@ struct ArticleMetadata: Codable {
     let summary: StructuredSummary?
     let summarizationDate: Date?
     let wordCount: Int?
+    let sourceMetadata: SourceMetadata?
     
     enum CodingKeys: String, CodingKey {
         case source
@@ -30,6 +31,7 @@ struct ArticleMetadata: Codable {
         case summary
         case summarizationDate = "summarization_date"
         case wordCount = "word_count"
+        case sourceMetadata = "source_metadata"
     }
     
     init(from decoder: Decoder) throws {
@@ -43,6 +45,7 @@ struct ArticleMetadata: Codable {
         finalUrlAfterRedirects = try container.decodeIfPresent(String.self, forKey: .finalUrlAfterRedirects)
         summary = try container.decodeIfPresent(StructuredSummary.self, forKey: .summary)
         wordCount = try container.decodeIfPresent(Int.self, forKey: .wordCount)
+        sourceMetadata = try container.decodeIfPresent(SourceMetadata.self, forKey: .sourceMetadata)
         
         // Handle date parsing for publicationDate
         if let dateString = try container.decodeIfPresent(String.self, forKey: .publicationDate) {
@@ -70,6 +73,7 @@ struct ArticleMetadata: Codable {
         try container.encodeIfPresent(finalUrlAfterRedirects, forKey: .finalUrlAfterRedirects)
         try container.encodeIfPresent(summary, forKey: .summary)
         try container.encodeIfPresent(wordCount, forKey: .wordCount)
+        try container.encodeIfPresent(sourceMetadata, forKey: .sourceMetadata)
         
         // Encode dates as ISO8601 strings
         if let date = publicationDate {

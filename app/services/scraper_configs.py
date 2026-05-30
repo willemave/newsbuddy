@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -137,6 +137,67 @@ def _coerce_publication_date(content: Content) -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def _stats_content_type_filter(configs: Iterable[UserScraperConfig]):
+    config_types = {config.scraper_type for config in configs}
+    predicates = []
+
+    if config_types.intersection({"substack", "atom"}):
+        predicates.append(Content.content_type == ContentType.ARTICLE.value)
+    if "podcast_rss" in config_types:
+        predicates.append(Content.content_type == ContentType.PODCAST.value)
+    if "youtube" in config_types:
+        predicates.append(
+            (Content.platform == "youtube") & (Content.content_type != ContentType.NEWS.value)
+        )
+
+    if not predicates:
+        long_form_filter = Content.content_type.in_(
+            (ContentType.ARTICLE.value, ContentType.PODCAST.value)
+        )
+        return long_form_filter | (
+            (Content.platform == "youtube") & (Content.content_type != ContentType.NEWS.value)
+        )
+
+    return or_(*predicates)
+
+
+def _chunked_ids(values: Iterable[int], size: int = 500) -> Iterable[list[int]]:
+    unique_values = sorted(set(values))
+    for index in range(0, len(unique_values), size):
+        yield unique_values[index : index + size]
+
+
+def _load_active_task_content_ids(db: Session, content_ids: Iterable[int]) -> set[int]:
+    active_task_content_ids: set[int] = set()
+    for chunk in _chunked_ids(content_ids):
+        active_task_content_ids.update(
+            content_id
+            for (content_id,) in db.query(ProcessingTask.content_id)
+            .filter(ProcessingTask.content_id.in_(chunk))
+            .filter(
+                ProcessingTask.status.in_(
+                    [ContentStatus.PENDING.value, ContentStatus.PROCESSING.value]
+                )
+            )
+            .all()
+            if content_id is not None
+        )
+    return active_task_content_ids
+
+
+def _load_read_content_ids(db: Session, *, user_id: int, content_ids: Iterable[int]) -> set[int]:
+    read_content_ids: set[int] = set()
+    for chunk in _chunked_ids(content_ids):
+        read_content_ids.update(
+            content_id
+            for (content_id,) in db.query(ContentReadStatus.content_id)
+            .filter(ContentReadStatus.user_id == user_id)
+            .filter(ContentReadStatus.content_id.in_(chunk))
+            .all()
+        )
+    return read_content_ids
+
+
 def _estimate_next_expected_at(
     publication_dates: list[datetime],
 ) -> tuple[datetime | None, float | None, int]:
@@ -199,7 +260,6 @@ def get_scraper_config_stats(
     if not config_list:
         return {}
 
-    long_form_types = {ContentType.ARTICLE.value, ContentType.PODCAST.value}
     processing_statuses = {
         ContentStatus.NEW.value,
         ContentStatus.PENDING.value,
@@ -240,29 +300,20 @@ def get_scraper_config_stats(
         .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
         .filter(ContentStatusEntry.user_id == user_id)
         .filter(ContentStatusEntry.status == CONTENT_STATUS_INBOX)
-        .filter(
-            (Content.content_type.in_(long_form_types))
-            | ((Content.platform == "youtube") & (Content.content_type != ContentType.NEWS.value))
+        .filter(_stats_content_type_filter(config_list))
+        .with_entities(
+            Content.id,
+            Content.status,
+            Content.classification,
+            Content.processed_at,
+            Content.publication_date,
+            Content.created_at,
+            Content.source,
+            Content.content_metadata,
+            Content.checked_out_by,
+            Content.checked_out_at,
         )
-        .all()
     )
-
-    active_task_content_ids = {
-        content_id
-        for (content_id,) in db.query(ProcessingTask.content_id)
-        .filter(ProcessingTask.content_id.is_not(None))
-        .filter(
-            ProcessingTask.status.in_([ContentStatus.PENDING.value, ContentStatus.PROCESSING.value])
-        )
-        .all()
-        if content_id is not None
-    }
-    read_content_ids = {
-        content_id
-        for (content_id,) in db.query(ContentReadStatus.content_id)
-        .filter(ContentReadStatus.user_id == user_id)
-        .all()
-    }
 
     stats_by_config: dict[int, dict[str, Any]] = {
         _require_config_id(config): {
@@ -280,7 +331,12 @@ def get_scraper_config_stats(
         for config in config_list
     }
 
-    for content in content_rows:
+    matched_content_ids: set[int] = set()
+    completed_content_ids_by_config: dict[int, set[int]] = defaultdict(set)
+    processing_candidates_by_config: dict[int, set[int]] = defaultdict(set)
+    checked_out_processing_ids_by_config: dict[int, set[int]] = defaultdict(set)
+
+    for content in content_rows.yield_per(500):
         matched_config = _match_scraper_config_for_content(
             content,
             configs_by_id=configs_by_id,
@@ -291,6 +347,8 @@ def get_scraper_config_stats(
             continue
 
         matched_config_id = _require_config_id(matched_config)
+        if content.id is not None:
+            matched_content_ids.add(int(content.id))
         stats = stats_by_config[matched_config_id]
         stats["total_count"] += 1
 
@@ -313,19 +371,39 @@ def get_scraper_config_stats(
         )
         if is_completed_visible:
             stats["completed_count"] += 1
-            if content.id not in read_content_ids:
-                stats["unread_count"] += 1
+            if content.id is not None:
+                completed_content_ids_by_config[matched_config_id].add(int(content.id))
 
-        is_active_processing = content.status in processing_statuses and (
-            content.id in active_task_content_ids
-            or (
+        is_active_processing = content.status in processing_statuses and (content.id is not None)
+        if is_active_processing:
+            processing_candidates_by_config[matched_config_id].add(int(content.id))
+            if (
                 content.checked_out_by is not None
                 and content.checked_out_at is not None
                 and content.checked_out_at >= processing_cutoff
-            )
+            ):
+                checked_out_processing_ids_by_config[matched_config_id].add(int(content.id))
+
+    completed_content_ids = {
+        content_id
+        for content_ids in completed_content_ids_by_config.values()
+        for content_id in content_ids
+    }
+    read_content_ids = _load_read_content_ids(
+        db, user_id=user_id, content_ids=completed_content_ids
+    )
+    active_task_content_ids = _load_active_task_content_ids(db, matched_content_ids)
+
+    for config_id, completed_content_ids_for_config in completed_content_ids_by_config.items():
+        stats_by_config[config_id]["unread_count"] = len(
+            completed_content_ids_for_config.difference(read_content_ids)
         )
-        if is_active_processing:
-            stats["processing_count"] += 1
+
+    for config_id, processing_candidate_ids in processing_candidates_by_config.items():
+        checked_out_ids = checked_out_processing_ids_by_config.get(config_id, set())
+        stats_by_config[config_id]["processing_count"] = len(
+            processing_candidate_ids.intersection(active_task_content_ids).union(checked_out_ids)
+        )
 
     for _config_id, stats in stats_by_config.items():
         next_expected_at, average_interval_hours, interval_sample_size = _estimate_next_expected_at(

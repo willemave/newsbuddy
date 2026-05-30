@@ -39,6 +39,7 @@ from app.services.http import NonRetryableError, get_http_service
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.queue import TaskType, get_queue_service
+from app.services.source_metadata import SOURCE_METADATA_KEY, attach_source_metadata
 from app.services.youtube_equivalent_resolver import (
     resolve_youtube_equivalent,
 )
@@ -453,6 +454,7 @@ class ContentWorker:
                 content.metadata["content_type"] = extracted_data.get("content_type", "unknown")
                 content.metadata["image_url"] = extracted_data.get("image_url")
                 content.metadata["final_url"] = extracted_data.get("final_url_after_redirects")
+                attach_source_metadata(content.metadata, extracted_data.get(SOURCE_METADATA_KEY))
                 if extracted_title:
                     content.title = extracted_title
                 return True
@@ -493,6 +495,7 @@ class ContentWorker:
                 metadata_update["video_duration_ms"] = extracted_data.get("video_duration_ms")
             if subscribe_to_feed:
                 metadata_update["subscribe_to_feed"] = True
+            attach_source_metadata(metadata_update, extracted_data.get(SOURCE_METADATA_KEY))
 
             if content.content_type == ContentType.NEWS:
                 article_info = existing_metadata.get("article", {}).copy()

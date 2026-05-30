@@ -18,12 +18,17 @@ class ScraperSettingsViewModel: ObservableObject {
         self.filterTypes = filterTypes
     }
 
-    func loadConfigs() async {
+    func loadConfigs(includeStats: Bool = true, showLoading: Bool = true) async {
         print("DEBUG: ScraperSettingsViewModel.loadConfigs() called")
-        isLoading = true
+        if showLoading {
+            isLoading = true
+        }
         errorMessage = nil
         do {
-            configs = try await service.listConfigs(types: filterTypes)
+            configs = try await service.listConfigs(
+                types: filterTypes,
+                includeStats: includeStats
+            )
             print("DEBUG: Successfully loaded \(configs.count) scraper configs")
             for config in configs {
                 print("DEBUG: Config: \(config.displayName ?? "N/A") (\(config.scraperType))")
@@ -32,7 +37,14 @@ class ScraperSettingsViewModel: ObservableObject {
             print("DEBUG: Error loading scraper configs: \(error)")
             errorMessage = error.localizedDescription
         }
-        isLoading = false
+        if showLoading {
+            isLoading = false
+        }
+    }
+
+    func loadConfigsWithDeferredStats() async {
+        await loadConfigs(includeStats: false)
+        await loadConfigs(includeStats: true, showLoading: false)
     }
 
     func addConfig(scraperType: String, displayName: String?, feedURL: String, limit: Int? = nil) async {

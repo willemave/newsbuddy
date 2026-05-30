@@ -70,6 +70,7 @@ def list_scraper_configs(
     current_user: Annotated[User, Depends(get_current_user)],
     scraper_type: str | None = Query(None, alias="type"),
     types: str | None = Query(None, alias="types"),
+    include_stats: bool = Query(True),
 ) -> list[ScraperConfigResponse]:
     """List scraper configurations for the current user."""
     user_id = require_user_id(current_user)
@@ -92,7 +93,9 @@ def list_scraper_configs(
         user_id,
         allowed_types=requested_types or None,
     )
-    stats_by_config = get_scraper_config_stats(db, user_id=user_id, configs=configs)
+    stats_by_config = (
+        get_scraper_config_stats(db, user_id=user_id, configs=configs) if include_stats else {}
+    )
     return [
         _serialize_scraper_config(
             config,

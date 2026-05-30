@@ -675,6 +675,62 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /api/jobs/{job_id}`.
     /// - Remark: Generated from `#/paths//api/jobs/{job_id}/get(getJob)`.
     func getJob(_ input: Operations.GetJob.Input) async throws -> Operations.GetJob.Output
+    /// List current user's Learning Decks
+    ///
+    /// Return current Learning Decks for the authenticated user.
+    ///
+    /// - Remark: HTTP `GET /api/learning/decks`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/get(listLearningDecks)`.
+    func listLearningDecks(_ input: Operations.ListLearningDecks.Input) async throws -> Operations.ListLearningDecks.Output
+    /// Create or rerun a Learning Deck
+    ///
+    /// Create or rerun a Learning Deck from one supported source.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/post(createLearningDeck)`.
+    func createLearningDeck(_ input: Operations.CreateLearningDeck.Input) async throws -> Operations.CreateLearningDeck.Output
+    /// Get one Learning Deck
+    ///
+    /// Return one Learning Deck for the authenticated user.
+    ///
+    /// - Remark: HTTP `GET /api/learning/decks/{deck_id}`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/get(getLearningDeck)`.
+    func getLearningDeck(_ input: Operations.GetLearningDeck.Input) async throws -> Operations.GetLearningDeck.Output
+    /// Delete a Learning Deck
+    ///
+    /// Soft-delete a Learning Deck and remove known artifact objects.
+    ///
+    /// - Remark: HTTP `DELETE /api/learning/decks/{deck_id}`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/delete(deleteLearningDeck)`.
+    func deleteLearningDeck(_ input: Operations.DeleteLearningDeck.Input) async throws -> Operations.DeleteLearningDeck.Output
+    /// Enable public sharing for a Learning Deck
+    ///
+    /// Enable sharing and return the stable public URL.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks/{deck_id}/share`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/post(enableLearningDecksShare)`.
+    func enableLearningDecksShare(_ input: Operations.EnableLearningDecksShare.Input) async throws -> Operations.EnableLearningDecksShare.Output
+    /// Disable public sharing for a Learning Deck
+    ///
+    /// Disable public sharing for a Learning Deck.
+    ///
+    /// - Remark: HTTP `DELETE /api/learning/decks/{deck_id}/share`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/delete(disableLearningDecksShare)`.
+    func disableLearningDecksShare(_ input: Operations.DisableLearningDecksShare.Input) async throws -> Operations.DisableLearningDecksShare.Output
+    /// Create a short-lived private source-notes URL
+    ///
+    /// Return a short-lived URL for rendered source notes.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks/{deck_id}/source-notes-url`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/source-notes-url/post(createLearningDecksSourceNotesUrl)`.
+    func createLearningDecksSourceNotesUrl(_ input: Operations.CreateLearningDecksSourceNotesUrl.Input) async throws -> Operations.CreateLearningDecksSourceNotesUrl.Output
+    /// Create a short-lived private viewer URL
+    ///
+    /// Return a short-lived URL for opening the raw Reveal.js deck.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks/{deck_id}/viewer-url`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/viewer-url/post(createLearningDecksViewerUrl)`.
+    func createLearningDecksViewerUrl(_ input: Operations.CreateLearningDecksViewerUrl.Input) async throws -> Operations.CreateLearningDecksViewerUrl.Output
     /// List visible news items
     ///
     /// Return the visible representative news feed for the current user.
@@ -1685,8 +1741,14 @@ extension APIProtocol {
     ///
     /// - Remark: HTTP `GET /api/content/scrapers/`.
     /// - Remark: Generated from `#/paths//api/content/scrapers//get(listContentScraperConfigs)`.
-    internal func listContentScraperConfigs(headers: Operations.ListContentScraperConfigs.Input.Headers = .init()) async throws -> Operations.ListContentScraperConfigs.Output {
-        try await listContentScraperConfigs(Operations.ListContentScraperConfigs.Input(headers: headers))
+    internal func listContentScraperConfigs(
+        query: Operations.ListContentScraperConfigs.Input.Query = .init(),
+        headers: Operations.ListContentScraperConfigs.Input.Headers = .init()
+    ) async throws -> Operations.ListContentScraperConfigs.Output {
+        try await listContentScraperConfigs(Operations.ListContentScraperConfigs.Input(
+            query: query,
+            headers: headers
+        ))
     }
     /// Create Scraper Config
     ///
@@ -2277,6 +2339,120 @@ extension APIProtocol {
             headers: headers
         ))
     }
+    /// List current user's Learning Decks
+    ///
+    /// Return current Learning Decks for the authenticated user.
+    ///
+    /// - Remark: HTTP `GET /api/learning/decks`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/get(listLearningDecks)`.
+    internal func listLearningDecks(headers: Operations.ListLearningDecks.Input.Headers = .init()) async throws -> Operations.ListLearningDecks.Output {
+        try await listLearningDecks(Operations.ListLearningDecks.Input(headers: headers))
+    }
+    /// Create or rerun a Learning Deck
+    ///
+    /// Create or rerun a Learning Deck from one supported source.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/post(createLearningDeck)`.
+    internal func createLearningDeck(
+        headers: Operations.CreateLearningDeck.Input.Headers = .init(),
+        body: Operations.CreateLearningDeck.Input.Body
+    ) async throws -> Operations.CreateLearningDeck.Output {
+        try await createLearningDeck(Operations.CreateLearningDeck.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// Get one Learning Deck
+    ///
+    /// Return one Learning Deck for the authenticated user.
+    ///
+    /// - Remark: HTTP `GET /api/learning/decks/{deck_id}`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/get(getLearningDeck)`.
+    internal func getLearningDeck(
+        path: Operations.GetLearningDeck.Input.Path,
+        headers: Operations.GetLearningDeck.Input.Headers = .init()
+    ) async throws -> Operations.GetLearningDeck.Output {
+        try await getLearningDeck(Operations.GetLearningDeck.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// Delete a Learning Deck
+    ///
+    /// Soft-delete a Learning Deck and remove known artifact objects.
+    ///
+    /// - Remark: HTTP `DELETE /api/learning/decks/{deck_id}`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/delete(deleteLearningDeck)`.
+    internal func deleteLearningDeck(
+        path: Operations.DeleteLearningDeck.Input.Path,
+        headers: Operations.DeleteLearningDeck.Input.Headers = .init()
+    ) async throws -> Operations.DeleteLearningDeck.Output {
+        try await deleteLearningDeck(Operations.DeleteLearningDeck.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// Enable public sharing for a Learning Deck
+    ///
+    /// Enable sharing and return the stable public URL.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks/{deck_id}/share`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/post(enableLearningDecksShare)`.
+    internal func enableLearningDecksShare(
+        path: Operations.EnableLearningDecksShare.Input.Path,
+        headers: Operations.EnableLearningDecksShare.Input.Headers = .init()
+    ) async throws -> Operations.EnableLearningDecksShare.Output {
+        try await enableLearningDecksShare(Operations.EnableLearningDecksShare.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// Disable public sharing for a Learning Deck
+    ///
+    /// Disable public sharing for a Learning Deck.
+    ///
+    /// - Remark: HTTP `DELETE /api/learning/decks/{deck_id}/share`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/delete(disableLearningDecksShare)`.
+    internal func disableLearningDecksShare(
+        path: Operations.DisableLearningDecksShare.Input.Path,
+        headers: Operations.DisableLearningDecksShare.Input.Headers = .init()
+    ) async throws -> Operations.DisableLearningDecksShare.Output {
+        try await disableLearningDecksShare(Operations.DisableLearningDecksShare.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// Create a short-lived private source-notes URL
+    ///
+    /// Return a short-lived URL for rendered source notes.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks/{deck_id}/source-notes-url`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/source-notes-url/post(createLearningDecksSourceNotesUrl)`.
+    internal func createLearningDecksSourceNotesUrl(
+        path: Operations.CreateLearningDecksSourceNotesUrl.Input.Path,
+        headers: Operations.CreateLearningDecksSourceNotesUrl.Input.Headers = .init()
+    ) async throws -> Operations.CreateLearningDecksSourceNotesUrl.Output {
+        try await createLearningDecksSourceNotesUrl(Operations.CreateLearningDecksSourceNotesUrl.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// Create a short-lived private viewer URL
+    ///
+    /// Return a short-lived URL for opening the raw Reveal.js deck.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks/{deck_id}/viewer-url`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/viewer-url/post(createLearningDecksViewerUrl)`.
+    internal func createLearningDecksViewerUrl(
+        path: Operations.CreateLearningDecksViewerUrl.Input.Path,
+        headers: Operations.CreateLearningDecksViewerUrl.Input.Headers = .init()
+    ) async throws -> Operations.CreateLearningDecksViewerUrl.Output {
+        try await createLearningDecksViewerUrl(Operations.CreateLearningDecksViewerUrl.Input(
+            path: path,
+            headers: headers
+        ))
+    }
     /// List visible news items
     ///
     /// Return the visible representative news feed for the current user.
@@ -2530,8 +2706,14 @@ extension APIProtocol {
     ///
     /// - Remark: HTTP `GET /api/scrapers/`.
     /// - Remark: Generated from `#/paths//api/scrapers//get(listScraperConfigs)`.
-    internal func listScraperConfigs(headers: Operations.ListScraperConfigs.Input.Headers = .init()) async throws -> Operations.ListScraperConfigs.Output {
-        try await listScraperConfigs(Operations.ListScraperConfigs.Input(headers: headers))
+    internal func listScraperConfigs(
+        query: Operations.ListScraperConfigs.Input.Query = .init(),
+        headers: Operations.ListScraperConfigs.Input.Headers = .init()
+    ) async throws -> Operations.ListScraperConfigs.Output {
+        try await listScraperConfigs(Operations.ListScraperConfigs.Input(
+            query: query,
+            headers: headers
+        ))
     }
     /// Create Scraper Config
     ///
@@ -5556,6 +5738,245 @@ internal enum Components {
             case cerebras = "cerebras"
             case openrouter = "openrouter"
             case deepResearch = "deep_research"
+        }
+        /// Create or rerun a Learning Deck from one source.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckCreateRequest`.
+        internal struct LearningDeckCreateRequest: Codable, Hashable, Sendable {
+            /// Creates a new `LearningDeckCreateRequest`.
+            internal init() {}
+        }
+        /// List response for current user's Learning Decks.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckListResponse`.
+        internal struct LearningDeckListResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/LearningDeckListResponse/decks`.
+            internal var decks: [Components.Schemas.LearningDeckResponse]?
+            /// Creates a new `LearningDeckListResponse`.
+            ///
+            /// - Parameters:
+            ///   - decks:
+            internal init(decks: [Components.Schemas.LearningDeckResponse]? = nil) {
+                self.decks = decks
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case decks
+            }
+        }
+        /// Client-visible Learning Deck state.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckResponse`.
+        internal struct LearningDeckResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/LearningDeckResponse/created_at`.
+            internal var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/LearningDeckResponse/id`.
+            internal var id: Swift.Int
+            /// - Remark: Generated from `#/components/schemas/LearningDeckResponse/share_enabled`.
+            internal var shareEnabled: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/LearningDeckResponse/source_kind`.
+            internal var sourceKind: Components.Schemas.LearningDeckSourceKind
+            /// - Remark: Generated from `#/components/schemas/LearningDeckResponse/source_metadata`.
+            internal struct SourceMetadataPayload: Codable, Hashable, Sendable {
+                /// A container of undocumented properties.
+                internal var additionalProperties: OpenAPIRuntime.OpenAPIObjectContainer
+                /// Creates a new `SourceMetadataPayload`.
+                ///
+                /// - Parameters:
+                ///   - additionalProperties: A container of undocumented properties.
+                internal init(additionalProperties: OpenAPIRuntime.OpenAPIObjectContainer = .init()) {
+                    self.additionalProperties = additionalProperties
+                }
+                internal init(from decoder: any Decoder) throws {
+                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                }
+                internal func encode(to encoder: any Encoder) throws {
+                    try encoder.encodeAdditionalProperties(additionalProperties)
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/LearningDeckResponse/source_metadata`.
+            internal var sourceMetadata: Components.Schemas.LearningDeckResponse.SourceMetadataPayload?
+            /// - Remark: Generated from `#/components/schemas/LearningDeckResponse/source_notes_available`.
+            internal var sourceNotesAvailable: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/LearningDeckResponse/title`.
+            internal var title: Swift.String
+            /// - Remark: Generated from `#/components/schemas/LearningDeckResponse/viewer_available`.
+            internal var viewerAvailable: Swift.Bool?
+            /// Creates a new `LearningDeckResponse`.
+            ///
+            /// - Parameters:
+            ///   - createdAt:
+            ///   - id:
+            ///   - shareEnabled:
+            ///   - sourceKind:
+            ///   - sourceMetadata:
+            ///   - sourceNotesAvailable:
+            ///   - title:
+            ///   - viewerAvailable:
+            internal init(
+                createdAt: Foundation.Date,
+                id: Swift.Int,
+                shareEnabled: Swift.Bool? = nil,
+                sourceKind: Components.Schemas.LearningDeckSourceKind,
+                sourceMetadata: Components.Schemas.LearningDeckResponse.SourceMetadataPayload? = nil,
+                sourceNotesAvailable: Swift.Bool? = nil,
+                title: Swift.String,
+                viewerAvailable: Swift.Bool? = nil
+            ) {
+                self.createdAt = createdAt
+                self.id = id
+                self.shareEnabled = shareEnabled
+                self.sourceKind = sourceKind
+                self.sourceMetadata = sourceMetadata
+                self.sourceNotesAvailable = sourceNotesAvailable
+                self.title = title
+                self.viewerAvailable = viewerAvailable
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case createdAt = "created_at"
+                case id
+                case shareEnabled = "share_enabled"
+                case sourceKind = "source_kind"
+                case sourceMetadata = "source_metadata"
+                case sourceNotesAvailable = "source_notes_available"
+                case title
+                case viewerAvailable = "viewer_available"
+            }
+        }
+        /// Client-visible generation attempt state.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckRunResponse`.
+        internal struct LearningDeckRunResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/LearningDeckRunResponse/created_at`.
+            internal var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/LearningDeckRunResponse/id`.
+            internal var id: Swift.Int
+            /// - Remark: Generated from `#/components/schemas/LearningDeckRunResponse/status`.
+            internal var status: Components.Schemas.LearningDeckRunStatus
+            /// - Remark: Generated from `#/components/schemas/LearningDeckRunResponse/timeline`.
+            internal var timeline: [Components.Schemas.LearningDeckTimelineEntry]?
+            /// Creates a new `LearningDeckRunResponse`.
+            ///
+            /// - Parameters:
+            ///   - createdAt:
+            ///   - id:
+            ///   - status:
+            ///   - timeline:
+            internal init(
+                createdAt: Foundation.Date,
+                id: Swift.Int,
+                status: Components.Schemas.LearningDeckRunStatus,
+                timeline: [Components.Schemas.LearningDeckTimelineEntry]? = nil
+            ) {
+                self.createdAt = createdAt
+                self.id = id
+                self.status = status
+                self.timeline = timeline
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case createdAt = "created_at"
+                case id
+                case status
+                case timeline
+            }
+        }
+        /// Lifecycle statuses for one Learning Deck generation run.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckRunStatus`.
+        internal enum LearningDeckRunStatus: String, Codable, Hashable, Sendable, CaseIterable {
+            case queued = "queued"
+            case preparing = "preparing"
+            case generating = "generating"
+            case validating = "validating"
+            case publishing = "publishing"
+            case completed = "completed"
+            case failed = "failed"
+            case cancelled = "cancelled"
+        }
+        /// Share state and stable public URL for one deck.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckShareResponse`.
+        internal struct LearningDeckShareResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/LearningDeckShareResponse/share_enabled`.
+            internal var shareEnabled: Swift.Bool
+            /// Creates a new `LearningDeckShareResponse`.
+            ///
+            /// - Parameters:
+            ///   - shareEnabled:
+            internal init(shareEnabled: Swift.Bool) {
+                self.shareEnabled = shareEnabled
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case shareEnabled = "share_enabled"
+            }
+        }
+        /// Supported source kinds for Learning Deck generation.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckSourceKind`.
+        internal enum LearningDeckSourceKind: String, Codable, Hashable, Sendable, CaseIterable {
+            case content = "content"
+            case githubRepo = "github_repo"
+        }
+        /// Client-facing Learning Deck status values.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckStatus`.
+        internal enum LearningDeckStatus: String, Codable, Hashable, Sendable, CaseIterable {
+            case ready = "ready"
+            case queued = "queued"
+            case preparing = "preparing"
+            case generating = "generating"
+            case validating = "validating"
+            case publishing = "publishing"
+            case completed = "completed"
+            case failed = "failed"
+            case cancelled = "cancelled"
+        }
+        /// One coarse user-visible generation note.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckTimelineEntry`.
+        internal struct LearningDeckTimelineEntry: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/LearningDeckTimelineEntry/created_at`.
+            internal var createdAt: Foundation.Date
+            /// - Remark: Generated from `#/components/schemas/LearningDeckTimelineEntry/note`.
+            internal var note: Swift.String
+            /// - Remark: Generated from `#/components/schemas/LearningDeckTimelineEntry/status`.
+            internal var status: Components.Schemas.LearningDeckRunStatus
+            /// Creates a new `LearningDeckTimelineEntry`.
+            ///
+            /// - Parameters:
+            ///   - createdAt:
+            ///   - note:
+            ///   - status:
+            internal init(
+                createdAt: Foundation.Date,
+                note: Swift.String,
+                status: Components.Schemas.LearningDeckRunStatus
+            ) {
+                self.createdAt = createdAt
+                self.note = note
+                self.status = status
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case createdAt = "created_at"
+                case note
+                case status
+            }
+        }
+        /// A URL the client can open in Safari.
+        ///
+        /// - Remark: Generated from `#/components/schemas/LearningDeckUrlResponse`.
+        internal struct LearningDeckUrlResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/LearningDeckUrlResponse/url`.
+            internal var url: Swift.String
+            /// Creates a new `LearningDeckUrlResponse`.
+            ///
+            /// - Parameters:
+            ///   - url:
+            internal init(url: Swift.String) {
+                self.url = url
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case url
+            }
         }
         /// Response containing unread long-form count for a user.
         ///
@@ -17726,6 +18147,19 @@ internal enum Operations {
     internal enum ListContentScraperConfigs {
         internal static let id: Swift.String = "listContentScraperConfigs"
         internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/content/scrapers/GET/query`.
+            internal struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/scrapers/GET/query/include_stats`.
+                internal var includeStats: Swift.Bool?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - includeStats:
+                internal init(includeStats: Swift.Bool? = nil) {
+                    self.includeStats = includeStats
+                }
+            }
+            internal var query: Operations.ListContentScraperConfigs.Input.Query
             /// - Remark: Generated from `#/paths/api/content/scrapers/GET/header`.
             internal struct Headers: Sendable, Hashable {
                 internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListContentScraperConfigs.AcceptableContentType>]
@@ -17741,8 +18175,13 @@ internal enum Operations {
             /// Creates a new `Input`.
             ///
             /// - Parameters:
+            ///   - query:
             ///   - headers:
-            internal init(headers: Operations.ListContentScraperConfigs.Input.Headers = .init()) {
+            internal init(
+                query: Operations.ListContentScraperConfigs.Input.Query = .init(),
+                headers: Operations.ListContentScraperConfigs.Input.Headers = .init()
+            ) {
+                self.query = query
                 self.headers = headers
             }
         }
@@ -26522,6 +26961,1362 @@ internal enum Operations {
             }
         }
     }
+    /// List current user's Learning Decks
+    ///
+    /// Return current Learning Decks for the authenticated user.
+    ///
+    /// - Remark: HTTP `GET /api/learning/decks`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/get(listLearningDecks)`.
+    internal enum ListLearningDecks {
+        internal static let id: Swift.String = "listLearningDecks"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/learning/decks/GET/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListLearningDecks.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListLearningDecks.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.ListLearningDecks.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            internal init(headers: Operations.ListLearningDecks.Input.Headers = .init()) {
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/GET/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/GET/responses/200/content/application\/json`.
+                    case json(Components.Schemas.LearningDeckListResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.LearningDeckListResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.ListLearningDecks.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.ListLearningDecks.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/get(listLearningDecks)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.ListLearningDecks.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.ListLearningDecks.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Create or rerun a Learning Deck
+    ///
+    /// Create or rerun a Learning Deck from one supported source.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/post(createLearningDeck)`.
+    internal enum CreateLearningDeck {
+        internal static let id: Swift.String = "createLearningDeck"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/learning/decks/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateLearningDeck.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateLearningDeck.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.CreateLearningDeck.Input.Headers
+            /// - Remark: Generated from `#/paths/api/learning/decks/POST/requestBody`.
+            internal enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.LearningDeckCreateRequest)
+            }
+            internal var body: Operations.CreateLearningDeck.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            internal init(
+                headers: Operations.CreateLearningDeck.Input.Headers = .init(),
+                body: Operations.CreateLearningDeck.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Accepted: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/POST/responses/202/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/POST/responses/202/content/application\/json`.
+                    case json(Components.Schemas.LearningDeckResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.LearningDeckResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateLearningDeck.Output.Accepted.Body
+                /// Creates a new `Accepted`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateLearningDeck.Output.Accepted.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/post(createLearningDeck)/responses/202`.
+            ///
+            /// HTTP response code: `202 accepted`.
+            case accepted(Operations.CreateLearningDeck.Output.Accepted)
+            /// The associated value of the enum case if `self` is `.accepted`.
+            ///
+            /// - Throws: An error if `self` is not `.accepted`.
+            /// - SeeAlso: `.accepted`.
+            internal var accepted: Operations.CreateLearningDeck.Output.Accepted {
+                get throws {
+                    switch self {
+                    case let .accepted(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "accepted",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/POST/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/POST/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateLearningDeck.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateLearningDeck.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/post(createLearningDeck)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.CreateLearningDeck.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.CreateLearningDeck.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Get one Learning Deck
+    ///
+    /// Return one Learning Deck for the authenticated user.
+    ///
+    /// - Remark: HTTP `GET /api/learning/decks/{deck_id}`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/get(getLearningDeck)`.
+    internal enum GetLearningDeck {
+        internal static let id: Swift.String = "getLearningDeck"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/GET/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/GET/path/deck_id`.
+                internal var deckId: Swift.Int
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - deckId:
+                internal init(deckId: Swift.Int) {
+                    self.deckId = deckId
+                }
+            }
+            internal var path: Operations.GetLearningDeck.Input.Path
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/GET/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetLearningDeck.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.GetLearningDeck.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.GetLearningDeck.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            internal init(
+                path: Operations.GetLearningDeck.Input.Path,
+                headers: Operations.GetLearningDeck.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/GET/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/GET/responses/200/content/application\/json`.
+                    case json(Components.Schemas.LearningDeckResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.LearningDeckResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.GetLearningDeck.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.GetLearningDeck.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/get(getLearningDeck)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.GetLearningDeck.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.GetLearningDeck.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/GET/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/GET/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.GetLearningDeck.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.GetLearningDeck.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/get(getLearningDeck)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.GetLearningDeck.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.GetLearningDeck.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Delete a Learning Deck
+    ///
+    /// Soft-delete a Learning Deck and remove known artifact objects.
+    ///
+    /// - Remark: HTTP `DELETE /api/learning/decks/{deck_id}`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/delete(deleteLearningDeck)`.
+    internal enum DeleteLearningDeck {
+        internal static let id: Swift.String = "deleteLearningDeck"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/DELETE/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/DELETE/path/deck_id`.
+                internal var deckId: Swift.Int
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - deckId:
+                internal init(deckId: Swift.Int) {
+                    self.deckId = deckId
+                }
+            }
+            internal var path: Operations.DeleteLearningDeck.Input.Path
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/DELETE/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DeleteLearningDeck.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DeleteLearningDeck.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.DeleteLearningDeck.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            internal init(
+                path: Operations.DeleteLearningDeck.Input.Path,
+                headers: Operations.DeleteLearningDeck.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct NoContent: Sendable, Hashable {
+                /// Creates a new `NoContent`.
+                internal init() {}
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/delete(deleteLearningDeck)/responses/204`.
+            ///
+            /// HTTP response code: `204 noContent`.
+            case noContent(Operations.DeleteLearningDeck.Output.NoContent)
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/delete(deleteLearningDeck)/responses/204`.
+            ///
+            /// HTTP response code: `204 noContent`.
+            internal static var noContent: Self {
+                .noContent(.init())
+            }
+            /// The associated value of the enum case if `self` is `.noContent`.
+            ///
+            /// - Throws: An error if `self` is not `.noContent`.
+            /// - SeeAlso: `.noContent`.
+            internal var noContent: Operations.DeleteLearningDeck.Output.NoContent {
+                get throws {
+                    switch self {
+                    case let .noContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "noContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/DELETE/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/DELETE/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.DeleteLearningDeck.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.DeleteLearningDeck.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/delete(deleteLearningDeck)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.DeleteLearningDeck.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.DeleteLearningDeck.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Enable public sharing for a Learning Deck
+    ///
+    /// Enable sharing and return the stable public URL.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks/{deck_id}/share`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/post(enableLearningDecksShare)`.
+    internal enum EnableLearningDecksShare {
+        internal static let id: Swift.String = "enableLearningDecksShare"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/POST/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/POST/path/deck_id`.
+                internal var deckId: Swift.Int
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - deckId:
+                internal init(deckId: Swift.Int) {
+                    self.deckId = deckId
+                }
+            }
+            internal var path: Operations.EnableLearningDecksShare.Input.Path
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.EnableLearningDecksShare.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.EnableLearningDecksShare.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.EnableLearningDecksShare.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            internal init(
+                path: Operations.EnableLearningDecksShare.Input.Path,
+                headers: Operations.EnableLearningDecksShare.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/POST/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.LearningDeckShareResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.LearningDeckShareResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.EnableLearningDecksShare.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.EnableLearningDecksShare.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/post(enableLearningDecksShare)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.EnableLearningDecksShare.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.EnableLearningDecksShare.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/POST/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/POST/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.EnableLearningDecksShare.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.EnableLearningDecksShare.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/post(enableLearningDecksShare)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.EnableLearningDecksShare.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.EnableLearningDecksShare.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Disable public sharing for a Learning Deck
+    ///
+    /// Disable public sharing for a Learning Deck.
+    ///
+    /// - Remark: HTTP `DELETE /api/learning/decks/{deck_id}/share`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/delete(disableLearningDecksShare)`.
+    internal enum DisableLearningDecksShare {
+        internal static let id: Swift.String = "disableLearningDecksShare"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/DELETE/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/DELETE/path/deck_id`.
+                internal var deckId: Swift.Int
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - deckId:
+                internal init(deckId: Swift.Int) {
+                    self.deckId = deckId
+                }
+            }
+            internal var path: Operations.DisableLearningDecksShare.Input.Path
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/DELETE/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DisableLearningDecksShare.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DisableLearningDecksShare.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.DisableLearningDecksShare.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            internal init(
+                path: Operations.DisableLearningDecksShare.Input.Path,
+                headers: Operations.DisableLearningDecksShare.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/DELETE/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/DELETE/responses/200/content/application\/json`.
+                    case json(Components.Schemas.LearningDeckShareResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.LearningDeckShareResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.DisableLearningDecksShare.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.DisableLearningDecksShare.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/delete(disableLearningDecksShare)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.DisableLearningDecksShare.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.DisableLearningDecksShare.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/DELETE/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/share/DELETE/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.DisableLearningDecksShare.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.DisableLearningDecksShare.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/share/delete(disableLearningDecksShare)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.DisableLearningDecksShare.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.DisableLearningDecksShare.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Create a short-lived private source-notes URL
+    ///
+    /// Return a short-lived URL for rendered source notes.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks/{deck_id}/source-notes-url`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/source-notes-url/post(createLearningDecksSourceNotesUrl)`.
+    internal enum CreateLearningDecksSourceNotesUrl {
+        internal static let id: Swift.String = "createLearningDecksSourceNotesUrl"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/source-notes-url/POST/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/source-notes-url/POST/path/deck_id`.
+                internal var deckId: Swift.Int
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - deckId:
+                internal init(deckId: Swift.Int) {
+                    self.deckId = deckId
+                }
+            }
+            internal var path: Operations.CreateLearningDecksSourceNotesUrl.Input.Path
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/source-notes-url/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateLearningDecksSourceNotesUrl.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateLearningDecksSourceNotesUrl.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.CreateLearningDecksSourceNotesUrl.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            internal init(
+                path: Operations.CreateLearningDecksSourceNotesUrl.Input.Path,
+                headers: Operations.CreateLearningDecksSourceNotesUrl.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/source-notes-url/POST/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/source-notes-url/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.LearningDeckUrlResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.LearningDeckUrlResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateLearningDecksSourceNotesUrl.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateLearningDecksSourceNotesUrl.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/source-notes-url/post(createLearningDecksSourceNotesUrl)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.CreateLearningDecksSourceNotesUrl.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.CreateLearningDecksSourceNotesUrl.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/source-notes-url/POST/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/source-notes-url/POST/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateLearningDecksSourceNotesUrl.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateLearningDecksSourceNotesUrl.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/source-notes-url/post(createLearningDecksSourceNotesUrl)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.CreateLearningDecksSourceNotesUrl.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.CreateLearningDecksSourceNotesUrl.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Create a short-lived private viewer URL
+    ///
+    /// Return a short-lived URL for opening the raw Reveal.js deck.
+    ///
+    /// - Remark: HTTP `POST /api/learning/decks/{deck_id}/viewer-url`.
+    /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/viewer-url/post(createLearningDecksViewerUrl)`.
+    internal enum CreateLearningDecksViewerUrl {
+        internal static let id: Swift.String = "createLearningDecksViewerUrl"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/viewer-url/POST/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/viewer-url/POST/path/deck_id`.
+                internal var deckId: Swift.Int
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - deckId:
+                internal init(deckId: Swift.Int) {
+                    self.deckId = deckId
+                }
+            }
+            internal var path: Operations.CreateLearningDecksViewerUrl.Input.Path
+            /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/viewer-url/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateLearningDecksViewerUrl.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateLearningDecksViewerUrl.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.CreateLearningDecksViewerUrl.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            internal init(
+                path: Operations.CreateLearningDecksViewerUrl.Input.Path,
+                headers: Operations.CreateLearningDecksViewerUrl.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/viewer-url/POST/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/viewer-url/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.LearningDeckUrlResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.LearningDeckUrlResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateLearningDecksViewerUrl.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateLearningDecksViewerUrl.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/viewer-url/post(createLearningDecksViewerUrl)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.CreateLearningDecksViewerUrl.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.CreateLearningDecksViewerUrl.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/viewer-url/POST/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/learning/decks/{deck_id}/viewer-url/POST/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.CreateLearningDecksViewerUrl.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.CreateLearningDecksViewerUrl.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/learning/decks/{deck_id}/viewer-url/post(createLearningDecksViewerUrl)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.CreateLearningDecksViewerUrl.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.CreateLearningDecksViewerUrl.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
     /// List visible news items
     ///
     /// Return the visible representative news feed for the current user.
@@ -29768,6 +31563,19 @@ internal enum Operations {
     internal enum ListScraperConfigs {
         internal static let id: Swift.String = "listScraperConfigs"
         internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/scrapers/GET/query`.
+            internal struct Query: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/scrapers/GET/query/include_stats`.
+                internal var includeStats: Swift.Bool?
+                /// Creates a new `Query`.
+                ///
+                /// - Parameters:
+                ///   - includeStats:
+                internal init(includeStats: Swift.Bool? = nil) {
+                    self.includeStats = includeStats
+                }
+            }
+            internal var query: Operations.ListScraperConfigs.Input.Query
             /// - Remark: Generated from `#/paths/api/scrapers/GET/header`.
             internal struct Headers: Sendable, Hashable {
                 internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.ListScraperConfigs.AcceptableContentType>]
@@ -29783,8 +31591,13 @@ internal enum Operations {
             /// Creates a new `Input`.
             ///
             /// - Parameters:
+            ///   - query:
             ///   - headers:
-            internal init(headers: Operations.ListScraperConfigs.Input.Headers = .init()) {
+            internal init(
+                query: Operations.ListScraperConfigs.Input.Query = .init(),
+                headers: Operations.ListScraperConfigs.Input.Headers = .init()
+            ) {
+                self.query = query
                 self.headers = headers
             }
         }

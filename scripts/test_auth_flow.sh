@@ -90,7 +90,7 @@ python -c "
 import sys
 sys.path.insert(0, '.')
 from app.core.db import get_engine, get_session_factory, Base
-from app.models.user import User
+from app.models.db.users import User
 
 engine = get_engine()
 Base.metadata.create_all(bind=engine)

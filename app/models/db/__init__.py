@@ -21,6 +21,7 @@ from app.models.db.integrations import (
     UserIntegrationSyncedItem,
     UserIntegrationSyncState,
 )
+from app.models.db.learning_deck import LearningDeck, LearningDeckRun
 from app.models.db.news import NewsItem, NewsItemDiscussion, NewsItemReadStatus
 from app.models.db.onboarding import (
     OnboardingDiscoveryLane,

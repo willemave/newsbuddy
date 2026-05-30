@@ -35,10 +35,6 @@ struct NarrationPlaybackControlRow: View {
         .padding(.vertical, 7)
         .background(Color.surfacePrimary.opacity(0.65))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.outlineVariant.opacity(0.25), lineWidth: 1)
-        }
     }
 
     private var horizontalControls: some View {

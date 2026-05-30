@@ -9,6 +9,11 @@ from app.models.metadata.news import (
     NewsMetadata,
 )
 from app.models.metadata.podcasts import PodcastMetadata
+from app.models.metadata.source import (
+    SourceMetadataAuthor,
+    SourceMetadataCategory,
+    SourceMetadataEnvelope,
+)
 from app.models.metadata.summaries import *
 from app.models.metadata.validation import validate_content_metadata
 

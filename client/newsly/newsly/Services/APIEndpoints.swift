@@ -153,4 +153,19 @@ enum APIEndpoints {
         return "/api/content/chat/messages/\(messageId)/status"
     }
     static let assistantTurns = "/api/content/chat/assistant/turns"
+
+    // MARK: - Learning Deck Endpoints
+    static let learningDecks = "/api/learning/decks"
+    static func learningDeck(id: Int) -> String {
+        return "/api/learning/decks/\(id)"
+    }
+    static func learningDeckViewerURL(id: Int) -> String {
+        return "/api/learning/decks/\(id)/viewer-url"
+    }
+    static func learningDeckSourceNotesURL(id: Int) -> String {
+        return "/api/learning/decks/\(id)/source-notes-url"
+    }
+    static func learningDeckShare(id: Int) -> String {
+        return "/api/learning/decks/\(id)/share"
+    }
 }
