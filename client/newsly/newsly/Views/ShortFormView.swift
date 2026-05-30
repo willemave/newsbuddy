@@ -127,7 +127,10 @@ struct ShortFormView: View {
                 }
             }
             .scrollTargetLayout()
+            .background(Color.surfacePrimary)
         }
+        .scrollIndicators(.hidden)
+        .background(Color.surfacePrimary.ignoresSafeArea())
         .accessibilityIdentifier("short.screen")
         .screenContainer()
         .onScrollTargetVisibilityChange(idType: Int.self) { visibleIds in
@@ -534,6 +537,7 @@ private struct ShortNewsRow: View, Equatable {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Spacing.rowHorizontal)
         .padding(.vertical, 14)
+        .background(Color.surfacePrimary)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.borderSubtle.opacity(0.48))
@@ -619,5 +623,6 @@ private struct DayDelimiter: View, Equatable {
         .padding(.horizontal, Spacing.rowHorizontal)
         .padding(.top, isFirst ? 12 : 20)
         .padding(.bottom, 7)
+        .background(Color.surfacePrimary)
     }
 }
