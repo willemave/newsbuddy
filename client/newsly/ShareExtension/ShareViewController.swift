@@ -10,12 +10,15 @@ import UniformTypeIdentifiers
 
 fileprivate enum LinkHandlingMode: String, CaseIterable {
     case addContent
+    case createLearningDeck
     case addLinks
     case addFeed
     case chat
 
     var title: String {
         switch self {
+        case .createLearningDeck:
+            return "Create learning deck"
         case .addContent:
             return "Add content"
         case .addLinks:
@@ -29,6 +32,8 @@ fileprivate enum LinkHandlingMode: String, CaseIterable {
 
     var description: String {
         switch self {
+        case .createLearningDeck:
+            return "Save to Knowledge, skip Long Read, and generate a Learning Deck."
         case .addContent:
             return "Summarize the shared page in Newsbuddy."
         case .addLinks:
@@ -47,6 +52,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     private var linkHandlingMode: LinkHandlingMode = .addContent
     private var optionViews: [LinkHandlingMode: OptionRowView] = [:]
 
+    private let scrollView = UIScrollView()
     private let contentStack = UIStackView()
     private let titleLabel = UILabel()
     private let optionsStack = UIStackView()
@@ -126,13 +132,22 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         contentStack.addArrangedSubview(chatPromptStack)
         contentStack.addArrangedSubview(submitButton)
 
-        view.addSubview(contentStack)
+        scrollView.alwaysBounceVertical = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scrollView)
+        scrollView.addSubview(contentStack)
 
         NSLayoutConstraint.activate([
-            contentStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            contentStack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            contentStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+
+            contentStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 16),
+            contentStack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 16),
+            contentStack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -16),
+            contentStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -16),
+            contentStack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -32),
         ])
     }
 
@@ -297,6 +312,13 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }
 
     private func updateBookmarkOnlyToggleAvailability() {
+        bookmarkOnlyToggleView.isHidden = linkHandlingMode == .createLearningDeck
+        if linkHandlingMode == .createLearningDeck {
+            bookmarkOnlyToggleView.isOn = true
+            bookmarkOnlyToggleView.isEnabled = false
+            return
+        }
+
         if linkHandlingMode == .chat {
             bookmarkOnlyToggleView.isOn = true
             bookmarkOnlyToggleView.isEnabled = false
@@ -312,7 +334,15 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
     private func updateSubmitButtonTitle() {
         var configuration = submitButton.configuration ?? UIButton.Configuration.filled()
-        let title = linkHandlingMode == .chat ? "Start chat" : "Submit"
+        let title: String
+        switch linkHandlingMode {
+        case .createLearningDeck:
+            title = "Create deck"
+        case .chat:
+            title = "Start chat"
+        case .addContent, .addLinks, .addFeed:
+            title = "Submit"
+        }
         configuration.title = title
         submitButton.configuration = configuration
         keyboardSubmitButton.title = title
@@ -321,6 +351,11 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     // MARK: - API Submission
 
     private func submitURL(_ url: URL) async throws {
+        if linkHandlingMode == .createLearningDeck {
+            try await createLearningDeck(from: url)
+            return
+        }
+
         let handler = ShareURLRouting.handler(for: url)
         let shouldStartChat = linkHandlingMode == .chat
         var body: [String: Any] = [
@@ -341,6 +376,41 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         do {
             try await APIClient.shared.requestVoid(
                 "/api/content/submit",
+                method: "POST",
+                body: requestBody
+            )
+        } catch let error as APIError {
+            switch error {
+            case .unauthorized:
+                throw ShareError.notAuthenticated
+            case .invalidURL:
+                throw ShareError.invalidURL
+            case .networkError(let underlying):
+                throw ShareError.networkError(underlying.localizedDescription)
+            case .httpError(let statusCode, let detail):
+                if let message = detail?.trimmingCharacters(in: .whitespacesAndNewlines), !message.isEmpty {
+                    throw ShareError.serverError(message)
+                }
+                throw ShareError.serverError("Request failed with status \(statusCode)")
+            case .decodingError(let underlying):
+                throw ShareError.serverError(underlying.localizedDescription)
+            case .noData, .unknown:
+                throw ShareError.invalidResponse
+            }
+        } catch {
+            throw ShareError.serverError(error.localizedDescription)
+        }
+    }
+
+    private func createLearningDeck(from url: URL) async throws {
+        let body: [String: Any] = [
+            "url": url.absoluteString,
+        ]
+        let requestBody = try JSONSerialization.data(withJSONObject: body)
+
+        do {
+            try await APIClient.shared.requestVoid(
+                "/api/learning/decks",
                 method: "POST",
                 body: requestBody
             )

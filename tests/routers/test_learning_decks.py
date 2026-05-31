@@ -1,7 +1,14 @@
 from __future__ import annotations
 
-from app.models.contracts import ContentType, TaskType
-from app.models.db import LearningDeck, LearningDeckRun, ProcessingTask
+from app.models.contracts import ContentStatus, ContentType, TaskType
+from app.models.db import (
+    Content,
+    ContentKnowledgeSave,
+    ContentReadStatus,
+    LearningDeck,
+    LearningDeckRun,
+    ProcessingTask,
+)
 from app.services.gateways.object_storage_gateway import LocalObjectStorageGateway
 from tests.support.builders import create_content_status_entry_row
 
@@ -37,6 +44,49 @@ def test_create_learning_deck_endpoint_enqueues_generation(
     task = db_session.query(ProcessingTask).one()
     assert task.task_type == TaskType.GENERATE_LEARNING_DECK.value
     assert task.queue_name == "learning"
+
+
+def test_create_learning_deck_from_url_saves_to_knowledge_and_skips_unread_long_read(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    response = client.post(
+        "/api/learning/decks",
+        json={"url": "https://example.com/deck-source"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    source_content_id = payload["source_content_id"]
+    assert source_content_id is not None
+
+    source_content = db_session.query(Content).filter_by(id=source_content_id).one()
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=test_user.id, content_id=source_content_id)
+        .one_or_none()
+        is not None
+    )
+    assert (
+        db_session.query(ContentReadStatus)
+        .filter_by(user_id=test_user.id, content_id=source_content_id)
+        .one_or_none()
+        is not None
+    )
+
+    source_content.content_type = ContentType.ARTICLE.value
+    source_content.status = ContentStatus.COMPLETED.value
+    db_session.commit()
+
+    unread_long_read = client.get(
+        "/api/content/",
+        params={"content_type": ContentType.ARTICLE.value, "read_filter": "unread"},
+    )
+
+    assert unread_long_read.status_code == 200
+    unread_ids = {item["id"] for item in unread_long_read.json()["contents"]}
+    assert source_content_id not in unread_ids
 
 
 def test_private_viewer_url_requires_completed_deck(
