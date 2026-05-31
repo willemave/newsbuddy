@@ -211,7 +211,7 @@ struct KnowledgeView: View {
                 libraryButton(
                     title: "Saved",
                     systemImage: "books.vertical.fill",
-                    accent: .brandTertiary,
+                    accent: .brandPrimary,
                     action: {
                         onShowKnowledgeLibrary?()
                     }
@@ -230,7 +230,7 @@ struct KnowledgeView: View {
                 libraryButton(
                     title: "Learning Decks",
                     systemImage: "rectangle.stack.fill",
-                    accent: .brandSecondary,
+                    accent: .brandPrimary,
                     action: {
                         showLearningDeckList = true
                     }
@@ -387,17 +387,9 @@ struct KnowledgeView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 
-    private func actionColor(for id: HubActionID) -> Color {
-        switch id {
-        case .summary:
-            return .brandPrimary
-        case .topComments:
-            return .brandTertiary
-        case .findArticles:
-            return .brandSecondary
-        case .findFeeds:
-            return .brandSecondary
-        }
+    private func actionColor(for _: HubActionID) -> Color {
+        // Single accent across all hub actions.
+        .brandPrimary
     }
 
     private func startAction(_ action: HubAction) {

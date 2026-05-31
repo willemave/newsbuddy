@@ -155,7 +155,7 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             icon: "qrcode.viewfinder",
-                            iconColor: .brandSecondary,
+                            iconColor: .brandPrimary,
                             title: "Link CLI"
                         ) {
                             if isApprovingCLILink {
@@ -196,7 +196,7 @@ struct SettingsView: View {
             } label: {
                 SettingsRow(
                     icon: "bubble.left.and.bubble.right",
-                    iconColor: .brandSecondary,
+                    iconColor: .brandPrimary,
                     title: "Give Feedback"
                 ) {
                     NavigationChevron()
@@ -220,7 +220,7 @@ struct SettingsView: View {
                 } label: {
                     SettingsRow(
                         icon: "at",
-                        iconColor: .brandSecondary,
+                        iconColor: .brandPrimary,
                         title: "X / Twitter",
                         subtitle: xConnection?.settingsSubtitle
                     )
@@ -361,9 +361,9 @@ struct SettingsView: View {
         .accessibilityIdentifier("settings.council_section")
     }
 
-    private func expertColor(for index: Int) -> Color {
-        let colors: [Color] = [.brandPrimary, .brandSecondary, .brandTertiary]
-        return colors[index % colors.count]
+    private func expertColor(for _: Int) -> Color {
+        // Single accent across all council expert avatars.
+        .brandPrimary
     }
 
     private func addExpert() {
@@ -418,7 +418,7 @@ struct SettingsView: View {
         } label: {
             SettingsRow(
                 icon: "paintpalette",
-                iconColor: .brandSecondary,
+                iconColor: .brandPrimary,
                 title: "Color Theme",
                 subtitle: settings.readerPalette.displayName
             )
@@ -476,7 +476,7 @@ struct SettingsView: View {
                 } label: {
                     SettingsRow(
                         icon: "list.bullet.rectangle",
-                        iconColor: .brandSecondary,
+                        iconColor: .brandPrimary,
                         title: "Feed Sources"
                     )
                 }
@@ -489,7 +489,7 @@ struct SettingsView: View {
                 } label: {
                     SettingsRow(
                         icon: "waveform",
-                        iconColor: .brandSecondary,
+                        iconColor: .brandPrimary,
                         title: "Podcast Sources"
                     )
                 }
