@@ -26,26 +26,8 @@ struct LongformArtifactView: View {
 }
 
 private extension LongformArtifactEnvelope {
-    var detailAccent: Color {
-        switch artifact.type {
-        case "argument":
-            return .terracottaPrimary
-        case "mental_model":
-            return .summarySecondaryAccent
-        case "playbook":
-            return .summarySecondaryAccent
-        case "portrait":
-            return .summaryQuestionAccent
-        case "briefing":
-            return .terracottaDark
-        case "walkthrough":
-            return .summaryQuestionAccent
-        case "findings":
-            return .summaryCounterpointAccent
-        default:
-            return .terracottaPrimary
-        }
-    }
+    // Single accent across all artifact types; section text stays neutral.
+    var detailAccent: Color { .brandPrimary }
 }
 
 private struct ArtifactScaffold: View {
@@ -189,7 +171,7 @@ private struct ArtifactQuoteCard: View {
         .padding(.leading, 14)
         .overlay(
             Rectangle()
-                .fill(tint.opacity(0.55))
+                .fill(Color.onSurfaceTertiary.opacity(0.55))
                 .frame(width: 3),
             alignment: .leading
         )

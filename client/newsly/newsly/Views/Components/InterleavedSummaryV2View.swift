@@ -34,7 +34,7 @@ struct InterleavedSummaryV2View: View {
             }
 
             if !summary.quotes.isEmpty {
-                sectionHeader("Notable Quotes", icon: "quote.opening", tint: .terracottaDark)
+                sectionHeader("Notable Quotes", icon: "quote.opening", tint: .brandPrimary)
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(summary.quotes, id: \.text) { quote in
                         quoteCard(quote)
@@ -129,7 +129,7 @@ struct InterleavedSummaryV2View: View {
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [Color.terracottaPrimary.opacity(0.8), Color.terracottaPrimary.opacity(0.4)],
+                        colors: [Color.onSurfaceTertiary.opacity(0.8), Color.onSurfaceTertiary.opacity(0.4)],
                         startPoint: .top,
                         endPoint: .bottom
                     )

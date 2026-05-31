@@ -36,7 +36,7 @@ struct StructuredSummaryView: View {
                 modernSection(
                     title: "Notable Quotes",
                     icon: "quote.opening",
-                    iconColor: .terracottaDark,
+                    iconColor: .brandPrimary,
                     isExpanded: $isQuotesExpanded
                 ) {
                     VStack(alignment: .leading, spacing: 16) {
@@ -199,7 +199,7 @@ struct StructuredSummaryView: View {
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [Color.terracottaPrimary.opacity(0.8), Color.terracottaPrimary.opacity(0.4)],
+                        colors: [Color.onSurfaceTertiary.opacity(0.8), Color.onSurfaceTertiary.opacity(0.4)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -236,7 +236,7 @@ struct StructuredSummaryView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.caption)
-                .foregroundColor(.summaryCounterpointAccent)
+                .foregroundColor(.onSurfaceSecondary)
                 .frame(width: 16)
                 .padding(.top, 2)
 
@@ -303,13 +303,13 @@ struct StructuredSummaryView: View {
     private func categoryColor(for category: String) -> Color {
         switch category.lowercased() {
         case "key_finding":
-            return .brandSecondary
+            return .onSurfaceSecondary
         case "warning":
             return .statusDestructive
         case "recommendation":
-            return .summaryQuestionAccent
+            return .brandPrimary
         default:
-            return .gray
+            return .onSurfaceTertiary
         }
     }
 }
@@ -326,13 +326,13 @@ struct ModernKeyPointRow: View {
     private func categoryConfig(for category: String) -> (color: Color, icon: String) {
         switch category.lowercased() {
         case "key_finding":
-            return (.brandSecondary, "checkmark.circle.fill")
+            return (.onSurfaceSecondary, "checkmark.circle.fill")
         case "warning":
             return (.statusDestructive, "exclamationmark.triangle.fill")
         case "recommendation":
-            return (.summaryQuestionAccent, "lightbulb.fill")
+            return (.brandPrimary, "lightbulb.fill")
         default:
-            return (.secondary, "circle.fill")
+            return (.onSurfaceTertiary, "circle.fill")
         }
     }
 
@@ -340,7 +340,7 @@ struct ModernKeyPointRow: View {
         if let category = point.category {
             return categoryConfig(for: category).color
         }
-        return Color.terracottaPrimary.opacity(0.7)
+        return Color.onSurfaceTertiary.opacity(0.7)
     }
 
     var body: some View {
