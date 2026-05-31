@@ -15,8 +15,9 @@
 <p align="center">
   <a href="#getting-started"><img src="https://img.shields.io/badge/python-3.13+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.13+"></a>
   <a href="#getting-started"><img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"></a>
-  <a href="#cli"><img src="https://img.shields.io/badge/Go_CLI-1.23+-00add8?style=flat-square&logo=go&logoColor=white" alt="Go CLI"></a>
-  <a href="#ios-app"><img src="https://img.shields.io/badge/SwiftUI-iOS_17+-007aff?style=flat-square&logo=swift&logoColor=white" alt="SwiftUI"></a>
+  <a href="#cli"><img src="https://img.shields.io/badge/Go_CLI-1.26+-00add8?style=flat-square&logo=go&logoColor=white" alt="Go CLI"></a>
+  <a href="#ios-app"><img src="https://img.shields.io/badge/SwiftUI-iOS_18.5+-007aff?style=flat-square&logo=swift&logoColor=white" alt="SwiftUI"></a>
+  <a href="https://github.com/willemave/newsbuddy/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/willemave/newsbuddy/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
   <a href="https://github.com/willemave/newsbuddy/actions"><img src="https://img.shields.io/github/actions/workflow/status/willemave/newsbuddy/docker-racknerd-deploy.yml?branch=main&style=flat-square&label=deploy" alt="Deploy"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/docs-architecture-8b5cf6?style=flat-square" alt="Docs"></a>
 </p>
@@ -105,7 +106,7 @@ Discover New Knowledge
 Sources You Already Use
 </h3>
 
-<p>Built-in integrations for <strong>X bookmarks &amp; follows</strong>, <strong>Hacker News</strong>, <strong>Techmeme</strong>, <strong>Reddit</strong>, <strong>Substack</strong>, and any RSS/Atom feed. Connect the sources you already follow and let Newsbuddy do the rest.</p>
+<p>Built-in support for <strong>X bookmarks</strong>, <strong>Hacker News</strong>, <strong>Techmeme</strong>, <strong>Reddit</strong>, <strong>Substack</strong>, <strong>YouTube</strong>, podcasts, and any RSS/Atom feed. Connect the sources you already follow and let Newsbuddy do the rest.</p>
 
 </td>
 </tr>
@@ -118,7 +119,7 @@ Sources You Already Use
 CLI-Powered Content Management
 </h3>
 
-<p>A dedicated CLI lets your AI agents manage and curate your library from the terminal. Add feeds, submit articles, manage sources — the system classifies, processes, and enriches everything automatically.</p>
+<p>A dedicated CLI lets you — or your AI agents — manage and curate your library from the terminal. Add feeds, submit articles, manage sources — the system classifies, processes, and enriches everything automatically.</p>
 
 </td>
 <td width="50%" valign="top">
@@ -149,7 +150,7 @@ brew install newsbuddy
 ```
 
 ```bash
-# Authenticate
+# Authenticate — scan the QR code in the app to approve, no password needed
 newsbuddy auth login
 
 # Subscribe to an RSS feed
@@ -332,6 +333,7 @@ app/
 └── core/              # Settings, DB, auth
 client/
 └── newsly/            # SwiftUI iOS app + Share Extension
+cli/                   # Go (Cobra) command-line client
 migrations/
 └── alembic/           # Alembic env, templates, and schema history
 ```
@@ -342,16 +344,73 @@ Production deploys are handled via GitHub Actions with Docker image build + Rack
 
 <br>
 
+## Architecture
+
+One FastAPI backend owns auth, APIs, chat, discovery, and processing orchestration. Scrapers and user submissions create canonical content rows and enqueue work onto a PostgreSQL-backed task queue; a fleet of async workers extracts, transcribes, summarizes, and illustrates that content. The SwiftUI app, Share Extension, and Go CLI all consume the same API as the single source of truth.
+
+```mermaid
+flowchart LR
+  subgraph Clients
+    iOS["SwiftUI App"]
+    Share["Share Extension"]
+    CLI["Go CLI"]
+  end
+
+  iOS -->|JWT / API key| API["FastAPI"]
+  Share --> API
+  CLI --> API
+
+  Sources["Sources<br/>HN · Reddit · RSS · Substack<br/>X · YouTube · podcasts"] --> Queue[("PostgreSQL<br/>task queue")]
+  API --> Queue
+  API --> DB[(PostgreSQL)]
+
+  Queue --> Workers["Async workers"]
+  Workers --> Pipeline["Extract · Transcribe<br/>Summarize · Illustrate"]
+  Pipeline --> Providers["OpenAI · Claude · Gemini<br/>Whisper · Exa"]
+  Workers --> DB
+```
+
+<br>
+
+## Under the Hood
+
+A few of the engineering decisions that make Newsbuddy interesting:
+
+- **Postgres _is_ the queue.** The async task system is built directly on PostgreSQL — no Redis, Celery, or external broker. It claims jobs lock-free with `FOR UPDATE SKIP LOCKED`, wakes workers instantly via `LISTEN`/`NOTIFY` (with a polling fallback), dedupes with partial unique indexes, and holds time-based leases that a background thread renews so long-running jobs survive. A watchdog re-routes stale or misrouted tasks, and rotating retry buckets keep old failures from starving fresh work.
+
+- **One API spec, three clients, zero drift.** The FastAPI app is the single source of truth: it exports an OpenAPI schema that generates _both_ the Swift iOS client and the Go CLI. A pre-commit/CI check regenerates every artifact and diffs it against what's committed, so the server, app, and CLI can never silently fall out of sync.
+
+- **Content-aware model routing.** Each piece of content picks its own model — cheap-and-fast for short news, stronger models for long-form articles and podcasts — across OpenAI, Anthropic, Google Gemini, Cerebras, OpenRouter, and DeepSeek. Provider errors and context-limit overflows fall back automatically, and users can bring their own (encrypted) API keys.
+
+- **Structured outputs, never string-scraping.** Classification, summaries, editorial briefs, and discussion digests are all generated as validated Pydantic schemas through pydantic-ai, then stored as JSON — the pipeline never parses free-form text out of a model response.
+
+- **A council of experts.** Ask a hard question and the chat agent can fan it out to several AI personas at once; each runs in its own server-side session and the conversation fills in as each expert finishes. It's fully async — the client polls for completion instead of holding a socket open.
+
+- **Cover art chosen by information theory.** Editorial images come from Gemini + Runware, but the _brief_ is picked by scoring each story's Shannon entropy, information density, surprise keywords, conceptual tension, and abstractness — so a dense, surprising story gets a bolder, more dramatic image than a routine update.
+
+- **Self-healing extraction.** A URL is routed through an ordered strategy registry — Hacker News, arXiv, PubMed, YouTube, X, PDF, image, plain text, HTML — and HTML extraction degrades gracefully from crawl4ai to trafilatura to a paid Firecrawl fallback, only escalating when the cheaper tiers hit a paywall or return junk. Podcasts, YouTube, and tweet videos all flow through one yt-dlp + Whisper audio pipeline.
+
+- **Two read models, one product.** Long-form articles and short-form "Fast Reads" are separate canonical models — each with its own read-state, visibility, and discussion rules — bridged by an explicit link, so each surface stays fast without denormalizing the other. Article bodies live in pluggable local-or-S3 storage rather than the database, and comment threads refresh on a leased, TTL-bounded schedule that stops parallel workers from stampeding the same discussion.
+
+- **Ships as a single container.** One Docker image runs Postgres, the API, every queue worker, the watchdog, and a cron scheduler under Supervisor (with a lighter server-only mode). The `admin` CLI SSHes into the box and runs commands inside the container behind a stable JSON envelope, and `newsbuddy auth login` links the CLI by QR code — approve it in the app, no passwords in the terminal.
+
+See **[docs/architecture.md](docs/architecture.md)** for the full system reference.
+
+<br>
+
 ## Tech Stack
 
 | Layer | Technologies |
 |-------|-------------|
-| **Backend** | Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2 |
-| **AI/ML** | pydantic-ai, Anthropic Claude, OpenAI, Google Gemini |
-| **CLI** | Go, Cobra, `newsbuddy` binary |
+| **Backend** | Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, Alembic |
+| **Async & queue** | PostgreSQL-backed queue (`SKIP LOCKED`, `LISTEN`/`NOTIFY`), Supervisor, cron scheduler |
+| **AI / LLM** | pydantic-ai · OpenAI, Anthropic Claude, Google Gemini, Cerebras, OpenRouter, DeepSeek · Exa search |
+| **Ingestion & media** | crawl4ai, trafilatura, Firecrawl, feedparser, yt-dlp, Whisper, Gemini + Runware images |
+| **CLI** | Go, Cobra, ogen, `newsbuddy` binary |
 | **iOS** | SwiftUI, Apple Sign In, Share Extension |
-| **Frontend** | Jinja2 templates, Tailwind CSS v4 |
-| **Infrastructure** | PostgreSQL, Alembic, uv, GitHub Actions |
+| **Admin / Web** | Jinja2 templates, Tailwind CSS v4 |
+| **Observability** | Langfuse tracing, structured JSONL logs |
+| **Infrastructure** | Docker (single-container), GitHub Actions, uv |
 
 <br>
 
