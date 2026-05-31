@@ -29,7 +29,7 @@ struct EditorialMastheadHeader: View {
             Text(dateLabel)
                 .font(.terracottaCategoryPill)
                 .tracking(1.4)
-                .foregroundStyle(Color.terracottaPrimary)
+                .foregroundStyle(Color.onSurfaceSecondary)
 
             HStack(alignment: .firstTextBaseline) {
                 Text(title)

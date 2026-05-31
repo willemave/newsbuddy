@@ -122,7 +122,7 @@ struct SubmissionStatusRow: View {
         case "failed", "feed_not_found", "feed_fetch_failed", "feed_subscription_failed":
             return .statusDestructive.opacity(0.9)
         case "skipped":
-            return .brandTertiary.opacity(0.9)
+            return .onSurfaceSecondary.opacity(0.9)
         case "subscribed", "already_subscribed", "completed":
             return .statusActive
         case "processing":

@@ -144,16 +144,8 @@ struct TweetSuggestionsSheet: View {
     }
 
     private var creativityColor: Color {
-        switch viewModel.creativity {
-        case 1...3:
-            return .brandSecondary
-        case 4...7:
-            return .brandPrimary
-        case 8...10:
-            return .brandTertiary
-        default:
-            return .brandPrimary
-        }
+        // Single accent for the creativity meter.
+        .brandPrimary
     }
 
     private var voiceButton: some View {
@@ -328,17 +320,9 @@ struct TweetSuggestionCard: View {
         }
     }
 
-    private func styleColor(for label: String) -> Color {
-        let lowercased = label.lowercased()
-        if lowercased.contains("insight") || lowercased.contains("factual") {
-            return .brandSecondary
-        } else if lowercased.contains("provocative") || lowercased.contains("bold") {
-            return .brandTertiary
-        } else if lowercased.contains("reflective") || lowercased.contains("thought") {
-            return .brandPrimary
-        } else {
-            return .gray
-        }
+    private func styleColor(for _: String) -> Color {
+        // Style labels are neutral metadata, not per-style hues.
+        .onSurfaceSecondary
     }
 }
 

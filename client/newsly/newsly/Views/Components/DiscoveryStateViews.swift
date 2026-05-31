@@ -164,7 +164,7 @@ struct DiscoveryEmptyStateView: View {
         VStack(spacing: 20) {
             Image(systemName: "sparkles")
                 .font(.system(size: 48, weight: .light))
-                .foregroundStyle(Color.brandSecondary.opacity(0.72))
+                .foregroundStyle(Color.onSurfaceTertiary.opacity(0.72))
 
             VStack(spacing: 6) {
                 Text("Discover New Content")

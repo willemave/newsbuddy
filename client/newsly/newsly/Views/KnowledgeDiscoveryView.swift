@@ -286,7 +286,7 @@ struct KnowledgeDiscoveryView: View {
     private var newSuggestionsBanner: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(Color.brandTertiary)
+                .fill(Color.brandPrimary)
                 .frame(width: 6, height: 6)
 
             Text("New suggestions available")
@@ -354,7 +354,7 @@ private struct PodcastEpisodeSearchCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "waveform")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.brandTertiary)
+                    .foregroundColor(.onSurfaceSecondary)
 
                 if let podcastTitle = result.podcastTitle, !podcastTitle.isEmpty {
                     Text(podcastTitle.uppercased())

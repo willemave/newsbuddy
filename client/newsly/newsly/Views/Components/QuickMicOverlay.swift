@@ -71,7 +71,7 @@ struct QuickMicOverlay: View {
         case .recordingWaveform:
             return .brandPrimary
         case .finalizingTranscript, .submittingTurn:
-            return .brandTertiary
+            return .brandPrimary
         case .idle, .modalActive:
             return .secondary
         }
@@ -184,7 +184,7 @@ struct QuickMicOverlay: View {
                                 ? "Transcribing your message..."
                                 : "Thinking through a concise answer...",
                             systemImage: "sparkles",
-                            accentColor: .brandTertiary,
+                            accentColor: .brandPrimary,
                             showsProgress: true
                         )
                     }

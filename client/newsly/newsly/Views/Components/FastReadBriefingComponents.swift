@@ -62,7 +62,7 @@ struct BriefingStackCard: View {
             HStack(alignment: .center, spacing: 14) {
                 Image(systemName: "square.stack.3d.up.fill")
                     .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(Color.brandSecondary.opacity(0.86))
+                    .foregroundStyle(Color.onSurfaceSecondary.opacity(0.86))
                     .frame(width: 44, height: 44)
                     .accessibilityHidden(true)
 

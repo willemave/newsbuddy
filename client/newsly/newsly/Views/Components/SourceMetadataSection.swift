@@ -95,7 +95,7 @@ struct SourceMetadataSection: View {
                     .font(.caption.weight(.medium))
             }
             .buttonStyle(.plain)
-            .foregroundColor(Color.brandSecondary)
+            .foregroundColor(Color.brandPrimary)
             .accessibilityIdentifier("content.source_metadata.open_arxiv")
         }
     }

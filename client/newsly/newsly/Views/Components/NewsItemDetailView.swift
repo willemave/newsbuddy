@@ -50,10 +50,10 @@ struct NewsItemDetailView: View {
                         Label("Comments", systemImage: "bubble.left.and.bubble.right")
                             .font(.caption)
                             .fontWeight(.medium)
-                            .foregroundColor(.brandSecondary)
+                            .foregroundColor(.onSurfaceSecondary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(Color.brandSecondary.opacity(0.12))
+                            .background(Color.surfaceTertiary)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)

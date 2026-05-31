@@ -617,7 +617,7 @@ private struct DayDelimiter: View, Equatable {
                 .foregroundStyle(Color.sectionDelimiter)
 
             Rectangle()
-                .fill(Color.brandTertiary.opacity(0.36))
+                .fill(Color.outlineVariant)
                 .frame(height: 1)
         }
         .padding(.horizontal, Spacing.rowHorizontal)

@@ -21,7 +21,7 @@ struct DetectedFeedCard: View {
             HStack(spacing: 10) {
                 Image(systemName: feed.systemIcon)
                     .font(.title2)
-                    .foregroundColor(.brandSecondary)
+                    .foregroundColor(.onSurfaceSecondary)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Subscribe to \(feed.feedTypeName)")
@@ -39,7 +39,7 @@ struct DetectedFeedCard: View {
 
                 if hasSubscribed {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.brandSecondary)
+                        .foregroundColor(.brandPrimary)
                         .font(.title2)
                 } else {
                     Button(action: onSubscribe) {
@@ -59,7 +59,7 @@ struct DetectedFeedCard: View {
             if hasSubscribed {
                 Text("You'll now receive new content from this source")
                     .font(.caption)
-                    .foregroundColor(.brandSecondary)
+                    .foregroundColor(.onSurfaceSecondary)
             } else if let error = subscriptionError {
                 Text(error)
                     .font(.caption)

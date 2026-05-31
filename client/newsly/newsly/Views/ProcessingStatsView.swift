@@ -29,7 +29,7 @@ struct ProcessingStatsView: View {
                     subtitle: "Ready to read",
                     count: unreadCountService.longFormCount,
                     icon: "tray",
-                    color: .brandSecondary
+                    color: .onSurfaceSecondary
                 )
             } header: {
                 Text("Long-form")

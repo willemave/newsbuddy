@@ -1270,7 +1270,7 @@ struct ContentDetailView: View {
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
-                        .foregroundColor(.brandSecondary)
+                        .foregroundColor(.onSurfaceSecondary)
 
                         if let source = content.source {
                             Text("·")
@@ -1815,7 +1815,7 @@ struct ContentDetailView: View {
                 )
                 sheetOptionRow(
                     icon: "doc.text.magnifyingglass",
-                    iconColor: .brandSecondary,
+                    iconColor: .brandPrimary,
                     title: "Dig deeper",
                     subtitle: "Explore key points in detail",
                     disabled: isStartingChat,
@@ -1831,7 +1831,7 @@ struct ContentDetailView: View {
                 )
                 sheetOptionRow(
                     icon: "person.3.sequence.fill",
-                    iconColor: .brandTertiary,
+                    iconColor: .brandPrimary,
                     title: "Council Chat",
                     subtitle: "Compare four saved perspectives",
                     disabled: isStartingChat,
@@ -2667,7 +2667,7 @@ struct ContentDetailView: View {
                                     Text(link.source)
                                         .font(.caption2)
                                 }
-                                .foregroundColor(.brandSecondary)
+                                .foregroundColor(.onSurfaceSecondary)
                             }
 
                             HStack(spacing: 10) {
@@ -2824,7 +2824,7 @@ struct ContentDetailView: View {
                         }
                     }
                     .font(.subheadline.weight(.medium))
-                    .foregroundColor(state == .added ? .brandTertiary : Color.onSurfaceSecondary.opacity(0.78))
+                    .foregroundColor(state == .added ? .brandPrimary : Color.onSurfaceSecondary.opacity(0.78))
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
                 }

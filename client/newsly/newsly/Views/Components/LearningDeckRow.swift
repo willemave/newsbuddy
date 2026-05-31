@@ -49,9 +49,9 @@ struct LearningDeckRow: View {
         case .failed, .cancelled:
             return .statusDestructive
         case .queued, .preparing:
-            return .brandSecondary
+            return .onSurfaceSecondary
         case .generating, .validating, .publishing, .completed, .ready, .unknown, nil:
-            return .brandTertiary
+            return .onSurfaceSecondary
         }
     }
 

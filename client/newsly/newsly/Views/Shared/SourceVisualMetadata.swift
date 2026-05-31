@@ -29,19 +29,19 @@ struct SourceVisualMetadata {
     static func sourceType(_ rawValue: String?) -> SourceVisualMetadata {
         switch normalized(rawValue) {
         case "podcast_rss", "podcast":
-            return SourceVisualMetadata(glyph: .system("waveform"), color: .brandTertiary, label: "Podcast")
+            return SourceVisualMetadata(glyph: .system("waveform"), color: .onSurfaceSecondary, label: "Podcast")
         case "youtube":
             return SourceVisualMetadata(glyph: .system("play.rectangle.fill"), color: .statusDestructive, label: "YouTube")
         case "substack":
-            return SourceVisualMetadata(glyph: .system("newspaper"), color: .brandPrimary, label: "Newsletter")
+            return SourceVisualMetadata(glyph: .system("newspaper"), color: .onSurfaceSecondary, label: "Newsletter")
         case "atom", "rss", "feed":
             return SourceVisualMetadata(
                 glyph: .system("dot.radiowaves.left.and.right"),
-                color: .brandSecondary,
+                color: .onSurfaceSecondary,
                 label: "Feed"
             )
         default:
-            return SourceVisualMetadata(glyph: .system("list.bullet.rectangle"), color: .brandSecondary, label: "Feed")
+            return SourceVisualMetadata(glyph: .system("list.bullet.rectangle"), color: .onSurfaceSecondary, label: "Feed")
         }
     }
 
@@ -50,15 +50,15 @@ struct SourceVisualMetadata {
         case "":
             return nil
         case "hackernews":
-            return SourceVisualMetadata(glyph: .text("Y"), color: .brandPrimary, label: "Hacker News")
+            return SourceVisualMetadata(glyph: .text("Y"), color: .onSurfaceSecondary, label: "Hacker News")
         case "reddit":
-            return SourceVisualMetadata(glyph: .system("arrow.up.circle.fill"), color: .brandTertiary, label: "Reddit")
+            return SourceVisualMetadata(glyph: .system("arrow.up.circle.fill"), color: .onSurfaceSecondary, label: "Reddit")
         case "substack":
-            return SourceVisualMetadata(glyph: .system("doc.text.fill"), color: .brandPrimary, label: "Substack")
+            return SourceVisualMetadata(glyph: .system("doc.text.fill"), color: .onSurfaceSecondary, label: "Substack")
         case "podcast", "podcast_rss":
-            return SourceVisualMetadata(glyph: .system("mic.fill"), color: .brandTertiary, label: "Podcast")
+            return SourceVisualMetadata(glyph: .system("mic.fill"), color: .onSurfaceSecondary, label: "Podcast")
         case "twitter", "x":
-            return SourceVisualMetadata(glyph: .system("bird.fill"), color: .brandSecondary, label: "X")
+            return SourceVisualMetadata(glyph: .system("bird.fill"), color: .onSurfaceSecondary, label: "X")
         default:
             return SourceVisualMetadata(glyph: .system("link.circle.fill"), color: .onSurfaceSecondary, label: "Source")
         }
@@ -80,7 +80,7 @@ struct SourceVisualMetadata {
         case "podcast_rss", "podcast", "substack":
             return metadata
         default:
-            return SourceVisualMetadata(glyph: .system("doc.text"), color: .brandSecondary, label: "Feed")
+            return SourceVisualMetadata(glyph: .system("doc.text"), color: .onSurfaceSecondary, label: "Feed")
         }
     }
 
