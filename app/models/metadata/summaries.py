@@ -10,6 +10,7 @@ from pydantic import (
     HttpUrl,
     TypeAdapter,
     field_validator,
+    model_validator,
 )
 
 from app.constants import (
@@ -712,6 +713,33 @@ class DiscussionSummary(BaseModel):
     external_discussion_url: str | None = Field(None, max_length=2048)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_llm_discussion_payload(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        normalized = dict(value)
+        links = normalized.get("notable_links")
+        if isinstance(links, list):
+            normalized["notable_links"] = [
+                link for link in links if _is_valid_discussion_link_payload(link)
+            ]
+
+        topics = normalized.get("topics")
+        if not isinstance(topics, list) or not topics:
+            overview = str(normalized.get("overview") or "").strip()
+            normalized["topics"] = [
+                {
+                    "title": "General discussion",
+                    "summary": overview
+                    if len(overview) >= 10
+                    else "Commenters shared limited but relevant discussion context.",
+                }
+            ]
+
+        return normalized
+
     @field_validator("external_discussion_url")
     @classmethod
     def validate_external_discussion_url(cls, value: str | None) -> str | None:
@@ -721,7 +749,26 @@ class DiscussionSummary(BaseModel):
         if not value:
             return None
         adapter = TypeAdapter(HttpUrl)
-        return str(adapter.validate_python(value))
+        try:
+            return str(adapter.validate_python(value))
+        except ValueError:
+            return None
+
+
+def _is_valid_discussion_link_payload(value: Any) -> bool:
+    if isinstance(value, DiscussionSummaryLink):
+        return True
+    if not isinstance(value, dict):
+        return False
+    url = value.get("url")
+    if not isinstance(url, str) or not url.strip():
+        return False
+    adapter = TypeAdapter(HttpUrl)
+    try:
+        adapter.validate_python(url.strip())
+    except ValueError:
+        return False
+    return True
 
 
 SummaryPayload = (

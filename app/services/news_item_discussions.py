@@ -400,13 +400,22 @@ def should_enqueue_news_item_discussion_refresh(
     """Return whether a scrape should enqueue a full discussion refresh."""
     if row.news_item_id is None:
         return False
+    if row.platform not in SUPPORTED_DISCUSSION_PLATFORMS:
+        return False
+    if not row.external_id or not row.discussion_url:
+        return False
 
     current_time = now or _utcnow_naive()
     if row.next_refresh_after is not None and row.next_refresh_after > current_time:
         return False
-    return is_news_item_discussion_visible_to_active_user(
-        db,
-        news_item_id=row.news_item_id,
+    return (
+        db.query(NewsItem.id)
+        .filter(NewsItem.id == row.news_item_id)
+        .filter(_ready_representative_news_item_clause())
+        .filter(_visible_to_active_user_clause())
+        .filter(_supported_discussion_news_item_clause())
+        .first()
+        is not None
     )
 
 
@@ -472,6 +481,7 @@ def list_due_news_item_discussion_refresh_candidates(
         .filter(NewsItemDiscussion.platform.in_(list(SUPPORTED_DISCUSSION_PLATFORMS)))
         .filter(_ready_representative_news_item_clause())
         .filter(_visible_to_active_user_clause())
+        .filter(_supported_discussion_news_item_clause())
         .filter(
             or_(
                 NewsItemDiscussion.next_refresh_after.is_(None),
@@ -999,7 +1009,7 @@ def refresh_news_item_discussion(
 
     if summary_plan.mode in {DiscussionSummaryPlanMode.FULL, DiscussionSummaryPlanMode.MERGE}:
         try:
-            summary = execute_discussion_summary_plan(
+            summary_execution = execute_discussion_summary_plan(
                 db,
                 row=row,
                 news_item=item,
@@ -1007,6 +1017,7 @@ def refresh_news_item_discussion(
                 plan=summary_plan,
                 summarizer=summarizer,
             )
+            summary = summary_execution.summary
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "News item discussion summarization failed",
@@ -1040,9 +1051,11 @@ def refresh_news_item_discussion(
         store_summarized_summary_tracking(
             row=row,
             summary_input=summary_input,
-            incremental_update_count=(row.summary_incremental_update_count or 0) + 1
-            if summary_plan.mode == DiscussionSummaryPlanMode.MERGE
-            else 0,
+            incremental_update_count=(
+                (row.summary_incremental_update_count or 0) + 1
+                if summary_execution.mode == DiscussionSummaryPlanMode.MERGE
+                else 0
+            ),
         )
         store_seen_summary_tracking(row=row, summary_input=summary_input)
         summarized = True

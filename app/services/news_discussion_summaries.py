@@ -11,9 +11,12 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger
 from app.models.db import NewsItem, NewsItemDiscussion
 from app.models.metadata.summaries import DiscussionSummary
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
+
+logger = get_logger(__name__)
 
 MAX_SUMMARY_COMMENTS = 200
 MAX_SUMMARY_LINKS = 50
@@ -59,6 +62,12 @@ class DiscussionSummaryPlanMode(StrEnum):
 class DiscussionSummaryPlan:
     mode: DiscussionSummaryPlanMode
     changed_comments: tuple[SummaryPromptComment, ...] = ()
+
+
+@dataclass(frozen=True)
+class DiscussionSummaryExecution:
+    summary: DiscussionSummary
+    mode: DiscussionSummaryPlanMode
 
 
 def build_discussion_summary_input(
@@ -173,24 +182,55 @@ def execute_discussion_summary_plan(
     summary_input: DiscussionSummaryInput,
     plan: DiscussionSummaryPlan,
     summarizer: ContentSummarizer | None,
-) -> DiscussionSummary:
+) -> DiscussionSummaryExecution:
     if plan.mode == DiscussionSummaryPlanMode.MERGE:
-        return _merge_discussion_summary(
-            db,
-            row=row,
-            news_item=news_item,
-            summary_input=summary_input,
-            changed_comments=plan.changed_comments,
-            summarizer=summarizer,
-        )
+        try:
+            return DiscussionSummaryExecution(
+                summary=_merge_discussion_summary(
+                    db,
+                    row=row,
+                    news_item=news_item,
+                    summary_input=summary_input,
+                    changed_comments=plan.changed_comments,
+                    summarizer=summarizer,
+                ),
+                mode=DiscussionSummaryPlanMode.MERGE,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Discussion summary merge failed; falling back to full summary",
+                extra={
+                    "component": "news_discussions",
+                    "operation": "merge_summary.fallback_full",
+                    "item_id": str(row.news_item_id),
+                    "context_data": {
+                        "news_item_discussion_id": row.id,
+                        "platform": row.platform,
+                        "error": str(exc),
+                    },
+                },
+            )
+            return DiscussionSummaryExecution(
+                summary=_summarize_discussion(
+                    db,
+                    row=row,
+                    news_item=news_item,
+                    summary_input=summary_input,
+                    summarizer=summarizer,
+                ),
+                mode=DiscussionSummaryPlanMode.FULL,
+            )
 
     if plan.mode == DiscussionSummaryPlanMode.FULL:
-        return _summarize_discussion(
-            db,
-            row=row,
-            news_item=news_item,
-            summary_input=summary_input,
-            summarizer=summarizer,
+        return DiscussionSummaryExecution(
+            summary=_summarize_discussion(
+                db,
+                row=row,
+                news_item=news_item,
+                summary_input=summary_input,
+                summarizer=summarizer,
+            ),
+            mode=DiscussionSummaryPlanMode.FULL,
         )
 
     raise ValueError(f"Discussion summary plan is not executable: {plan.mode.value}")

@@ -93,3 +93,27 @@ def test_handler_propagates_retryability_on_failure(db_session, monkeypatch) -> 
     assert result.success is False
     assert result.retryable is True
     assert result.error_message == "timed out"
+
+
+def test_handler_completes_unsupported_discussion_task(db_session, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.pipeline.handlers.fetch_news_item_discussion.refresh_news_item_discussion",
+        lambda _db, news_item_id, summarizer=None: NewsItemDiscussionRefreshResult(
+            success=False,
+            status="unsupported",
+            error_message="News item does not have a supported discussion source",
+            retryable=False,
+        ),
+    )
+
+    handler = FetchNewsItemDiscussionHandler()
+    context = _build_context(db_session)
+    task = TaskEnvelope(
+        id=4,
+        task_type=TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+        payload={"news_item_id": "123"},
+    )
+
+    result = handler.handle(task, context)
+
+    assert result.success is True

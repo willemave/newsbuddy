@@ -48,6 +48,17 @@ class FetchNewsItemDiscussionHandler:
 
         if result.success:
             return TaskResult.ok()
+        if result.status == "unsupported":
+            logger.info(
+                "Skipping unsupported news item discussion task",
+                extra={
+                    "component": "fetch_news_item_discussion",
+                    "operation": "handle",
+                    "item_id": str(news_item_id),
+                    "context_data": {"task_id": task.id},
+                },
+            )
+            return TaskResult.ok()
 
         return TaskResult.fail(
             result.error_message or "News item discussion refresh failed",

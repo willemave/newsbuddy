@@ -5,6 +5,7 @@ import pytest
 from app.models.contracts import ContentType
 from app.models.db import VendorUsageRecord
 from app.models.metadata.summaries import (
+    DiscussionSummary,
     EditorialNarrativeSummary,
     EditorialQuote,
     GeneratedEditorialKeyPoint,
@@ -268,6 +269,35 @@ def test_summarize_prunes_short_editorial_quotes(monkeypatch: pytest.MonkeyPatch
 def test_summarize_returns_none_for_empty_payload() -> None:
     summarizer = llm_summarization.ContentSummarizer()
     assert summarizer.summarize("", content_type=ContentType.ARTICLE) is None
+
+
+def test_discussion_summary_discards_invalid_urls_from_llm_payload() -> None:
+    summary = DiscussionSummary.model_validate(
+        {
+            "overview": "Commenters compared the tradeoffs and surfaced concrete caveats.",
+            "topics": [],
+            "notable_links": [
+                {
+                    "url": "https://example.com/context",
+                    "title": "Useful context",
+                    "reason": "Adds background.",
+                },
+                {
+                    "url": "not a url",
+                    "title": "Malformed",
+                    "reason": "Should be dropped.",
+                },
+                {"title": "Missing URL"},
+            ],
+            "external_discussion_url": "not a url",
+        }
+    )
+
+    assert summary.external_discussion_url is None
+    assert len(summary.notable_links) == 1
+    assert str(summary.notable_links[0].url) == "https://example.com/context"
+    assert len(summary.topics) == 1
+    assert summary.topics[0].title == "General discussion"
 
 
 def test_summarize_persists_usage_when_db_and_metadata_provided(

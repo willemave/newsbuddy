@@ -237,6 +237,9 @@ Rules:
 - Ground new claims only in the provided existing summary and new or changed comments.
 - If the new comments are low-signal, preserve the prior summary and make only minimal updates.
 - Preserve named products, projects, people, numbers, and technical terms exactly.
+- Always return at least one topic with a concrete title and summary.
+- Only include notable_links with absolute http or https URLs; omit links that are malformed, relative, or unclear.
+- Use null for external_discussion_url unless a valid absolute discussion URL is provided.
 - Avoid markdown, numbering, bullets inside fields, or fields outside the schema.
 """
 

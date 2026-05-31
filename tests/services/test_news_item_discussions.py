@@ -67,6 +67,16 @@ class _FakeSummarizer:
         )
 
 
+class _MergeFailingSummarizer(_FakeSummarizer):
+    def summarize(self, content, content_type, **kwargs):
+        if content_type == "discussion_summary_merge":
+            self.calls += 1
+            self.content_types.append(content_type)
+            self.prompts.append(content)
+            raise ValueError("merge output validation failed")
+        return super().summarize(content, content_type, **kwargs)
+
+
 def _fake_hn_payload(
     *,
     external_id: str,
@@ -370,11 +380,34 @@ def test_due_discussion_candidates_prioritize_visible_due_rows(
         },
         ingested_at=now + timedelta(minutes=1),
     )
+    stale_unsupported_item = news_item_factory(
+        ingest_key="techmeme-stale-discussion-row",
+        platform="techmeme",
+        source_type="techmeme",
+        source_external_id="techmeme-stale",
+        discussion_url="https://www.techmeme.com/260518/p46#a260518p46",
+        canonical_item_url="https://www.techmeme.com/260518/p46#a260518p46",
+        raw_metadata={"platform": "techmeme"},
+        ingested_at=now + timedelta(minutes=2),
+    )
 
     missing_row = sync_news_item_discussion_from_news_item(db_session, missing_summary_item)
     high_growth_row = sync_news_item_discussion_from_news_item(db_session, high_growth_item)
     quiet_row = sync_news_item_discussion_from_news_item(db_session, quiet_item)
     hidden_row = sync_news_item_discussion_from_news_item(db_session, hidden_growth_item)
+    stale_unsupported_row = NewsItemDiscussion(
+        news_item_id=stale_unsupported_item.id,
+        platform="hackernews",
+        external_id="123",
+        discussion_url="https://news.ycombinator.com/item?id=123",
+        summary_status="completed",
+        last_refresh_status="completed",
+        next_refresh_after=now - timedelta(minutes=1),
+        raw_comments_ref={"kind": "storage"},
+        summary={"overview": "stale summary"},
+        fetched_comment_count=1,
+    )
+    db_session.add(stale_unsupported_row)
     assert missing_row is not None
     assert high_growth_row is not None
     assert quiet_row is not None
@@ -406,6 +439,12 @@ def test_due_discussion_candidates_prioritize_visible_due_rows(
 
     assert candidates[:3] == [missing_summary_item.id, high_growth_item.id, quiet_item.id]
     assert hidden_growth_item.id not in candidates
+    assert stale_unsupported_item.id not in candidates
+    assert not should_enqueue_news_item_discussion_refresh(
+        db_session,
+        row=stale_unsupported_row,
+        now=now,
+    )
 
 
 def test_refresh_news_item_discussion_stores_raw_summary_and_honors_ttl(
@@ -637,6 +676,69 @@ def test_refresh_news_item_discussion_merges_large_comment_delta(
     assert row.summary_seen_input_sha256 == row.summary_input_sha256
     assert row.summary_seen_comment_count == 13
     assert row.summary_incremental_update_count == 1
+
+
+def test_refresh_news_item_discussion_falls_back_to_full_summary_when_merge_fails(
+    db_session,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    discussion_url = "https://news.ycombinator.com/item?id=126"
+    item = news_item_factory(
+        ingest_key="hn-refresh-merge-fallback",
+        platform="hackernews",
+        source_external_id="126",
+        discussion_url=discussion_url,
+        raw_metadata={"platform": "hackernews"},
+    )
+    payloads = [
+        _fake_hn_payload(external_id="126", discussion_url=discussion_url),
+        _fake_hn_payload(
+            external_id="126",
+            discussion_url=discussion_url,
+            extra_comments=_extra_hn_comments(discussion_url=discussion_url, count=11),
+        ),
+    ]
+
+    def _fake_fetch(*, external_id: str, discussion_url: str):
+        return payloads.pop(0)
+
+    monkeypatch.setattr(
+        "app.services.news_item_discussions._fetch_hackernews_comments",
+        _fake_fetch,
+    )
+    gateway = _FakeGateway()
+    summarizer = _MergeFailingSummarizer()
+
+    first = refresh_news_item_discussion(
+        db_session,
+        news_item_id=item.id,
+        gateway=cast(ObjectStorageGateway, gateway),
+        summarizer=cast(ContentSummarizer, summarizer),
+    )
+    second = refresh_news_item_discussion(
+        db_session,
+        news_item_id=item.id,
+        force=True,
+        gateway=cast(ObjectStorageGateway, gateway),
+        summarizer=cast(ContentSummarizer, summarizer),
+    )
+    row = (
+        db_session.query(NewsItemDiscussion)
+        .filter(NewsItemDiscussion.news_item_id == item.id)
+        .one()
+    )
+
+    assert first.summarized is True
+    assert second.success is True
+    assert second.summarized is True
+    assert summarizer.content_types == [
+        "discussion_summary",
+        "discussion_summary_merge",
+        "discussion_summary",
+    ]
+    assert row.summary_status == "completed"
+    assert row.summary_incremental_update_count == 0
 
 
 def test_refresh_news_item_discussion_claim_suppresses_concurrent_fetch(
