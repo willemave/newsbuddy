@@ -10,33 +10,34 @@ import UIKit
 
 enum AppChrome {
     static func configure() {
-        let accent = UIColor.appAccent
-        let unselected = UIColor.appOnSurfaceSecondary
+        let chromeAccent = UIColor.appChromeAccent
+        let unselected = UIColor.tertiaryLabel
         let surface = UIColor.appSurfacePrimary
 
         let itemAppearance = UITabBarItemAppearance()
-        itemAppearance.selected.iconColor = accent
-        itemAppearance.selected.titleTextAttributes = [.foregroundColor: accent]
+        itemAppearance.selected.iconColor = chromeAccent
+        itemAppearance.selected.titleTextAttributes = [.foregroundColor: chromeAccent]
         itemAppearance.normal.iconColor = unselected
         itemAppearance.normal.titleTextAttributes = [.foregroundColor: unselected]
 
         let tabAppearance = UITabBarAppearance()
         tabAppearance.configureWithTransparentBackground()
         tabAppearance.backgroundColor = surface.withAlphaComponent(0.92)
-        tabAppearance.shadowColor = UIColor.appAccent.withAlphaComponent(0.18)
+        tabAppearance.shadowColor = UIColor.separator
         tabAppearance.stackedLayoutAppearance = itemAppearance
         tabAppearance.inlineLayoutAppearance = itemAppearance
         tabAppearance.compactInlineLayoutAppearance = itemAppearance
         UITabBar.appearance().standardAppearance = tabAppearance
         UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+        UITabBar.appearance().tintColor = chromeAccent
 
         let navigationAppearance = UINavigationBarAppearance()
         navigationAppearance.configureWithTransparentBackground()
         navigationAppearance.backgroundColor = surface.withAlphaComponent(0.92)
-        navigationAppearance.shadowColor = UIColor.appAccent.withAlphaComponent(0.12)
+        navigationAppearance.shadowColor = UIColor.separator
         UINavigationBar.appearance().standardAppearance = navigationAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navigationAppearance
-        UINavigationBar.appearance().tintColor = accent
+        UINavigationBar.appearance().tintColor = chromeAccent
     }
 }
 
