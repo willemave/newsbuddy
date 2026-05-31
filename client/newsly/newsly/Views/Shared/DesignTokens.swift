@@ -47,6 +47,10 @@ extension Color {
     static var brandTertiary: Color {
         Color(UIColor.appTertiaryAccent)
     }
+    // Fixed platform chrome tint. Reader palettes recolor content, not navigation selection.
+    static var appChromeAccent: Color {
+        Color(UIColor.appChromeAccent)
+    }
 
     // Backward-compatible accent aliases.
     static var terracottaPrimary: Color { Color.brandPrimary }
@@ -90,7 +94,7 @@ extension Color {
     }
 
     // Status colors (reader-palette muted)
-    static var statusSuccess: Color { Color.brandSecondary.opacity(0.9) }
+    static var statusSuccess: Color { Color.brandPrimary }
     static var statusProcessing: Color { Color.brandPrimary }
     static var statusActive: Color { Color.statusSuccess }
     static var statusInactive: Color { Color.onSurfaceTertiary }
@@ -107,21 +111,21 @@ extension Color {
     static var editorialSub: Color { Color.onSurfaceSecondary }
     static var editorialBorder: Color { Color.outlineVariant }
 
-    // Adaptive accent (topic badges, knowledge saves)
-    static var topicAccent: Color { Color.brandSecondary }
+    // Adaptive accent (topic badges, knowledge saves) — neutral metadata, not a hue
+    static var topicAccent: Color { Color.onSurfaceSecondary }
 
     // Platform label color (news feed metadata)
-    static var platformLabel: Color { Color.brandSecondary }
+    static var platformLabel: Color { Color.onSurfaceSecondary }
 
-    // Day section delimiter text (distinct grey, not textTertiary)
-    static var sectionDelimiter: Color { Color.brandTertiary }
+    // Day section delimiter text (quiet grey)
+    static var sectionDelimiter: Color { Color.onSurfaceTertiary }
 
-    // Summary and artifact accents.
+    // Summary and artifact accents — single accent; section text is neutralized at call sites.
     static var summaryPrimaryAccent: Color { Color.brandPrimary }
-    static var summarySecondaryAccent: Color { Color.brandSecondary }
-    static var summaryQuestionAccent: Color { Color.brandPrimaryStrong }
-    static var summaryCounterpointAccent: Color { Color.brandTertiary }
-    static var summaryQuoteAccent: Color { Color.brandPrimaryStrong }
+    static var summarySecondaryAccent: Color { Color.brandPrimary }
+    static var summaryQuestionAccent: Color { Color.brandPrimary }
+    static var summaryCounterpointAccent: Color { Color.brandPrimary }
+    static var summaryQuoteAccent: Color { Color.brandPrimary }
 
     // Onboarding and ambient illustration roles.
     static var onboardingSurface: Color { Color.surfacePrimary }
@@ -338,6 +342,10 @@ extension View {
 // MARK: - UIColor Design Tokens (for UIKit appearance APIs)
 
 extension UIColor {
+    static var appChromeAccent: UIColor {
+        // Muted neutral nav selection (palette-independent, same across all themes).
+        .secondaryLabel
+    }
     static var appAccent: UIColor {
         ReaderPalette.selectedUIColor(\.brandPrimary)
     }
