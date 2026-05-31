@@ -113,7 +113,7 @@
       <div>
         <h2 class="text-sm font-semibold text-gray-900">Cost Analysis</h2>
         <p class="text-xs text-gray-500 mt-1">
-          Tracked LLM areas: chat, summarization, and image generation. Showing {{ cost_analysis.selected_cost_bucket_label.lower() }} rollups for the {{ cost_analysis.cost_window_label }}.
+          Tracked LLM areas: chat, summarization, image generation, and learning decks. Showing {{ cost_analysis.selected_cost_bucket_label.lower() }} rollups for the {{ cost_analysis.cost_window_label }}.
           Per-user rows only include usage records with a stored user attribution.
         </p>
       </div>
@@ -207,6 +207,7 @@
                   <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Chat</th>
                   <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Summary</th>
                   <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Image</th>
+                  <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Decks</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-50">
@@ -221,6 +222,7 @@
                   <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">${{ "%.6f"|format(row.chat_cost_usd) }}</td>
                   <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">${{ "%.6f"|format(row.summarization_cost_usd) }}</td>
                   <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">${{ "%.6f"|format(row.image_generation_cost_usd) }}</td>
+                  <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">${{ "%.6f"|format(row.learning_decks_cost_usd) }}</td>
                 </tr>
                 {% endfor %}
               </tbody>
@@ -247,6 +249,7 @@
                 <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Chat</th>
                 <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Summarization</th>
                 <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Image</th>
+                <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Decks</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-50">
@@ -258,6 +261,7 @@
                 <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">${{ "%.6f"|format(row.chat_cost_usd) }}</td>
                 <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">${{ "%.6f"|format(row.summarization_cost_usd) }}</td>
                 <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">${{ "%.6f"|format(row.image_generation_cost_usd) }}</td>
+                <td class="px-4 py-2.5 text-right tabular-nums text-gray-600">${{ "%.6f"|format(row.learning_decks_cost_usd) }}</td>
               </tr>
               {% endfor %}
             </tbody>

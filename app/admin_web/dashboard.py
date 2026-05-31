@@ -46,11 +46,13 @@ COST_AREA_LABELS = {
     "chat": "Chat",
     "summarization": "Summarization",
     "image_generation": "Image Generation",
+    "learning_decks": "Learning Decks",
 }
 COST_FEATURE_GROUPS = {
     "chat": {"chat"},
     "summarization": {"news_processing", "summarization"},
     "image_generation": {"image_generation"},
+    "learning_decks": {"learning_deck_generation"},
 }
 COST_EXTERNAL_FEATURES = (
     "x_api",
@@ -61,11 +63,12 @@ COST_EXTERNAL_FEATURES = (
     "html_extraction",
     "object_storage",
     "chat_sandbox",
+    "learning_deck_sandbox",
 )
 COST_TRACKED_FEATURES = tuple(
     sorted({feature for features in COST_FEATURE_GROUPS.values() for feature in features})
 )
-COST_AREA_ORDER = ("chat", "summarization", "image_generation")
+COST_AREA_ORDER = ("chat", "summarization", "image_generation", "learning_decks")
 COST_FEATURE_TO_AREA = {
     feature: area for area, features in COST_FEATURE_GROUPS.items() for feature in features
 }
@@ -586,6 +589,7 @@ def _build_cost_analysis(
                 "chat_cost_usd": 0.0,
                 "summarization_cost_usd": 0.0,
                 "image_generation_cost_usd": 0.0,
+                "learning_decks_cost_usd": 0.0,
             },
         )
         area = COST_FEATURE_TO_AREA.get(row.feature)
@@ -606,6 +610,7 @@ def _build_cost_analysis(
                 "chat_cost_usd": round(float(row["chat_cost_usd"]), 8),
                 "summarization_cost_usd": round(float(row["summarization_cost_usd"]), 8),
                 "image_generation_cost_usd": round(float(row["image_generation_cost_usd"]), 8),
+                "learning_decks_cost_usd": round(float(row["learning_decks_cost_usd"]), 8),
             }
             for row in bucket_rollups.values()
         ),
@@ -646,6 +651,7 @@ def _build_cost_analysis(
                 "chat_cost_usd": 0.0,
                 "summarization_cost_usd": 0.0,
                 "image_generation_cost_usd": 0.0,
+                "learning_decks_cost_usd": 0.0,
             },
         )
         area = COST_FEATURE_TO_AREA.get(row.feature)
@@ -664,6 +670,7 @@ def _build_cost_analysis(
                 "chat_cost_usd": round(float(row["chat_cost_usd"]), 8),
                 "summarization_cost_usd": round(float(row["summarization_cost_usd"]), 8),
                 "image_generation_cost_usd": round(float(row["image_generation_cost_usd"]), 8),
+                "learning_decks_cost_usd": round(float(row["learning_decks_cost_usd"]), 8),
                 "average_cost_usd": round(
                     float(row["total_cost_usd"]) / config["bucket_count"],
                     8,

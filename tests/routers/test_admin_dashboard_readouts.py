@@ -174,6 +174,18 @@ def test_admin_dashboard_shows_cost_analysis(client, db_session, test_user) -> N
                     created_at=now,
                 ),
                 VendorUsageRecord(
+                    provider="openai",
+                    model="gpt-5.4",
+                    feature="learning_deck_generation",
+                    operation="learning_deck.generate",
+                    user_id=test_user.id,
+                    cost_usd=cast(Any, Decimal("2.0")),
+                    total_tokens=2000,
+                    currency="USD",
+                    metadata_json={"run_id": 123},
+                    created_at=now,
+                ),
+                VendorUsageRecord(
                     provider="x",
                     model="posts.read",
                     feature="x_api",
@@ -183,6 +195,17 @@ def test_admin_dashboard_shows_cost_analysis(client, db_session, test_user) -> N
                     resource_count=20,
                     currency="USD",
                     metadata_json={},
+                    created_at=now,
+                ),
+                VendorUsageRecord(
+                    provider="e2b",
+                    model="default",
+                    feature="learning_deck_sandbox",
+                    operation="learning_deck_sandbox.e2b_create",
+                    cost_usd=cast(Any, Decimal("0.2")),
+                    request_count=1,
+                    currency="USD",
+                    metadata_json={"run_id": 123},
                     created_at=now,
                 ),
                 VendorUsageRecord(
@@ -206,7 +229,9 @@ def test_admin_dashboard_shows_cost_analysis(client, db_session, test_user) -> N
         body = response.text
 
         assert "Cost Analysis" in body
-        assert "Tracked LLM areas: chat, summarization, and image generation." in body
+        assert (
+            "Tracked LLM areas: chat, summarization, image generation, and learning decks." in body
+        )
         assert "Cost By Area" in body
         assert "Top User Cost" in body
         assert "Recent Weekly Cost" in body
@@ -215,12 +240,16 @@ def test_admin_dashboard_shows_cost_analysis(client, db_session, test_user) -> N
         assert "Chat" in body
         assert "Summarization" in body
         assert "Image Generation" in body
+        assert "Learning Decks" in body
         assert "X API" in body
+        assert "E2B Sandbox" in body
         assert "Firecrawl" in body
         assert "cost-other@example.com" in body
-        assert "$2.500000" in body
-        assert "$1.500000" in body
+        assert "$4.500000" in body
+        assert "$3.500000" in body
+        assert "$2.000000" in body
         assert "$1.000000" in body
+        assert "$0.200000" in body
         assert "$0.000830" in body
     finally:
         app.dependency_overrides.pop(require_admin, None)
