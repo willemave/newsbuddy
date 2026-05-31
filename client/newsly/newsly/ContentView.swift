@@ -88,6 +88,7 @@ struct ContentView: View {
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize
                 )
+                .id(settings.readerPaletteId)
             }
             .toolbar(longFormPath.isEmpty ? .visible : .hidden, for: .tabBar)
             .tag(RootTab.longContent)
@@ -110,6 +111,7 @@ struct ContentView: View {
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize
                 )
+                .id(settings.readerPaletteId)
             }
             .toolbar(shortFormPath.isEmpty ? .visible : .hidden, for: .tabBar)
             .tag(RootTab.shortNews)
@@ -141,6 +143,7 @@ struct ContentView: View {
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize
                 )
+                .id(settings.readerPaletteId)
             }
             .tag(RootTab.knowledge)
             .tabItem {
@@ -158,7 +161,7 @@ struct ContentView: View {
             }
             .badge(moreBadge != nil ? Int(moreBadge!) ?? 0 : 0)
         }
-        .tint(Color.brandPrimary)
+        .tint(Color.appChromeAccent)
         .dynamicTypeSize(AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize)
         .environmentObject(readingStateStore)
         .onAppear {
