@@ -290,6 +290,45 @@ def test_sync_x_sources_persists_bookmark_progress(
     assert sync_state.last_error is None
 
 
+def test_sync_x_sources_requests_small_bookmark_pages(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Scheduled bookmark polling should avoid reading large pages by default."""
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read"],
+    )
+    db_session.add(connection)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_valid_access_token",
+        lambda *_args, **_kwargs: "token",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_provider_user_id",
+        lambda *_args, **_kwargs: "42",
+    )
+    captured_max_results: list[int] = []
+
+    def fake_fetch_bookmarks(**kwargs):  # noqa: ANN003
+        captured_max_results.append(kwargs["max_results"])
+        return XTweetsPage(tweets=[_tweet("101", "Bookmark me")])
+
+    monkeypatch.setattr(
+        "app.services.x_integration.fetch_bookmarks",
+        fake_fetch_bookmarks,
+    )
+
+    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    assert summary.status == "success"
+    assert captured_max_results == [x_integration.BOOKMARK_SYNC_PAGE_SIZE]
+    assert captured_max_results == [10]
+
+
 def test_sync_x_sources_persists_bookmark_tweet_snapshot_for_later_resolution(
     db_session,
     test_user,
