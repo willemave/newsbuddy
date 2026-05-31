@@ -311,8 +311,12 @@ def run_learning_deck_agent(
                 "feature": "learning_deck_generation",
                 "operation": "learning_deck.generate",
                 "source": "queue",
+                "content_id": _learning_deck_usage_content_id(source_snapshot),
                 "user_id": user_id,
-                "metadata": {"run_id": run_id},
+                "metadata": _learning_deck_usage_metadata(
+                    source_snapshot,
+                    run_id=run_id,
+                ),
             },
         )
         logger.info(
@@ -527,6 +531,27 @@ def _build_runtime_model_settings(base_model_settings: ModelSettings | None) -> 
     runtime_settings = dict(base_model_settings or {})
     runtime_settings["timeout"] = settings.learning_sandbox_timeout_seconds
     return cast(ModelSettings, runtime_settings)
+
+
+def _learning_deck_usage_content_id(source_snapshot: dict[str, Any]) -> int | None:
+    content_id = source_snapshot.get("source_content_id")
+    return content_id if isinstance(content_id, int) else None
+
+
+def _learning_deck_usage_metadata(
+    source_snapshot: dict[str, Any],
+    *,
+    run_id: int,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"run_id": run_id}
+    for key in ("source_kind", "source_identity"):
+        value = source_snapshot.get(key)
+        if isinstance(value, str) and value:
+            metadata[key] = value
+    content_id = _learning_deck_usage_content_id(source_snapshot)
+    if content_id is not None:
+        metadata["source_content_id"] = content_id
+    return metadata
 
 
 def _collect_assets(sandbox: LearningDeckSandboxSession) -> dict[str, tuple[bytes, str]]:
