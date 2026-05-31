@@ -105,7 +105,7 @@ struct LongFormCard: View {
                     HStack(spacing: 8) {
                         Image(systemName: contentTypeIcon)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.brandSecondary)
+                            .foregroundStyle(Color.onSurfaceSecondary)
                             .frame(width: 18, height: 18)
                             .accessibilityHidden(true)
 
@@ -129,7 +129,7 @@ struct LongFormCard: View {
                         } label: {
                             Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
                                 .font(.system(size: 20))
-                                .foregroundStyle(content.isRead ? Color.brandTertiary : Color.onSurfaceSecondary)
+                                .foregroundStyle(Color.onSurfaceSecondary)
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("long.action.mark_read.\(content.id)")
@@ -141,7 +141,7 @@ struct LongFormCard: View {
                             KnowledgeSaveIcon(
                                 isSaved: content.isSavedToKnowledge,
                                 unsavedColor: Color.onSurfaceSecondary,
-                                badgeColor: Color.brandTertiary
+                                badgeColor: Color.brandPrimary
                             )
                         }
                         .buttonStyle(.plain)

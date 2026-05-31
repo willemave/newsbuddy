@@ -55,7 +55,7 @@ struct ContentListView: View {
                                             } label: {
                                                 Label("Mark as Read", systemImage: "checkmark.circle.fill")
                                             }
-                                            .tint(Color.brandTertiary)
+                                            .tint(Color.brandPrimary)
                                         }
                                     }
                                 }

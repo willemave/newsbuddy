@@ -168,7 +168,7 @@ struct ArticleCardView: View {
             if content.isRead {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.caption)
-                    .foregroundColor(.brandTertiary)
+                    .foregroundColor(.onSurfaceSecondary)
             }
         }
     }
@@ -193,10 +193,10 @@ struct ArticleCardView: View {
                     Text(topic)
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundColor(.brandSecondary)
+                        .foregroundColor(.onSurfaceSecondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(Color.brandSecondary.opacity(0.12))
+                        .background(Color.surfaceTertiary)
                         .cornerRadius(12)
                 }
             }
@@ -270,7 +270,7 @@ struct ArticleCardView: View {
             Button(action: onMarkRead) {
                 Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
                     .font(.system(size: 20, weight: .regular))
-                    .foregroundColor(content.isRead ? .brandTertiary : Color.onSurfaceSecondary)
+                    .foregroundColor(Color.onSurfaceSecondary)
             }
             .frame(width: 44, height: 44)
             .accessibilityLabel(content.isRead ? "Marked as read" : "Mark as read")

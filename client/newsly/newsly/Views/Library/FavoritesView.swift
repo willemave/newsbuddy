@@ -78,7 +78,7 @@ struct KnowledgeLibraryView: View {
         VStack(spacing: 20) {
             Image(systemName: "books.vertical")
                 .font(.system(size: 48, weight: .light))
-                .foregroundStyle(Color.brandTertiary.opacity(0.78))
+                .foregroundStyle(Color.onSurfaceTertiary.opacity(0.78))
 
             VStack(spacing: 6) {
                 Text("No saved items yet")
@@ -125,7 +125,7 @@ struct KnowledgeLibraryView: View {
                         } label: {
                             Label("Mark as Read", systemImage: "checkmark.circle.fill")
                         }
-                        .tint(Color.brandTertiary)
+                        .tint(Color.brandPrimary)
                     }
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -139,7 +139,7 @@ struct KnowledgeLibraryView: View {
                     } label: {
                         Label("Remove", systemImage: "books.vertical.fill")
                     }
-                    .tint(Color.brandTertiary)
+                    .tint(Color.statusDestructive)
                 }
             }
 
@@ -300,7 +300,7 @@ private struct SavedLibraryRow: View {
             if content.savedSource == "x_bookmark" {
                 Image(systemName: "bookmark.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.brandTertiary)
+                    .foregroundStyle(Color.onSurfaceSecondary)
                     .padding(.top, 4)
                     .accessibilityLabel("X bookmark")
             }
