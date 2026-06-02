@@ -28,6 +28,7 @@ from app.models.api.audio_episodes import (
 )
 from app.models.contracts import ContentType, TaskType
 from app.models.db import AudioEpisode, Content, NewsItem
+from app.repositories import read_status_repository
 from app.repositories.content_detail_repository import get_visible_content
 from app.services.audio_episode_kinds import (
     AUDIO_EPISODE_MODEL,
@@ -46,9 +47,11 @@ from app.services.custom_narrations import (
 )
 from app.services.llm_agents import get_basic_agent
 from app.services.news_feed import (
+    bulk_mark_news_items_read,
     get_visible_news_item,
     list_unread_visible_news_items,
 )
+from app.services.prompt_library import load_prompt
 from app.services.queue import get_queue_service
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.voice.narration_tts import get_content_narration_tts_service
@@ -64,12 +67,7 @@ AUDIO_EPISODE_FILE_CHUNK_SIZE = 1024 * 256
 AUDIO_EPISODE_FOLLOW_POLL_SECONDS = 0.25
 AUDIO_EPISODE_FOLLOW_TIMEOUT_SECONDS = 180
 
-SCRIPT_SYSTEM_PROMPT = """You write concise, natural podcast scripts for Newsly.
-Create spoken dialogue, not an essay. The format should feel like a smart tech/business
-podcast roundtable: quick context, clear stakes, grounded analysis, and a brisk close.
-Do not mention or imitate any specific real podcast, host, or brand. Do not invent facts
-outside the supplied source material. No stage directions, music cues, sponsor reads, or
-markdown."""
+SCRIPT_SYSTEM_PROMPT = load_prompt("audio/episode_scripts#system")
 
 
 class AudioEpisodeTurn(BaseModel):
@@ -294,7 +292,9 @@ def create_custom_narration_episode(
     *,
     user_id: int,
     content_ids: list[int],
+    news_item_ids: list[int] | None = None,
     title: str | None = None,
+    mark_source_content_read_on_play: bool = False,
 ) -> AudioEpisode:
     """Create or reuse one combined narration from selected articles/podcasts."""
 
@@ -316,15 +316,23 @@ def create_custom_narration_episode(
         db,
         user_id=user_id,
         content_ids=content_ids,
+        news_item_ids=news_item_ids,
+        mark_source_content_read_on_play=mark_source_content_read_on_play,
     )
     episode_title = custom_narration_title(source_snapshot, title=title)
+    raw_news_item_ids = source_snapshot.get("news_item_ids")
+    source_item_ids = (
+        _int_list_from_snapshot_values(raw_news_item_ids)
+        if isinstance(raw_news_item_ids, list)
+        else []
+    )
     episode = _create_or_reuse_episode(
         db,
         user_id=user_id,
         kind=CUSTOM_NARRATION_KIND,
         title=episode_title[:255],
         source_content_id=None,
-        source_item_ids=[],
+        source_item_ids=source_item_ids,
         source_snapshot=source_snapshot,
     )
     logger.info(
@@ -518,6 +526,8 @@ def present_audio_episode(episode: AudioEpisode) -> AudioEpisodeResponse:
         source_content_ids=_episode_source_content_ids(episode),
         source_count=_episode_source_count(episode),
         source_titles=_episode_source_titles(episode),
+        read_on_play_content_ids=_episode_read_on_play_content_ids(episode),
+        read_on_play_news_item_ids=_episode_read_on_play_news_item_ids(episode),
         duration_seconds=episode.duration_seconds,
         audio_url=audio_url,
         stream_url=stream_url,
@@ -571,6 +581,56 @@ def commit_audio_episode_delivery(
         },
     )
     return present_audio_episode(episode)
+
+
+def mark_audio_episode_sources_read_on_play(
+    db: Session,
+    *,
+    episode: AudioEpisode,
+) -> dict[str, Any]:
+    """Mark custom narration source rows read when the authenticated owner starts playback."""
+
+    if episode.kind != CUSTOM_NARRATION_KIND:
+        return {
+            "content_marked_count": 0,
+            "content_failed_ids": [],
+            "news_marked_count": 0,
+            "news_failed_ids": [],
+        }
+
+    user_id = _required_int(episode.user_id, "audio episode user_id")
+    content_ids = _episode_read_on_play_content_ids(episode)
+    news_item_ids = _episode_read_on_play_news_item_ids(episode)
+
+    content_marked_count = 0
+    content_failed_ids: list[int] = []
+    if content_ids:
+        content_marked_count, content_failed_ids = read_status_repository.mark_contents_as_read(
+            db,
+            content_ids,
+            user_id,
+        )
+
+    news_marked_count = 0
+    news_failed_ids: list[int] = []
+    if news_item_ids:
+        news_result = bulk_mark_news_items_read(
+            db,
+            user_id=user_id,
+            news_item_ids=news_item_ids,
+        )
+        raw_news_marked_count = news_result.get("marked_count", 0)
+        news_marked_count = raw_news_marked_count if isinstance(raw_news_marked_count, int) else 0
+        raw_news_failed_ids = news_result.get("failed_ids", [])
+        if isinstance(raw_news_failed_ids, list):
+            news_failed_ids = _int_list_from_snapshot_values(raw_news_failed_ids)
+
+    return {
+        "content_marked_count": content_marked_count,
+        "content_failed_ids": content_failed_ids,
+        "news_marked_count": news_marked_count,
+        "news_failed_ids": news_failed_ids,
+    }
 
 
 def audio_episode_file_path(episode: AudioEpisode) -> Path | None:
@@ -1653,6 +1713,30 @@ def _episode_source_count(episode: AudioEpisode) -> int:
         return len(source_content_ids)
     source_item_ids = episode.source_item_ids or []
     return len(source_item_ids)
+
+
+def _episode_read_on_play_content_ids(episode: AudioEpisode) -> list[int]:
+    read_policy = _episode_read_on_play_policy(episode)
+    raw_content_ids = read_policy.get("content_ids")
+    return (
+        _int_list_from_snapshot_values(raw_content_ids) if isinstance(raw_content_ids, list) else []
+    )
+
+
+def _episode_read_on_play_news_item_ids(episode: AudioEpisode) -> list[int]:
+    read_policy = _episode_read_on_play_policy(episode)
+    raw_news_item_ids = read_policy.get("news_item_ids")
+    return (
+        _int_list_from_snapshot_values(raw_news_item_ids)
+        if isinstance(raw_news_item_ids, list)
+        else []
+    )
+
+
+def _episode_read_on_play_policy(episode: AudioEpisode) -> dict[str, Any]:
+    snapshot = episode.source_snapshot if isinstance(episode.source_snapshot, dict) else {}
+    read_policy = snapshot.get("read_on_play")
+    return read_policy if isinstance(read_policy, dict) else {}
 
 
 def _int_list_from_snapshot_values(values: list[Any]) -> list[int]:

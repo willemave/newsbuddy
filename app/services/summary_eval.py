@@ -18,6 +18,7 @@ from app.services.llm_summarization import (
     resolve_summarization_output_type,
     resolve_summarization_spec,
 )
+from app.services.prompt_library import render_prompt
 
 SummaryEvalContentType = Literal["article", "podcast", "news"]
 LongformTemplate = Literal[
@@ -251,28 +252,18 @@ def build_title_judge_prompt(
         "\n".join(f"- {title}" for title in case.reference_titles) or "- None provided"
     )
     evaluation_criteria = case.evaluation_criteria or "No extra evaluation criteria."
-    return (
-        "You are grading a generated title for a summary-generation eval.\n\n"
-        "Decide whether the generated title is grounded, specific, and materially better "
-        "than the known bad titles.\n"
-        "The generated title does not need to match the reference titles exactly, but it "
-        "should be comparably informative and faithful.\n\n"
-        f"Content type: {case.content_type}\n"
-        f"Prompt type: {prompt_type}\n"
-        f"Source title hint: {case.source_title or 'None'}\n"
-        f"Existing title: {case.existing_title or 'None'}\n"
-        f"Known bad titles:\n{bad_titles}\n\n"
-        f"Reference good titles:\n{reference_titles}\n\n"
-        f"Evaluation criteria:\n{evaluation_criteria}\n\n"
-        f"Source evidence:\n{case.input_text}\n\n"
-        f"Generated title:\n{generated_title}\n\n"
-        f"Full generated payload:\n{payload_json}\n\n"
-        "Grade on these dimensions:\n"
-        "- Specificity and informativeness\n"
-        "- Faithfulness to the evidence\n"
-        "- Whether it avoids vague reaction-text or placeholder framing\n"
-        "- Whether it captures the real takeaway or tension\n\n"
-        "Fail the title if it stays generic, mirrors the bad titles, or misses the story."
+    return render_prompt(
+        "evals/judges#title_judge_user",
+        content_type=case.content_type,
+        prompt_type=prompt_type,
+        source_title=case.source_title or "None",
+        existing_title=case.existing_title or "None",
+        bad_titles=bad_titles,
+        reference_titles=reference_titles,
+        evaluation_criteria=evaluation_criteria,
+        input_text=case.input_text,
+        generated_title=generated_title,
+        payload_json=payload_json,
     )
 
 

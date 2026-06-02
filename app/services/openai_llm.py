@@ -15,6 +15,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.services.langfuse_tracing import langfuse_trace_context
+from app.services.prompt_library import load_prompt
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 try:
@@ -158,31 +159,16 @@ class OpenAITranscriptionService:
     def _get_transcription_prompt(self, file_path: Path) -> str:
         """Generate a contextual prompt based on the file name and podcast context."""
         file_name = file_path.stem
-        prompt = (
-            "This is a podcast episode. Please transcribe accurately, "
-            "including speaker names when mentioned."
-        )
+        prompt = load_prompt("audio/transcription#default")
 
         if "interview" in file_name.lower():
-            prompt = (
-                "This is a podcast interview. Please transcribe accurately, "
-                "noting different speakers."
-            )
+            prompt = load_prompt("audio/transcription#interview")
         elif "tech" in file_name.lower() or "ai" in file_name.lower():
-            prompt = (
-                "This is a technology podcast discussing AI, software, and tech innovations. "
-                "Include technical terms accurately."
-            )
+            prompt = load_prompt("audio/transcription#tech")
         elif "news" in file_name.lower():
-            prompt = (
-                "This is a news podcast. Please transcribe accurately, "
-                "including proper names and places."
-            )
+            prompt = load_prompt("audio/transcription#news")
         elif any(term in file_name.lower() for term in ["bg2", "bill", "gurley", "gerstner"]):
-            prompt = (
-                "This is the BG2 podcast with Bill Gurley and Brad Gerstner discussing "
-                "technology, venture capital, and market trends."
-            )
+            prompt = load_prompt("audio/transcription#bg2")
 
         return prompt
 
@@ -383,7 +369,7 @@ class OpenAITranscriptionService:
 
                     chunk_prompt = prompt
                     if i > 0:
-                        chunk_prompt += " This is a continuation of the previous segment."
+                        chunk_prompt += f" {load_prompt('audio/transcription#continuation_suffix')}"
 
                     chunk_transcript, chunk_language = self._transcribe_single_file(
                         chunk_path, chunk_prompt

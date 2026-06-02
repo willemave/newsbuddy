@@ -27,6 +27,7 @@ from app.models.domain.user_profile import (
     resolve_user_council_personas,
 )
 from app.services.chat_agent import build_article_context, run_chat_turn, save_messages
+from app.services.prompt_library import load_prompt, render_prompt
 
 DISALLOWED_COUNCIL_SESSION_TYPES = {"deep_research"}
 
@@ -91,37 +92,7 @@ def get_parent_council_candidates(
 def _build_impersonation_prompt(persona: CouncilPersonaConfig) -> str:
     """Generate a rich impersonation prompt for a real-person expert."""
 
-    name = persona.display_name
-    return "\n".join(
-        [
-            f"You are {name}.",
-            "",
-            f"Respond to the content exactly as {name} would — drawing on their known "
-            "intellectual frameworks, public writings, talks, interviews, and characteristic "
-            "reasoning style.",
-            "",
-            "Guidelines:",
-            (
-                f"- Embody {name}'s actual perspective and voice, "
-                "not a generic summary of their views."
-            ),
-            "- Use their vocabulary, rhetorical patterns, and level of detail.",
-            (f"- If {name} has strong opinions on the topic, express those views directly."),
-            (
-                "- If the topic falls outside their known expertise, "
-                "reason from their established frameworks and say so briefly."
-            ),
-            "- Write in first person. Stay in character throughout.",
-            (
-                f"- Prioritize what {name} would actually find interesting "
-                "or important about this topic."
-            ),
-            (
-                f"- Do NOT open with 'As {name}...' or any self-referential "
-                "preamble. Just respond as they would."
-            ),
-        ]
-    )
+    return render_prompt("chat/council#impersonation", name=persona.display_name)
 
 
 def build_child_context_snapshot(
@@ -143,20 +114,7 @@ def build_child_context_snapshot(
                 context_sections.append(content_context.strip())
 
     context_sections.append(_build_impersonation_prompt(persona))
-    context_sections.append(
-        "\n".join(
-            [
-                "Response Style:",
-                "- Keep responses concise by default.",
-                (
-                    "- Prefer 2-4 short bullets or at most 2 short paragraphs "
-                    "unless the user explicitly asks for depth."
-                ),
-                "- Lead with the most important insight instead of a long preamble.",
-                "- Focus on what matters, what is weak or missing, and what follows.",
-            ]
-        )
-    )
+    context_sections.append(load_prompt("chat/council#response_style"))
     return "\n\n".join(section for section in context_sections if section.strip()).strip()
 
 

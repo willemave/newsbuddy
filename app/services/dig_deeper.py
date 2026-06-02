@@ -15,19 +15,13 @@ from app.services.chat_agent import create_processing_message, process_message_a
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
 from app.services.personal_markdown_library import sync_personal_markdown_for_content
+from app.services.prompt_library import render_prompt
 from app.services.queue import TaskType
 from app.utils.title_utils import resolve_content_display_title
 
 logger = get_logger(__name__)
 
 KNOWLEDGE_SESSION_TYPE = "knowledge_chat"
-DIG_DEEPER_PROMPT_TEMPLATE = (
-    "Dig deeper into the key points of {title}. For each main point, explain reasoning, "
-    "supporting evidence, and include a bit more detail explaining the point. "
-    "Also pull out key ideas from the discussion context when available, and add more insights "
-    "from the discussion, including notable agreements and disagreements. "
-    "Keep answers concise and numbered."
-)
 MAX_DISCUSSION_COMMENT_SNIPPETS = 8
 MAX_DISCUSSION_GROUP_SNIPPETS = 4
 MAX_DISCUSSION_SNIPPET_CHARS = 220
@@ -228,7 +222,7 @@ def build_dig_deeper_prompt(db: Session, content: Content) -> str:
         Prompt string for the chat agent.
     """
     title = resolve_display_title(content)
-    prompt = DIG_DEEPER_PROMPT_TEMPLATE.format(title=title)
+    prompt = render_prompt("chat/dig_deeper#user", title=title)
     discussion_context = _build_discussion_context(db, content.id)
     if not discussion_context:
         return prompt

@@ -12,22 +12,22 @@ SECTION_MARKER_PATTERN = "<!-- prompt-section: {section} -->"
 SECTION_END_MARKER = "<!-- /prompt-section -->"
 
 
-def _split_prompt_reference(name: str) -> tuple[str, str | None]:
-    prompt_name, separator, section_name = name.partition("#")
+def _split_prompt_reference(prompt_ref: str) -> tuple[str, str | None]:
+    prompt_name, separator, section_name = prompt_ref.partition("#")
     if not separator:
         return prompt_name, None
     section = section_name.strip().lower()
     if not section:
-        raise ValueError(f"Prompt section cannot be empty: {name}")
+        raise ValueError(f"Prompt section cannot be empty: {prompt_ref}")
     return prompt_name, section
 
 
-def _normalize_prompt_name(name: str) -> str:
-    normalized = name.strip().removeprefix("/")
+def _normalize_prompt_name(prompt_name: str) -> str:
+    normalized = prompt_name.strip().removeprefix("/")
     if not normalized:
         raise ValueError("Prompt name cannot be empty")
     if ".." in normalized.split("/"):
-        raise ValueError(f"Invalid prompt path: {name}")
+        raise ValueError(f"Invalid prompt path: {prompt_name}")
     if not normalized.endswith(".md"):
         normalized = f"{normalized}.md"
     return normalized
@@ -73,9 +73,9 @@ def _extract_prompt_section(text: str, section: str) -> str:
 
 
 @cache
-def load_prompt(name: str) -> str:
+def load_prompt(prompt_ref: str) -> str:
     """Load a Markdown prompt body, excluding frontmatter metadata."""
-    prompt_name, section = _split_prompt_reference(name)
+    prompt_name, section = _split_prompt_reference(prompt_ref)
     normalized = _normalize_prompt_name(prompt_name)
     resource = files(PROMPT_PACKAGE)
     for part in normalized.split("/"):
@@ -86,7 +86,7 @@ def load_prompt(name: str) -> str:
     return text
 
 
-def render_prompt(name: str, **values: object) -> str:
+def render_prompt(prompt_ref: str, **values: object) -> str:
     """Load and substitute a Markdown prompt template using string.Template syntax."""
     mapping = {key: str(value) for key, value in values.items()}
-    return Template(load_prompt(name)).substitute(mapping)
+    return Template(load_prompt(prompt_ref)).substitute(mapping)

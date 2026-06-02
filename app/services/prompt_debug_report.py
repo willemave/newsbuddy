@@ -20,6 +20,7 @@ from app.services.content_analyzer import CONTENT_ANALYSIS_MODEL, CONTENT_ANALYZ
 from app.services.content_bodies import get_content_body_resolver
 from app.services.llm_prompts import generate_summary_prompt
 from app.services.llm_summarization import DEFAULT_SUMMARIZATION_MODELS
+from app.services.prompt_library import render_prompt
 from app.services.summarization_templates import resolve_summarization_prompt_route
 
 FAILURE_LEVELS = {"ERROR", "CRITICAL"}
@@ -394,18 +395,12 @@ def reconstruct_analyze_url_prompt(failure: FailureRecord) -> PromptSnapshot:
             notes=notes + ["Missing URL in failure record context"],
         )
 
-    user_prompt = (
-        "INPUT:\n"
-        f"URL: {url}\n"
-        "WORD COUNT: unknown\n"
-        f"INSTRUCTION: {instruction}\n\n"
-        "DETECTED MEDIA LINKS (extracted from HTML):\n"
-        f"- Platforms found: {detected_placeholder}\n"
-        f"- Platform URLs (NOT directly downloadable): {detected_placeholder}\n"
-        f"- Direct audio files: {detected_placeholder}\n"
-        "- RSS audio URL: [unknown]\n\n"
-        "PAGE CONTENT (truncated):\n"
-        f"{content_placeholder}\n"
+    user_prompt = render_prompt(
+        "content/analyzer#reconstruction_user",
+        url=url,
+        instruction=instruction,
+        detected_placeholder=detected_placeholder,
+        content_placeholder=content_placeholder,
     )
 
     return PromptSnapshot(

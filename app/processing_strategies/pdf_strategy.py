@@ -15,6 +15,7 @@ from app.services.langfuse_tracing import (
     langfuse_generation_context,
 )
 from app.services.pdf_text_extraction import extract_pdf_text
+from app.services.prompt_library import load_prompt
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -87,13 +88,7 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
             # Create a Part object from PDF bytes
             pdf_part = Part.from_bytes(data=content, mime_type="application/pdf")
 
-            # Simple extraction prompt - just get the text
-            extraction_prompt = """
-            Extract all text content from this PDF document.
-            Return the full text in a clean, readable format.
-            Preserve the document structure (headings, paragraphs, lists).
-            If you can identify the title, include it at the beginning.
-            """
+            extraction_prompt = load_prompt("processing/pdf_extract_text")
 
             with langfuse_generation_context(
                 name="queue.pdf.extract_text",

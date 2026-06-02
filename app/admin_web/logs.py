@@ -11,6 +11,7 @@ from app.admin_web.templates import templates
 from app.core.deps import require_admin
 from app.core.logging import get_logger
 from app.core.settings import get_settings
+from app.services.prompt_library import load_prompt
 
 router = APIRouter(tags=["admin"])
 
@@ -675,12 +676,7 @@ def _an_generate_llm_prompt(grouped: dict[str, list[dict[str, Any]]], hours: int
 
     # Structured request for the LLM
     lines.append("## Fix Request")
-    lines.append("Please propose fixes with:")
-    lines.append("1. Critical fixes first (showstoppers), with code diffs.")
-    lines.append("2. Root-cause analysis for top categories and patterns.")
-    lines.append("3. Specific code changes (file paths, line ranges, before/after snippets).")
-    lines.append("4. Preventive measures (validation, retries, backoff, monitoring, alerts).")
-    lines.append("5. Testing strategy (unit/integration), plus quick verification steps.")
+    lines.append(load_prompt("admin/error_analysis_fix_request"))
 
     return "\n".join(lines)
 

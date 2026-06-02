@@ -57,6 +57,7 @@ from app.services.llm_models import (
 )
 from app.services.news_feed import list_unread_visible_news_items
 from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
+from app.services.prompt_library import load_prompt
 from app.services.sandbox_runtime import (
     PersonalLibrarySandboxSession,
     SandboxRuntimeUnavailableError,
@@ -84,43 +85,7 @@ ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS = "pick_interesting_unread_news"
 
 ASSISTANT_OPENAI_REASONING_EFFORT: ReasoningEffort = "low"
 
-ASSISTANT_SYSTEM_PROMPT = (
-    "You are Newsly's contextual assistant. "
-    "You help users understand what they are looking at, discover new content, "
-    "and take actions inside the app. "
-    "Be concise, action-oriented, and explicit when you changed the user's state.\n\n"
-    "Rules:\n"
-    "- Use tools when they can directly answer or complete the request.\n"
-    "- If the user asks about their saved markdown library, file paths, raw markdown, "
-    "or summary markdown, call SearchMarkdownLibrary first.\n"
-    "- When SearchMarkdownLibrary returns relevant file paths, call ReadMarkdownFile "
-    "before answering from file contents.\n"
-    "- If the user asks about their saved knowledge or bookmarked content, "
-    "call search_knowledge first.\n"
-    "- If the user asks about their in-app feed or inbox, call search_content "
-    "and search_news as needed.\n"
-    "- If turn instructions require list_unread_news_items, call it before answering.\n"
-    "- If the user asks about a specific followed feed, newsletter, or podcast, "
-    "call search_subscription_feeds first.\n"
-    "- For broad current-events or recent factual questions, call search_web first.\n"
-    "- For blog, newsletter, RSS, or podcast source-finding requests, call "
-    "find_feed_options first and present the returned options as recommendations "
-    "the user can review.\n"
-    "- When recommending feed options, stay in review mode. Do not offer to subscribe, "
-    "add, or mutate anything unless the user explicitly asks for that after seeing the options.\n"
-    "- For source recommendations, prefer high-signal, widely recognized outlets unless "
-    "the user explicitly asks for niche or emerging ones.\n"
-    "- Mutations are allowed, but do not subscribe to a discovered feed in the same turn that "
-    "you searched for options unless the user provided a direct URL.\n"
-    "- Keep tool narration compact. State the outcome, not a verbose audit log.\n"
-    "- When a request would take a long time, create the handoff and tell the user where "
-    "to continue.\n"
-    "- When extra client context is provided, use it as supporting background. "
-    "Do not assume it changes tool routing on its own.\n"
-    "- Do not use markdown tables in chat responses. "
-    "For comparisons or lists, use headings, bullets, "
-    "or one-item-per-line formatting that reads well on mobile.\n"
-)
+ASSISTANT_SYSTEM_PROMPT = load_prompt("chat/contextual_assistant#system")
 
 SMALL_TALK_PHRASES = {
     "hi",
@@ -352,77 +317,30 @@ def _build_turn_instructions(
         screen_context is not None
         and screen_context.assistant_action == ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS
     ):
-        return (
-            "For this turn, call list_unread_news_items before answering. "
-            "Use the returned unread in-app fast-news items as the candidate set. "
-            "Pick the most interesting stories by prioritizing surprising, important, "
-            "high-signal, or discussion-worthy items over generic recency. "
-            "For each pick, name the story and briefly explain why it is worth attention. "
-            "If the tool returns no items, say there are no unread fast-news items. "
-            "Do not mark items read, save items, subscribe to feeds, or take any mutation. "
-            "Only call search_web if it is needed to clarify a selected story."
-        )
+        return load_prompt("chat/contextual_assistant#turn_pick_interesting_unread_news")
 
     if _is_small_talk(user_text):
         return None
 
     if _should_route_to_feed_finder(user_text):
-        return (
-            "For this turn, call find_feed_options before answering. "
-            "Summarize the best validated matches you found, keep the response in recommendation "
-            "mode, and mention that validated feed options are attached below for review. "
-            "Do not offer to subscribe, add, or take any mutation in this response. "
-            "Close by inviting the user to review or compare the options, not by proposing an "
-            "immediate action. "
-            "Do not call subscribe_to_feed in this turn unless the user supplied a specific URL "
-            "or explicitly asks to subscribe to one of the returned options."
-        )
+        return load_prompt("chat/contextual_assistant#turn_feed_finder")
 
     if _should_route_to_markdown_library(user_text):
-        return (
-            "For this turn, call SearchMarkdownLibrary before answering. "
-            "Use a concise query derived from the user's request. "
-            "If it returns relevant file paths, call ReadMarkdownFile on the most relevant file "
-            "before answering. Only fall back to search_knowledge if the markdown library has no "
-            "useful file-level results."
-        )
+        return load_prompt("chat/contextual_assistant#turn_markdown_library")
 
     if _should_route_to_content_search(user_text):
-        return (
-            "For this turn, call search_content and search_news before answering. "
-            "If the request is about a specific followed feed, newsletter, or podcast, "
-            "call search_subscription_feeds first. "
-            "Only call search_web if these tools are insufficient."
-        )
+        return load_prompt("chat/contextual_assistant#turn_content_search")
 
     if _should_route_to_knowledge(user_text):
-        return (
-            "For this turn, call search_knowledge before answering. "
-            "Use a concise query derived from the user's request. "
-            "If search_knowledge has no relevant matches, say so plainly instead of guessing."
-        )
+        return load_prompt("chat/contextual_assistant#turn_knowledge_search")
 
     if _should_route_to_web(user_text):
         normalized = _normalize_turn_text(user_text)
         if any(hint in normalized for hint in SOURCE_RECOMMENDATION_HINTS):
-            return (
-                "For this turn, call search_web before answering. "
-                "When recommending blogs, publications, or sources, prefer high-signal, "
-                "widely recognized outlets over obscure results unless the user asks for "
-                "niche options."
-            )
-        return (
-            "For this turn, call search_web before answering. "
-            "Use a concise web query derived from the user's request. "
-            "If the request is actually about saved knowledge, "
-            "call search_knowledge first."
-        )
+            return load_prompt("chat/contextual_assistant#turn_source_recommendation")
+        return load_prompt("chat/contextual_assistant#turn_web_search")
 
-    return (
-        "For this turn, if the user is asking for specific factual information, "
-        "prefer tools over assumptions. Use search_knowledge for saved knowledge context "
-        "and search_web for current external facts."
-    )
+    return load_prompt("chat/contextual_assistant#turn_default_tool_preference")
 
 
 def _personal_library_unavailable_message(error: str | None) -> str:

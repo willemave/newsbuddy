@@ -22,6 +22,7 @@ from app.services.apple_podcasts import resolve_apple_podcast_feed_url
 from app.services.exa_client import ExaClientError, exa_search
 from app.services.http import HttpService, fetch_quiet_compat, head_quiet_compat
 from app.services.llm_agents import get_basic_agent
+from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_usage import record_model_usage
 
 logger = get_logger(__name__)
@@ -29,10 +30,7 @@ logger = get_logger(__name__)
 # Configuration
 FEED_CLASSIFICATION_MODEL = SMART_MODEL_SPEC
 FEED_CLASSIFICATION_TIMEOUT = 10.0
-FEED_CLASSIFICATION_SYSTEM_PROMPT = (
-    "You classify RSS/Atom feeds by inspecting the feed URL and page metadata. "
-    "Return structured output that matches the schema."
-)
+FEED_CLASSIFICATION_SYSTEM_PROMPT = load_prompt("feeds/classification#system")
 HEURISTIC_CONFIDENCE_THRESHOLD = 0.75
 FEED_CANDIDATE_PATHS = (
     "/rss.xml",
@@ -478,21 +476,12 @@ def _build_classification_prompt(
     """Build the classification prompt for the LLM."""
     title_line = f"Page Title: {page_title}\n" if page_title else ""
 
-    return f"""Classify this RSS/Atom feed based on the feed URL and the page it was found on.
-
-Feed URL: {feed_url}
-Page URL: {page_url}
-{title_line}
-Classify as one of:
-- "substack": Substack newsletter. Substack publications may use custom domains
-  (e.g., chinatalk.media, stratechery.com) but are still Substack-powered.
-  Look for substack.com in the feed URL, or indicators that this is a newsletter.
-- "podcast_rss": Podcast feed with audio episodes. Look for podcast hosting platforms
-  (anchor.fm, transistor.fm, libsyn, buzzsprout, simplecast, captivate, podbean, spreaker)
-  or keywords like podcast/episode in the URL.
-- "atom": Generic blog or news RSS feed that doesn't fit the above categories.
-
-Return your classification with confidence score and brief reasoning."""
+    return render_prompt(
+        "feeds/classification#user",
+        feed_url=feed_url,
+        page_url=page_url,
+        title_line=title_line.rstrip(),
+    )
 
 
 def _normalize_value(value: str | None) -> str:

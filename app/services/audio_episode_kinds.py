@@ -13,6 +13,7 @@ from app.services.custom_narrations import (
     CUSTOM_NARRATION_KIND,
     build_custom_narration_prompt,
 )
+from app.services.prompt_library import render_prompt
 
 FAST_NEWS_DIGEST_KIND: Literal["fast_news_digest"] = "fast_news_digest"
 CONTENT_COUNCIL_DISCUSSION_KIND: Literal["content_council_discussion"] = (
@@ -41,71 +42,29 @@ def audio_episode_kind_spec(kind: str) -> AudioEpisodeKindSpec:
 
 
 def _build_fast_news_prompt(source_snapshot: dict[str, Any]) -> str:
-    return f"""Create a roughly 60 second quick-hit episode from these unread Fast Reads.
-
-Goal:
-- Curate the highest-signal highlights across the list, not a rote item-by-item readout.
-- Use only summaries and key points below.
-- Mention concrete companies, products, people, and numbers when present.
-- Group related items into themes when that makes the briefing sharper.
-- Keep it brisk, conversational, and useful for someone catching up while walking.
-
-Shape:
-- 110-150 spoken words.
-- Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 6-8 turns.
-- Start with the top 2-3 headlines and why they matter.
-- End with one short "what to watch next" close.
-
-Unread Fast Reads JSON:
-{json.dumps(source_snapshot, ensure_ascii=False, indent=2)}
-"""
+    return render_prompt(
+        "audio/episode_scripts#fast_news_digest_user",
+        dialogue_text_char_limit=DIALOGUE_TEXT_CHAR_LIMIT,
+        source_snapshot_json=json.dumps(source_snapshot, ensure_ascii=False, indent=2),
+    )
 
 
 def _build_content_council_prompt(source_snapshot: dict[str, Any]) -> str:
     source_label = "transcript" if source_snapshot.get("content_type") == "podcast" else "article"
-    return f"""Create a roughly 60 second council-of-experts discussion about this
-long-form {source_label}.
-
-Goal:
-- Use the supplied {source_label} excerpts plus the summary.
-- Give listeners the thesis, strongest evidence, implications, and any weak spots or open questions.
-- Make it feel like a compact expert roundtable, not a narration of the article.
-- Keep the discussion grounded: if a point is not in the source, do not include it.
-
-Shape:
-- 110-150 spoken words.
-- Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 6-8 turns.
-- Use speaker='host' for framing, speaker='cohost' for synthesis, and
-  speaker='expert' for sharper analysis.
-- End with a concise takeaway and why the piece is worth remembering.
-
-Long-form source JSON:
-{json.dumps(source_snapshot, ensure_ascii=False, indent=2)}
-"""
+    return render_prompt(
+        "audio/episode_scripts#content_council_discussion_user",
+        source_label=source_label,
+        dialogue_text_char_limit=DIALOGUE_TEXT_CHAR_LIMIT,
+        source_snapshot_json=json.dumps(source_snapshot, ensure_ascii=False, indent=2),
+    )
 
 
 def _build_news_item_discussion_prompt(source_snapshot: dict[str, Any]) -> str:
-    return f"""Create a roughly 60 second podcast-style discussion about this single Fast Read.
-
-Goal:
-- Use only the supplied summary, key points, and links metadata.
-- Give listeners the headline, context, stakes, and what to watch next.
-- Make it a compact expert roundtable, not a read-aloud summary.
-- Do not invent extra facts beyond the source material.
-
-Shape:
-- 110-150 spoken words.
-- Hard cap: {DIALOGUE_TEXT_CHAR_LIMIT} characters across all spoken turn text.
-- 6-8 turns.
-- Use speaker='host' for framing, speaker='cohost' for synthesis, and
-  speaker='expert' for sharper analysis.
-- End with a concise takeaway.
-
-Fast Read source JSON:
-{json.dumps(source_snapshot, ensure_ascii=False, indent=2)}
-"""
+    return render_prompt(
+        "audio/episode_scripts#news_item_discussion_user",
+        dialogue_text_char_limit=DIALOGUE_TEXT_CHAR_LIMIT,
+        source_snapshot_json=json.dumps(source_snapshot, ensure_ascii=False, indent=2),
+    )
 
 
 AUDIO_EPISODE_KIND_SPECS: dict[str, AudioEpisodeKindSpec] = {

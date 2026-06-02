@@ -29,6 +29,7 @@ from app.services.langfuse_tracing import (
     extract_google_usage_details,
     langfuse_generation_context,
 )
+from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 from app.utils.image_paths import (
     get_content_images_dir,
@@ -43,12 +44,7 @@ DEFAULT_RUNWARE_INFOGRAPHIC_MODEL = RUNWARE_INFOGRAPHIC_MODEL_SPEC
 RUNWARE_API_URL = "https://api.runware.ai/v1"
 RUNWARE_INFOGRAPHIC_WIDTH = 1024
 RUNWARE_INFOGRAPHIC_HEIGHT = 576
-RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT = (
-    "readable text, words, letters, numbers, captions, labels, headlines, logos, "
-    "watermarks, screenshots, website UI, app interface, chart axes, poster, document "
-    "page, printed page, magazine spread, dashboard, phone screen, tablet screen, "
-    "desktop monitor, laptop, computer, office workstation"
-)
+RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT = load_prompt("images/infographic#runware_negative")
 RUNWARE_INLINE_RETRY_ATTEMPTS = 2
 
 # Image size settings
@@ -260,47 +256,26 @@ def _build_news_thumbnail_prompt(content: ContentData) -> str:
 
     # Style based on abstractness
     if score.abstractness > 60:
-        style_direction = """
-- Abstract, conceptual representation
-- Simple geometric shapes
-- Plenty of negative space
-- Minimalist composition"""
+        style_direction = load_prompt("images/thumbnail#style_abstract")
     elif score.abstractness > 30:
-        style_direction = """
-- Stylized, understated illustration
-- Simple shapes and forms
-- Subtle metaphorical imagery
-- Balanced, calm composition"""
+        style_direction = load_prompt("images/thumbnail#style_stylized")
     else:
-        style_direction = """
-- Clean, simple illustration style
-- Recognizable subjects, minimal detail
-- Quiet visual hierarchy
-- Refined editorial aesthetic"""
+        style_direction = load_prompt("images/thumbnail#style_simple")
 
     tension_instruction = ""
     if score.contrast_pairs:
         tension = score.contrast_pairs[0]
         tension_instruction = f"\n- Visual tension between {tension[0]} and {tension[1]}"
 
-    return f"""Create a subtle editorial thumbnail illustration.
-
-CONTENT:
-Title: {title}
-Summary: {overview[:300] if overview else "N/A"}
-Key themes: {", ".join(score.key_concepts[:5])}
-
-VISUAL REQUIREMENTS:
-{style_direction}
-- No text, logos, or watermarks
-- Square 1:1 aspect ratio
-- Muted, subtle color palette
-- Soft contrast, understated aesthetic
-- Clean and minimal{tension_instruction}
-
-MOOD: {_get_mood_from_score(score)}
-
-Create a refined, elegant thumbnail image."""
+    return render_prompt(
+        "images/thumbnail#news_user",
+        title=title,
+        overview=overview[:300] if overview else "N/A",
+        key_themes=", ".join(score.key_concepts[:5]),
+        style_direction=style_direction,
+        tension_instruction=tension_instruction,
+        mood=_get_mood_from_score(score),
+    )
 
 
 def _build_infographic_prompt(content: ContentData) -> str:
@@ -366,27 +341,13 @@ def _build_infographic_prompt(content: ContentData) -> str:
         key_points=key_points,
     )
 
-    return (
-        "Create a premium no-text editorial illustration for Newsly.\n\n"
-        "Hard constraints:\n"
-        "- No readable text, letters, numbers, labels, captions, logos, or watermarks\n"
-        "- No poster layout, newspaper layout, document pages, magazine spreads, "
-        "screenshots, dashboards, or UI chrome\n"
-        "- 16:9 aspect ratio optimized for mobile display\n"
-        "- One dominant visual metaphor or one coherent scene, never a collage\n"
-        "- One focal subject with strong negative space and clear "
-        "foreground/background separation\n"
-        "- Bold, graphic, and immediately legible at thumbnail size\n"
-        "- Refined editorial palette with 2 to 4 dominant colors\n\n"
-        "Visual brief:\n"
-        f"- Story context: {visual_brief['story_context']}\n"
-        f"- Primary subject: {visual_brief['primary_subject']}\n"
-        f"- Visual metaphor: {visual_brief['visual_metaphor']}\n"
-        f"- Scene direction: {visual_brief['scene_direction']}\n"
-        f"- Supporting cues: {visual_brief['supporting_cues']}\n\n"
-        "Output goal:\n"
-        "Create a distinctive editorial image that communicates the story instantly "
-        "without rendering any words."
+    return render_prompt(
+        "images/infographic#article_user",
+        story_context=visual_brief["story_context"],
+        primary_subject=visual_brief["primary_subject"],
+        visual_metaphor=visual_brief["visual_metaphor"],
+        scene_direction=visual_brief["scene_direction"],
+        supporting_cues=visual_brief["supporting_cues"],
     )
 
 
@@ -423,29 +384,13 @@ def _build_insight_report_infographic_prompt(content: ContentData) -> str:
         key_points=key_points,
     )
 
-    return (
-        "Create a premium no-text editorial cover illustration for a Newsly "
-        "insight report — a personal weekly briefing synthesized from the "
-        "reader's saved library.\n\n"
-        "Hard constraints:\n"
-        "- No readable text, letters, numbers, labels, captions, logos, or watermarks\n"
-        "- No poster layout, newspaper layout, document pages, magazine spreads, "
-        "screenshots, dashboards, or UI chrome\n"
-        "- 16:9 aspect ratio optimized for mobile display\n"
-        "- One dominant visual metaphor or one coherent scene, never a collage\n"
-        "- One focal subject with strong negative space and clear "
-        "foreground/background separation\n"
-        "- Bold, graphic, and immediately legible at thumbnail size\n"
-        "- Refined, slightly warmer editorial palette with 2 to 4 dominant colors\n\n"
-        "Visual brief:\n"
-        f"- Story context: {visual_brief['story_context']}\n"
-        f"- Primary subject: {visual_brief['primary_subject']}\n"
-        f"- Visual metaphor: {visual_brief['visual_metaphor']}\n"
-        f"- Scene direction: {visual_brief['scene_direction']}\n"
-        f"- Supporting cues: {visual_brief['supporting_cues']}\n\n"
-        "Output goal:\n"
-        "Create a distinctive editorial cover image that reads as a synthesis "
-        "across the reader's recurring themes, not as a single news article."
+    return render_prompt(
+        "images/infographic#insight_report_user",
+        story_context=visual_brief["story_context"],
+        primary_subject=visual_brief["primary_subject"],
+        visual_metaphor=visual_brief["visual_metaphor"],
+        scene_direction=visual_brief["scene_direction"],
+        supporting_cues=visual_brief["supporting_cues"],
     )
 
 

@@ -31,6 +31,7 @@ from app.models.contracts import ContentClassification, ContentStatus, ContentTy
 from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry
 from app.services.exa_client import ExaSearchResult, exa_search, get_exa_client
 from app.services.llm_models import build_pydantic_model
+from app.services.prompt_library import load_prompt, render_prompt
 
 logger = get_logger(__name__)
 
@@ -218,15 +219,11 @@ def extract_themes(knowledge_items: list[KnowledgeItem]) -> list[str]:
         return []
 
     prompt_blocks = "\n\n".join(item.to_prompt_block() for item in knowledge_items)
-    system_prompt = (
-        "You group a reader's saved articles into a small number of recurring "
-        "themes. Prefer specific, noun-phrase themes over generic buckets. "
-        "Each theme should cover multiple items from the library."
-    )
-    user_prompt = (
-        f"Identify {THEME_COUNT} themes that best organize the following saved items. "
-        "Return concise noun phrases suitable for a newsletter section heading.\n\n"
-        f"{prompt_blocks}"
+    system_prompt = load_prompt("content/insight_themes#system")
+    user_prompt = render_prompt(
+        "content/insight_themes#user",
+        theme_count=THEME_COUNT,
+        prompt_blocks=prompt_blocks,
     )
 
     model, model_settings = build_pydantic_model(THEME_MODEL)
@@ -296,29 +293,12 @@ def synthesize_report(
     themes_block = "\n".join(f"- {t}" for t in themes) or "(no themes)"
     web_block = _format_web_results(theme_web_results)
 
-    system_prompt = (
-        "You are a sharp, senior editor writing a personal briefing for a single "
-        "reader. You have two inputs: the reader's recent saved library (with "
-        "summaries and key points) and fresh web results organized by theme. "
-        "Your job is to synthesize, not repeat. Produce an insight report that "
-        "ties items together, names tensions, and seeds follow-up conversations "
-        "the reader might want to have with an AI assistant. Cite saved items "
-        "by their [#content_id] when they meaningfully drive a point. Prefer "
-        "confident, specific prose over hedging.\n\n"
-        "For dig_deeper_areas, write 3-5 chat-starter prompts in the reader's "
-        "own voice (first person). Each should pick up a specific thread from "
-        "the report — a tension, an open question, a claim worth stress-testing "
-        "— and phrase it as something the reader would type into a chat to keep "
-        "exploring. Do NOT write search queries."
-    )
-    user_prompt = (
-        "Use the reader's saved library and the fresh web findings to draft the "
-        "insight report. Focus on non-obvious observations. End with 3-5 "
-        "chat-starter prompts for dig_deeper_areas — first-person questions "
-        "the reader can tap to continue the conversation.\n\n"
-        f"Themes to organize the report around:\n{themes_block}\n\n"
-        f"--- SAVED LIBRARY ---\n{library_block}\n\n"
-        f"--- FRESH WEB FINDINGS ---\n{web_block}\n"
+    system_prompt = load_prompt("content/insight_report#system")
+    user_prompt = render_prompt(
+        "content/insight_report#user",
+        themes_block=themes_block,
+        library_block=library_block,
+        web_block=web_block,
     )
 
     model, model_settings = build_pydantic_model(model_spec)

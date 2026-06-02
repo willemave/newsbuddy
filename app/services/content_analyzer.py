@@ -30,6 +30,7 @@ from app.models.llm.content_analysis import (
 from app.services.feed_detection import extract_feed_links
 from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_models import build_pydantic_model
+from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_usage import record_model_usage
 
 logger = get_logger(__name__)
@@ -88,38 +89,7 @@ class DetectedMedia(TypedDict):
     rss_audio_url: str | None
 
 
-# System prompt for the content analyzer agent
-CONTENT_ANALYZER_SYSTEM_PROMPT = """\
-You classify web pages as article, podcast, or video and optionally extract links that \
-support a user instruction. Use web search when helpful.
-
-CLASSIFICATION RULES (priority order):
-1. LONG ARTICLE OVERRIDE: If page text is >3000 words AND contains a podcast embed, \
-classify as "article" (text likely contains transcript).
-2. PODCAST: If podcast platform link detected (Spotify, Apple Podcasts, Overcast) \
-AND text is short (<3000 words) → content_type="podcast", platform=platform name.
-3. VIDEO: If YouTube/Vimeo link detected (and no podcast links) → content_type="video".
-4. ARTICLE: If NO podcast or video links detected, OR text is long enough to be a transcript.
-
-CRITICAL media_url rules:
-- NEVER use Spotify/Apple Podcasts/Overcast URLs as media_url (not direct audio).
-- ONLY use direct audio file URLs (.mp3, .m4a, .wav, .ogg) as media_url.
-- If an RSS audio URL is provided, use it as media_url.
-- If only platform links exist, set media_url to null.
-- Always set platform to the detected platform name (spotify, apple_podcasts, etc.).
-
-Instruction handling:
-- If an instruction is provided, return a concise text summary and 0+ relevant links.
-- Links should be relevant to the instruction and to understanding the submitted URL.
-- For each link, include optional metadata: content_type, platform, source.
-
-OUTPUT:
-- Return ONLY valid JSON.
-- Top-level keys: "analysis" and "instruction".
-- "analysis" must match ContentAnalysisResult fields.
-- "analysis.original_url" MUST be the input URL.
-- "instruction" may be null or include "text" and "links".
-"""
+CONTENT_ANALYZER_SYSTEM_PROMPT = load_prompt("content/analyzer#system")
 
 
 def _fetch_page_content(url: str) -> tuple[str | None, str | None]:
@@ -344,22 +314,18 @@ class ContentAnalyzer:
 
             instruction_text = instruction.strip() if instruction else "None"
 
-            prompt = f"""{CONTENT_ANALYZER_SYSTEM_PROMPT}
-
-INPUT:
-URL: {url}
-WORD COUNT: {word_count} words
-INSTRUCTION: {instruction_text}
-
-DETECTED MEDIA LINKS (extracted from HTML):
-- Platforms found: {detected["platforms"] or "None"}
-- Platform URLs (NOT directly downloadable): {detected["platform_urls"][:3] or "None"}
-- Direct audio files: {detected["audio_urls"][:2] or "None"}
-{rss_audio_line}
-
-PAGE CONTENT (truncated):
-{text_snippet}
-"""
+            prompt = render_prompt(
+                "content/analyzer#user",
+                system_prompt=CONTENT_ANALYZER_SYSTEM_PROMPT,
+                url=url,
+                word_count=word_count,
+                instruction_text=instruction_text,
+                platforms=detected["platforms"] or "None",
+                platform_urls=detected["platform_urls"][:3] or "None",
+                audio_urls=detected["audio_urls"][:2] or "None",
+                rss_audio_line=rss_audio_line,
+                text_snippet=text_snippet,
+            )
 
             try:
                 with langfuse_trace_context(

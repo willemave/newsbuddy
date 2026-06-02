@@ -16,6 +16,7 @@ from app.core.model_defaults import CHEAP_MODEL_SPEC
 from app.models.metadata.summaries import InterestingExternalLink
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_models import resolve_model
+from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_usage import record_model_usage
 
 logger = get_logger(__name__)
@@ -95,16 +96,7 @@ SHARE_HOSTS = {
 }
 SHARE_PATH_MARKERS = ("intent", "share", "sharer", "submit")
 
-LINK_SELECTION_SYSTEM_PROMPT = """Select useful outbound links from an article.
-
-Return only links that help a reader understand, verify, or continue from the article:
-- primary sources, papers, datasets, documentation, tools, source repositories,
-  company/product pages, or important related context
-- exclude navigation, homepages, share links, login/signup/subscribe pages, ads,
-  generic social follow links, and weak citations
-- choose from the provided candidates only; never invent a URL
-- prefer fewer high-signal links over a long list
-"""
+LINK_SELECTION_SYSTEM_PROMPT = load_prompt("content/interesting_links#system")
 
 
 @dataclass(frozen=True)
@@ -233,12 +225,12 @@ def _build_selection_prompt(
         }
         for candidate in candidates
     ]
-    return (
-        f"Article title: {title or 'Untitled'}\n"
-        f"Article URL: {source_url or 'unknown'}\n\n"
-        "Candidate outbound links:\n"
-        f"{json.dumps(candidate_payload, ensure_ascii=False, indent=2)}\n\n"
-        f"Select up to {MAX_SELECTED_LINKS} links. Use concise titles and reasons."
+    return render_prompt(
+        "content/interesting_links#user",
+        title=title or "Untitled",
+        source_url=source_url or "unknown",
+        candidate_payload=json.dumps(candidate_payload, ensure_ascii=False, indent=2),
+        max_selected_links=MAX_SELECTED_LINKS,
     )
 
 

@@ -63,6 +63,7 @@ from app.services.feed_resolution import resolve_feed_candidate
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_agents import get_basic_agent
 from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
+from app.services.prompt_library import load_prompt, render_prompt
 from app.services.queue import TaskType
 from app.services.scraper_configs import (
     ScraperConfigAlreadyExistsError,
@@ -125,48 +126,10 @@ SCRAPER_SOURCE_BY_TYPE = {
 }
 ONBOARDING_FEED_DETECTOR = FeedDetector(use_llm=False, use_exa_search=False)
 
-PROFILE_SYSTEM_PROMPT = (
-    "You are building a short onboarding profile for a user. "
-    "Use the provided interests and web snippets to infer a concise profile summary "
-    "and 3-6 topical interests. "
-    "Do not invent interests that contradict the user-provided topics. "
-    "Return structured output only."
-)
-
-FAST_DISCOVER_SYSTEM_PROMPT = (
-    "You are selecting high-quality sources for a new user. "
-    "Use the profile summary, topics, search snippets, and curated fill-in candidates "
-    "to suggest Substack/Atom feeds, podcast RSS feeds, and relevant subreddits. "
-    "Prioritize sources grounded in web_results first; "
-    "use curated_fill_ins as backups for feeds and reddit when needed. "
-    "Podcast suggestions must come from web_results only — do not fabricate podcasts "
-    "and do not reuse feeds/reddit fill-ins as podcasts. "
-    "If web_results contain no suitable podcast RSS feeds, return zero podcasts. "
-    "Every suggestion must include a concise, specific rationale sentence. "
-    "Prefer sources with clear RSS URLs when possible. "
-    "For feed-like sources, always provide a best-effort feed_url when available. "
-    "If uncertain, include candidate_feed_url and set is_likely_feed plus feed_confidence (0-1). "
-    "For reddit entries, include subreddit. "
-    "Return structured output only."
-)
-
-VOICE_PARSE_SYSTEM_PROMPT = (
-    "You extract onboarding fields from a transcript. "
-    "Return a first name if explicitly stated and a concise list of interest topics. "
-    "Do not guess missing information. "
-    "Return structured output only."
-)
-
-AUDIO_PLAN_SYSTEM_PROMPT = (
-    "You design onboarding discovery lanes based on a user's spoken interests. "
-    "Return a concise topic_summary, 3-6 inferred_topics, and 3-5 lanes. "
-    "Each lane must include name, goal, target (feeds, podcasts, reddit), "
-    "and 2-4 web search queries. Queries must be varied and specific: each query should be "
-    "a compact search phrase (5-10 words) with concrete keywords tied to the lane goal, "
-    "and avoid repeating the same wording pattern. "
-    "Include at least one reddit lane. "
-    "Return structured output only."
-)
+PROFILE_SYSTEM_PROMPT = load_prompt("onboarding/profile#system")
+FAST_DISCOVER_SYSTEM_PROMPT = load_prompt("onboarding/fast_discover#system")
+VOICE_PARSE_SYSTEM_PROMPT = load_prompt("onboarding/voice_parse#system")
+AUDIO_PLAN_SYSTEM_PROMPT = load_prompt("onboarding/audio_plan#system")
 
 
 class _ProfileOutput(BaseModel):
@@ -1283,24 +1246,23 @@ def _prompt_snippet(snippet: str | None) -> str:
 def _format_profile_prompt(
     request: OnboardingProfileRequest, results: list[ExaSearchResult]
 ) -> str:
-    lines = [
-        f"first_name: {request.first_name}",
-        f"interest_topics: {', '.join(request.interest_topics)}",
-        "",
-        "web_results:",
-    ]
+    lines: list[str] = []
     for idx, item in enumerate(results[:10], start=1):
         lines.append(f"{idx}. {item.title}\nurl: {item.url}\nsummary: {item.snippet or ''}")
-    return "\n".join(lines)
+    return render_prompt(
+        "onboarding/profile#user",
+        first_name=request.first_name,
+        interest_topics=", ".join(request.interest_topics),
+        web_results="\n".join(lines),
+    )
 
 
 def _format_voice_parse_prompt(transcript: str, locale: str | None) -> str:
     locale_value = locale or "unknown"
-    return (
-        "Extract the user's first name (if stated) and the topics of news they want to read. "
-        "Return concise topic phrases (2-5 words) and avoid guessing. "
-        f"locale: {locale_value}\n"
-        f"transcript: {transcript}"
+    return render_prompt(
+        "onboarding/voice_parse#user",
+        locale=locale_value,
+        transcript=transcript,
     )
 
 
@@ -1337,7 +1299,7 @@ async def _build_audio_lane_plan_with_metadata(
 
 def _format_audio_plan_prompt(transcript: str, locale: str | None) -> str:
     locale_value = locale or "unknown"
-    return f"locale: {locale_value}\ntranscript: {transcript}"
+    return render_prompt("onboarding/audio_plan#user", locale=locale_value, transcript=transcript)
 
 
 def _candidate_models(primary: str, fallbacks: tuple[str, ...]) -> list[str]:
@@ -1883,34 +1845,35 @@ def _format_discovery_prompt(
     results: list[_DiscoveryWebResult],
     curated_fill_ins: dict[str, list[OnboardingSuggestion]] | None = None,
 ) -> str:
-    lines = [
-        f"profile_summary: {request.profile_summary}",
-        f"topics: {', '.join(request.inferred_topics)}",
-        "",
-        "web_results:",
-    ]
+    web_lines: list[str] = []
     for idx, item in enumerate(results[:DISCOVERY_PROMPT_MAX_WEB_RESULTS], start=1):
         lane_name = getattr(item, "lane_name", None)
         query = getattr(item, "query", None)
         lane_context = f" | lane: {lane_name}" if lane_name else ""
         query_context = f" | query: {query}" if query else ""
-        lines.append(
+        web_lines.append(
             f"{idx}. {item.title}{lane_context}{query_context}\n"
             f"url: {item.url}\n"
             f"summary: {_prompt_snippet(item.snippet)}"
         )
 
-    lines.extend(["", "curated_fill_ins:"])
+    curated_lines: list[str] = []
     fill_ins = curated_fill_ins or {}
     for section_name in ("feeds", "reddit"):
         section_items = fill_ins.get(section_name, [])
-        lines.append(f"{section_name}:")
+        curated_lines.append(f"{section_name}:")
         if not section_items:
-            lines.append("  - none")
+            curated_lines.append("  - none")
             continue
         for idx, curated_item in enumerate(section_items, start=1):
-            lines.append(f"  {idx}. {_format_curated_candidate(curated_item)}")
-    return "\n".join(lines)
+            curated_lines.append(f"  {idx}. {_format_curated_candidate(curated_item)}")
+    return render_prompt(
+        "onboarding/fast_discover#user",
+        profile_summary=request.profile_summary,
+        topics=", ".join(request.inferred_topics),
+        web_results="\n".join(web_lines),
+        curated_fill_ins="\n".join(curated_lines),
+    )
 
 
 def _fast_discover_from_defaults(

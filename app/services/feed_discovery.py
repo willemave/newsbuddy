@@ -42,6 +42,7 @@ from app.services.exa_client import ExaSearchResult, exa_search
 from app.services.feed_detection import FeedDetector
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_models import build_pydantic_model
+from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_usage import (
     end_usage_context,
     record_model_usage,
@@ -453,11 +454,7 @@ def _get_direction_agent(model_spec: str) -> Agent[DiscoveryToolDeps, DiscoveryD
         model,
         deps_type=DiscoveryToolDeps,
         output_type=DiscoveryDirectionPlan,
-        system_prompt=(
-            "You are a discovery planner. Analyze the user's favorited content and "
-            "propose 2-4 distinct exploration directions for discovering new feeds, "
-            "podcasts, and YouTube channels."
-        ),
+        system_prompt=load_prompt("discovery/direction#system"),
         model_settings=model_settings,
     )
 
@@ -547,13 +544,7 @@ def _select_directions_llm(
 ) -> DiscoveryDirectionPlan:
     queue_settings = get_settings().queue
     agent = _get_direction_agent(model_spec)
-    prompt = (
-        "Use search_favorites to inspect the user's favorites. "
-        "Call it multiple times (using offsets) until you have enough coverage "
-        "to pick 2-4 distinct exploration directions. Return JSON with summary and "
-        "directions. Each direction must include a name, rationale, and favorite_ids "
-        "that justify it."
-    )
+    prompt = load_prompt("discovery/direction#user")
 
     logger.debug(
         "Running LLM direction selection",
@@ -624,22 +615,12 @@ def _plan_lanes_llm(
     agent = get_basic_agent(
         model_spec=model_spec,
         output_type=DiscoveryLanePlan,
-        system_prompt=(
-            "You design discovery lanes with targeted search queries. "
-            "Create 3-6 lanes across feeds, podcasts, and YouTube. "
-            "Each lane includes 2-4 concrete queries."
-        ),
+        system_prompt=load_prompt("discovery/lane#system"),
     )
 
-    prompt = (
-        "Use the directions below to craft lanes. Mix in smallweb and Substack where relevant. "
-        "Include at least one YouTube-focused lane if any direction suggests it. "
-        "Include at least two podcast-focused lanes and ensure some queries mention "
-        "podcast RSS feeds. Prefer generic queries like 'podcast', 'podcast RSS', "
-        "or 'RSS feed' that can surface both single episodes and full podcast feeds. "
-        "Avoid platform brand names except Apple Podcasts is allowed when it helps "
-        "surface show pages we can resolve to RSS.\n\n"
-        f"Directions: {direction_plan.model_dump_json()}"
+    prompt = render_prompt(
+        "discovery/lane#user",
+        direction_plan_json=direction_plan.model_dump_json(),
     )
 
     logger.debug(
@@ -699,21 +680,13 @@ def _extract_candidates_llm(
     agent = get_basic_agent(
         model_spec=model_spec,
         output_type=DiscoveryCandidateBatch,
-        system_prompt=(
-            "You are a curator selecting candidate feeds/podcasts/YouTube channels. "
-            "Use search results to propose concrete sources with rationale and a relevance "
-            "score (0-1)."
-        ),
+        system_prompt=load_prompt("discovery/candidate#system"),
     )
 
-    prompt = (
-        "Return JSON candidates with site_url, optional feed_url, optional item_url, "
-        "suggestion_type, and rationale. Include channel_id or playlist_id when YouTube is "
-        "relevant. Use item_url for specific episodes/videos and keep feed_url for "
-        "podcast RSS or YouTube channels/playlists. Apple Podcasts show URLs are "
-        "acceptable; include them as site_url so we can resolve the RSS feed.\n\n"
-        f"Lane: {lane.model_dump_json()}\n\n"
-        f"Search results:\n{_format_exa_results(results)}"
+    prompt = render_prompt(
+        "discovery/candidate#user",
+        lane_json=lane.model_dump_json(),
+        search_results=_format_exa_results(results),
     )
 
     logger.debug(

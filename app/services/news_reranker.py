@@ -13,13 +13,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.services.news_embeddings import resolve_transformer_device
+from app.services.prompt_library import load_prompt
 
 logger = get_logger(__name__)
 
-RERANKER_SYSTEM_PROMPT = (
-    "Judge whether the Document meets the requirements based on the Query and the "
-    'Instruct provided. Note that the answer can only be "yes" or "no".'
-)
+RERANKER_SYSTEM_PROMPT = load_prompt("content/news_pipeline#reranker_system")
 DEFAULT_NEWS_RERANKER_INSTRUCTION = (
     "Given a news headline and a candidate cluster, determine whether they describe "
     "the same underlying news event. Treat different product launches, policy "

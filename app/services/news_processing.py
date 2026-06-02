@@ -21,6 +21,7 @@ from app.services.news_relevant_links import (
     NEWS_ARTICLE_RELEVANT_LINKS_KEY,
     select_news_article_relevant_links,
 )
+from app.services.prompt_library import load_prompt
 from app.utils.news_titles import get_news_article_title, get_news_summary_title
 from app.utils.title_utils import clean_title, resolve_title_candidate
 from app.utils.url_utils import normalize_http_url
@@ -152,7 +153,7 @@ def _build_processing_prompt(
     article_body_text: str | None = None,
 ) -> str:
     lines = [
-        "Create a compact short-form news summary grounded only in this evidence.",
+        load_prompt("content/news_pipeline#processing_user"),
     ]
     if item.source_label:
         lines.append(f"Source label: {item.source_label}")

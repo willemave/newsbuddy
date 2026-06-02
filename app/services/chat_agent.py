@@ -31,6 +31,7 @@ from app.services.llm_models import (  # noqa: F401 (re-export for API schemas)
     LLMProvider as ChatModelProvider,
 )
 from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
+from app.services.prompt_library import load_prompt, render_prompt
 from app.services.sandbox_runtime import (
     PersonalLibrarySandboxSession,
     SandboxRuntimeUnavailableError,
@@ -45,34 +46,7 @@ CONTEXT_WINDOW_TOKENS = 200_000
 SYSTEM_AND_ARTICLE_BUDGET_RATIO = 0.75
 TOKEN_CHARS_PER_TOKEN = 4
 
-SYSTEM_PROMPT_TEXT = (
-    "You are an assistant helping users explore articles, news, and topics. "
-    "Be concise but thorough. Help users understand what they read."
-    "\n\n"
-    "**Personal Library Tools:**\n"
-    "- If the user asks about their saved, favorited, or previously chatted items, "
-    "use search_personal_library first\n"
-    "- Use list_personal_library to inspect the library structure before reading files\n"
-    "- Use read_personal_markdown_file for exact files returned by search_personal_library\n"
-    "- Prefer these tools over guessing about the user's saved content"
-    "\n\n"
-    "**CRITICAL - How to Use Web Search:**\n"
-    "- Use exa_web_search to research topics, verify claims, and find context\n"
-    "- AFTER searching, you MUST synthesize the results into your response:\n"
-    "  1. Summarize key findings from the search results\n"
-    "  2. Quote or paraphrase specific insights from the sources\n"
-    "  3. Include clickable markdown links: [Source Title](url)\n"
-    "  4. Compare/contrast what different sources say\n"
-    "- If search returns relevant content, NEVER give a generic response - use the content!\n"
-    "- Search multiple times if exploring different angles"
-    "\n\n"
-    "**Response Format:**\n"
-    "- Do not use markdown tables in chat responses. "
-    "On mobile, format comparisons as headings, bullets, "
-    "or one-item-per-line entries instead\n"
-    "- Always cite sources with markdown links when referencing search results\n"
-    "- Keep responses focused and scannable"
-)
+SYSTEM_PROMPT_TEXT = load_prompt("chat/article#system")
 
 
 def _require_session_id(session: ChatSession) -> int:
@@ -288,11 +262,7 @@ def _build_context_prompt_parts(
     parts = _build_article_header(content, session)
 
     if article_context:
-        parts.append(
-            "\nProvided reference context is available below. Treat it as the "
-            "conversation's source material even if the user does not repeat it, "
-            "and do not ask the user to paste it again unless the context is actually missing."
-        )
+        parts.append(f"\n{load_prompt('chat/article#context_notice')}")
         parts.append(f"\n{context_label}:\n{article_context}")
 
     return parts
@@ -301,11 +271,11 @@ def _build_context_prompt_parts(
 def _build_run_user_prompt(user_prompt: str, deps: ChatDeps) -> str:
     """Build the model-facing user prompt for a chat turn."""
     if deps.session.context_snapshot and deps.article_context:
-        return (
-            "Use the provided session context below as the source material for this "
-            "conversation, even if the user does not repeat it.\n\n"
-            f"{deps.context_label}:\n{deps.article_context}\n\n"
-            f"User request:\n{user_prompt}"
+        return render_prompt(
+            "chat/article#run_with_context_user",
+            context_label=deps.context_label,
+            article_context=deps.article_context,
+            user_prompt=user_prompt,
         )
     return user_prompt
 
@@ -1457,20 +1427,7 @@ async def process_message_async(
         db.close()
 
 
-INITIAL_QUESTIONS_PROMPT = """
-You are starting a new conversation about the article described in your context.
-
-Write a short welcome message (1-2 sentences) that:
-- Briefly states what help you can provide (explain, critique, brainstorm, apply ideas).
-- Sounds friendly and concise.
-
-After the welcome, propose 2-4 concrete directions the user could take next:
-- Use bullet points.
-- Mix question types: clarification, implications, counterpoints, practical applications.
-- Make them specific to this article, not generic.
-
-Do not mention tools, system prompts, or implementation details. Just write what the user sees.
-""".strip()
+INITIAL_QUESTIONS_PROMPT = load_prompt("chat/article#initial_questions_user")
 
 
 async def generate_initial_suggestions(

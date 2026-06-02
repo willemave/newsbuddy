@@ -52,6 +52,7 @@ from app.services.llm_models import (
     resolve_effective_api_key,
     resolve_model_provider,
 )
+from app.services.prompt_library import render_prompt
 from app.services.queue import QueueService
 from app.testing.postgres_harness import TemporaryPostgresHarness, create_temporary_postgres_harness
 
@@ -488,15 +489,10 @@ def build_generic_judge_prompt(
     """Build the generic judge prompt for one eval case."""
 
     trace_json = json.dumps(trace.model_dump(mode="json"), indent=2, sort_keys=True)
-    return (
-        "You are grading whether an assistant satisfied an expected outcome.\n\n"
-        f"Expected outcome:\n{expected_outcome.strip()}\n\n"
-        "Observed execution trace:\n"
-        f"{trace_json}\n\n"
-        "Decide whether the assistant satisfied the expected outcome.\n"
-        "Consider the final assistant response and the actions reflected in the trace.\n"
-        "Return passed=true only when the overall behavior matches the expected outcome.\n"
-        "If the trace shows the wrong target, a missing action, or inconsistent behavior, fail it."
+    return render_prompt(
+        "evals/judges#assistant_trace_judge_user",
+        expected_outcome=expected_outcome.strip(),
+        trace_json=trace_json,
     )
 
 
