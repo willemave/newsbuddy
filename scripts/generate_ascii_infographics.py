@@ -37,6 +37,7 @@ from app.core.logging import get_logger, setup_logging  # noqa: E402
 from app.models.contracts import ContentStatus  # noqa: E402
 from app.models.db import Content  # noqa: E402
 from app.services.llm_models import build_pydantic_model  # noqa: E402
+from app.services.prompt_library import load_prompt, render_prompt  # noqa: E402
 
 setup_logging()
 logger = get_logger(__name__)
@@ -64,63 +65,10 @@ class AsciiResult:
 
 def build_ascii_prompt(title: str, key_points: list[str], quotes: list[str]) -> str:
     """Build prompt to generate ASCII art infographic."""
+    del quotes
     points_text = "\n".join(f"- {p}" for p in key_points[:3])
 
-    # Using raw string to avoid escape sequence warnings in ASCII art examples
-    return rf"""Create ASCII ART that visually represents this news article's core concept.
-
-ARTICLE TOPIC: {title}
-KEY POINTS:
-{points_text}
-
-YOUR TASK: Draw an ASCII art illustration - NOT text descriptions.
-Create a VISUAL PICTURE using ASCII characters that captures the essence of this story.
-
-STRICT RULES:
-1. Draw actual ASCII ART - shapes, objects, scenes, symbols
-2. Use these characters: / \ | - _ = + * # @ . : ; ' " ^ ~ < > ( ) [ ] {{ }}
-3. Maximum 14 lines, 44 characters wide
-4. NO sentences or paragraphs - only visual art with minimal labels (1-3 words max)
-5. Be creative - draw metaphors, not literal descriptions
-
-GOOD EXAMPLES OF ASCII ART:
-
-Tech/AI topic:
-    .---.
-   /     \\
-  | () () |    NEURAL
-  |   ^   |    NET
-   \\ === /
-    '---'
-  /|||||\\
-
-Money/Finance topic:
-     $$$
-    $   $
-   $  $  $     MARKET
-    $   $      RISE
-     $$$
-      |
-   __|__
-
-Cloud/Data topic:
-    .---.
-   (     )
-  (       )   DATA
-   (     )    FLOW
-    '---'
-      |
-   [_____]
-
-Growth topic:
-         *
-        /|\\
-       / | \\
-      /  |  \\    UP
-     /   |   \\
-    /____|____\\
-
-Now create ASCII art for the article above. Output ONLY the ASCII art, nothing else:"""
+    return render_prompt("scripts/ascii_infographic#user", title=title, points_text=points_text)
 
 
 def render_ascii_to_image(
@@ -400,10 +348,7 @@ def main() -> None:
     model, model_settings = build_pydantic_model(model_spec)
     agent: Agent[None, str] = Agent(
         model,
-        system_prompt=(
-            "You are an ASCII artist. You create visual ASCII art illustrations, "
-            "not text descriptions. Output only ASCII art, no explanations."
-        ),
+        system_prompt=load_prompt("scripts/ascii_infographic#system"),
         output_type=str,
     )
     print(f"Using model: {model_spec}")

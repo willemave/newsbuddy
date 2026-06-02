@@ -43,6 +43,7 @@ from app.core.logging import get_logger, setup_logging  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
 from app.models.contracts import ContentStatus  # noqa: E402
 from app.models.db import Content  # noqa: E402
+from app.services.prompt_library import load_prompt, render_prompt  # noqa: E402
 
 setup_logging()
 logger = get_logger(__name__)
@@ -370,52 +371,28 @@ def build_interesting_prompt(
     # Build visual elements based on abstractness score
     if score.abstractness > 60:
         # Abstract visualization
-        style_direction = """
-- Abstract, conceptual representation
-- Simple geometric shapes
-- Plenty of negative space
-- Minimalist composition"""
+        style_direction = load_prompt("images/thumbnail#style_abstract")
     elif score.abstractness > 30:
         # Semi-abstract
-        style_direction = """
-- Stylized, understated illustration
-- Simple shapes and forms
-- Subtle metaphorical imagery
-- Balanced, calm composition"""
+        style_direction = load_prompt("images/thumbnail#style_stylized")
     else:
         # More literal
-        style_direction = """
-- Clean, simple illustration style
-- Recognizable subjects, minimal detail
-- Quiet visual hierarchy
-- Refined editorial aesthetic"""
+        style_direction = load_prompt("images/thumbnail#style_simple")
 
     # Build tension/contrast instructions if present
     tension_instruction = ""
     if tension:
         tension_instruction = f"\n- Visual tension between {tension[0]} and {tension[1]}"
 
-    # Build the prompt
-    prompt = f"""Create a striking editorial thumbnail illustration.
-
-CONTENT:
-Title: {title}
-Summary: {overview[:300] if overview else "N/A"}
-Key themes: {", ".join(score.key_concepts[:5])}
-
-VISUAL REQUIREMENTS:
-{style_direction}
-- No text, logos, or watermarks
-- Square 1:1 aspect ratio
-- Muted, subtle color palette
-- Soft contrast, understated aesthetic
-- Clean and minimal{tension_instruction}
-
-MOOD: {_get_mood_from_score(score)}
-
-Create a refined, elegant thumbnail image."""
-
-    return prompt
+    return render_prompt(
+        "images/thumbnail#script_user",
+        title=title,
+        overview=overview[:300] if overview else "N/A",
+        key_themes=", ".join(score.key_concepts[:5]),
+        style_direction=style_direction,
+        tension_instruction=tension_instruction,
+        mood=_get_mood_from_score(score),
+    )
 
 
 def _get_mood_from_score(score: InterestingScore) -> str:

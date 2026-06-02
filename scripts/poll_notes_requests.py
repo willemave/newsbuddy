@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """Poll Apple Notes for NewsApp work and launch Codex runs."""
 
 from __future__ import annotations
@@ -9,12 +10,17 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.services.prompt_library import render_prompt
+
 DEFAULT_LOGS_DIR = PROJECT_ROOT / "logs" / "notes_request_poller"
 DEFAULT_STATE_FILE = DEFAULT_LOGS_DIR / "state.json"
 DEFAULT_LOCK_FILE = DEFAULT_LOGS_DIR / "poller.lock"
@@ -325,33 +331,20 @@ def build_codex_prompt(
     notes_helper: Path,
 ) -> str:
     """Build the prompt passed to Codex."""
-    plan_requirements = (
-        "Write a comprehensive plan with these sections: Problem Summary, Relevant Files "
-        "and Code Paths, Implementation Steps, Verification Plan, Risks and Open Questions. "
-        f"Write that plan back into the note via {notes_helper}."
+    prompt_name = (
+        "scripts/notes_request_codex_plan"
+        if run_mode == "plan"
+        else "scripts/notes_request_codex_approved"
     )
-    common_prefix = (
-        f"Use ${skill_name} at {skill_path}. "
-        f"Process the Apple Notes request in folder {folder!r} with note id {note['id']!r} "
-        f"and current title {note['name']!r}. "
-        "Follow the skill workflow exactly. "
-        "Keep the note marked with ⚙️ while working. "
-        "Ask a user question only if blocked or the request is genuinely ambiguous. "
-    )
-    if run_mode == "plan":
-        return (
-            common_prefix
-            + plan_requirements
-            + " Do not implement the change yet. Stop after the plan is written back to the note "
-            "and wait for the title to gain 👍 approval."
-        )
-    return (
-        common_prefix
-        + plan_requirements
-        + " The note is already approved with 👍, so after the plan is written or refreshed, "
-        "implement the change in the current repository, run appropriate verification, "
-        "and mark the note done with ✅ when complete."
-    )
+    values = {
+        "skill_name": skill_name,
+        "skill_path": skill_path,
+        "folder_repr": repr(folder),
+        "note_id_repr": repr(note["id"]),
+        "note_name_repr": repr(note["name"]),
+        "notes_helper": notes_helper,
+    }
+    return render_prompt(prompt_name, **values)
 
 
 def safe_slug(value: str) -> str:

@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """Run a prompt-iteration study for Runware FLUX.1 dev against Gemini baselines."""
 
 from __future__ import annotations
@@ -6,6 +7,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,6 +19,11 @@ from uuid import uuid4
 import requests
 from PIL import Image
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.services.prompt_library import load_prompt, render_prompt
+
 FIXTURE_RESULTS_PATH = Path(
     "outputs/image_provider_benchmark/20260418_infographic_explainer_grid_v2_merged/results.json"
 )
@@ -27,12 +34,18 @@ RUNWARE_API_URL = "https://api.runware.ai/v1"
 RUNWARE_MODEL = "runware:101@1"
 RUNWARE_WIDTH = 1024
 RUNWARE_HEIGHT = 576
-RUNWARE_NEGATIVE_PROMPT = (
-    "readable text, labels, logos, watermarks, screenshots, interface, dashboard, "
-    "phone screen, laptop, monitor"
-)
+RUNWARE_NEGATIVE_PROMPT = load_prompt("scripts/image_benchmarks#fluxdev_runware_negative")
 TARGET_CASE_IDS = [29269, 29268, 29267, 29266]
 RUN_TS_FORMAT = "%Y%m%d_%H%M%S"
+
+FLUXDEV_VARIANT_PROMPTS = {
+    "long_gemini": "scripts/image_benchmarks#fluxdev_long_gemini",
+    "long_gemini_narrative": "scripts/image_benchmarks#fluxdev_long_gemini_narrative",
+    "long_gemini_process": "scripts/image_benchmarks#fluxdev_long_gemini_process",
+    "long_gemini_airy": "scripts/image_benchmarks#fluxdev_long_gemini_airy",
+    "long_gemini_object_system": "scripts/image_benchmarks#fluxdev_long_gemini_object_system",
+    "long_gemini_story_card": "scripts/image_benchmarks#fluxdev_long_gemini_story_card",
+}
 
 
 @dataclass(frozen=True)
@@ -188,188 +201,17 @@ def build_variant_prompt(fixture: CaseFixture, variant: PromptVariant) -> str:
     narrative = fixture.editorial_narrative or fixture.case_title
     narrative_compact = clamp_text(narrative, 650)
     narrative_tight = clamp_text(narrative, 420)
-    if variant.key == "long_gemini":
-        return (
-            "Create an infographic that describes the article.\n\n"
-            "Style requirements:\n"
-            "- Modern, clean editorial illustration style\n"
-            "- Subtle, muted color palette with good contrast\n"
-            "- Conceptual representation of the theme\n"
-            "- Suitable for a news app\n"
-            "- Do not use text, letters, labels, captions, logos, or watermarks\n"
-            "- The description below is context only and must not appear as rendered words "
-            "in the image\n"
-            "- 16:9 aspect ratio optimized for mobile display\n\n"
-            f"Description: {fixture.story_title}\n\n"
-            "Benchmark-specific art direction:\n"
-            "- Use one dominant visual metaphor or one coherent scene, not a collage.\n"
-            "- Choose a single focal subject that communicates the story instantly at "
-            "thumbnail size.\n"
-            "- Compose for a 16:9 editorial card with strong negative space and clear "
-            "foreground/background separation.\n"
-            "- Keep the image bold, graphic, and readable on mobile.\n"
-            "- Prefer simplified shapes, restrained detail, and deliberate lighting over "
-            "photo-busy realism.\n"
-            "- No text, captions, UI chrome, newspaper layout, screenshots, logos, or watermarks.\n"
-            "- Avoid generic stock-photo business scenes and multiple unrelated subjects "
-            "competing for attention.\n"
-            "- Use a refined editorial palette with 2 to 4 dominant colors.\n\n"
-            f"Story title: {fixture.story_title}\n"
-            "Key facts to encode visually:\n"
-            f"{facts_4}\n\n"
-            "Output goal:\n"
-            "Create a premium editorial illustration for Newsly that feels distinctive, modern, "
-            "and immediately legible."
-        )
-    if variant.key == "long_gemini_narrative":
-        return (
-            "Create an infographic that describes the article.\n\n"
-            "Style requirements:\n"
-            "- Modern, clean editorial illustration style\n"
-            "- Subtle, muted color palette with good contrast\n"
-            "- Conceptual representation of the theme\n"
-            "- Suitable for a news app\n"
-            "- Do not use text, letters, labels, captions, logos, or watermarks\n"
-            "- The description below is context only and must not appear as rendered words "
-            "in the image\n"
-            "- 16:9 aspect ratio optimized for mobile display\n\n"
-            f"Description: {fixture.story_title}\n\n"
-            "Benchmark-specific art direction:\n"
-            "- Use one dominant visual metaphor or one coherent scene, not a collage.\n"
-            "- Choose a single focal subject that communicates the story instantly at "
-            "thumbnail size.\n"
-            "- Compose for a 16:9 editorial card with strong negative space and clear "
-            "foreground/background separation.\n"
-            "- Keep the image bold, graphic, and readable on mobile.\n"
-            "- Prefer simplified shapes, restrained detail, and deliberate lighting over "
-            "photo-busy realism.\n"
-            "- Avoid generic stock-photo business scenes and multiple unrelated subjects "
-            "competing for attention.\n"
-            "- Use a refined editorial palette with 2 to 4 dominant colors.\n\n"
-            f"Story title: {fixture.story_title}\n"
-            f"Editorial narrative: {narrative_compact}\n"
-            "Key facts to encode visually:\n"
-            f"{facts_3}\n\n"
-            "Output goal:\n"
-            "Create a premium editorial illustration for Newsly that feels distinctive, modern, "
-            "and immediately legible."
-        )
-    if variant.key == "long_gemini_process":
-        return (
-            "Create an infographic that describes the article through image alone.\n\n"
-            "Style requirements:\n"
-            "- Modern, clean editorial illustration style\n"
-            "- Subtle, muted color palette with good contrast\n"
-            "- Conceptual but concrete enough to explain the article at a glance\n"
-            "- Strong negative space and one clear focal subject\n"
-            "- Do not use text, letters, labels, captions, logos, screenshots, or watermarks\n"
-            "- 16:9 aspect ratio optimized for mobile display\n\n"
-            f"Description: {fixture.story_title}\n\n"
-            "Benchmark-specific art direction:\n"
-            "- Make the image feel like the existing Gemini baseline: airy, graphic, calm, "
-            "and polished.\n"
-            "- Use 3 to 5 related editorial objects rather than many small scattered "
-            "symbols.\n"
-            "- Organize the objects into a readable process chain or visual progression.\n"
-            "- Prefer books, envelopes, stacks, packages, tokens, sketch tools, shelves, "
-            "and symbolic rewards.\n"
-            "- Avoid interfaces, dashboards, screens, and literal documents.\n\n"
-            f"Story title: {fixture.story_title}\n"
-            f"Editorial narrative: {narrative_compact}\n"
-            "Key facts to encode visually:\n"
-            f"{facts_3}\n\n"
-            "Output goal:\n"
-            "Create a premium editorial illustration for Newsly that is visually explanatory, "
-            "highly legible on mobile, and stylistically close to the Gemini baseline."
-        )
-    if variant.key == "long_gemini_airy":
-        return (
-            "Create an infographic that describes the article.\n\n"
-            "Style requirements:\n"
-            "- Modern, clean editorial illustration style\n"
-            "- Subtle, muted color palette with good contrast\n"
-            "- Suitable for a news app\n"
-            "- Do not use text, letters, labels, captions, logos, or watermarks\n"
-            "- The description below is context only and must not appear as rendered words "
-            "in the image\n"
-            "- 16:9 aspect ratio optimized for mobile display\n\n"
-            f"Description: {fixture.story_title}\n\n"
-            "Benchmark-specific art direction:\n"
-            "- Match the Gemini baseline's airy, uncluttered feel.\n"
-            "- Use fewer, larger objects instead of many small icons.\n"
-            "- Keep broad negative space around the focal subject.\n"
-            "- One coherent scene or tableau, never a collage.\n"
-            "- Calm editorial lighting, clean edges, restrained detail.\n"
-            "- Bold mobile readability over realism.\n"
-            "- No UI chrome, screens, dashboards, or literal document pages.\n"
-            "- Prefer books, envelopes, packages, sketch tools, shelves, and symbolic rewards.\n\n"
-            f"Story title: {fixture.story_title}\n"
-            f"Editorial narrative: {narrative_tight}\n"
-            "Key facts to encode visually:\n"
-            f"{facts_3}\n\n"
-            "Output goal:\n"
-            "Create a premium, calm, polished editorial image that feels close to Gemini's "
-            "visual tone and composition."
-        )
-    if variant.key == "long_gemini_object_system":
-        return (
-            "Create an infographic that describes the article.\n\n"
-            "Style requirements:\n"
-            "- Modern, clean editorial illustration style\n"
-            "- Subtle, muted color palette with good contrast\n"
-            "- Suitable for a news app\n"
-            "- Do not use text, letters, labels, captions, logos, or watermarks\n"
-            "- The description below is context only and must not appear as rendered words "
-            "in the image\n"
-            "- 16:9 aspect ratio optimized for mobile display\n\n"
-            f"Description: {fixture.story_title}\n\n"
-            "Benchmark-specific art direction:\n"
-            "- Build a Gemini-like object system: one hero object plus 3 to 4 supporting objects.\n"
-            "- Make the relationships legible through grouping, scale, and spacing rather "
-            "than arrows.\n"
-            "- Keep the composition information-dense but still open and breathable.\n"
-            "- Avoid visual noise and avoid many tiny decorative details.\n"
-            "- Prefer books, envelopes, stacks, packages, tokens, plinths, sketch tools, "
-            "and shelves.\n"
-            "- No interfaces, dashboards, labels, screenshots, or logos.\n\n"
-            f"Story title: {fixture.story_title}\n"
-            f"Editorial narrative: {narrative_tight}\n"
-            "Key facts to encode visually:\n"
-            f"{facts_4}\n\n"
-            "Output goal:\n"
-            "Create a premium explanatory editorial illustration that feels organized, calm, "
-            "and visually close to the Gemini baseline."
-        )
-    if variant.key == "long_gemini_story_card":
-        return (
-            "Create an infographic that describes the article.\n\n"
-            "Style requirements:\n"
-            "- Modern, clean editorial illustration style\n"
-            "- Subtle, muted color palette with good contrast\n"
-            "- Conceptual representation of the theme\n"
-            "- Suitable for a news app\n"
-            "- Do not use text, letters, labels, captions, logos, or watermarks\n"
-            "- The description below is context only and must not appear as rendered words "
-            "in the image\n"
-            "- 16:9 aspect ratio optimized for mobile display\n\n"
-            f"Description: {fixture.story_title}\n\n"
-            "Benchmark-specific art direction:\n"
-            "- Make it feel like a premium editorial story card.\n"
-            "- Use one dominant visual metaphor with a clear supporting object system.\n"
-            "- Strong foreground/background separation and broad negative space.\n"
-            "- Calm, polished, illustrative rather than photoreal.\n"
-            "- Avoid business-scene cliches and unrelated secondary subjects.\n"
-            "- Keep the image legible and elegant on mobile.\n"
-            "- No screenshots, UI, logos, labels, or visible words.\n\n"
-            f"Story title: {fixture.story_title}\n"
-            f"Editorial narrative: {narrative_compact}\n"
-            "Key facts to encode visually:\n"
-            f"{facts_3}\n\n"
-            "Output goal:\n"
-            "Create a polished Newsly card image that is visually explanatory and as close "
-            "as possible to the existing Gemini production image."
-        )
-    raise ValueError(f"Unknown prompt variant: {variant.key}")
+    prompt_name = FLUXDEV_VARIANT_PROMPTS.get(variant.key)
+    if prompt_name is None:
+        raise ValueError(f"Unknown prompt variant: {variant.key}")
+    return render_prompt(
+        prompt_name,
+        story_title=fixture.story_title,
+        facts_3=facts_3,
+        facts_4=facts_4,
+        narrative_compact=narrative_compact,
+        narrative_tight=narrative_tight,
+    )
 
 
 def ensure_output_dir(output_dir_name: str | None) -> Path:

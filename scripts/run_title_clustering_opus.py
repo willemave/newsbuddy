@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """Prepare title-only clustering batches and optionally run Claude Opus over them."""
 
 from __future__ import annotations
@@ -5,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,20 +14,17 @@ from typing import Any
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.services.prompt_library import load_prompt, render_prompt
+
 DEFAULT_MODEL = "claude-opus-4-6"
 DEFAULT_BATCH_SIZE = 2000
 DEFAULT_LIMIT = 10_000
 DEFAULT_OUTPUT_DIR = Path("outputs/title_clustering")
 
-SYSTEM_PROMPT = """You are reviewing titles from a news/content feed to find duplicate or \
-near-duplicate story clusters.
-
-Cluster only when titles clearly refer to the same underlying story, launch, leak, \
-announcement, incident, or repeated post.
-Do not cluster merely because they mention the same company, product, or broad topic.
-Be conservative. False positives are worse than missing a weak cluster.
-
-Return strict JSON only."""
+SYSTEM_PROMPT = load_prompt("scripts/title_clustering#system")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -163,32 +162,11 @@ def _build_user_prompt(*, batch_id: str, rows: list[dict[str, Any]]) -> str:
         for row in rows
     ]
     payload = json.dumps(compact_rows, ensure_ascii=False, separators=(",", ":"))
-    return (
-        f"Batch ID: {batch_id}\n"
-        f"Titles in this batch: {len(rows)}\n\n"
-        "Task:\n"
-        "1. Identify exact duplicates and near-duplicate story families from title-only evidence.\n"
-        "2. Create clusters only for rows that refer to the same underlying story.\n"
-        "3. Leave topical neighbors unclustered.\n"
-        "4. Do not emit singleton clusters. "
-        "Any item not in a duplicate cluster belongs in singletons.\n\n"
-        "Return JSON with this shape:\n"
-        "{"
-        '"batch_id":"...",'
-        '"clusters":['
-        '{"cluster_id":"c1","label":"short label","confidence":"high|medium|low",'
-        '"member_content_ids":[1,2,3],"reason":"one short sentence"}'
-        "],"
-        '"singletons":[4,5,6]'
-        "}\n\n"
-        "Row fields:\n"
-        "- id: content_id\n"
-        "- ts: created_at\n"
-        "- src: source label\n"
-        "- dom: domain\n"
-        "- t: display title\n\n"
-        "Rows:\n"
-        f"{payload}"
+    return render_prompt(
+        "scripts/title_clustering#user",
+        batch_id=batch_id,
+        row_count=len(rows),
+        payload=payload,
     )
 
 

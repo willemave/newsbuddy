@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """Probe Google Gemini routing paths for News App workers.
 
 This script tests whether calls succeed via:
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,8 +25,14 @@ from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
-PROMPT = "Reply with exactly OK"
-ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.services.prompt_library import load_prompt
+
+PROMPT = load_prompt("scripts/probe_google_vertex#contents")
+PYDANTIC_SYSTEM_PROMPT = load_prompt("scripts/probe_google_vertex#system")
+ENV_PATH = PROJECT_ROOT / ".env"
 
 # Keep script runnable without PYTHONPATH by reading credentials from .env directly.
 load_dotenv(dotenv_path=ENV_PATH, override=True)
@@ -99,7 +107,7 @@ def _probe_pydantic_google_gla(api_key: str, model: str) -> str:
     agent = Agent(
         GoogleModel(model, provider=provider),
         output_type=str,
-        system_prompt="Return OK only.",
+        system_prompt=PYDANTIC_SYSTEM_PROMPT,
     )
     result = agent.run_sync("Ping")
     return str(result.output)
@@ -110,7 +118,7 @@ def _probe_pydantic_vertex(project: str, location: str, model: str) -> str:
     agent = Agent(
         GoogleModel(model, provider=provider),
         output_type=str,
-        system_prompt="Return OK only.",
+        system_prompt=PYDANTIC_SYSTEM_PROMPT,
     )
     result = agent.run_sync("Ping")
     return str(result.output)

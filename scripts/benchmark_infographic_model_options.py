@@ -36,6 +36,7 @@ from app.services.image_generation import (
     RUNWARE_INFOGRAPHIC_WIDTH,
     ImageGenerationService,
 )
+from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_costs import estimate_vendor_cost_usd
 
 FIXTURE_RESULTS_PATH = Path(
@@ -47,9 +48,8 @@ EXISTING_PROVIDER = "newsly_existing"
 FAL_API_BASE = "https://fal.run"
 RUN_TS_FORMAT = "%Y%m%d_%H%M%S"
 TARGET_CASE_IDS = [29269, 29268, 29267, 29266]
-RUNWARE_BENCHMARK_NEGATIVE_PROMPT = (
-    "readable text, labels, logos, watermarks, screenshots, interface, dashboard, "
-    "phone screen, laptop, monitor"
+RUNWARE_BENCHMARK_NEGATIVE_PROMPT = load_prompt(
+    "scripts/image_benchmarks#infographic_runware_negative"
 )
 
 
@@ -172,14 +172,10 @@ def build_compact_gemini_prompt(full_prompt: str) -> str:
 
     compact_facts = key_facts[:2]
     story_bits = "\n".join(f"- {fact}" for fact in compact_facts) or "- Explain the story visually."
-    return (
-        "No text. 16:9 editorial infographic. Explain the story through connected objects in a "
-        "clear process chain with 3 to 5 major elements. No UI, screens, dashboards, labels, "
-        "logos, or readable words.\n"
-        f"Title: {title}\n"
-        "Encode these facts visually:\n"
-        f"{story_bits}\n"
-        "Use clean hierarchy, strong negative space, and a premium editorial illustration style."
+    return render_prompt(
+        "scripts/image_benchmarks#infographic_compact_gemini_user",
+        title=title,
+        story_bits=story_bits,
     )
 
 
@@ -189,7 +185,7 @@ def build_prompt(spec: ProviderSpec, fixture: CaseFixture) -> str:
     if spec.prompt_mode == "full_plus_ideogram":
         return (
             f"{fixture.full_prompt}\n\n"
-            "Keep it crisp and diagrammatic, with clear object grouping and no fake typography."
+            f"{load_prompt('scripts/image_benchmarks#infographic_full_plus_ideogram_suffix')}"
         )
     return fixture.full_prompt
 
@@ -200,7 +196,11 @@ def build_variant_prompt(
     prompt_variant: PromptVariantSpec,
 ) -> str:
     base_prompt = build_prompt(spec, fixture)
-    return f"{base_prompt}\n\nPrompt variant:\n{prompt_variant.suffix}\n"
+    return render_prompt(
+        "scripts/image_benchmarks#infographic_variant_wrapper",
+        base_prompt=base_prompt,
+        variant_suffix=prompt_variant.suffix,
+    )
 
 
 def ensure_output_dir(output_dir_name: str | None) -> Path:
@@ -912,19 +912,12 @@ def main() -> None:
         PromptVariantSpec(
             key="process_chain",
             label="process_chain",
-            suffix=(
-                "Emphasize a clean left-to-right explainer chain with 3 to 5 editorial objects, "
-                "where each object visibly transforms into or causes the next."
-            ),
+            suffix=load_prompt("scripts/image_benchmarks#infographic_variant_process_chain"),
         ),
         PromptVariantSpec(
             key="artifact_network",
             label="artifact_network",
-            suffix=(
-                "Emphasize an information-dense artifact network with one dominant central object "
-                "and 3 to 4 supporting objects grouped around it, using connectors and spatial "
-                "hierarchy instead of text."
-            ),
+            suffix=load_prompt("scripts/image_benchmarks#infographic_variant_artifact_network"),
         ),
     ]
 

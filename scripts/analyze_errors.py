@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """Analyze error logs and generate LLM-ready debugging prompts.
 
 This script:
@@ -21,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.settings import Settings
 from app.models.db import Content
+from app.services.prompt_library import load_prompt, render_prompt
 
 
 def parse_jsonl_logs(log_dir: Path) -> list[dict[str, Any]]:
@@ -110,11 +112,15 @@ def generate_debug_prompt(
 
     prompt_parts = []
 
-    # Header
-    prompt_parts.append("# Error Analysis and Fix Request\n")
-    prompt_parts.append(f"Generated: {datetime.now().isoformat()}\n")
-    prompt_parts.append(f"Total Errors: {len(errors)}\n")
-    prompt_parts.append(f"Errored Content Items: {len(errored_content)}\n\n")
+    prompt_parts.append(
+        render_prompt(
+            "scripts/error_analysis_header",
+            generated=datetime.now().isoformat(),
+            total_errors=len(errors),
+            errored_content_count=len(errored_content),
+        )
+        + "\n\n"
+    )
 
     # Error Summary by Category
     prompt_parts.append("## Error Summary by Category\n")
@@ -191,22 +197,8 @@ def generate_debug_prompt(
                 f"\n... and {len(errored_content) - 10} more errored content items\n"
             )
 
-    # Fix Request
-    prompt_parts.append("\n## Fix Request\n")
-    prompt_parts.append("Please analyze these errors and:\n")
-    prompt_parts.append("1. Identify the root cause(s) of each error category\n")
-    prompt_parts.append("2. Suggest code fixes with specific file paths and line numbers\n")
-    prompt_parts.append("3. Recommend error handling improvements\n")
-    prompt_parts.append(
-        "4. Identify any pattern in failing URLs/content that might need special handling\n"
-    )
-    prompt_parts.append("5. Suggest retry strategies or fallback mechanisms where appropriate\n\n")
-
-    prompt_parts.append("**Key Questions to Answer:**\n")
-    prompt_parts.append("- Are these transient errors (network timeouts) or code bugs?\n")
-    prompt_parts.append("- Should we add fallback extraction methods?\n")
-    prompt_parts.append("- Do we need better timeout/retry configuration?\n")
-    prompt_parts.append("- Are certain sources consistently problematic?\n")
+    prompt_parts.append("\n")
+    prompt_parts.append(load_prompt("scripts/error_analysis_fix_request"))
 
     return "".join(prompt_parts)
 
