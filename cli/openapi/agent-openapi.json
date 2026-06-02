@@ -685,6 +685,20 @@
             "title": "Kind",
             "type": "string"
           },
+          "read_on_play_content_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Read On Play Content Ids",
+            "type": "array"
+          },
+          "read_on_play_news_item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Read On Play News Item Ids",
+            "type": "array"
+          },
           "script_text": {
             "nullable": true,
             "title": "Script Text",
@@ -755,6 +769,30 @@
           "created_at"
         ],
         "title": "AudioEpisodeResponse",
+        "type": "object"
+      },
+      "AudioEpisodeShareResponse": {
+        "description": "Public sharing state for a completed narration.",
+        "properties": {
+          "share_audio_url": {
+            "nullable": true,
+            "title": "Share Audio Url",
+            "type": "string"
+          },
+          "share_enabled": {
+            "title": "Share Enabled",
+            "type": "boolean"
+          },
+          "share_page_url": {
+            "nullable": true,
+            "title": "Share Page Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "share_enabled"
+        ],
+        "title": "AudioEpisodeShareResponse",
         "type": "object"
       },
       "AudioTranscriptionHealthResponse": {
@@ -2589,9 +2627,19 @@
             "items": {
               "type": "integer"
             },
-            "maxItems": 12,
-            "minItems": 1,
             "title": "Content Ids",
+            "type": "array"
+          },
+          "mark_source_content_read_on_play": {
+            "default": false,
+            "title": "Mark Source Content Read On Play",
+            "type": "boolean"
+          },
+          "news_item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "News Item Ids",
             "type": "array"
           },
           "title": {
@@ -2601,9 +2649,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "content_ids"
-        ],
         "title": "CustomNarrationCreateRequest",
         "type": "object"
       },

@@ -80,6 +80,9 @@ struct ContentView: View {
                     },
                     onShowNarrations: {
                         openKnowledgeNarrations()
+                    },
+                    currentFastReadItems: {
+                        tabCoordinator.shortNewsVM.currentItems()
                     }
                 )
                 .withContentRoutes(

@@ -15,6 +15,7 @@ struct LongFormView: View {
     let isActive: Bool
     let onSelect: (ContentDetailRoute) -> Void
     let onShowNarrations: () -> Void
+    let currentFastReadItems: () -> [ContentSummary]
 
     @StateObject private var unreadCountService = UnreadCountService.shared
     @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
@@ -140,9 +141,10 @@ struct LongFormView: View {
         .sheet(isPresented: $showCustomNarrationPicker) {
             CustomNarrationPickerSheet(
                 currentItems: viewModel.currentItems(),
+                currentFastReadItems: currentFastReadItems(),
                 isCreating: customNarrationCreator.isCreating,
-                onCreate: { selectedItems in
-                    await customNarrationCreator.create(from: selectedItems)
+                onCreate: { selection in
+                    await customNarrationCreator.create(from: selection)
                 }
             )
             .presentationDetents([.medium, .large])

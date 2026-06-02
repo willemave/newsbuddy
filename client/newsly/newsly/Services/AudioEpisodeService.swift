@@ -20,11 +20,15 @@ enum AudioEpisodeDelivery: String {
 
 private struct CustomNarrationCreatePayload: Encodable {
     let contentIds: [Int]
+    let newsItemIds: [Int]
     let title: String?
+    let markSourceContentReadOnPlay: Bool
 
     enum CodingKeys: String, CodingKey {
         case contentIds = "content_ids"
+        case newsItemIds = "news_item_ids"
         case title
+        case markSourceContentReadOnPlay = "mark_source_content_read_on_play"
     }
 }
 
@@ -114,14 +118,21 @@ final class AudioEpisodeService {
 
     func createCustomNarrationEpisode(
         contentIds: [Int],
+        newsItemIds: [Int] = [],
         title: String? = nil,
+        markSourceContentReadOnPlay: Bool = false,
         delivery: AudioEpisodeDelivery = .background
     ) async throws -> AudioEpisode {
         let startedAt = Date()
-        let payload = CustomNarrationCreatePayload(contentIds: contentIds, title: title)
+        let payload = CustomNarrationCreatePayload(
+            contentIds: contentIds,
+            newsItemIds: newsItemIds,
+            title: title,
+            markSourceContentReadOnPlay: markSourceContentReadOnPlay
+        )
         let body = try JSONEncoder().encode(payload)
         audioEpisodeLogger.info(
-            "Create episode started | kind=custom_narration sourceCount=\(contentIds.count) delivery=\(delivery.rawValue, privacy: .public)"
+            "Create episode started | kind=custom_narration contentCount=\(contentIds.count) newsItemCount=\(newsItemIds.count) delivery=\(delivery.rawValue, privacy: .public)"
         )
         do {
             let episode: AudioEpisode = try await client.request(
@@ -140,6 +151,18 @@ final class AudioEpisodeService {
             )
             throw error
         }
+    }
+
+    func enableEpisodeShare(id: Int) async throws -> AudioEpisodeShareResponse {
+        let startedAt = Date()
+        let response: AudioEpisodeShareResponse = try await client.request(
+            APIEndpoints.audioEpisodeShare(id: id),
+            method: "POST"
+        )
+        audioEpisodeLogger.info(
+            "Enable episode share completed | episodeId=\(id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasPageUrl=\(response.sharePageUrl != nil) hasAudioUrl=\(response.shareAudioUrl != nil)"
+        )
+        return response
     }
 
     func fetchCustomNarrationEpisodes(limit: Int = 20) async throws -> [AudioEpisode] {

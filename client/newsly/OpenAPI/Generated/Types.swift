@@ -255,6 +255,20 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /api/content/audio-episodes/{audio_episode_id}/audio`.
     /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/audio/get(getContentAudioEpisodeAudio)`.
     func getContentAudioEpisodeAudio(_ input: Operations.GetContentAudioEpisodeAudio.Input) async throws -> Operations.GetContentAudioEpisodeAudio.Output
+    /// Enable public sharing for a completed custom narration
+    ///
+    /// Enable public page and audio links for a completed custom narration.
+    ///
+    /// - Remark: HTTP `POST /api/content/audio-episodes/{audio_episode_id}/share`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/post(enableContentAudioEpisodePublicShare)`.
+    func enableContentAudioEpisodePublicShare(_ input: Operations.EnableContentAudioEpisodePublicShare.Input) async throws -> Operations.EnableContentAudioEpisodePublicShare.Output
+    /// Disable public sharing for a custom narration
+    ///
+    /// Disable public page and audio links for a narration.
+    ///
+    /// - Remark: HTTP `DELETE /api/content/audio-episodes/{audio_episode_id}/share`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/delete(disableContentAudioEpisodePublicShare)`.
+    func disableContentAudioEpisodePublicShare(_ input: Operations.DisableContentAudioEpisodePublicShare.Input) async throws -> Operations.DisableContentAudioEpisodePublicShare.Output
     /// Stream or generate an audio episode MP3
     ///
     /// Stream cached audio or generate the episode inline for low-latency playback.
@@ -1451,6 +1465,36 @@ extension APIProtocol {
         headers: Operations.GetContentAudioEpisodeAudio.Input.Headers = .init()
     ) async throws -> Operations.GetContentAudioEpisodeAudio.Output {
         try await getContentAudioEpisodeAudio(Operations.GetContentAudioEpisodeAudio.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// Enable public sharing for a completed custom narration
+    ///
+    /// Enable public page and audio links for a completed custom narration.
+    ///
+    /// - Remark: HTTP `POST /api/content/audio-episodes/{audio_episode_id}/share`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/post(enableContentAudioEpisodePublicShare)`.
+    internal func enableContentAudioEpisodePublicShare(
+        path: Operations.EnableContentAudioEpisodePublicShare.Input.Path,
+        headers: Operations.EnableContentAudioEpisodePublicShare.Input.Headers = .init()
+    ) async throws -> Operations.EnableContentAudioEpisodePublicShare.Output {
+        try await enableContentAudioEpisodePublicShare(Operations.EnableContentAudioEpisodePublicShare.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// Disable public sharing for a custom narration
+    ///
+    /// Disable public page and audio links for a narration.
+    ///
+    /// - Remark: HTTP `DELETE /api/content/audio-episodes/{audio_episode_id}/share`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/delete(disableContentAudioEpisodePublicShare)`.
+    internal func disableContentAudioEpisodePublicShare(
+        path: Operations.DisableContentAudioEpisodePublicShare.Input.Path,
+        headers: Operations.DisableContentAudioEpisodePublicShare.Input.Headers = .init()
+    ) async throws -> Operations.DisableContentAudioEpisodePublicShare.Output {
+        try await disableContentAudioEpisodePublicShare(Operations.DisableContentAudioEpisodePublicShare.Input(
             path: path,
             headers: headers
         ))
@@ -3574,6 +3618,10 @@ internal enum Components {
             }
             /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/kind`.
             internal var kind: Components.Schemas.AudioEpisodeResponse.KindPayload
+            /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/read_on_play_content_ids`.
+            internal var readOnPlayContentIds: [Swift.Int]?
+            /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/read_on_play_news_item_ids`.
+            internal var readOnPlayNewsItemIds: [Swift.Int]?
             /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/source_content_ids`.
             internal var sourceContentIds: [Swift.Int]?
             /// - Remark: Generated from `#/components/schemas/AudioEpisodeResponse/source_count`.
@@ -3599,6 +3647,8 @@ internal enum Components {
             ///   - createdAt:
             ///   - id:
             ///   - kind:
+            ///   - readOnPlayContentIds:
+            ///   - readOnPlayNewsItemIds:
             ///   - sourceContentIds:
             ///   - sourceCount:
             ///   - sourceItemIds:
@@ -3609,6 +3659,8 @@ internal enum Components {
                 createdAt: Foundation.Date,
                 id: Swift.Int,
                 kind: Components.Schemas.AudioEpisodeResponse.KindPayload,
+                readOnPlayContentIds: [Swift.Int]? = nil,
+                readOnPlayNewsItemIds: [Swift.Int]? = nil,
                 sourceContentIds: [Swift.Int]? = nil,
                 sourceCount: Swift.Int? = nil,
                 sourceItemIds: [Swift.Int]? = nil,
@@ -3619,6 +3671,8 @@ internal enum Components {
                 self.createdAt = createdAt
                 self.id = id
                 self.kind = kind
+                self.readOnPlayContentIds = readOnPlayContentIds
+                self.readOnPlayNewsItemIds = readOnPlayNewsItemIds
                 self.sourceContentIds = sourceContentIds
                 self.sourceCount = sourceCount
                 self.sourceItemIds = sourceItemIds
@@ -3630,12 +3684,31 @@ internal enum Components {
                 case createdAt = "created_at"
                 case id
                 case kind
+                case readOnPlayContentIds = "read_on_play_content_ids"
+                case readOnPlayNewsItemIds = "read_on_play_news_item_ids"
                 case sourceContentIds = "source_content_ids"
                 case sourceCount = "source_count"
                 case sourceItemIds = "source_item_ids"
                 case sourceTitles = "source_titles"
                 case status
                 case title
+            }
+        }
+        /// Public sharing state for a completed narration.
+        ///
+        /// - Remark: Generated from `#/components/schemas/AudioEpisodeShareResponse`.
+        internal struct AudioEpisodeShareResponse: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/AudioEpisodeShareResponse/share_enabled`.
+            internal var shareEnabled: Swift.Bool
+            /// Creates a new `AudioEpisodeShareResponse`.
+            ///
+            /// - Parameters:
+            ///   - shareEnabled:
+            internal init(shareEnabled: Swift.Bool) {
+                self.shareEnabled = shareEnabled
+            }
+            internal enum CodingKeys: String, CodingKey {
+                case shareEnabled = "share_enabled"
             }
         }
         /// Dependency readiness for uploaded-audio transcription.
@@ -5043,16 +5116,30 @@ internal enum Components {
         /// - Remark: Generated from `#/components/schemas/CustomNarrationCreateRequest`.
         internal struct CustomNarrationCreateRequest: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/CustomNarrationCreateRequest/content_ids`.
-            internal var contentIds: [Swift.Int]
+            internal var contentIds: [Swift.Int]?
+            /// - Remark: Generated from `#/components/schemas/CustomNarrationCreateRequest/mark_source_content_read_on_play`.
+            internal var markSourceContentReadOnPlay: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/CustomNarrationCreateRequest/news_item_ids`.
+            internal var newsItemIds: [Swift.Int]?
             /// Creates a new `CustomNarrationCreateRequest`.
             ///
             /// - Parameters:
             ///   - contentIds:
-            internal init(contentIds: [Swift.Int]) {
+            ///   - markSourceContentReadOnPlay:
+            ///   - newsItemIds:
+            internal init(
+                contentIds: [Swift.Int]? = nil,
+                markSourceContentReadOnPlay: Swift.Bool? = nil,
+                newsItemIds: [Swift.Int]? = nil
+            ) {
                 self.contentIds = contentIds
+                self.markSourceContentReadOnPlay = markSourceContentReadOnPlay
+                self.newsItemIds = newsItemIds
             }
             internal enum CodingKeys: String, CodingKey {
                 case contentIds = "content_ids"
+                case markSourceContentReadOnPlay = "mark_source_content_read_on_play"
+                case newsItemIds = "news_item_ids"
             }
         }
         /// Request schema for creating or resuming a debug user session.
@@ -13977,6 +14064,438 @@ internal enum Operations {
                 [
                     .json,
                     .audioMpeg
+                ]
+            }
+        }
+    }
+    /// Enable public sharing for a completed custom narration
+    ///
+    /// Enable public page and audio links for a completed custom narration.
+    ///
+    /// - Remark: HTTP `POST /api/content/audio-episodes/{audio_episode_id}/share`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/post(enableContentAudioEpisodePublicShare)`.
+    internal enum EnableContentAudioEpisodePublicShare {
+        internal static let id: Swift.String = "enableContentAudioEpisodePublicShare"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/POST/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/POST/path/audio_episode_id`.
+                internal var audioEpisodeId: Swift.Int
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - audioEpisodeId:
+                internal init(audioEpisodeId: Swift.Int) {
+                    self.audioEpisodeId = audioEpisodeId
+                }
+            }
+            internal var path: Operations.EnableContentAudioEpisodePublicShare.Input.Path
+            /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.EnableContentAudioEpisodePublicShare.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.EnableContentAudioEpisodePublicShare.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.EnableContentAudioEpisodePublicShare.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            internal init(
+                path: Operations.EnableContentAudioEpisodePublicShare.Input.Path,
+                headers: Operations.EnableContentAudioEpisodePublicShare.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/POST/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.AudioEpisodeShareResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.AudioEpisodeShareResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.EnableContentAudioEpisodePublicShare.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.EnableContentAudioEpisodePublicShare.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/post(enableContentAudioEpisodePublicShare)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.EnableContentAudioEpisodePublicShare.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.EnableContentAudioEpisodePublicShare.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                internal init() {}
+            }
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/post(enableContentAudioEpisodePublicShare)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.EnableContentAudioEpisodePublicShare.Output.NotFound)
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/post(enableContentAudioEpisodePublicShare)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            internal static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            internal var notFound: Operations.EnableContentAudioEpisodePublicShare.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/POST/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/POST/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.EnableContentAudioEpisodePublicShare.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.EnableContentAudioEpisodePublicShare.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/post(enableContentAudioEpisodePublicShare)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.EnableContentAudioEpisodePublicShare.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.EnableContentAudioEpisodePublicShare.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Disable public sharing for a custom narration
+    ///
+    /// Disable public page and audio links for a narration.
+    ///
+    /// - Remark: HTTP `DELETE /api/content/audio-episodes/{audio_episode_id}/share`.
+    /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/delete(disableContentAudioEpisodePublicShare)`.
+    internal enum DisableContentAudioEpisodePublicShare {
+        internal static let id: Swift.String = "disableContentAudioEpisodePublicShare"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/DELETE/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/DELETE/path/audio_episode_id`.
+                internal var audioEpisodeId: Swift.Int
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - audioEpisodeId:
+                internal init(audioEpisodeId: Swift.Int) {
+                    self.audioEpisodeId = audioEpisodeId
+                }
+            }
+            internal var path: Operations.DisableContentAudioEpisodePublicShare.Input.Path
+            /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/DELETE/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DisableContentAudioEpisodePublicShare.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DisableContentAudioEpisodePublicShare.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.DisableContentAudioEpisodePublicShare.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            internal init(
+                path: Operations.DisableContentAudioEpisodePublicShare.Input.Path,
+                headers: Operations.DisableContentAudioEpisodePublicShare.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/DELETE/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/DELETE/responses/200/content/application\/json`.
+                    case json(Components.Schemas.AudioEpisodeShareResponse)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.AudioEpisodeShareResponse {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.DisableContentAudioEpisodePublicShare.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.DisableContentAudioEpisodePublicShare.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Successful Response
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/delete(disableContentAudioEpisodePublicShare)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.DisableContentAudioEpisodePublicShare.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.DisableContentAudioEpisodePublicShare.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct NotFound: Sendable, Hashable {
+                /// Creates a new `NotFound`.
+                internal init() {}
+            }
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/delete(disableContentAudioEpisodePublicShare)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.DisableContentAudioEpisodePublicShare.Output.NotFound)
+            /// Not found
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/delete(disableContentAudioEpisodePublicShare)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            internal static var notFound: Self {
+                .notFound(.init())
+            }
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            internal var notFound: Operations.DisableContentAudioEpisodePublicShare.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct UnprocessableContent: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/DELETE/responses/422/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/api/content/audio-episodes/{audio_episode_id}/share/DELETE/responses/422/content/application\/json`.
+                    case json(Components.Schemas.HTTPValidationError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Components.Schemas.HTTPValidationError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.DisableContentAudioEpisodePublicShare.Output.UnprocessableContent.Body
+                /// Creates a new `UnprocessableContent`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.DisableContentAudioEpisodePublicShare.Output.UnprocessableContent.Body) {
+                    self.body = body
+                }
+            }
+            /// Validation Error
+            ///
+            /// - Remark: Generated from `#/paths//api/content/audio-episodes/{audio_episode_id}/share/delete(disableContentAudioEpisodePublicShare)/responses/422`.
+            ///
+            /// HTTP response code: `422 unprocessableContent`.
+            case unprocessableContent(Operations.DisableContentAudioEpisodePublicShare.Output.UnprocessableContent)
+            /// The associated value of the enum case if `self` is `.unprocessableContent`.
+            ///
+            /// - Throws: An error if `self` is not `.unprocessableContent`.
+            /// - SeeAlso: `.unprocessableContent`.
+            internal var unprocessableContent: Operations.DisableContentAudioEpisodePublicShare.Output.UnprocessableContent {
+                get throws {
+                    switch self {
+                    case let .unprocessableContent(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unprocessableContent",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
                 ]
             }
         }

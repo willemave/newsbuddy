@@ -4,12 +4,14 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct CustomNarrationListSheet: View {
     @ObservedObject var viewModel: CustomNarrationLibraryViewModel
     @ObservedObject var playbackService: NarrationPlaybackService
 
     @Environment(\.dismiss) private var dismiss
+    @State private var shareItem: NarrationShareItem?
 
     var body: some View {
         NavigationStack {
@@ -50,6 +52,9 @@ struct CustomNarrationListSheet: View {
                 await viewModel.load()
             }
         }
+        .sheet(item: $shareItem) { item in
+            NarrationShareSheet(item: item)
+        }
     }
 
     private var loadingRow: some View {
@@ -77,44 +82,50 @@ struct CustomNarrationListSheet: View {
 
     private func narrationRow(_ episode: AudioEpisode) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button {
-                Task {
-                    await viewModel.handleTap(episode)
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.terracottaPrimary.opacity(0.14))
-                            .frame(width: 38, height: 38)
-
-                        narrationIcon(episode)
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        await viewModel.handleTap(episode)
                     }
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.terracottaPrimary.opacity(0.14))
+                                .frame(width: 38, height: 38)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(episode.title)
-                            .font(.terracottaBodyLarge.weight(.semibold))
-                            .foregroundStyle(Color.onSurface)
-                            .lineLimit(2)
+                            narrationIcon(episode)
+                        }
 
-                        Text(viewModel.subtitle(for: episode))
-                            .font(.terracottaBodySmall)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                            .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(episode.title)
+                                .font(.terracottaBodyLarge.weight(.semibold))
+                                .foregroundStyle(Color.onSurface)
+                                .lineLimit(2)
+
+                            Text(viewModel.subtitle(for: episode))
+                                .font(.terracottaBodySmall)
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 10)
+
+                        Image(systemName: viewModel.isPlaying(episode) ? "pause.fill" : "play.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(episode.isCompleted ? Color.terracottaPrimary : Color.onSurfaceSecondary)
+                            .frame(width: 30, height: 30)
+                            .background(Color.surfaceSecondary)
+                            .clipShape(Circle())
                     }
-
-                    Spacer(minLength: 10)
-
-                    Image(systemName: viewModel.isPlaying(episode) ? "pause.fill" : "play.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(episode.isCompleted ? Color.terracottaPrimary : Color.onSurfaceSecondary)
-                        .frame(width: 30, height: 30)
-                        .background(Color.surfaceSecondary)
-                        .clipShape(Circle())
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+
+                if episode.isCompleted {
+                    shareButton(episode)
+                }
             }
-            .buttonStyle(.plain)
 
             if episode.isCompleted && viewModel.isPlaying(episode) {
                 NarrationPlaybackControlRow(
@@ -135,6 +146,43 @@ struct CustomNarrationListSheet: View {
         .accessibilityIdentifier("knowledge.narration.\(episode.id)")
     }
 
+    private func shareButton(_ episode: AudioEpisode) -> some View {
+        Button {
+            Task { @MainActor in
+                guard let response = await viewModel.shareLinks(for: episode),
+                      let pageUrlString = response.sharePageUrl,
+                      let pageURL = URL(string: pageUrlString)
+                else { return }
+                let audioURL = response.shareAudioUrl.flatMap(URL.init(string:))
+                shareItem = NarrationShareItem(
+                    title: episode.title,
+                    pageURL: pageURL,
+                    audioURL: audioURL
+                )
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(Color.surfaceSecondary)
+                    .frame(width: 34, height: 34)
+
+                if viewModel.isSharing(episode) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.terracottaPrimary)
+                } else {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.terracottaPrimary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isSharing(episode))
+        .accessibilityLabel("Share narration")
+        .accessibilityIdentifier("knowledge.narration.share.\(episode.id)")
+    }
+
     @ViewBuilder
     private func narrationIcon(_ episode: AudioEpisode) -> some View {
         if episode.isGenerating {
@@ -150,4 +198,25 @@ struct CustomNarrationListSheet: View {
                 .foregroundStyle(Color.terracottaPrimary)
         }
     }
+}
+
+private struct NarrationShareItem: Identifiable {
+    let id = UUID()
+    let title: String
+    let pageURL: URL
+    let audioURL: URL?
+}
+
+private struct NarrationShareSheet: UIViewControllerRepresentable {
+    let item: NarrationShareItem
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        var items: [Any] = [item.title, item.pageURL]
+        if let audioURL = item.audioURL {
+            items.append(audioURL)
+        }
+        return UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

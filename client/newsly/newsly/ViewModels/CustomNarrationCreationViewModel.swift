@@ -10,6 +10,16 @@ struct CustomNarrationPollKey: Equatable {
     let shouldPoll: Bool
 }
 
+struct CustomNarrationSourceSelection {
+    let contentIds: [Int]
+    let newsItemIds: [Int]
+    let markSourceContentReadOnPlay: Bool
+
+    var isEmpty: Bool {
+        contentIds.isEmpty && newsItemIds.isEmpty
+    }
+}
+
 @MainActor
 final class CustomNarrationCreationViewModel: ObservableObject {
     @Published private(set) var isCreating = false
@@ -27,15 +37,17 @@ final class CustomNarrationCreationViewModel: ObservableObject {
         )
     }
 
-    func create(from selectedItems: [ContentSummary]) async -> Bool {
-        guard !selectedItems.isEmpty, !isCreating else { return false }
+    func create(from selection: CustomNarrationSourceSelection) async -> Bool {
+        guard !selection.isEmpty, !isCreating else { return false }
         isCreating = true
         errorMessage = nil
         defer { isCreating = false }
 
         do {
             let createdEpisode = try await AudioEpisodeService.shared.createCustomNarrationEpisode(
-                contentIds: selectedItems.map(\.id),
+                contentIds: selection.contentIds,
+                newsItemIds: selection.newsItemIds,
+                markSourceContentReadOnPlay: selection.markSourceContentReadOnPlay,
                 delivery: .background
             )
             episode = createdEpisode

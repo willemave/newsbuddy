@@ -9,9 +9,11 @@ import Foundation
 final class CustomNarrationLibraryViewModel: ObservableObject {
     @Published private(set) var episodes: [AudioEpisode] = []
     @Published private(set) var isLoading = false
+    @Published private(set) var sharingEpisodeIds: Set<Int> = []
     @Published var errorMessage: String?
 
     let playbackService = NarrationPlaybackService.shared
+    private var readNotifiedEpisodeIds: Set<Int> = []
 
     func load() async {
         guard !isLoading else { return }
@@ -31,6 +33,10 @@ final class CustomNarrationLibraryViewModel: ObservableObject {
     func isPlaying(_ episode: AudioEpisode) -> Bool {
         playbackService.isSpeaking
             && playbackService.speakingTarget == .audioEpisode(episode.id)
+    }
+
+    func isSharing(_ episode: AudioEpisode) -> Bool {
+        sharingEpisodeIds.contains(episode.id)
     }
 
     func subtitle(for episode: AudioEpisode) -> String {
@@ -68,10 +74,29 @@ final class CustomNarrationLibraryViewModel: ObservableObject {
                     try await AudioEpisodeService.shared.streamResource(for: episode)
                 }
             )
+            await markReadSourcesLocallyIfNeeded(episode)
         } catch where isNetworkCancellation(error) {
             return
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func shareLinks(for episode: AudioEpisode) async -> AudioEpisodeShareResponse? {
+        guard episode.isCompleted, !sharingEpisodeIds.contains(episode.id) else { return nil }
+        sharingEpisodeIds.insert(episode.id)
+        defer { sharingEpisodeIds.remove(episode.id) }
+
+        do {
+            let response = try await AudioEpisodeService.shared.enableEpisodeShare(id: episode.id)
+            errorMessage = nil
+            return response
+        } catch where isNetworkCancellation(error) {
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            ToastService.shared.showError("Failed to share narration: \(error.localizedDescription)")
+            return nil
         }
     }
 
@@ -90,6 +115,30 @@ final class CustomNarrationLibraryViewModel: ObservableObject {
         if let index = episodes.firstIndex(where: { $0.id == episode.id }) {
             episodes[index] = episode
         }
+    }
+
+    private func markReadSourcesLocallyIfNeeded(_ episode: AudioEpisode) async {
+        guard !readNotifiedEpisodeIds.contains(episode.id) else { return }
+        let contentIds = episode.readOnPlayContentIds
+        let newsItemIds = episode.readOnPlayNewsItemIds
+        guard !contentIds.isEmpty || !newsItemIds.isEmpty else { return }
+
+        readNotifiedEpisodeIds.insert(episode.id)
+        for contentId in contentIds {
+            postReadNotification(contentId: contentId, contentType: .article)
+        }
+        for newsItemId in newsItemIds {
+            postReadNotification(contentId: newsItemId, contentType: .news)
+        }
+        await UnreadCountService.shared.refreshCounts()
+    }
+
+    private func postReadNotification(contentId: Int, contentType: ContentType) {
+        NotificationCenter.default.post(
+            name: .contentMarkedAsRead,
+            object: nil,
+            userInfo: ["contentId": contentId, "contentType": contentType.rawValue]
+        )
     }
 
     private func formattedNarrationDuration(_ seconds: Int) -> String {

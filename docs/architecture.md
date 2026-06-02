@@ -517,9 +517,18 @@ Prefix: `/api/content`
 - `GET /api/content/narration/{target_type}/{target_id}`
 - `POST /api/content/audio-episodes/fast-news`
 - `POST /api/content/{content_id}/audio-episodes/council`
+- `POST /api/content/audio-episodes/custom-narrations`
+- `GET /api/content/audio-episodes/custom-narrations`
 - `GET /api/content/audio-episodes/{audio_episode_id}`
 - `GET /api/content/audio-episodes/{audio_episode_id}/audio`
 - `GET /api/content/audio-episodes/{audio_episode_id}/stream`
+- `POST /api/content/audio-episodes/{audio_episode_id}/share`
+- `DELETE /api/content/audio-episodes/{audio_episode_id}/share`
+
+Public custom narration share routes:
+
+- `GET /audio/share/{token}/`
+- `GET /audio/share/{token}/audio`
 
 #### Content actions
 

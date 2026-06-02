@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.models.contracts import ContentType, TaskType
-from app.models.db import AudioEpisode, ProcessingTask
+from app.models.db import AudioEpisode, ContentReadStatus, NewsItemReadStatus, ProcessingTask
 from tests.support.builders import create_content_status_entry_row, create_news_item_row
 
 
@@ -164,6 +164,246 @@ def test_create_custom_narration_audio_episode_enqueues_generation(
     assert task.task_type == TaskType.GENERATE_AUDIO_EPISODE.value
     assert task.payload == {"audio_episode_id": episode.id}
     assert task.queue_name == "audio_episode"
+
+
+def test_create_custom_narration_audio_episode_accepts_fast_reads(
+    client,
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    article = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Agent workflows",
+        content_metadata={"content": "Full article body about agent workflows."},
+    )
+    news_item = create_news_item_row(
+        db_session,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        summary_title="AI labs ship new browsers",
+        summary_text="AI labs are moving agent browsers into products.",
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=article)
+
+    response = client.post(
+        "/api/content/audio-episodes/custom-narrations",
+        json={
+            "content_ids": [article.id],
+            "news_item_ids": [news_item.id],
+            "title": "Mixed narration",
+            "mark_source_content_read_on_play": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "custom_narration"
+    assert payload["source_content_ids"] == [article.id]
+    assert payload["source_item_ids"] == [news_item.id]
+    assert payload["source_count"] == 2
+    assert payload["read_on_play_content_ids"] == [article.id]
+    assert payload["read_on_play_news_item_ids"] == [news_item.id]
+
+
+def test_custom_narration_marks_sources_read_when_audio_is_played(
+    client,
+    db_session,
+    test_user,
+    content_factory,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    audio_path = tmp_path / "narration.mp3"
+    audio_path.write_bytes(b"mp3")
+    article = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Agent workflows",
+        content_metadata={"content": "Full article body about agent workflows."},
+    )
+    news_item = create_news_item_row(
+        db_session,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        summary_title="AI labs ship new browsers",
+        summary_text="AI labs are moving agent browsers into products.",
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=article)
+
+    def fake_generate_audio_episode(db, *, audio_episode_id: int):
+        episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).one()
+        episode.status = "completed"
+        episode.audio_storage_path = str(audio_path)
+        episode.audio_content_type = "audio/mpeg"
+        episode.duration_seconds = 90
+        return episode
+
+    monkeypatch.setattr(
+        "app.services.audio_episodes.generate_audio_episode",
+        fake_generate_audio_episode,
+    )
+
+    response = client.post(
+        "/api/content/audio-episodes/custom-narrations?delivery=inline",
+        json={
+            "content_ids": [article.id],
+            "news_item_ids": [news_item.id],
+            "mark_source_content_read_on_play": True,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["audio_url"] is not None
+    assert db_session.query(ContentReadStatus).count() == 0
+    assert db_session.query(NewsItemReadStatus).count() == 0
+
+    audio_response = client.get(payload["audio_url"])
+
+    assert audio_response.status_code == 200
+    assert audio_response.content == b"mp3"
+    content_read = (
+        db_session.query(ContentReadStatus)
+        .filter(
+            ContentReadStatus.user_id == test_user.id,
+            ContentReadStatus.content_id == article.id,
+        )
+        .one_or_none()
+    )
+    news_read = (
+        db_session.query(NewsItemReadStatus)
+        .filter(
+            NewsItemReadStatus.user_id == test_user.id,
+            NewsItemReadStatus.news_item_id == news_item.id,
+        )
+        .one_or_none()
+    )
+    assert content_read is not None
+    assert news_read is not None
+
+
+def test_custom_narration_playback_marks_fast_reads_but_not_long_reads_by_default(
+    client,
+    db_session,
+    test_user,
+    content_factory,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    audio_path = tmp_path / "narration.mp3"
+    audio_path.write_bytes(b"mp3")
+    article = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Agent workflows",
+        content_metadata={"content": "Full article body about agent workflows."},
+    )
+    news_item = create_news_item_row(
+        db_session,
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        summary_title="AI labs ship new browsers",
+        summary_text="AI labs are moving agent browsers into products.",
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=article)
+
+    def fake_generate_audio_episode(db, *, audio_episode_id: int):
+        episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).one()
+        episode.status = "completed"
+        episode.audio_storage_path = str(audio_path)
+        episode.audio_content_type = "audio/mpeg"
+        episode.duration_seconds = 90
+        return episode
+
+    monkeypatch.setattr(
+        "app.services.audio_episodes.generate_audio_episode",
+        fake_generate_audio_episode,
+    )
+
+    response = client.post(
+        "/api/content/audio-episodes/custom-narrations?delivery=inline",
+        json={"content_ids": [article.id], "news_item_ids": [news_item.id]},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["read_on_play_content_ids"] == []
+    assert payload["read_on_play_news_item_ids"] == [news_item.id]
+
+    audio_response = client.get(payload["audio_url"])
+
+    assert audio_response.status_code == 200
+    assert db_session.query(ContentReadStatus).count() == 0
+    assert (
+        db_session.query(NewsItemReadStatus)
+        .filter(
+            NewsItemReadStatus.user_id == test_user.id,
+            NewsItemReadStatus.news_item_id == news_item.id,
+        )
+        .one_or_none()
+        is not None
+    )
+
+
+def test_custom_narration_public_share_page_audio_and_revoke(
+    client,
+    db_session,
+    test_user,
+    tmp_path,
+) -> None:
+    audio_path = tmp_path / "shared-narration.mp3"
+    audio_path.write_bytes(b"shared-mp3")
+    episode = AudioEpisode(
+        user_id=test_user.id,
+        kind="custom_narration",
+        status="completed",
+        title="Shared narration",
+        input_hash="share",
+        source_item_ids=[],
+        source_snapshot={
+            "kind": "custom_narration",
+            "content_ids": [],
+            "news_item_ids": [],
+            "source_count": 1,
+            "items": [{"title": "Shared narration"}],
+        },
+        prompt_version=1,
+        audio_storage_path=str(audio_path),
+    )
+    db_session.add(episode)
+    db_session.commit()
+
+    share_response = client.post(f"/api/content/audio-episodes/{episode.id}/share")
+
+    assert share_response.status_code == 200
+    payload = share_response.json()
+    assert payload["share_enabled"] is True
+    assert payload["share_page_url"]
+    assert payload["share_audio_url"]
+
+    page_response = client.get(payload["share_page_url"])
+    assert page_response.status_code == 200
+    assert "Shared narration" in page_response.text
+    assert "<audio controls" in page_response.text
+
+    audio_response = client.get(payload["share_audio_url"])
+    assert audio_response.status_code == 200
+    assert audio_response.content == b"shared-mp3"
+
+    disable_response = client.delete(f"/api/content/audio-episodes/{episode.id}/share")
+    assert disable_response.status_code == 200
+    assert disable_response.json() == {
+        "share_enabled": False,
+        "share_page_url": None,
+        "share_audio_url": None,
+    }
+    assert client.get(payload["share_page_url"]).status_code == 404
+    assert client.get(payload["share_audio_url"]).status_code == 404
+
+    reshare_response = client.post(f"/api/content/audio-episodes/{episode.id}/share")
+    assert reshare_response.status_code == 200
+    reshare_payload = reshare_response.json()
+    assert reshare_payload["share_enabled"] is True
+    assert reshare_payload["share_page_url"] != payload["share_page_url"]
+    assert client.get(payload["share_page_url"]).status_code == 404
+    assert client.get(reshare_payload["share_page_url"]).status_code == 200
 
 
 def test_list_custom_narration_audio_episodes_is_user_scoped(

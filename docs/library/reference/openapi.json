@@ -847,6 +847,20 @@
             "title": "Kind",
             "type": "string"
           },
+          "read_on_play_content_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Read On Play Content Ids",
+            "type": "array"
+          },
+          "read_on_play_news_item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Read On Play News Item Ids",
+            "type": "array"
+          },
           "script_text": {
             "anyOf": [
               {
@@ -941,6 +955,42 @@
           "created_at"
         ],
         "title": "AudioEpisodeResponse",
+        "type": "object"
+      },
+      "AudioEpisodeShareResponse": {
+        "description": "Public sharing state for a completed narration.",
+        "properties": {
+          "share_audio_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Audio Url"
+          },
+          "share_enabled": {
+            "title": "Share Enabled",
+            "type": "boolean"
+          },
+          "share_page_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Page Url"
+          }
+        },
+        "required": [
+          "share_enabled"
+        ],
+        "title": "AudioEpisodeShareResponse",
         "type": "object"
       },
       "AudioTranscriptionHealthResponse": {
@@ -3345,9 +3395,19 @@
             "items": {
               "type": "integer"
             },
-            "maxItems": 12,
-            "minItems": 1,
             "title": "Content Ids",
+            "type": "array"
+          },
+          "mark_source_content_read_on_play": {
+            "default": false,
+            "title": "Mark Source Content Read On Play",
+            "type": "boolean"
+          },
+          "news_item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "News Item Ids",
             "type": "array"
           },
           "title": {
@@ -3363,9 +3423,6 @@
             "title": "Title"
           }
         },
-        "required": [
-          "content_ids"
-        ],
         "title": "CustomNarrationCreateRequest",
         "type": "object"
       },
@@ -9166,6 +9223,108 @@
           }
         ],
         "summary": "Stream generated audio episode MP3",
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/api/content/audio-episodes/{audio_episode_id}/share": {
+      "delete": {
+        "description": "Disable public page and audio links for a narration.",
+        "operationId": "disableContentAudioEpisodePublicShare",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audio_episode_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Audio Episode Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEpisodeShareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Disable public sharing for a custom narration",
+        "tags": [
+          "content"
+        ]
+      },
+      "post": {
+        "description": "Enable public page and audio links for a completed custom narration.",
+        "operationId": "enableContentAudioEpisodePublicShare",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audio_episode_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Audio Episode Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEpisodeShareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Enable public sharing for a completed custom narration",
         "tags": [
           "content"
         ]

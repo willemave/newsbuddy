@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.db import Base
@@ -28,6 +28,9 @@ class AudioEpisode(Base):
     audio_storage_path = Column(String(2048), nullable=True)
     audio_content_type = Column(String(100), nullable=False, default="audio/mpeg")
     duration_seconds = Column(Integer, nullable=True)
+    share_enabled = Column(Boolean, nullable=False, default=False, index=True)
+    share_token_hash = Column(String(64), nullable=True, index=True)
+    share_token_nonce = Column(String(64), nullable=True)
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
