@@ -153,11 +153,8 @@ struct CustomNarrationListSheet: View {
                       let pageUrlString = response.sharePageUrl,
                       let pageURL = URL(string: pageUrlString)
                 else { return }
-                let audioURL = response.shareAudioUrl.flatMap(URL.init(string:))
                 shareItem = NarrationShareItem(
-                    title: episode.title,
-                    pageURL: pageURL,
-                    audioURL: audioURL
+                    pageURL: pageURL
                 )
             }
         } label: {
@@ -202,20 +199,14 @@ struct CustomNarrationListSheet: View {
 
 private struct NarrationShareItem: Identifiable {
     let id = UUID()
-    let title: String
     let pageURL: URL
-    let audioURL: URL?
 }
 
 private struct NarrationShareSheet: UIViewControllerRepresentable {
     let item: NarrationShareItem
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        var items: [Any] = [item.title, item.pageURL]
-        if let audioURL = item.audioURL {
-            items.append(audioURL)
-        }
-        return UIActivityViewController(activityItems: items, applicationActivities: nil)
+        UIActivityViewController(activityItems: [item.pageURL], applicationActivities: nil)
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
