@@ -20,6 +20,7 @@
   <a href="https://github.com/willemave/newsbuddy/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/willemave/newsbuddy/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
   <a href="https://github.com/willemave/newsbuddy/actions"><img src="https://img.shields.io/github/actions/workflow/status/willemave/newsbuddy/docker-racknerd-deploy.yml?branch=main&style=flat-square&label=deploy" alt="Deploy"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/docs-architecture-8b5cf6?style=flat-square" alt="Docs"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"></a>
 </p>
 
 ---
@@ -390,6 +391,8 @@ A few of the engineering decisions that make Newsbuddy interesting:
 
 - **Self-healing extraction.** A URL is routed through an ordered strategy registry — Hacker News, arXiv, PubMed, YouTube, X, PDF, image, plain text, HTML — and HTML extraction degrades gracefully from crawl4ai to trafilatura to a paid Firecrawl fallback, only escalating when the cheaper tiers hit a paywall or return junk. Podcasts, YouTube, and tweet videos all flow through one yt-dlp + Whisper audio pipeline.
 
+- **One story, not fifty headlines.** When the same event surfaces from Hacker News, Techmeme, Reddit, and a dozen blogs, Newsbuddy collapses it into a single card. Every incoming news item runs a cost-tiered cascade — exact-URL match → a cheap lexical pre-filter → multi-view sentence-embedding similarity (title, summary, and source scored separately) → a Qwen cross-encoder asked, yes-or-no, whether two headlines describe _the same_ event (a fresh launch, lawsuit, or follow-up counts as different). Matches fold into one representative item that tracks how many sources covered it, and the feed only ever shows representatives. The whole thing runs incrementally on CPU inside a worker, narrowing thousands of items down to ~12 candidates before the heavy model ever loads.
+
 - **Two read models, one product.** Long-form articles and short-form "Fast Reads" are separate canonical models — each with its own read-state, visibility, and discussion rules — bridged by an explicit link, so each surface stays fast without denormalizing the other. Article bodies live in pluggable local-or-S3 storage rather than the database, and comment threads refresh on a leased, TTL-bounded schedule that stops parallel workers from stampeding the same discussion.
 
 - **Ships as a single container.** One Docker image runs Postgres, the API, every queue worker, the watchdog, and a cron scheduler under Supervisor (with a lighter server-only mode). The `admin` CLI SSHes into the box and runs commands inside the container behind a stable JSON envelope, and `newsbuddy auth login` links the CLI by QR code — approve it in the app, no passwords in the terminal.
@@ -404,7 +407,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the full system referen
 |-------|-------------|
 | **Backend** | Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, Alembic |
 | **Async & queue** | PostgreSQL-backed queue (`SKIP LOCKED`, `LISTEN`/`NOTIFY`), Supervisor, cron scheduler |
-| **AI / LLM** | pydantic-ai · OpenAI, Anthropic Claude, Google Gemini, Cerebras, OpenRouter, DeepSeek · Exa search |
+| **AI / LLM** | pydantic-ai · OpenAI, Anthropic Claude, Google Gemini, Cerebras, OpenRouter, DeepSeek · Exa search · local SentenceTransformers + Qwen reranker |
 | **Ingestion & media** | crawl4ai, trafilatura, Firecrawl, feedparser, yt-dlp, Whisper, Gemini + Runware images |
 | **CLI** | Go, Cobra, ogen, `newsbuddy` binary |
 | **iOS** | SwiftUI, Apple Sign In, Share Extension |
@@ -432,6 +435,12 @@ See **[docs/architecture.md](docs/architecture.md)** for the full system referen
 4. Run `ruff check . && ruff format . && pytest tests/ -v`
 5. Commit and push
 6. Open a Pull Request
+
+<br>
+
+## License
+
+Released under the [MIT License](LICENSE).
 
 <br>
 
