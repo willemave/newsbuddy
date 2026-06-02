@@ -46,6 +46,9 @@ build/
 .derived-data/
 *.png
 !docs/assets/newsbuddy-hero.png
+!tests/ios_e2e/baselines/
+!tests/ios_e2e/baselines/**/
+!tests/ios_e2e/baselines/**/*.png
 *.db-shm
 *.db-wal
 

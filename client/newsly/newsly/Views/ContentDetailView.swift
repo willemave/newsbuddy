@@ -594,7 +594,7 @@ struct ContentDetailView: View {
 
             case .discussion:
                 discussionSheet
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents(discussionPresentationDetents)
                     .presentationDragIndicator(.visible)
 
             case .chat:
@@ -1596,6 +1596,9 @@ struct ContentDetailView: View {
                         .background(Color.surfaceTertiary)
                         .clipShape(Circle())
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Close sheet")
+                .accessibilityIdentifier("content.sheet.close")
             }
             .padding(.horizontal, 20)
             .padding(.top, 14)
@@ -1715,10 +1718,11 @@ struct ContentDetailView: View {
                 }
             )
             .padding(.horizontal, 20)
-
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.surfacePrimary)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("content.share.sheet")
     }
 
     // MARK: - Download Sheet
@@ -1770,10 +1774,11 @@ struct ContentDetailView: View {
                 )
             }
             .padding(.horizontal, 20)
-
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.surfacePrimary)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("content.download.sheet")
     }
 
     // MARK: - AI Chat Sheet
@@ -1864,10 +1869,36 @@ struct ContentDetailView: View {
                         .padding(.horizontal, 20)
                 }
 
-                Spacer(minLength: 16)
+                Color.clear.frame(height: 16)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.surfacePrimary)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("content.chat.sheet")
+    }
+
+    private var discussionPresentationDetents: Set<PresentationDetent> {
+        guard !isLoadingDiscussion,
+              discussionPayload?.hasRenderableContent == true else {
+            return [.height(250)]
+        }
+        if let discussionPayload,
+           usesCompactDiscussionDetent(discussionPayload) {
+            return [.height(compactDiscussionDetentHeight(for: discussionPayload))]
+        }
+        return [.medium, .large]
+    }
+
+    private func usesCompactDiscussionDetent(_ discussion: ContentDiscussion) -> Bool {
+        discussion.mode == "comments"
+            && discussion.summary == nil
+            && discussion.links.isEmpty
+            && discussion.comments.count <= 2
+    }
+
+    private func compactDiscussionDetentHeight(for discussion: ContentDiscussion) -> CGFloat {
+        discussion.comments.count <= 1 ? 250 : 320
     }
 
     private func handleDiscussionTap(content: ContentDetail, fallbackURL: URL) {
@@ -2171,10 +2202,8 @@ struct ContentDetailView: View {
                 }
                 .buttonStyle(.bordered)
             }
-
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(20)
     }
 

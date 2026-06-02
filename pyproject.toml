@@ -88,6 +88,7 @@ asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "ios_e2e: marks tests that drive the iOS simulator through Maestro",
+    "ios_visual: marks Maestro screenshot regression tests for iOS screens and sheets",
 ]
 
 [tool.mypy]

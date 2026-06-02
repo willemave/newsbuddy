@@ -65,6 +65,7 @@ struct MoreView: View {
         }
         .listStyle(.insetGrouped)
         .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("more.screen")
         .task {
             await submissionsViewModel.load()
             await processingCountService.refreshCount()

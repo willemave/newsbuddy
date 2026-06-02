@@ -15,8 +15,12 @@ appId: "${APP_ID}"
       newslyE2EOpenChatSessionId: "${CHAT_SESSION_ID}"
 - assertVisible:
     id: knowledge.chat_input
-- assertVisible:
-    text: "${LATEST_ASSISTANT}"
+- scrollUntilVisible:
+    element: "${LATEST_ASSISTANT}"
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 50
+    centerElement: true
 - scrollUntilVisible:
     element: "${OLDER_USER}"
     direction: UP

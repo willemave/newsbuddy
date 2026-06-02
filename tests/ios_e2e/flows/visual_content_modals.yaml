@@ -1,0 +1,81 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenContentType: article
+      newslyE2EOpenContentId: "${CONTENT_ID}"
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 15000
+- assertVisible:
+    id: content.detail.title.${CONTENT_ID}
+- assertScreenshot:
+    path: "${BASELINE_DIR}/detail-article.png"
+    cropOn:
+      id: content.detail.screen
+    thresholdPercentage: 94
+- tapOn:
+    id: content.action.share
+- extendedWaitUntil:
+    visible:
+      id: content.share.sheet
+    timeout: 8000
+- assertScreenshot:
+    path: "${BASELINE_DIR}/modal-share.png"
+    cropOn:
+      id: content.share.sheet
+    thresholdPercentage: 98
+- tapOn:
+    id: content.sheet.close
+- waitForAnimationToEnd
+- tapOn:
+    id: content.action.download_more
+- extendedWaitUntil:
+    visible:
+      id: content.download.sheet
+    timeout: 8000
+- assertScreenshot:
+    path: "${BASELINE_DIR}/modal-download.png"
+    cropOn:
+      id: content.download.sheet
+    thresholdPercentage: 98
+- tapOn:
+    id: content.sheet.close
+- waitForAnimationToEnd
+- tapOn:
+    id: content.action.deep_dive
+- extendedWaitUntil:
+    visible:
+      id: content.chat.sheet
+    timeout: 8000
+- assertScreenshot:
+    path: "${BASELINE_DIR}/modal-chat.png"
+    cropOn:
+      id: content.chat.sheet
+    thresholdPercentage: 98
+- tapOn:
+    id: content.sheet.close
+- waitForAnimationToEnd
+- tapOn:
+    id: content.action.learning_deck
+- extendedWaitUntil:
+    visible:
+      id: learning_deck.create.sheet
+    timeout: 8000
+- assertScreenshot:
+    path: "${BASELINE_DIR}/modal-learning-deck.png"
+    cropOn:
+      id: learning_deck.create.sheet
+    thresholdPercentage: 97
+- tapOn: Cancel

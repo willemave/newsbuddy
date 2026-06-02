@@ -124,11 +124,10 @@ struct SuggestionDetailSheet: View {
                     .frame(minHeight: RowMetrics.compactHeight)
             }
             .buttonStyle(.plain)
-
-            Spacer()
         }
         .presentationDetents([.height(320)])
         .presentationDragIndicator(.hidden)
+        .accessibilityIdentifier("discovery.suggestion.sheet")
     }
 
     // MARK: - Type Helpers

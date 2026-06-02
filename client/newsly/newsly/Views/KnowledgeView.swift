@@ -108,6 +108,7 @@ struct KnowledgeView: View {
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("knowledge.screen")
         .sheet(isPresented: $showNarrationList) {
             CustomNarrationListSheet(
                 viewModel: customNarrationLibrary,

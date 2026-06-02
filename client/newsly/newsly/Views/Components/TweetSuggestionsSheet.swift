@@ -77,6 +77,7 @@ struct TweetSuggestionsSheet: View {
                 await viewModel.initialize(contentId: contentId)
             }
         }
+        .accessibilityIdentifier("content.tweet.sheet")
     }
 
     // MARK: - Controls Section (Creativity + Voice)

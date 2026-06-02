@@ -19,6 +19,6 @@ appId: "${APP_ID}"
 - assertVisible:
     id: long.row.${CONTENT_ID}
 - tapOn:
-    id: long.action.mark_read.${CONTENT_ID}
+    text: Mark as read
 - assertVisible:
     id: long.screen

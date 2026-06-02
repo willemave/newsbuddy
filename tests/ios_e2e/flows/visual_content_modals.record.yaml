@@ -1,0 +1,76 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenContentType: article
+      newslyE2EOpenContentId: "${CONTENT_ID}"
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 15000
+- assertVisible:
+    id: content.detail.title.${CONTENT_ID}
+- takeScreenshot:
+    path: "${BASELINE_DIR}/detail-article"
+    cropOn:
+      id: content.detail.screen
+- tapOn:
+    id: content.action.share
+- extendedWaitUntil:
+    visible:
+      id: content.share.sheet
+    timeout: 8000
+- takeScreenshot:
+    path: "${BASELINE_DIR}/modal-share"
+    cropOn:
+      id: content.share.sheet
+- tapOn:
+    id: content.sheet.close
+- waitForAnimationToEnd
+- tapOn:
+    id: content.action.download_more
+- extendedWaitUntil:
+    visible:
+      id: content.download.sheet
+    timeout: 8000
+- takeScreenshot:
+    path: "${BASELINE_DIR}/modal-download"
+    cropOn:
+      id: content.download.sheet
+- tapOn:
+    id: content.sheet.close
+- waitForAnimationToEnd
+- tapOn:
+    id: content.action.deep_dive
+- extendedWaitUntil:
+    visible:
+      id: content.chat.sheet
+    timeout: 8000
+- takeScreenshot:
+    path: "${BASELINE_DIR}/modal-chat"
+    cropOn:
+      id: content.chat.sheet
+- tapOn:
+    id: content.sheet.close
+- waitForAnimationToEnd
+- tapOn:
+    id: content.action.learning_deck
+- extendedWaitUntil:
+    visible:
+      id: learning_deck.create.sheet
+    timeout: 8000
+- takeScreenshot:
+    path: "${BASELINE_DIR}/modal-learning-deck"
+    cropOn:
+      id: learning_deck.create.sheet
+- tapOn: Cancel

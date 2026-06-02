@@ -202,12 +202,14 @@ def test_long_form_list_mark_read_action_updates_backend_state(
 def test_short_form_detail_discussion_sheet_renders_embedded_comments(
     run_ios_flow,
     db_session,
+    test_user,
 ) -> None:
     """Comments button should open the in-app discussion sheet for news items."""
     comment_id = "comment-1"
     news_item = NewsItem(
         ingest_key="ios-e2e-discussion",
-        visibility_scope="global",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
         platform="hackernews",
         source_type="hackernews",
         source_label="Hacker News",
@@ -271,6 +273,7 @@ def test_short_form_detail_discussion_sheet_renders_embedded_comments(
 def test_short_form_detail_discussion_sheet_renders_discussion_summary(
     run_ios_flow,
     db_session,
+    test_user,
 ) -> None:
     """Comments button should render the new stored news-item discussion summary."""
     summary_overview = (
@@ -279,7 +282,8 @@ def test_short_form_detail_discussion_sheet_renders_discussion_summary(
     topic_title = "Parser ergonomics"
     news_item = NewsItem(
         ingest_key="ios-e2e-discussion-summary",
-        visibility_scope="global",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
         platform="hackernews",
         source_type="hackernews",
         source_label="Hacker News",

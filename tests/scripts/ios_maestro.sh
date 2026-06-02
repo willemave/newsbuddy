@@ -42,8 +42,22 @@ if specified:
     print(specified)
     raise SystemExit
 
+specified_name = os.environ.get("NEWSLY_MAESTRO_SIMULATOR_NAME")
+
 def load(*args: str) -> dict:
     return json.loads(subprocess.check_output(["xcrun", "simctl", "list", *args, "-j"], text=True))
+
+if specified_name:
+    for device_sets in (load("devices", "booted"), load("devices", "available")):
+        for runtime_devices in device_sets.get("devices", {}).values():
+            for device in runtime_devices:
+                if (
+                    device.get("name") == specified_name
+                    and device.get("isAvailable", True)
+                ):
+                    print(device["udid"])
+                    raise SystemExit
+    sys.exit(f"No available simulator named {specified_name!r} found")
 
 booted = load("devices", "booted")
 for runtime_devices in booted.get("devices", {}).values():
@@ -53,7 +67,7 @@ for runtime_devices in booted.get("devices", {}).values():
             raise SystemExit
 
 available = load("devices", "available")
-preferred_names = ["iPhone 16 Pro", "iPhone 16", "iPhone 15 Pro", "iPhone 15"]
+preferred_names = ["iPhone 17 Pro", "iPhone 17", "iPhone 16 Pro", "iPhone 16", "iPhone 15 Pro", "iPhone 15"]
 fallback = None
 for runtime_devices in available.get("devices", {}).values():
     for device in runtime_devices:
@@ -79,6 +93,22 @@ PY
 open -a Simulator
 xcrun simctl boot "$SIMULATOR_ID" >/dev/null 2>&1 || true
 xcrun simctl bootstatus "$SIMULATOR_ID" -b
+
+if [[ -n "${NEWSLY_MAESTRO_APPEARANCE:-}" ]]; then
+  xcrun simctl ui "$SIMULATOR_ID" appearance "$NEWSLY_MAESTRO_APPEARANCE"
+fi
+
+if [[ "${NEWSLY_MAESTRO_FREEZE_STATUS_BAR:-1}" != "0" ]]; then
+  xcrun simctl status_bar "$SIMULATOR_ID" override \
+    --time "${NEWSLY_MAESTRO_STATUS_BAR_TIME:-9:41}" \
+    --dataNetwork 5g \
+    --cellularMode active \
+    --cellularBars 4 \
+    --wifiMode active \
+    --wifiBars 3 \
+    --batteryState charged \
+    --batteryLevel 100
+fi
 
 mkdir -p "$DERIVED_DATA_PATH"
 

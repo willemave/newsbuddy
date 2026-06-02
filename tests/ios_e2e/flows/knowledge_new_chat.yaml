@@ -19,9 +19,9 @@ appId: "${APP_ID}"
 - assertVisible:
     text: Actions
 - tapOn:
-    id: knowledge.new_chat_mic
+    text: Start voice chat
 - tapOn:
-    id: knowledge.new_chat_mic
+    text: Stop voice chat
 - assertVisible:
     id: knowledge.chat_input
 - assertVisible:

@@ -1,0 +1,64 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+- tapOn:
+    id: tab.long_form
+- extendedWaitUntil:
+    visible:
+      id: long.screen
+    timeout: 15000
+- assertVisible:
+    id: long.row.${LONG_CONTENT_ID}
+- assertScreenshot:
+    path: "${BASELINE_DIR}/main-long.png"
+    cropOn:
+      id: long.screen
+    thresholdPercentage: 94
+- tapOn:
+    id: tab.fast_news
+- extendedWaitUntil:
+    visible:
+      id: short.screen
+    timeout: 15000
+- assertVisible:
+    id: short.row.${NEWS_ITEM_ID}
+- assertScreenshot:
+    path: "${BASELINE_DIR}/main-fast.png"
+    cropOn:
+      id: short.screen
+    thresholdPercentage: 94
+- tapOn:
+    id: tab.knowledge
+- extendedWaitUntil:
+    visible:
+      id: knowledge.screen
+    timeout: 15000
+- assertVisible: Actions
+- assertScreenshot:
+    path: "${BASELINE_DIR}/main-knowledge.png"
+    cropOn:
+      id: knowledge.screen
+    thresholdPercentage: 94
+- tapOn:
+    id: tab.more
+- extendedWaitUntil:
+    visible:
+      id: more.screen
+    timeout: 15000
+- assertVisible: Settings
+- assertScreenshot:
+    path: "${BASELINE_DIR}/main-more.png"
+    cropOn:
+      id: more.screen
+    thresholdPercentage: 94

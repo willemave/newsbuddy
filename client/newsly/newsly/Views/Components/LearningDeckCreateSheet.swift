@@ -145,6 +145,7 @@ struct LearningDeckCreateSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .accessibilityIdentifier("learning_deck.create.sheet")
         .onDisappear {
             focusRecorder.cancelRecording()
         }

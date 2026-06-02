@@ -1,0 +1,60 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+- tapOn:
+    id: tab.long_form
+- extendedWaitUntil:
+    visible:
+      id: long.screen
+    timeout: 15000
+- assertVisible:
+    id: long.row.${LONG_CONTENT_ID}
+- takeScreenshot:
+    path: "${BASELINE_DIR}/main-long"
+    cropOn:
+      id: long.screen
+- tapOn:
+    id: tab.fast_news
+- extendedWaitUntil:
+    visible:
+      id: short.screen
+    timeout: 15000
+- assertVisible:
+    id: short.row.${NEWS_ITEM_ID}
+- takeScreenshot:
+    path: "${BASELINE_DIR}/main-fast"
+    cropOn:
+      id: short.screen
+- tapOn:
+    id: tab.knowledge
+- extendedWaitUntil:
+    visible:
+      id: knowledge.screen
+    timeout: 15000
+- assertVisible: Actions
+- takeScreenshot:
+    path: "${BASELINE_DIR}/main-knowledge"
+    cropOn:
+      id: knowledge.screen
+- tapOn:
+    id: tab.more
+- extendedWaitUntil:
+    visible:
+      id: more.screen
+    timeout: 15000
+- assertVisible: Settings
+- takeScreenshot:
+    path: "${BASELINE_DIR}/main-more"
+    cropOn:
+      id: more.screen

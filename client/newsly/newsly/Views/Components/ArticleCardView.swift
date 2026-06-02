@@ -330,12 +330,11 @@ struct ArticleCardView: View {
                 downloadSheetRow(count: 20, subtitle: "Full backlog")
             }
             .padding(.horizontal, 20)
-
-            Spacer()
         }
         .presentationDetents([.height(320)])
         .presentationCornerRadius(20)
         .presentationDragIndicator(.hidden)
+        .accessibilityIdentifier("article.download.sheet")
     }
 
     private func downloadSheetRow(count: Int, subtitle: String) -> some View {

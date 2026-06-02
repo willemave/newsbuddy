@@ -184,8 +184,12 @@ def run_maestro_flow(maestro_bin: str) -> Callable[..., subprocess.CompletedProc
             rendered_path = temp_flow.name
 
         try:
+            command = [maestro_bin, "test"]
+            if test_output_dir := os.environ.get("NEWSLY_MAESTRO_TEST_OUTPUT_DIR"):
+                command.extend(["--test-output-dir", test_output_dir])
+            command.append(rendered_path)
             result = subprocess.run(
-                [maestro_bin, "test", rendered_path],
+                command,
                 cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,

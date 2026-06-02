@@ -128,13 +128,50 @@ extension Color {
     static var summaryQuoteAccent: Color { Color.brandPrimary }
 
     // Onboarding and ambient illustration roles.
-    static var onboardingSurface: Color { Color.surfacePrimary }
-    static var onboardingText: Color { Color.onSurface }
-    static var onboardingSelectionAccent: Color { Color.brandSecondary }
-    static var onboardingAmbientPrimary: Color { Color.brandSecondary }
-    static var onboardingAmbientSecondary: Color { Color.brandPrimary.opacity(0.92) }
-    static var onboardingAmbientTertiary: Color { Color.brandTertiary }
-    static var onboardingAmbientQuaternary: Color { Color.brandSecondary.opacity(0.86) }
+    // Keep this independent from reader palettes so the first-run flow stays colorful.
+    static var onboardingSurface: Color {
+        Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.047, green: 0.059, blue: 0.078, alpha: 1.0)  // #0c0f14
+                : UIColor(red: 0.973, green: 0.980, blue: 0.988, alpha: 1.0)  // #f8fafc
+        })
+    }
+    static var onboardingText: Color {
+        Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.886, green: 0.910, blue: 0.941, alpha: 1.0)  // #e2e8f0
+                : UIColor(red: 0.200, green: 0.255, blue: 0.333, alpha: 1.0)  // #334155
+        })
+    }
+    static var onboardingSelectionAccent: Color {
+        Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.165, green: 0.478, blue: 0.322, alpha: 1.0)  // #2a7a52
+                : UIColor(red: 0.400, green: 0.820, blue: 0.640, alpha: 1.0)  // #66d1a3
+        })
+    }
+    static var onboardingAmbientPrimary: Color {
+        Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.227, green: 0.353, blue: 0.549, alpha: 1.0)  // #3a5a8c
+                : UIColor(red: 0.580, green: 0.680, blue: 0.820, alpha: 1.0)  // #94add1
+        })
+    }
+    static var onboardingAmbientSecondary: Color { Color.onboardingAmbientTertiary }
+    static var onboardingAmbientTertiary: Color {
+        Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.549, green: 0.290, blue: 0.259, alpha: 1.0)  // #8c4a42
+                : UIColor(red: 0.960, green: 0.620, blue: 0.580, alpha: 1.0)  // #f59e94
+        })
+    }
+    static var onboardingAmbientQuaternary: Color {
+        Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.165, green: 0.416, blue: 0.612, alpha: 1.0)  // #2a6a9c
+                : UIColor(red: 0.500, green: 0.780, blue: 0.960, alpha: 1.0)  // #80c7f5
+        })
+    }
 }
 
 // MARK: - Typography

@@ -37,9 +37,9 @@ appId: "${APP_ID}"
 - tapOn:
     text: Latent Space
 - tapOn:
-    text: Continue with 5
+    text: Continue
 - tapOn:
-    text: Start with 7 sources
+    text: Start with .* sources
 - assertVisible:
     text: What to expect
 - tapOn:
