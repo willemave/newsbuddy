@@ -59,6 +59,9 @@ admin = "admin.cli:main"
 where = ["."]
 include = ["admin*", "app*", "cli*", "cron*"]
 
+[tool.setuptools.package-data]
+"app.prompts" = ["**/*.md"]
+
 [dependency-groups]
 dev = [
     "mypy>=1.18.2",
