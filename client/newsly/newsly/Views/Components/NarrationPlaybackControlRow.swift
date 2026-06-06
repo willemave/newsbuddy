@@ -64,7 +64,7 @@ struct NarrationPlaybackControlRow: View {
             ZStack {
                 Circle()
                     .fill(Color.terracottaPrimary.opacity(0.12))
-                    .frame(width: 30, height: 30)
+                    .frame(width: 36, height: 36)
 
                 if isPreparing {
                     ProgressView()
@@ -76,10 +76,14 @@ struct NarrationPlaybackControlRow: View {
                         .foregroundStyle(Color.terracottaPrimary)
                 }
             }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isPreparing)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(playbackAccessibilityLabel)
+        .accessibilityAddTraits(.isButton)
     }
 
     private var speedControls: some View {
@@ -93,14 +97,18 @@ struct NarrationPlaybackControlRow: View {
                         .foregroundStyle(isSelected(option) ? Color.terracottaPrimary : Color.onSurfaceSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                        .frame(width: 32, height: 26)
+                        .frame(width: 48, height: 44)
                         .background(
                             Capsule()
                                 .fill(isSelected(option) ? Color.terracottaPrimary.opacity(0.12) : Color.clear)
                         )
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Playback speed \(option.title)")
+                .accessibilityValue(isSelected(option) ? "Selected" : "")
+                .accessibilityAddTraits(.isButton)
             }
         }
     }
@@ -117,6 +125,7 @@ struct NarrationPlaybackControlRow: View {
             }
         )
         .accessibilityLabel("Playback progress")
+        .accessibilityValue("\(formatTime(playbackService.currentTime)) of \(formatTime(playbackService.duration))")
     }
 
     private var isCurrentTarget: Bool {
@@ -226,6 +235,6 @@ private struct PlaybackProgressScrubber: View {
             .foregroundStyle(Color.onSurfaceSecondary.opacity(0.75))
         }
         .opacity(isEnabled ? 1 : 0.55)
-        .accessibilityValue("\(currentTimeText) of \(durationText)")
+        .accessibilityElement(children: .ignore)
     }
 }

@@ -86,6 +86,12 @@ struct LongFormCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 8)
+                .accessibilityLabel(content.displayTitle)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Opens content")
+                .accessibilityAction {
+                    onOpen?()
+                }
 
                 if let summary = summaryText {
                     SelectableText(
@@ -99,6 +105,12 @@ struct LongFormCard: View {
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 12)
+                    .accessibilityLabel(summary)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("Opens content")
+                    .accessibilityAction {
+                        onOpen?()
+                    }
                 }
 
                 HStack {
@@ -120,6 +132,11 @@ struct LongFormCard: View {
                         onOpen?()
                     }
                     .accessibilityLabel("\(contentTypeLabel), \(sourceLabel)")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("Opens content")
+                    .accessibilityAction {
+                        onOpen?()
+                    }
 
                     Spacer()
 
@@ -130,8 +147,10 @@ struct LongFormCard: View {
                             Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
                                 .font(.system(size: 20))
                                 .foregroundStyle(Color.onSurfaceSecondary)
+                                .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
+                        .contentShape(Rectangle())
                         .accessibilityIdentifier("long.action.mark_read.\(content.id)")
                         .accessibilityLabel(content.isRead ? "Marked as read" : "Mark as read")
 
@@ -143,8 +162,10 @@ struct LongFormCard: View {
                                 unsavedColor: Color.onSurfaceSecondary,
                                 badgeColor: Color.brandPrimary
                             )
+                            .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
+                        .contentShape(Rectangle())
                         .accessibilityIdentifier("long.action.knowledge.\(content.id)")
                         .accessibilityLabel(content.isSavedToKnowledge ? "Remove from Knowledge" : "Save to Knowledge")
                     }
@@ -215,8 +236,10 @@ struct LongFormCard: View {
                         .foregroundStyle(Color.terracottaPrimary)
                 }
             }
+            .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
         .disabled(isAudioPreparing)
         .accessibilityIdentifier("long.action.audio.\(content.id)")
         .accessibilityLabel(isAudioPlaying ? "Pause audio discussion" : "Play audio discussion")

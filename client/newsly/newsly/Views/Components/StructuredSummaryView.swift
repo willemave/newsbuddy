@@ -350,6 +350,7 @@ struct ModernKeyPointRow: View {
                 .fill(bulletColor)
                 .frame(width: 6, height: 6)
                 .padding(.top, 7)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(point.text)

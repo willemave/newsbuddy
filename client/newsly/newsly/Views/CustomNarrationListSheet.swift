@@ -43,8 +43,11 @@ struct CustomNarrationListSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Text("Done")
+                            .frame(minHeight: 44)
                     }
                 }
             }
@@ -121,6 +124,9 @@ struct CustomNarrationListSheet: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(viewModel.isPlaying(episode) ? "Pause" : "Play") \(episode.title)")
+                .accessibilityValue(viewModel.subtitle(for: episode))
+                .accessibilityIdentifier("knowledge.narration.play.\(episode.id)")
 
                 if episode.isCompleted {
                     shareButton(episode)
@@ -161,7 +167,7 @@ struct CustomNarrationListSheet: View {
             ZStack {
                 Circle()
                     .fill(Color.surfaceSecondary)
-                    .frame(width: 34, height: 34)
+                    .frame(width: 40, height: 40)
 
                 if viewModel.isSharing(episode) {
                     ProgressView()
@@ -173,10 +179,13 @@ struct CustomNarrationListSheet: View {
                         .foregroundStyle(Color.terracottaPrimary)
                 }
             }
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .disabled(viewModel.isSharing(episode))
         .accessibilityLabel("Share narration")
+        .accessibilityValue(viewModel.isSharing(episode) ? "Sharing" : "")
         .accessibilityIdentifier("knowledge.narration.share.\(episode.id)")
     }
 

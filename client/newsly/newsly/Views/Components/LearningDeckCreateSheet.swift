@@ -65,8 +65,10 @@ struct LearningDeckCreateSheet: View {
                         .font(.terracottaBodyLarge)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .background(Color.surfaceSecondary)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .accessibilityLabel("Learning Deck URL")
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -81,7 +83,7 @@ struct LearningDeckCreateSheet: View {
                             isEnabled: !isSubmitting && !focusRecorder.isTranscribing,
                             isRecording: focusRecorder.isRecording,
                             isBusy: focusRecorder.isVoiceActionInFlight && !focusRecorder.isRecording,
-                            size: 34,
+                            size: 48,
                             action: {
                                 Task {
                                     await focusRecorder.toggleRecording { transcript in

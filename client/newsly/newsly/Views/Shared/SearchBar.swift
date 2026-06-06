@@ -17,17 +17,23 @@ struct SearchBar: View {
             Image(systemName: "magnifyingglass")
                 .font(.listTitle)
                 .foregroundColor(.onSurfaceSecondary)
+                .accessibilityHidden(true)
 
             TextField(placeholder, text: $text)
                 .font(.listTitle)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
+                .padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .background(Color.surfacePrimary.opacity(0.001))
+                .accessibilityLabel(placeholder)
                 .onSubmit { onSubmit?() }
 
             if isLoading {
                 ProgressView()
                     .controlSize(.small)
+                    .frame(width: 44, height: 44)
             } else if !text.isEmpty {
                 Button {
                     text = ""
@@ -36,12 +42,14 @@ struct SearchBar: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.listTitle)
                         .foregroundColor(.onSurfaceSecondary)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
+                .contentShape(Circle())
                 .accessibilityLabel("Clear search")
             }
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 6)
         .padding(.horizontal, 14)
         .overlay(
             RoundedRectangle(cornerRadius: 12)

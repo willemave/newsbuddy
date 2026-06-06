@@ -97,6 +97,7 @@ private struct LongFormActionChip: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .frame(minHeight: 44)
         .background(Color.surfaceSecondary)
         .clipShape(Capsule())
         .overlay {

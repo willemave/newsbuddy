@@ -100,6 +100,7 @@ struct InterleavedSummaryV2View: View {
                 .fill(Color.onSurface.opacity(0.5))
                 .frame(width: 5, height: 5)
                 .padding(.top, 7)
+                .accessibilityHidden(true)
             Text(text)
                 .font(.callout)
                 .foregroundColor(Color.readerBodyText)

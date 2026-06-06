@@ -25,6 +25,7 @@ struct LearningDeckListSheet: View {
     @State private var showCreateSheet = false
     @State private var browserDestination: LearningDeckBrowserDestination?
     @State private var notice: LearningDeckNotice?
+    @State private var deckPendingDeletion: LearningDeck?
 
     var body: some View {
         NavigationStack {
@@ -55,7 +56,7 @@ struct LearningDeckListSheet: View {
                                 open: { Task { await openDeck(deck) } },
                                 openNotes: { Task { await openSourceNotes(deck) } },
                                 toggleShare: { Task { await toggleShare(deck) } },
-                                delete: { Task { await viewModel.delete(deck) } }
+                                delete: { deckPendingDeletion = deck }
                             )
                         }
                     }
@@ -68,8 +69,11 @@ struct LearningDeckListSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") {
+                    Button {
                         isPresented = false
+                    } label: {
+                        Text("Done")
+                            .frame(minHeight: 44)
                     }
                 }
 
@@ -78,6 +82,7 @@ struct LearningDeckListSheet: View {
                         showCreateSheet = true
                     } label: {
                         Image(systemName: "plus")
+                            .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel("Create Learning Deck")
                 }
@@ -104,7 +109,33 @@ struct LearningDeckListSheet: View {
                     dismissButton: .cancel(Text("OK"))
                 )
             }
+            .alert(
+                "Delete Learning Deck?",
+                isPresented: deleteConfirmationBinding
+            ) {
+                Button("Cancel", role: .cancel) {
+                    deckPendingDeletion = nil
+                }
+                Button("Delete", role: .destructive) {
+                    guard let deck = deckPendingDeletion else { return }
+                    deckPendingDeletion = nil
+                    Task { await viewModel.delete(deck) }
+                }
+            } message: {
+                Text("This removes the deck from your library.")
+            }
         }
+    }
+
+    private var deleteConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { deckPendingDeletion != nil },
+            set: { isPresented in
+                if !isPresented {
+                    deckPendingDeletion = nil
+                }
+            }
+        )
     }
 
     @MainActor

@@ -194,14 +194,21 @@ struct LearningDeckRow: View {
                 Spacer(minLength: 0)
 
                 Button(role: .destructive, action: delete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .frame(width: 40, height: 40)
+                    ZStack {
+                        Color.clear
+                        Image(systemName: "trash")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                 }
                 .disabled(isBusy)
                 .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Delete Learning Deck")
+                .accessibilityAddTraits(.isButton)
             }
         }
         .padding(.horizontal, Spacing.screenHorizontal)
@@ -239,7 +246,7 @@ private struct LearningDeckActionButton: View {
                 .minimumScaleFactor(0.82)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .frame(minHeight: 40)
+                .frame(minHeight: 44)
                 .background(
                     disabled
                         ? Color.surfaceSecondary.opacity(0.3)

@@ -174,12 +174,19 @@ private struct LinkRow: View {
                 .font(.caption)
                 .foregroundStyle(Color.onSurfaceSecondary)
             if let url = URL(string: value) {
-                Link(value, destination: url)
-                    .font(.footnote)
+                Link(destination: url) {
+                    Text(value)
+                        .font(.footnote)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("\(label): \(value)")
             } else {
                 Text(value)
                     .font(.footnote)
                     .foregroundStyle(Color.onSurfaceSecondary)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }
         }
         .textSelection(.enabled)

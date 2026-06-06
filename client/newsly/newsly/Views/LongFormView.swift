@@ -34,6 +34,7 @@ struct LongFormView: View {
     @State private var isStartingLongFormSummaryChat = false
     @State private var longFormSummaryError: String?
     private let chatService = ChatService.shared
+    private let bottomActionScrollPadding: CGFloat = 96
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -96,15 +97,22 @@ struct LongFormView: View {
                                         Spacer()
                                     }
                                 }
+
+                                Color.clear
+                                    .frame(height: bottomActionScrollPadding)
+                                    .accessibilityHidden(true)
                             }
                         }
                         .refreshable {
                             await refreshLongFormSurface(forceReload: true)
                         }
-                        .confirmationDialog(
+                        .alert(
                             "Mark all long-form content as read?",
                             isPresented: $showMarkAllConfirmation
                         ) {
+                            Button("Cancel", role: .cancel) {
+                                showMarkAllConfirmation = false
+                            }
                             Button("Mark All as Read", role: .destructive) {
                                 showMarkAllConfirmation = false
                                 isProcessingBulk = true
@@ -113,11 +121,8 @@ struct LongFormView: View {
                                     await viewModel.markAllVisibleAsRead()
                                 }
                             }
-                            Button("Cancel", role: .cancel) {
-                                showMarkAllConfirmation = false
-                            }
                         } message: {
-                            Text("Long press to quickly mark every unread item in the current list as read.")
+                            Text("Marks every unread long-form item currently loaded in the list.")
                         }
                     }
                 }
@@ -367,7 +372,11 @@ struct LongFormView: View {
         guard pendingOpenContentId != content.id else { return }
         pendingOpenContentId = content.id
         ContentImagePrefetcher.prefetch(content)
-        onSelect(ContentDetailRoute(summary: content, allContentIds: viewModel.currentItems().map(\.id)))
+        onSelect(ContentDetailRoute(
+            summary: content,
+            allContentIds: viewModel.currentItems().map(\.id),
+            navigationSurface: .longForm
+        ))
 
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 300_000_000)
@@ -385,6 +394,7 @@ struct LongFormView: View {
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
+                .frame(minHeight: 44)
                 .background(Color.surfaceSecondary)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
         }

@@ -56,9 +56,9 @@ struct ArticleReaderView: View {
                 .padding(.bottom, 56)
                 .frame(maxWidth: .infinity)
             }
+            .accessibilityIdentifier("article.reader.screen")
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
-        .accessibilityIdentifier("article.reader.screen")
     }
 
     private var readerToolbar: some View {
@@ -68,11 +68,14 @@ struct ArticleReaderView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .background(Color.surfaceTertiary.opacity(0.78), in: Circle())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("Close reader")
+            .accessibilityIdentifier("article.reader.close")
 
             Spacer()
 
@@ -82,11 +85,14 @@ struct ArticleReaderView: View {
                 } label: {
                     Image(systemName: "safari")
                         .font(.system(size: 17, weight: .regular))
-                        .frame(width: 40, height: 40)
+                        .frame(width: 44, height: 44)
                         .background(Color.surfaceTertiary.opacity(0.78), in: Circle())
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Open original article")
+                .accessibilityIdentifier("article.reader.open_original")
             }
 
             HStack(spacing: 2) {
@@ -95,25 +101,32 @@ struct ArticleReaderView: View {
                 } label: {
                     Image(systemName: "minus")
                         .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 34, height: 34)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .disabled(bodyFontSize <= minBodyFontSize)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Decrease text size")
+                .accessibilityIdentifier("article.reader.text_size.decrease")
 
                 Text("Aa")
                     .font(.custom("Newsreader", size: 16).weight(.semibold))
                     .foregroundStyle(Color.onSurface)
                     .frame(width: 34, height: 34)
+                    .accessibilityHidden(true)
 
                 Button {
                     updateBodyFontSize(by: 1)
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 34, height: 34)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .disabled(bodyFontSize >= maxBodyFontSize)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Increase text size")
+                .accessibilityIdentifier("article.reader.text_size.increase")
             }
             .buttonStyle(.plain)
             .foregroundStyle(Color.onSurface)

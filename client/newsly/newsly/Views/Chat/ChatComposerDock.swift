@@ -119,7 +119,7 @@ struct ChatComposerDock: View {
             Image(systemName: "plus")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.onSurfaceSecondary)
-                .frame(width: 34, height: 34)
+                .frame(width: 44, height: 44)
                 .background(
                     Circle()
                         .fill(Color.surfaceSecondary.opacity(0.72))
@@ -129,6 +129,7 @@ struct ChatComposerDock: View {
                         .stroke(Color.outlineVariant.opacity(0.18), lineWidth: 1)
                 )
         }
+        .contentShape(Circle())
         .accessibilityLabel("More actions")
         .accessibilityIdentifier("knowledge.mode_menu")
     }
@@ -144,9 +145,9 @@ struct ChatComposerDock: View {
                 .font(.terracottaBodyMedium)
                 .lineLimit(1...5)
                 .focused(isInputFocused)
-                .accessibilityIdentifier("knowledge.chat_input")
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .background(Color.surfaceContainerHighest)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
@@ -156,13 +157,14 @@ struct ChatComposerDock: View {
                             lineWidth: 1
                         )
                 )
-                .frame(maxWidth: .infinity)
+                .accessibilityLabel("Message")
+                .accessibilityIdentifier("knowledge.chat_input")
 
             TapToTalkMicButton(
                 isEnabled: !isSending && !isVoiceActionInFlight && !isTranscribing,
                 isRecording: isRecording,
                 isBusy: isVoiceActionInFlight && !isRecording,
-                size: 34,
+                size: 44,
                 action: onToggleVoiceRecording
             )
             .opacity(voiceDictationAvailable || isRecording ? 1 : 0.72)
@@ -181,11 +183,13 @@ struct ChatComposerDock: View {
                     }
                 }
                 .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : .white)
-                .frame(width: 34, height: 34, alignment: .center)
+                .frame(width: 44, height: 44, alignment: .center)
                 .background(sendButtonDisabled ? Color.surfaceContainer : Color.chatUserBubble)
                 .clipShape(Circle())
             }
             .disabled(sendButtonDisabled)
+            .contentShape(Circle())
+            .accessibilityLabel(isSending ? "Sending message" : "Send message")
             .accessibilityIdentifier("knowledge.chat_send")
         }
     }

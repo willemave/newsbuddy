@@ -90,6 +90,7 @@ struct KnowledgeView: View {
                 }
                 .padding(.bottom, 32)
             }
+            .accessibilityIdentifier("knowledge.screen")
             .refreshable {
                 await loadKnowledgeScreen()
             }
@@ -108,7 +109,6 @@ struct KnowledgeView: View {
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("knowledge.screen")
         .sheet(isPresented: $showNarrationList) {
             CustomNarrationListSheet(
                 viewModel: customNarrationLibrary,
@@ -154,6 +154,7 @@ struct KnowledgeView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundColor(.onSurfaceSecondary)
+                .accessibilityHidden(true)
 
             TextField("Ask anything...", text: $searchText)
                 .font(.terracottaBodyLarge)
@@ -162,6 +163,12 @@ struct KnowledgeView: View {
                 .onSubmit {
                     sendSearchQuery()
                 }
+                .padding(.vertical, 11)
+                .padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .background(Color.surfaceContainer.opacity(0.001))
+                .accessibilityLabel("Ask Knowledge")
+                .accessibilityIdentifier("knowledge.search.input")
 
             if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button {
@@ -170,12 +177,15 @@ struct KnowledgeView: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 28))
                         .foregroundColor(viewModel.isCreatingSession ? .onSurfaceSecondary : .terracottaPrimary)
+                        .frame(width: 44, height: 44)
                 }
                 .disabled(viewModel.isCreatingSession)
+                .contentShape(Circle())
+                .accessibilityLabel("Send question")
+                .accessibilityIdentifier("knowledge.search.send")
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
         .background(Color.surfaceContainer)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, Spacing.screenHorizontal)
@@ -300,6 +310,9 @@ struct KnowledgeView: View {
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.25)) {
                 proxy.scrollTo(request.target, anchor: .top)
+            }
+            if request.target == .narrations {
+                showNarrationList = true
             }
             onFocusHandled?(request)
         }
