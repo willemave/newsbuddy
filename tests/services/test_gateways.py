@@ -196,6 +196,7 @@ def test_get_task_queue_gateway_returns_cached_instance(monkeypatch):
     """Global queue gateway accessor should lazily build once and then reuse."""
     from app.services.gateways import task_queue_gateway as module
 
+    original_gateway = module._task_queue_gateway
     module._task_queue_gateway = None
     created = []
 
@@ -206,8 +207,11 @@ def test_get_task_queue_gateway_returns_cached_instance(monkeypatch):
 
     monkeypatch.setattr(module, "TaskQueueGateway", _build_gateway)
 
-    first = get_task_queue_gateway()
-    second = get_task_queue_gateway()
+    try:
+        first = get_task_queue_gateway()
+        second = get_task_queue_gateway()
 
-    assert first is second
-    assert len(created) == 1
+        assert first is second
+        assert len(created) == 1
+    finally:
+        module._task_queue_gateway = original_gateway

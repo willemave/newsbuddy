@@ -147,6 +147,8 @@ def test_get_news_item_discussion_returns_comments_payload_from_legacy_content(
     )
     news_item = news_item_factory(
         ingest_key="hn-456",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
         platform="hackernews",
         canonical_item_url="https://example.com/story",
         discussion_url="https://news.ycombinator.com/item?id=456",
@@ -180,9 +182,12 @@ def test_get_news_item_discussion_returns_embedded_payload_without_legacy_conten
     client,
     discussion_payload_factory,
     news_item_factory,
+    test_user,
 ) -> None:
     news_item = news_item_factory(
         ingest_key="hn-embedded-discussion",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
         platform="hackernews",
         source_type="hackernews",
         source_label="Hacker News",
@@ -387,10 +392,13 @@ def test_refresh_news_item_discussion_updates_embedded_payload(
     client,
     discussion_payload_factory,
     news_item_factory,
+    test_user,
     monkeypatch,
 ) -> None:
     news_item = news_item_factory(
         ingest_key="techmeme-embedded-refresh",
+        visibility_scope="user",
+        owner_user_id=test_user.id,
         platform="techmeme",
         source_type="techmeme",
         source_label="Techmeme",
