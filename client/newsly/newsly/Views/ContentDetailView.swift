@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import MarkdownUI
 import UIKit
 import os.log
 
@@ -47,7 +46,8 @@ private struct ViewAlert: Identifiable {
 // MARK: - Design Tokens
 private enum DetailDesign {
     // Spacing
-    static let horizontalPadding: CGFloat = 20
+    static let headerHorizontalPadding: CGFloat = Spacing.screenHorizontal
+    static let horizontalPadding: CGFloat = Spacing.readerHorizontal
     static let sectionSpacing: CGFloat = 20
     static let actionBarTopPadding: CGFloat = 0
     static let summaryTopPadding: CGFloat = 14
@@ -336,8 +336,7 @@ struct ContentDetailView: View {
                                 icon: content.contentTypeEnum == .podcast ? "text.alignleft" : "doc.text",
                                 isExpanded: $isTranscriptExpanded
                             ) {
-                                Markdown(bodyText)
-                                    .markdownTheme(.gitHub)
+                                detailMarkdownBody(bodyText, content: content)
                             }
                             .padding(.horizontal, DetailDesign.horizontalPadding)
                             .padding(.top, DetailDesign.sectionSpacing)
@@ -347,8 +346,7 @@ struct ContentDetailView: View {
                                 icon: "text.alignleft",
                                 isExpanded: $isTranscriptExpanded
                             ) {
-                                Markdown(transcript)
-                                    .markdownTheme(.gitHub)
+                                detailMarkdownBody(transcript, content: content)
                             }
                             .padding(.horizontal, DetailDesign.horizontalPadding)
                             .padding(.top, DetailDesign.sectionSpacing)
@@ -358,8 +356,7 @@ struct ContentDetailView: View {
                                 icon: "doc.text",
                                 isExpanded: $isTranscriptExpanded
                             ) {
-                                Markdown(fullMarkdown)
-                                    .markdownTheme(.gitHub)
+                                detailMarkdownBody(fullMarkdown, content: content)
                             }
                             .padding(.horizontal, DetailDesign.horizontalPadding)
                             .padding(.top, DetailDesign.sectionSpacing)
@@ -1240,7 +1237,7 @@ struct ContentDetailView: View {
                             .padding(.top, 2)
                     }
                 }
-                .padding(.horizontal, DetailDesign.horizontalPadding)
+                .padding(.horizontal, DetailDesign.headerHorizontalPadding)
                 .padding(.bottom, 10)
             }
             .frame(height: DetailDesign.parallaxHeroHeight)
@@ -1293,17 +1290,17 @@ struct ContentDetailView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DetailDesign.horizontalPadding)
+                .padding(.horizontal, DetailDesign.headerHorizontalPadding)
                 .padding(.top, 16)
                 .padding(.bottom, 6)
 
                 actionBar(content: content, overlaid: false)
-                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                    .padding(.horizontal, DetailDesign.headerHorizontalPadding)
                     .padding(.top, 2)
 
                 if shouldShowPodcastPlaybackControls(for: content) {
                     podcastPlaybackControls(for: content)
-                        .padding(.horizontal, DetailDesign.horizontalPadding)
+                        .padding(.horizontal, DetailDesign.headerHorizontalPadding)
                         .padding(.top, 4)
                 }
             }
@@ -2393,7 +2390,7 @@ struct ContentDetailView: View {
 
                 Text(topic.summary)
                     .font(.callout)
-                    .foregroundColor(Color.onSurface)
+                    .foregroundColor(Color.readerBodyText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2433,7 +2430,7 @@ struct ContentDetailView: View {
                     .tracking(0.4)
                 Text(comment.text)
                     .font(.footnote)
-                    .foregroundColor(Color.onSurface.opacity(0.9))
+                    .foregroundColor(Color.readerBodyText)
                     .lineSpacing(1)
                     .fixedSize(horizontal: false, vertical: true)
                 if let reason = comment.reason {
@@ -2457,7 +2454,7 @@ struct ContentDetailView: View {
 
                     Text(summary.overview)
                         .font(.callout)
-                        .foregroundColor(Color.onSurface)
+                        .foregroundColor(Color.readerBodyText)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let urlString = summary.externalDiscussionURL ?? discussion.discussionURL ?? discussion.sourceURL,
@@ -2487,7 +2484,7 @@ struct ContentDetailView: View {
                                     .fontWeight(.semibold)
                                 Text(topic.summary)
                                     .font(.subheadline)
-                                    .foregroundColor(Color.onSurfaceSecondary)
+                                    .foregroundColor(Color.readerBodyText)
                                     .fixedSize(horizontal: false, vertical: true)
                                 if let stance = topic.stance {
                                     Text(stance)
@@ -2519,6 +2516,7 @@ struct ContentDetailView: View {
                                     .foregroundColor(Color.onSurfaceSecondary)
                                 Text(comment.text)
                                     .font(.subheadline)
+                                    .foregroundColor(Color.readerBodyText)
                                     .fixedSize(horizontal: false, vertical: true)
                                 if let reason = comment.reason {
                                     Text(reason)
@@ -2599,6 +2597,7 @@ struct ContentDetailView: View {
                                 Text(comment.compactText ?? comment.text)
                                     .font(.callout)
                                     .fontWeight(.regular)
+                                    .foregroundColor(Color.readerBodyText)
                                     .fixedSize(horizontal: false, vertical: true)
                             } else if childCount > 0 {
                                 HStack(spacing: 6) {
@@ -2996,6 +2995,23 @@ struct ContentDetailView: View {
         }
         .background(Color.surfaceSecondary)
         .clipShape(RoundedRectangle(cornerRadius: DetailDesign.cardRadius))
+    }
+
+    private func detailMarkdownBody(_ markdown: String, content: ContentDetail) -> some View {
+        SelectableMarkdownView(
+            markdown: markdown,
+            textColor: .appReaderBodyText,
+            baseFont: detailBodyUIFont,
+            adjustsFontForContentSizeCategory: true,
+            onDigDeeper: { selectedText in
+                handleReaderDigDeeper(selectedText: selectedText, content: content)
+            }
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var detailBodyUIFont: UIFont {
+        .appReaderBody
     }
 
     @ViewBuilder

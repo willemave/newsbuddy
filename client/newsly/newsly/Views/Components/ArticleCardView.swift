@@ -178,9 +178,8 @@ struct ArticleCardView: View {
         if let hookText = hook, !hookText.isEmpty {
             Text(hookText)
                 .font(.subheadline)
-                .fontWeight(.medium)
                 .italic()
-                .foregroundColor(Color.onSurfaceSecondary)
+                .foregroundColor(Color.readerBodyText)
                 .padding(.vertical, 4)
         }
     }
@@ -220,7 +219,7 @@ struct ArticleCardView: View {
             } else if let summary = content.summaryDisplayText {
                 Text(summary)
                     .font(.subheadline)
-                    .foregroundColor(Color.onSurface)
+                    .foregroundColor(Color.readerBodyText)
                     .lineLimit(4)
             } else {
                 Text("No summary available")
@@ -240,7 +239,7 @@ struct ArticleCardView: View {
 
             Text(text)
                 .font(.subheadline)
-                .foregroundColor(Color.onSurface)
+                .foregroundColor(Color.readerBodyText)
                 .multilineTextAlignment(.leading)
         }
     }

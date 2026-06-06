@@ -183,7 +183,7 @@ struct StructuredSummaryView: View {
             Text(quote.text)
                 .font(.callout)
                 .italic()
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let context = quote.context {
@@ -225,7 +225,7 @@ struct StructuredSummaryView: View {
 
             Text(question)
                 .font(.callout)
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -242,7 +242,7 @@ struct StructuredSummaryView: View {
 
             Text(argument)
                 .font(.callout)
-                .foregroundColor(Color.onSurface.opacity(0.85))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -354,7 +354,7 @@ struct ModernKeyPointRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(point.text)
                     .font(.callout)
-                    .foregroundColor(Color.onSurface.opacity(0.9))
+                    .foregroundColor(Color.readerBodyText)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let category = point.category {

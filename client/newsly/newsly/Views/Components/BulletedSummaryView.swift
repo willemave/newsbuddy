@@ -38,8 +38,7 @@ struct BulletedSummaryView: View {
 
                 Text(point.text)
                     .font(.callout)
-                    .fontWeight(.medium)
-                    .foregroundColor(Color.onSurface)
+                    .foregroundColor(Color.readerBodyText)
                     .multilineTextAlignment(.leading)
 
                 Spacer()
@@ -48,7 +47,7 @@ struct BulletedSummaryView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(point.detail)
                     .font(.subheadline)
-                    .foregroundColor(Color.onSurfaceSecondary)
+                    .foregroundColor(Color.readerBodyText)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if !point.quotes.isEmpty {
@@ -70,7 +69,7 @@ struct BulletedSummaryView: View {
             Text(quote.text)
                 .font(.subheadline)
                 .italic()
-                .foregroundColor(Color.onSurface.opacity(0.75))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attributionLine = quoteAttributionLine(quote) {

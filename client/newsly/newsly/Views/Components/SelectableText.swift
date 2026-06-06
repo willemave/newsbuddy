@@ -17,8 +17,8 @@ struct SelectableText: UIViewRepresentable {
 
     init(
         _ text: String,
-        textColor: UIColor = .label,
-        font: UIFont = .preferredFont(forTextStyle: .callout),
+        textColor: UIColor = .appReaderBodyText,
+        font: UIFont = .appReaderBody,
         lineLimit: Int? = nil,
         lineBreakMode: NSLineBreakMode = .byWordWrapping,
         onDigDeeper: ((String) -> Void)? = nil,

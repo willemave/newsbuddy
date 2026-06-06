@@ -24,7 +24,7 @@ struct EditorialNarrativeSummaryView: View {
                     ForEach(Array(summary.narrativeParagraphs.enumerated()), id: \.offset) { _, paragraph in
                         Text(paragraph)
                             .font(.callout)
-                            .foregroundColor(Color.onSurface.opacity(0.92))
+                            .foregroundColor(Color.readerBodyText)
                             .lineSpacing(5)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -108,7 +108,7 @@ struct EditorialNarrativeSummaryView: View {
                 .padding(.top, 7)
             Text(text)
                 .font(.callout)
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -119,7 +119,7 @@ struct EditorialNarrativeSummaryView: View {
             Text(quote.text)
                 .font(.callout)
                 .italic()
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attributionLine = quoteAttributionLine(quote) {

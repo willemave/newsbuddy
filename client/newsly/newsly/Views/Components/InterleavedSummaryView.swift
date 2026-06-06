@@ -23,7 +23,7 @@ struct InterleavedSummaryView: View {
             // Hook
             Text(summary.hook)
                 .font(.callout)
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             // Insights
@@ -48,7 +48,7 @@ struct InterleavedSummaryView: View {
 
                 Text(summary.takeaway)
                     .font(.callout)
-                    .foregroundColor(Color.onSurface.opacity(0.9))
+                    .foregroundColor(Color.readerBodyText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -67,7 +67,7 @@ struct InterleavedSummaryView: View {
             // Insight text
             Text(insight.insight)
                 .font(.callout)
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             // Quote (if present)
@@ -76,7 +76,7 @@ struct InterleavedSummaryView: View {
                     Text(quote)
                         .font(.callout)
                         .italic()
-                        .foregroundColor(Color.onSurface.opacity(0.8))
+                        .foregroundColor(Color.readerBodyText)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let attribution = insight.quoteAttribution, !attribution.isEmpty {

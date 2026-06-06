@@ -36,7 +36,7 @@ struct ArticleReaderView: View {
                            !text.isEmpty {
                             SelectableMarkdownView(
                                 markdown: text,
-                                textColor: .appOnSurface,
+                                textColor: .appReaderBodyText,
                                 baseFont: readerUIFont,
                                 adjustsFontForContentSizeCategory: true,
                                 onDigDeeper: onDigDeeper
@@ -51,7 +51,7 @@ struct ArticleReaderView: View {
                     }
                 }
                 .frame(maxWidth: 720, alignment: .leading)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Spacing.readerHorizontal)
                 .padding(.top, 30)
                 .padding(.bottom, 56)
                 .frame(maxWidth: .infinity)

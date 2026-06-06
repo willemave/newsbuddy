@@ -19,8 +19,8 @@ struct SelectableMarkdownView: UIViewRepresentable {
 
     init(
         markdown: String,
-        textColor: UIColor = .label,
-        baseFont: UIFont = .preferredFont(forTextStyle: .callout),
+        textColor: UIColor = .appReaderBodyText,
+        baseFont: UIFont = .appReaderBody,
         adjustsFontForContentSizeCategory: Bool = false,
         onDigDeeper: ((String) -> Void)? = nil
     ) {

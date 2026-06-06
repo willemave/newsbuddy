@@ -60,6 +60,9 @@ extension Color {
     static var onSurface: Color {
         Color(UIColor.appOnSurface)
     }
+    static var readerBodyText: Color {
+        Color(UIColor.appReaderBodyText)
+    }
     static var onSurfaceSecondary: Color {
         Color(UIColor.appOnSurfaceSecondary)
     }
@@ -219,6 +222,12 @@ extension Font {
     static let terracottaBodySmall = Font.custom("Inter", size: 12)
     static let terracottaLabelSmall = Font.custom("Inter", size: 9).weight(.bold)
     static let terracottaCategoryPill = Font.custom("Inter", size: 10).weight(.semibold)
+
+    // Reader typography — regular body copy.
+    static let readerBody = Font.custom("Inter", size: ReaderContentStyle.bodyFontSize)
+        .weight(ReaderContentStyle.bodyFontWeight)
+    static let readerSummaryBody = Font.custom("Inter", size: ReaderContentStyle.summaryBodyFontSize)
+        .weight(ReaderContentStyle.bodyFontWeight)
 }
 
 extension UIFont {
@@ -231,8 +240,28 @@ extension UIFont {
     }
 
     static var appEditorialSummary: UIFont {
-        UIFont(name: "Inter", size: 14) ?? UIFont.systemFont(ofSize: 14, weight: .regular)
+        UIFont(name: "Inter", size: ReaderContentStyle.summaryBodyFontSize)
+            ?? UIFont.systemFont(
+                ofSize: ReaderContentStyle.summaryBodyFontSize,
+                weight: ReaderContentStyle.uiBodyFontWeight
+            )
     }
+
+    static var appReaderBody: UIFont {
+        UIFont(name: "Inter", size: ReaderContentStyle.bodyFontSize)
+            ?? UIFont.systemFont(
+                ofSize: ReaderContentStyle.bodyFontSize,
+                weight: ReaderContentStyle.uiBodyFontWeight
+            )
+    }
+}
+
+enum ReaderContentStyle {
+    static let bodyTextOpacity: CGFloat = 1.0
+    static let bodyFontWeight: Font.Weight = .regular
+    static let uiBodyFontWeight: UIFont.Weight = .regular
+    static let bodyFontSize: CGFloat = 15
+    static let summaryBodyFontSize: CGFloat = 14
 }
 
 // MARK: - Card Metrics
@@ -312,6 +341,8 @@ enum ContentTextSize: Int, CaseIterable {
 enum Spacing {
     /// Default horizontal padding for rows and screen content (20pt baseline).
     static let screenHorizontal: CGFloat = 20
+    /// Reader content gutter for long-form/detail reading surfaces.
+    static let readerHorizontal: CGFloat = 36
     static let rowHorizontal: CGFloat = 20
     static let rowVertical: CGFloat = 12
     static let sectionTop: CGFloat = 24
@@ -394,6 +425,13 @@ extension UIColor {
     }
     static var appOnSurface: UIColor {
         ReaderPalette.selectedUIColor(\.onSurface)
+    }
+    static var appReaderBodyText: UIColor {
+        UIColor { traitCollection in
+            appOnSurface
+                .resolvedColor(with: traitCollection)
+                .withAlphaComponent(ReaderContentStyle.bodyTextOpacity)
+        }
     }
     static var appOnSurfaceSecondary: UIColor {
         ReaderPalette.selectedUIColor(\.onSurfaceSecondary)

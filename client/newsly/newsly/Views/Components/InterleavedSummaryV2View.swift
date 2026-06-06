@@ -21,7 +21,7 @@ struct InterleavedSummaryV2View: View {
         VStack(alignment: .leading, spacing: InterleavedV2Design.sectionSpacing) {
             Text(summary.hook)
                 .font(.callout)
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if !summary.keyPoints.isEmpty {
@@ -66,7 +66,7 @@ struct InterleavedSummaryV2View: View {
                 sectionHeader("Takeaway", icon: "lightbulb", tint: .terracottaPrimary, uppercase: false)
                 Text(summary.takeaway)
                     .font(.callout)
-                    .foregroundColor(Color.onSurface.opacity(0.9))
+                    .foregroundColor(Color.readerBodyText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -102,7 +102,7 @@ struct InterleavedSummaryV2View: View {
                 .padding(.top, 7)
             Text(text)
                 .font(.callout)
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -113,7 +113,7 @@ struct InterleavedSummaryV2View: View {
             Text(quote.text)
                 .font(.callout)
                 .italic()
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attributionLine = quoteAttributionLine(quote) {

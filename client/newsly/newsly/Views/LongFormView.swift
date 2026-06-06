@@ -80,11 +80,11 @@ struct LongFormView: View {
                                         )
                                     }
                                 }
-                                .padding(.horizontal, Spacing.screenHorizontal)
+                                .padding(.horizontal, Spacing.readerHorizontal)
 
                                 if items.contains(where: { !$0.isRead }) {
                                     markAllLongFormButton
-                                        .padding(.horizontal, Spacing.screenHorizontal)
+                                        .padding(.horizontal, Spacing.readerHorizontal)
                                         .padding(.vertical, 8)
                                 }
 
@@ -488,54 +488,55 @@ struct LongFormView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 EditorialMastheadHeader(title: "Long Read")
-                    .padding(.horizontal, -Spacing.screenHorizontal)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Image(systemName: totalSourceItemsProcessing > 0 ? "clock.arrow.circlepath" : "dot.radiowaves.left.and.right")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color.terracottaPrimary)
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Image(systemName: totalSourceItemsProcessing > 0 ? "clock.arrow.circlepath" : "dot.radiowaves.left.and.right")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.terracottaPrimary)
 
-                        Text(bootstrapHeadline)
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(Color.onSurface)
-                    }
-
-                    Text(bootstrapSubtitle)
-                        .font(.listSubtitle)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-
-                    Text(bootstrapCheckBackSummary)
-                        .font(.listSubtitle.weight(.medium))
-                        .foregroundStyle(Color.terracottaPrimary)
-                }
-
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Selected Sources")
-                        .font(.headline)
-                        .foregroundStyle(Color.onSurface)
-                        .padding(.bottom, 12)
-
-                    ForEach(longFormSources) { config in
-                        sourceProgressRow(config)
-                        if config.id != longFormSources.last?.id {
-                            Divider()
-                                .padding(.leading, 40)
+                            Text(bootstrapHeadline)
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(Color.onSurface)
                         }
-                    }
-                }
 
-                if sourcesViewModel.isLoading && longFormSources.isEmpty {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("Loading your sources")
+                        Text(bootstrapSubtitle)
                             .font(.listSubtitle)
                             .foregroundStyle(Color.onSurfaceSecondary)
+
+                        Text(bootstrapCheckBackSummary)
+                            .font(.listSubtitle.weight(.medium))
+                            .foregroundStyle(Color.terracottaPrimary)
                     }
-                    .padding(.top, 4)
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Selected Sources")
+                            .font(.headline)
+                            .foregroundStyle(Color.onSurface)
+                            .padding(.bottom, 12)
+
+                        ForEach(longFormSources) { config in
+                            sourceProgressRow(config)
+                            if config.id != longFormSources.last?.id {
+                                Divider()
+                                    .padding(.leading, 40)
+                            }
+                        }
+                    }
+
+                    if sourcesViewModel.isLoading && longFormSources.isEmpty {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Loading your sources")
+                                .font(.listSubtitle)
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                        }
+                        .padding(.top, 4)
+                    }
                 }
+                .padding(.horizontal, Spacing.readerHorizontal)
             }
-            .padding(.horizontal, Spacing.screenHorizontal)
             .padding(.bottom, 32)
         }
         .refreshable {

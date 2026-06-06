@@ -76,7 +76,7 @@ struct LongFormCard: View {
 
                 SelectableText(
                     content.displayTitle,
-                    textColor: content.isRead ? .appOnSurfaceSecondary : .appOnSurface,
+                    textColor: .appReaderBodyText,
                     font: headlineUIFont,
                     lineLimit: 3,
                     lineBreakMode: .byTruncatingTail,
@@ -90,7 +90,7 @@ struct LongFormCard: View {
                 if let summary = summaryText {
                     SelectableText(
                         summary,
-                        textColor: .appOnSurfaceSecondary,
+                        textColor: .appReaderBodyText,
                         font: summaryUIFont,
                         lineLimit: 3,
                         lineBreakMode: .byTruncatingTail,

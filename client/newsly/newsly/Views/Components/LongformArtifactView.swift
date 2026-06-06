@@ -72,15 +72,14 @@ private struct ExtraSection: View {
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(section.title)
-                            .font(.footnote)
-                            .fontWeight(.semibold)
-                            .foregroundColor(Color.onSurfaceSecondary)
-                            .textCase(.uppercase)
-                            .tracking(0.5)
+                        ArtifactEyebrowText(section.title)
 
                         ForEach(section.items, id: \.self) { item in
-                            ArtifactBulletRow(text: item)
+                            Text(item)
+                                .font(.callout)
+                                .foregroundColor(Color.readerBodyText)
+                                .lineSpacing(3)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -114,15 +113,11 @@ private struct KeyPointList: View {
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(points) { point in
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(point.heading)
-                            .font(.callout)
-                            .fontWeight(.semibold)
-                            .foregroundColor(Color.onSurface)
-                            .fixedSize(horizontal: false, vertical: true)
+                        ArtifactEyebrowText(point.heading)
 
                         Text(point.content)
                             .font(.callout)
-                            .foregroundColor(Color.onSurface.opacity(0.88))
+                            .foregroundColor(Color.readerBodyText)
                             .lineSpacing(3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -141,8 +136,7 @@ private struct TakeawayBanner: View {
             ArtifactSectionHeader("Takeaway", icon: "checkmark.seal", tint: tint)
             Text(text)
                 .font(.callout)
-                .fontWeight(.medium)
-                .foregroundStyle(Color.onSurface)
+                .foregroundStyle(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -157,7 +151,7 @@ private struct ArtifactQuoteCard: View {
             Text(quote.text)
                 .font(.callout)
                 .italic()
-                .foregroundColor(Color.onSurface.opacity(0.9))
+                .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attribution = quote.attribution?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -178,20 +172,21 @@ private struct ArtifactQuoteCard: View {
     }
 }
 
-private struct ArtifactBulletRow: View {
-    let text: String
+private struct ArtifactEyebrowText: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(Color.onSurface.opacity(0.5))
-                .frame(width: 5, height: 5)
-                .padding(.top, 7)
-            Text(text)
-                .font(.callout)
-                .foregroundColor(Color.onSurface.opacity(0.9))
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        Text(title)
+            .font(.footnote)
+            .fontWeight(.semibold)
+            .foregroundColor(Color.onSurfaceSecondary)
+            .textCase(.uppercase)
+            .tracking(0.5)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

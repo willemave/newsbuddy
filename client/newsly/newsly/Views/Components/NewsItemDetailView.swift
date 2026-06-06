@@ -71,6 +71,7 @@ struct NewsItemDetailView: View {
 
                         Text(point)
                             .font(.callout)
+                            .foregroundColor(Color.readerBodyText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
