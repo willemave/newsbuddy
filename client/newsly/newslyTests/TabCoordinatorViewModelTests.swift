@@ -156,6 +156,83 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         await assertEventuallyLoadedItems([], in: viewModel)
     }
 
+    func testShortNewsMarkAllVisibleAsReadDropsUnreadItemsAndMarksNewsRows() {
+        let repository = FakeContentRepository()
+        let readRepository = FakeReadStatusRepository()
+        let viewModel = ShortNewsListViewModel(
+            repository: repository,
+            readRepository: readRepository,
+            unreadCountService: .shared
+        )
+        viewModel.replaceItems([
+            makeSummary(id: 11, contentType: "news"),
+            makeSummary(id: 12, contentType: "news"),
+        ])
+
+        viewModel.markAllVisibleAsRead()
+
+        XCTAssertEqual(viewModel.currentItems().map(\.id), [])
+        XCTAssertEqual(readRepository.markReadCalls, [[11, 12]])
+    }
+
+    func testShortNewsDetailReadNotificationDropsItemFromUnreadFeed() async {
+        let repository = FakeContentRepository()
+        let viewModel = ShortNewsListViewModel(
+            repository: repository,
+            readRepository: FakeReadStatusRepository(),
+            unreadCountService: .shared
+        )
+        viewModel.replaceItems([
+            makeSummary(id: 11, contentType: "news"),
+            makeSummary(id: 12, contentType: "news"),
+        ])
+
+        NotificationCenter.default.post(
+            name: .contentMarkedAsRead,
+            object: nil,
+            userInfo: ["contentId": 11, "contentType": "news"]
+        )
+
+        await assertEventuallyLoadedItems([12], in: viewModel)
+    }
+
+    func testGroupedShortNewsMarkReadUsesNewsItemEndpoint() async {
+        let readRepository = FakeReadStatusRepository()
+        let viewModel = NewsGroupViewModel(
+            repository: FakeContentRepository(),
+            readRepository: readRepository,
+            unreadCountService: .shared
+        )
+        viewModel.newsGroups = [
+            NewsGroup(items: [
+                makeSummary(id: 21, contentType: "news"),
+                makeSummary(id: 22, contentType: "news"),
+            ])
+        ]
+
+        await viewModel.markGroupAsRead("21")
+
+        XCTAssertEqual(readRepository.markReadCalls, [[21, 22]])
+        XCTAssertTrue(viewModel.newsGroups.first?.isRead ?? false)
+    }
+
+    func testGroupedShortNewsLoadUsesUnreadNewsFilter() async {
+        let repository = FakeContentRepository(
+            responseContents: [makeSummary(id: 31, contentType: "news")]
+        )
+        let viewModel = NewsGroupViewModel(
+            repository: repository,
+            readRepository: FakeReadStatusRepository(),
+            unreadCountService: .shared
+        )
+
+        await viewModel.loadNewsGroups()
+
+        XCTAssertEqual(repository.loadPageRequests.map(\.contentTypes), [[.news]])
+        XCTAssertEqual(repository.loadPageRequests.map(\.readFilter), [.unread])
+        XCTAssertEqual(viewModel.newsGroups.flatMap(\.items).map(\.id), [31])
+    }
+
     private func makeSummary(id: Int, contentType: String) -> ContentSummary {
         ContentSummary(
             id: id,
@@ -185,6 +262,22 @@ final class TabCoordinatorViewModelTests: XCTestCase {
     private func assertEventuallyLoadedItems(
         _ expectedIds: [Int],
         in viewModel: LongContentListViewModel,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<50 {
+            if viewModel.currentItems().map(\.id) == expectedIds {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(viewModel.currentItems().map(\.id), expectedIds, file: file, line: line)
+    }
+
+    private func assertEventuallyLoadedItems(
+        _ expectedIds: [Int],
+        in viewModel: ShortNewsListViewModel,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
@@ -258,8 +351,16 @@ private final class FailingContentRepository: ContentRepositoryType {
 }
 
 private final class FakeContentRepository: ContentRepositoryType {
+    struct LoadPageRequest {
+        let contentTypes: [ContentType]
+        let readFilter: ReadFilter
+        let cursor: String?
+        let limit: Int?
+    }
+
     private let responseContents: [ContentSummary]
-    private(set) var loadPageCallCount = 0
+    private(set) var loadPageRequests: [LoadPageRequest] = []
+    var loadPageCallCount: Int { loadPageRequests.count }
 
     init(responseContents: [ContentSummary] = []) {
         self.responseContents = responseContents
@@ -271,7 +372,14 @@ private final class FakeContentRepository: ContentRepositoryType {
         cursor: String?,
         limit: Int?
     ) -> AnyPublisher<ContentListResponse, Error> {
-        loadPageCallCount += 1
+        loadPageRequests.append(
+            LoadPageRequest(
+                contentTypes: contentTypes,
+                readFilter: readFilter,
+                cursor: cursor,
+                limit: limit
+            )
+        )
         return Just(
             ContentListResponse(
                 contents: responseContents,
@@ -295,8 +403,11 @@ private final class FakeContentRepository: ContentRepositoryType {
 }
 
 private final class FakeReadStatusRepository: ReadStatusRepositoryType {
+    private(set) var markReadCalls: [[Int]] = []
+
     func markRead(ids: [Int]) -> AnyPublisher<Void, Error> {
-        Just(())
+        markReadCalls.append(ids)
+        return Just(())
             .setFailureType(to: Error.self)
             .eraseToAnyPublisher()
     }

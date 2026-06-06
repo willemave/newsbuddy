@@ -92,9 +92,15 @@ final class ShortNewsListViewModel: BaseContentListViewModel {
                     return
                 }
 
-                // Update local state
                 logger.info("[ShortNewsList] Updating local read state from notification | contentId=\(contentId)")
-                markItemLocallyRead(id: contentId)
+                let shouldDropReadItems = currentReadFilter() == .unread
+                let markedItems = markItemsLocallyRead(
+                    ids: [contentId],
+                    removeReadItems: shouldDropReadItems
+                )
+                if markedItems.isEmpty && shouldDropReadItems {
+                    dropReadItems()
+                }
             }
             .store(in: &readCancellables)
     }
@@ -102,7 +108,11 @@ final class ShortNewsListViewModel: BaseContentListViewModel {
     private func markBatchRead(ids: [Int]) {
         logger.info("[ShortNewsList] markBatchRead called | ids=\(ids, privacy: .public)")
 
-        let markedIds = markItemsLocallyRead(ids: ids)
+        let markedItems = markItemsLocallyRead(
+            ids: ids,
+            removeReadItems: currentReadFilter() == .unread
+        )
+        let markedIds = markedItems.map(\.id)
         guard !markedIds.isEmpty else {
             logger.debug("[ShortNewsList] markBatchRead: all items already read, skipping")
             return

@@ -5,6 +5,7 @@
 //  Created by Assistant on 10/12/25.
 //
 
+import Combine
 import Foundation
 import SwiftUI
 
@@ -15,8 +16,20 @@ class NewsGroupViewModel: CursorPaginatedViewModel {
     @Published var isLoadingMore = false
     @Published var errorMessage: String?
 
-    private let contentService = ContentService.shared
-    private let unreadCountService = UnreadCountService.shared
+    private let repository: ContentRepositoryType
+    private let readRepository: ReadStatusRepositoryType
+    private let unreadCountService: UnreadCountService
+
+    init(
+        repository: ContentRepositoryType = ContentRepository(includeAvailableDates: false),
+        readRepository: ReadStatusRepositoryType = ReadStatusRepository(endpoint: .newsItems),
+        unreadCountService: UnreadCountService? = nil
+    ) {
+        self.repository = repository
+        self.readRepository = readRepository
+        self.unreadCountService = unreadCountService ?? UnreadCountService.shared
+        super.init()
+    }
 
     private var sessionReadGroupIds: Set<String> = []
 
@@ -47,13 +60,7 @@ class NewsGroupViewModel: CursorPaginatedViewModel {
             // Load news content (limit = groupSize * 5 groups)
             let limit = groupSize * 5
             print("🧮 Fetch news groups — size: \(groupSize), limit: \(limit), preserve reads: \(preserveReadGroups)")
-            let response = try await contentService.fetchContentList(
-                contentType: "news",
-                date: nil,
-                readFilter: "unread",
-                cursor: nil,
-                limit: limit
-            )
+            let response = try await loadNewsPage(cursor: nil, limit: limit)
 
             // Group items to fit the actual card height when metrics are available
             var fetchedGroups: [NewsGroup]
@@ -91,13 +98,7 @@ class NewsGroupViewModel: CursorPaginatedViewModel {
         do {
             // Load more with same dynamic limit
             let limit = groupSize * 5
-            let response = try await contentService.fetchContentList(
-                contentType: "news",
-                date: nil,
-                readFilter: "unread",
-                cursor: cursor,
-                limit: limit
-            )
+            let response = try await loadNewsPage(cursor: cursor, limit: limit)
 
             // Append new groups using the same height-aware packing
             let newGroups: [NewsGroup]
@@ -124,7 +125,7 @@ class NewsGroupViewModel: CursorPaginatedViewModel {
         let itemIds = group.items.map { $0.id }
 
         do {
-            _ = try await contentService.bulkMarkAsRead(contentIds: itemIds)
+            try await markNewsItemsAsRead(itemIds)
 
             // Update local state to mark as read while keeping it visible this session
             newsGroups[groupIndex] = group.updatingAllAsRead(true)
@@ -139,6 +140,28 @@ class NewsGroupViewModel: CursorPaginatedViewModel {
             ToastService.shared.showError("Failed to mark as read")
             errorMessage = "Failed to mark group as read: \(error.localizedDescription)"
         }
+    }
+
+    private func loadNewsPage(cursor: String?, limit: Int) async throws -> ContentListResponse {
+        try await firstValue(
+            from: repository.loadPage(
+                contentTypes: [.news],
+                readFilter: .unread,
+                cursor: cursor,
+                limit: limit
+            )
+        )
+    }
+
+    private func markNewsItemsAsRead(_ itemIds: [Int]) async throws {
+        try await firstValue(from: readRepository.markRead(ids: itemIds))
+    }
+
+    private func firstValue<T>(from publisher: AnyPublisher<T, Error>) async throws -> T {
+        for try await value in publisher.values {
+            return value
+        }
+        throw CancellationError()
     }
 
     func preloadNextGroups() async {
