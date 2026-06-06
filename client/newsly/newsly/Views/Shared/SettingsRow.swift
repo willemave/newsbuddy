@@ -21,6 +21,7 @@ struct SettingsIcon: View {
             .foregroundStyle(.white)
             .frame(width: Spacing.iconSize, height: Spacing.iconSize)
             .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 
@@ -96,6 +97,7 @@ struct NavigationChevron: View {
         Image(systemName: "chevron.right")
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(Color.onSurfaceSecondary)
+            .accessibilityHidden(true)
     }
 }
 

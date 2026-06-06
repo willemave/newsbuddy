@@ -95,6 +95,7 @@ struct ProcessingStatsView: View {
                 .frame(width: 28, height: 28)
                 .background(color.gradient)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(subtitle)
@@ -108,6 +109,9 @@ struct ProcessingStatsView: View {
                 .foregroundStyle(Color.onSurface)
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(subtitle)")
+        .accessibilityValue("\(count)")
     }
 
     private var articleSources: [ScraperConfig] {
@@ -144,6 +148,7 @@ struct ProcessingStatsView: View {
                 .frame(width: 28, height: 28)
                 .background(Color.brandPrimary.gradient)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(summary)
@@ -152,25 +157,34 @@ struct ProcessingStatsView: View {
             }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(summary)
     }
 
     private func sourceStatsRow(_ config: ScraperConfig) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let title = config.displayName ?? config.feedURL ?? "Source"
+        let meta = sourceMetaLine(config.stats)
+        let unreadCount = config.stats?.unreadCount ?? 0
+        let unreadSummary: String? = unreadCount > 0 ? "\(unreadCount) unread" : nil
+
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 SourceTypeIcon(type: config.scraperType)
-                Text(config.displayName ?? config.feedURL ?? "Source")
+                    .accessibilityHidden(true)
+                Text(title)
                     .font(.callout)
                     .foregroundStyle(Color.onSurface)
                     .lineLimit(1)
                 Spacer()
-                if let unreadCount = config.stats?.unreadCount, unreadCount > 0 {
-                    Text("\(unreadCount) unread")
+                if let unreadSummary {
+                    Text(unreadSummary)
                         .font(.caption)
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
             }
 
-            if let meta = sourceMetaLine(config.stats) {
+            if let meta {
                 Text(meta)
                     .font(.caption)
                     .foregroundStyle(Color.onSurfaceSecondary)
@@ -178,6 +192,14 @@ struct ProcessingStatsView: View {
             }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(sourceStatsAccessibilityLabel(title: title, unreadSummary: unreadSummary, meta: meta))
+    }
+
+    private func sourceStatsAccessibilityLabel(title: String, unreadSummary: String?, meta: String?) -> String {
+        [title, unreadSummary, meta]
+            .compactMap { $0 }
+            .joined(separator: ", ")
     }
 
     private func sourceMetaLine(_ stats: ScraperConfigStats?) -> String? {

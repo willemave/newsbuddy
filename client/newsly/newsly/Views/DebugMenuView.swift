@@ -39,7 +39,17 @@ struct DebugMenuView: View {
                             .foregroundColor(Color.onSurface)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
+                            .padding(.horizontal, 12)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
+                            .background(Color.surfaceSecondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(Color.outlineVariant.opacity(0.5), lineWidth: 1)
+                            )
+                            .accessibilityLabel("Host")
                     }
+                    .frame(minHeight: 52)
 
                     HStack {
                         Text("Port")
@@ -47,7 +57,17 @@ struct DebugMenuView: View {
                             .multilineTextAlignment(.trailing)
                             .foregroundColor(Color.onSurface)
                             .keyboardType(.numberPad)
+                            .padding(.horizontal, 12)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
+                            .background(Color.surfaceSecondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(Color.outlineVariant.opacity(0.5), lineWidth: 1)
+                            )
+                            .accessibilityLabel("Port")
                     }
+                    .frame(minHeight: 52)
 
                     Toggle("Use HTTPS", isOn: $appSettings.useHTTPS)
                 }
@@ -344,12 +364,14 @@ struct TokenInputView: View {
                     TextEditor(text: $accessToken)
                         .frame(height: 100)
                         .font(.system(.caption, design: .monospaced))
+                        .accessibilityLabel("Access token")
                 }
 
                 Section(header: Text("Refresh Token (Optional)")) {
                     TextEditor(text: $refreshToken)
                         .frame(height: 100)
                         .font(.system(.caption, design: .monospaced))
+                        .accessibilityLabel("Refresh token")
                 }
 
                 Section {

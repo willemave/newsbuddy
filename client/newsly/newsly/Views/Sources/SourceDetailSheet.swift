@@ -97,6 +97,7 @@ struct SourceDetailSheet: View {
 
                 HStack(spacing: 6) {
                     SourceTypeIcon(type: config.scraperType)
+                        .accessibilityHidden(true)
                     Text(config.scraperType.capitalized)
                         .font(.listMono)
                         .foregroundStyle(Color.onSurfaceSecondary)
@@ -117,16 +118,27 @@ struct SourceDetailSheet: View {
                 .tracking(0.5)
 
             // Active toggle
-            HStack {
-                Text("Active")
-                    .font(.listTitle)
-                    .foregroundStyle(Color.onSurface)
+            Button {
+                isActive.toggle()
+            } label: {
+                HStack {
+                    Text("Active")
+                        .font(.listTitle)
+                        .foregroundStyle(Color.onSurface)
 
-                Spacer()
+                    Spacer()
 
-                Toggle("", isOn: $isActive)
-                    .labelsHidden()
+                    Toggle("", isOn: $isActive)
+                        .labelsHidden()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Active")
+            .accessibilityValue(isActive ? "On" : "Off")
 
             Divider()
 
@@ -136,8 +148,12 @@ struct SourceDetailSheet: View {
                     .font(.listCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
 
-                TextField("Display Name", text: $displayName)
-                    .textFieldStyle(.roundedBorder)
+                FormTextField(
+                    placeholder: "Display Name",
+                    text: $displayName,
+                    backgroundColor: .surfacePrimary,
+                    accessibilityLabel: "Display name"
+                )
             }
 
             // Feed URL
@@ -146,11 +162,15 @@ struct SourceDetailSheet: View {
                     .font(.listCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
 
-                TextField("Feed URL", text: $feedURL)
-                    .textFieldStyle(.roundedBorder)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                FormTextField(
+                    placeholder: "Feed URL",
+                    text: $feedURL,
+                    keyboardType: .URL,
+                    textInputAutocapitalization: .never,
+                    autocorrectionDisabled: true,
+                    backgroundColor: .surfacePrimary,
+                    accessibilityLabel: "Feed URL"
+                )
             }
 
             // Limit (podcasts only)
@@ -160,9 +180,13 @@ struct SourceDetailSheet: View {
                         .font(.listCaption)
                         .foregroundStyle(Color.onSurfaceSecondary)
 
-                    TextField("Optional", text: $limit)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.numberPad)
+                    FormTextField(
+                        placeholder: "Optional",
+                        text: $limit,
+                        keyboardType: .numberPad,
+                        backgroundColor: .surfacePrimary,
+                        accessibilityLabel: "Episode limit"
+                    )
                 }
             }
         }
@@ -205,6 +229,7 @@ struct SourceDetailSheet: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.statusDestructive)
+                .accessibilityHidden(true)
 
             Text(error)
                 .font(.subheadline)
@@ -299,6 +324,8 @@ struct SourceDetailSheet: View {
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .multilineTextAlignment(.trailing)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(value)")
     }
 
     private func formattedTimestamp(_ date: Date?) -> String? {

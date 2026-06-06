@@ -18,6 +18,7 @@ struct SourceRow: View {
         HStack(spacing: 12) {
             // Type icon
             SourceTypeIcon(type: type)
+                .accessibilityHidden(true)
 
             // Content
             VStack(alignment: .leading, spacing: 2) {
@@ -46,15 +47,20 @@ struct SourceRow: View {
             // Status + chevron
             HStack(spacing: 8) {
                 StatusChip(isActive: isActive)
+                    .accessibilityHidden(true)
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.onSurfaceSecondary)
+                    .accessibilityHidden(true)
             }
         }
         .padding(.vertical, Spacing.rowVertical)
         .padding(.horizontal, Spacing.rowHorizontal)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(sourceAccessibilityLabel)
+        .accessibilityAddTraits(.isButton)
     }
 
     private func formattedURL(_ urlString: String) -> String {
@@ -75,6 +81,18 @@ struct SourceRow: View {
             parts.append(processedSummary)
         }
         return parts.isEmpty ? nil : parts.joined(separator: " • ")
+    }
+
+    private var sourceAccessibilityLabel: String {
+        var parts = [name]
+        if let url {
+            parts.append(formattedURL(url))
+        }
+        parts.append(isActive ? "Active" : "Inactive")
+        if let statsLine {
+            parts.append(statsLine)
+        }
+        return parts.joined(separator: ", ")
     }
 }
 

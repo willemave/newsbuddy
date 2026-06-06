@@ -14,6 +14,11 @@ struct FeedSourcesView: View {
     @State private var newFeedURL: String = ""
     @State private var newFeedName: String = ""
     @State private var newFeedType: String = "substack"
+    private let feedTypeOptions = [
+        FormChoiceOption(title: "Substack", value: "substack"),
+        FormChoiceOption(title: "RSS/Atom", value: "atom"),
+        FormChoiceOption(title: "YouTube", value: "youtube"),
+    ]
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -125,12 +130,7 @@ struct FeedSourcesView: View {
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .tracking(0.5)
 
-                    Picker("Type", selection: $newFeedType) {
-                        Text("Substack").tag("substack")
-                        Text("RSS/Atom").tag("atom")
-                        Text("YouTube").tag("youtube")
-                    }
-                    .pickerStyle(.segmented)
+                    FormChoicePillGroup(options: feedTypeOptions, selection: $newFeedType)
                 }
 
                 // URL field
@@ -140,11 +140,14 @@ struct FeedSourcesView: View {
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .tracking(0.5)
 
-                    TextField("https://example.com/feed", text: $newFeedURL)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    FormTextField(
+                        placeholder: "https://example.com/feed",
+                        text: $newFeedURL,
+                        keyboardType: .URL,
+                        textInputAutocapitalization: .never,
+                        autocorrectionDisabled: true,
+                        accessibilityLabel: "Feed URL"
+                    )
                 }
 
                 // Name field
@@ -154,8 +157,11 @@ struct FeedSourcesView: View {
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .tracking(0.5)
 
-                    TextField("Optional", text: $newFeedName)
-                        .textFieldStyle(.roundedBorder)
+                    FormTextField(
+                        placeholder: "Optional",
+                        text: $newFeedName,
+                        accessibilityLabel: "Display name"
+                    )
                 }
 
                 Spacer()
@@ -195,4 +201,5 @@ struct FeedSourcesView: View {
         newFeedName = ""
         newFeedType = "substack"
     }
+
 }

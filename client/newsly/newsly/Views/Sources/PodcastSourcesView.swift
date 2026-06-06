@@ -126,11 +126,14 @@ struct PodcastSourcesView: View {
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .tracking(0.5)
 
-                    TextField("https://example.com/podcast/feed", text: $newFeedURL)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    FormTextField(
+                        placeholder: "https://example.com/podcast/feed",
+                        text: $newFeedURL,
+                        keyboardType: .URL,
+                        textInputAutocapitalization: .never,
+                        autocorrectionDisabled: true,
+                        accessibilityLabel: "Podcast feed URL"
+                    )
                 }
 
                 // Name field
@@ -140,8 +143,11 @@ struct PodcastSourcesView: View {
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .tracking(0.5)
 
-                    TextField("Optional", text: $newFeedName)
-                        .textFieldStyle(.roundedBorder)
+                    FormTextField(
+                        placeholder: "Optional",
+                        text: $newFeedName,
+                        accessibilityLabel: "Display name"
+                    )
                 }
 
                 // Limit field
@@ -151,9 +157,12 @@ struct PodcastSourcesView: View {
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .tracking(0.5)
 
-                    TextField("1-100, optional", text: $newLimit)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.numberPad)
+                    FormTextField(
+                        placeholder: "1-100, optional",
+                        text: $newLimit,
+                        keyboardType: .numberPad,
+                        accessibilityLabel: "Episode limit"
+                    )
                 }
 
                 Spacer()

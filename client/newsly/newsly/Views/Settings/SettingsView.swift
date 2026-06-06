@@ -49,7 +49,7 @@ struct SettingsView: View {
                     #endif
                 }
                 .padding(.top, 8)
-                .padding(.bottom, 40)
+                .padding(.bottom, 120)
             }
             .onAppear {
                 guard scrollToCouncilOnAppear else { return }
@@ -69,10 +69,9 @@ struct SettingsView: View {
         } message: {
             Text(alertMessage)
         }
-        .confirmationDialog(
+        .alert(
             "Mark all as read",
             isPresented: $showMarkAllDialog,
-            titleVisibility: .visible
         ) {
             ForEach(MarkAllTarget.allCases, id: \.self) { target in
                 Button(target.buttonTitle) {
@@ -80,6 +79,8 @@ struct SettingsView: View {
                 }
             }
             Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Choose which unread content should be marked as read.")
         }
         .sheet(isPresented: $showingDebugMenu) {
             DebugMenuView()
@@ -275,6 +276,7 @@ struct SettingsView: View {
                                     .font(.system(size: 15, weight: .semibold, design: .rounded))
                                     .foregroundStyle(expertColor(for: index))
                             )
+                            .accessibilityHidden(true)
 
                         Text(persona.displayName)
                             .font(.body)
@@ -288,8 +290,11 @@ struct SettingsView: View {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 20))
                                 .foregroundStyle(Color.onSurfaceSecondary.opacity(0.5))
+                                .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
+                        .contentShape(Circle())
+                        .accessibilityLabel("Remove \(persona.displayName)")
                     }
                     .padding(.vertical, 8)
                     .background(Color.surfaceSecondary.opacity(0.55))
@@ -303,8 +308,10 @@ struct SettingsView: View {
                             .textFieldStyle(.plain)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             .background(Color.surfaceTertiary, in: RoundedRectangle(cornerRadius: 12))
                             .submitLabel(.done)
+                            .accessibilityLabel("Expert name")
                             .onSubmit { addExpert() }
 
                         Button {
@@ -313,8 +320,11 @@ struct SettingsView: View {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 24))
                                 .foregroundStyle(Color.brandPrimary)
+                                .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
+                        .contentShape(Circle())
+                        .accessibilityLabel("Add expert")
                         .disabled(newExpertName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
@@ -346,9 +356,12 @@ struct SettingsView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
+                        .frame(minHeight: 44)
                         .background(Color.terracottaPrimary, in: RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("Save experts")
                     .disabled(isSavingCouncilPersonas || !hasUnsavedCouncilPersonaEdits)
                     .opacity((isSavingCouncilPersonas || !hasUnsavedCouncilPersonaEdits) ? 0.4 : 1.0)
                 }
@@ -358,7 +371,6 @@ struct SettingsView: View {
             .settingsCard()
         }
         .id("settings.council")
-        .accessibilityIdentifier("settings.council_section")
     }
 
     private func expertColor(for _: Int) -> Color {
@@ -450,18 +462,30 @@ struct SettingsView: View {
                 Text("A")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.onSurfaceSecondary)
+                    .accessibilityHidden(true)
 
                 Slider(value: value, in: range, step: 1)
                     .tint(Color.brandPrimary)
+                    .frame(minHeight: 44)
+                    .accessibilityLabel(title)
+                    .accessibilityValue(textSizeAccessibilityValue(value.wrappedValue, range: range))
 
                 Text("A")
                     .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(Color.onSurfaceSecondary)
+                    .accessibilityHidden(true)
             }
             .padding(.leading, Spacing.rowDividerInset)
             .padding(.trailing, Spacing.rowHorizontal)
             .padding(.bottom, Spacing.rowVertical)
         }
+    }
+
+    private func textSizeAccessibilityValue(_ value: Double, range: ClosedRange<Double>) -> String {
+        let stepCount = Int(range.upperBound - range.lowerBound) + 1
+        let clampedValue = min(max(value, range.lowerBound), range.upperBound)
+        let currentStep = Int(clampedValue - range.lowerBound) + 1
+        return "\(currentStep) of \(stepCount)"
     }
 
     // MARK: - Sources Section
@@ -703,6 +727,7 @@ private struct FeedbackSheet: View {
                         .font(.body)
                         .foregroundStyle(Color.onSurface)
                         .frame(minHeight: 180)
+                        .accessibilityLabel("Feedback message")
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         .background(Color.surfaceTertiary, in: RoundedRectangle(cornerRadius: 12))
@@ -781,6 +806,7 @@ private struct AccountCard: View {
                 .foregroundStyle(.white)
                 .frame(width: Spacing.iconSize, height: Spacing.iconSize)
                 .background(Color.terracottaPrimary, in: Circle())
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.fullName ?? user.email)

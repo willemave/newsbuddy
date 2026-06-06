@@ -15,6 +15,11 @@ struct FilterSheet: View {
     
     let contentTypes: [String]
     let availableDates: [String]
+    private let readStatusOptions = [
+        FormChoiceOption(title: "Unread", value: "unread"),
+        FormChoiceOption(title: "All", value: "all"),
+        FormChoiceOption(title: "Read", value: "read"),
+    ]
     
     var body: some View {
         NavigationStack {
@@ -30,27 +35,44 @@ struct FilterSheet: View {
                             }
                         }
                         .pickerStyle(InlinePickerStyle())
+                        .labelsHidden()
                     }
                     
                     // Date Section
                     Section(header: Text("Date")) {
-                        Picker("Date", selection: $selectedDate) {
-                            Text("All Dates").tag("")
-                            ForEach(availableDates, id: \.self) { date in
-                                Text(formatDate(date)).tag(date)
+                        Menu {
+                            Button("All Dates") {
+                                selectedDate = ""
                             }
+                            ForEach(availableDates, id: \.self) { date in
+                                Button(formatDate(date)) {
+                                    selectedDate = date
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text(selectedDateTitle)
+                                    .foregroundStyle(Color.onSurface)
+                                Spacer()
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Color.onSurfaceSecondary)
+                                    .accessibilityHidden(true)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         }
-                        .pickerStyle(InlinePickerStyle())
+                        .accessibilityLabel("Date")
+                        .accessibilityValue(selectedDateTitle)
                     }
                     
                     // Read Status Section
                     Section(header: Text("Read Status")) {
-                        Picker("Read Status", selection: $selectedReadFilter) {
-                            Text("Unread Only").tag("unread")
-                            Text("All Content").tag("all")
-                            Text("Read Only").tag("read")
-                        }
-                        .pickerStyle(SegmentedPickerStyle())
+                        FormChoicePillGroup(
+                            options: readStatusOptions,
+                            selection: $selectedReadFilter,
+                            unselectedBackground: .surfaceContainer
+                        )
+                        .padding(.vertical, 4)
                     }
                     
                     // Settings Section
@@ -59,6 +81,7 @@ struct FilterSheet: View {
                             HStack {
                                 Image(systemName: "gear")
                                     .foregroundColor(.brandPrimary)
+                                    .accessibilityHidden(true)
                                 Text("Settings")
                             }
                         }
@@ -90,5 +113,9 @@ struct FilterSheet: View {
         displayFormatter.timeStyle = .none
         
         return displayFormatter.string(from: date)
+    }
+
+    private var selectedDateTitle: String {
+        selectedDate.isEmpty ? "All Dates" : formatDate(selectedDate)
     }
 }

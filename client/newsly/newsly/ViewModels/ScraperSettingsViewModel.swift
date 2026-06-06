@@ -4,6 +4,9 @@
 //
 
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.newsly", category: "ScraperSettings")
 
 @MainActor
 class ScraperSettingsViewModel: ObservableObject {
@@ -13,38 +16,71 @@ class ScraperSettingsViewModel: ObservableObject {
 
     private let filterTypes: [String]?
     private let service = ScraperConfigService.shared
+    private var activeLoad: ActiveConfigLoad?
 
     init(filterTypes: [String]? = nil) {
         self.filterTypes = filterTypes
     }
 
     func loadConfigs(includeStats: Bool = true, showLoading: Bool = true) async {
-        print("DEBUG: ScraperSettingsViewModel.loadConfigs() called")
+        await waitForActiveLoad()
+
+        await runLoadTask {
+            _ = await self.performLoadConfigs(includeStats: includeStats, showLoading: showLoading)
+        }
+    }
+
+    func loadConfigsWithDeferredStats() async {
+        await waitForActiveLoad()
+
+        await runLoadTask {
+            let loadedFastConfig = await self.performLoadConfigs(includeStats: false, showLoading: true)
+            guard loadedFastConfig, !Task.isCancelled else { return }
+            _ = await self.performLoadConfigs(includeStats: true, showLoading: false)
+        }
+    }
+
+    private func waitForActiveLoad() async {
+        guard let activeLoad else { return }
+        await activeLoad.task.value
+    }
+
+    private func runLoadTask(_ operation: @escaping @MainActor () async -> Void) async {
+        let loadId = UUID()
+        let task = Task { @MainActor in
+            await operation()
+        }
+        activeLoad = ActiveConfigLoad(id: loadId, task: task)
+        await task.value
+        if activeLoad?.id == loadId {
+            activeLoad = nil
+        }
+    }
+
+    private func performLoadConfigs(includeStats: Bool, showLoading: Bool) async -> Bool {
         if showLoading {
             isLoading = true
         }
         errorMessage = nil
+        defer {
+            if showLoading {
+                isLoading = false
+            }
+        }
+
         do {
             configs = try await service.listConfigs(
                 types: filterTypes,
                 includeStats: includeStats
             )
-            print("DEBUG: Successfully loaded \(configs.count) scraper configs")
-            for config in configs {
-                print("DEBUG: Config: \(config.displayName ?? "N/A") (\(config.scraperType))")
-            }
+            return true
+        } catch where isNetworkCancellation(error) {
+            return false
         } catch {
-            print("DEBUG: Error loading scraper configs: \(error)")
+            logger.error("Failed to load scraper configs: \(error.localizedDescription, privacy: .public)")
             errorMessage = error.localizedDescription
+            return false
         }
-        if showLoading {
-            isLoading = false
-        }
-    }
-
-    func loadConfigsWithDeferredStats() async {
-        await loadConfigs(includeStats: false)
-        await loadConfigs(includeStats: true, showLoading: false)
     }
 
     func addConfig(scraperType: String, displayName: String?, feedURL: String, limit: Int? = nil) async {
@@ -96,4 +132,9 @@ class ScraperSettingsViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
     }
+}
+
+private struct ActiveConfigLoad {
+    let id: UUID
+    let task: Task<Void, Never>
 }
