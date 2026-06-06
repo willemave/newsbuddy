@@ -371,6 +371,7 @@ struct SettingsView: View {
             .settingsCard()
         }
         .id("settings.council")
+        .accessibilityIdentifier("settings.council_section")
     }
 
     private func expertColor(for _: Int) -> Color {

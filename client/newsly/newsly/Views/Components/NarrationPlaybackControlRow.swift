@@ -107,7 +107,7 @@ struct NarrationPlaybackControlRow: View {
                 .buttonStyle(.plain)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Playback speed \(option.title)")
-                .accessibilityValue(isSelected(option) ? "Selected" : "")
+                .accessibilityValue(isSelected(option) ? "Selected" : "Not selected")
                 .accessibilityAddTraits(.isButton)
             }
         }
