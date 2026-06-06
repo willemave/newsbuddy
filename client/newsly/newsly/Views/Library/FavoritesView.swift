@@ -112,6 +112,7 @@ struct KnowledgeLibraryView: View {
             ForEach(displayedContents) { content in
                 NavigationLink(destination: ContentDetailView(
                     contentId: content.id,
+                    contentType: content.contentTypeEnum,
                     allContentIds: displayedContentIds
                 )) {
                     SavedLibraryRow(content: content)

@@ -15,7 +15,13 @@ struct NewsGroupCard: View {
         let content = VStack(alignment: .leading, spacing: 0) {
             // News items
             ForEach(group.items) { item in
-                NavigationLink(destination: ContentDetailView(contentId: item.id, allContentIds: group.items.map { $0.id })) {
+                NavigationLink(
+                    destination: ContentDetailView(
+                        contentId: item.id,
+                        contentType: item.contentTypeEnum ?? .news,
+                        allContentIds: group.items.map { $0.id }
+                    )
+                ) {
                     VStack(alignment: .leading, spacing: 4) {
                         // Title - full display
                         Text(item.displayTitle)

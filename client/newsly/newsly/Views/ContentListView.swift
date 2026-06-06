@@ -37,8 +37,14 @@ struct ContentListView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
                             List {
+                                let allContentIds = viewModel.contents.map(\.id)
                                 ForEach(viewModel.contents) { content in
-                                    NavigationLink(value: content.id) {
+                                    NavigationLink(
+                                        value: ContentDetailRoute(
+                                            summary: content,
+                                            allContentIds: allContentIds
+                                        )
+                                    ) {
                                         ContentCard(content: content)
                                     }
                                     .buttonStyle(.plain)
@@ -72,9 +78,12 @@ struct ContentListView: View {
                 .task {
                     await viewModel.loadContent()
                 }
-                .navigationDestination(for: Int.self) { contentId in
-                    let allIds = viewModel.contents.map { $0.id }
-                    ContentDetailView(contentId: contentId, allContentIds: allIds)
+                .navigationDestination(for: ContentDetailRoute.self) { route in
+                    ContentDetailView(
+                        contentId: route.contentId,
+                        contentType: route.contentType,
+                        allContentIds: route.allContentIds
+                    )
                 }
                 
                 // Floating menu button
