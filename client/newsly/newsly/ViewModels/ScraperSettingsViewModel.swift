@@ -23,31 +23,24 @@ class ScraperSettingsViewModel: ObservableObject {
     }
 
     func loadConfigs(includeStats: Bool = true, showLoading: Bool = true) async {
-        await waitForActiveLoad()
-
-        await runLoadTask {
+        await enqueueLoad {
             _ = await self.performLoadConfigs(includeStats: includeStats, showLoading: showLoading)
         }
     }
 
     func loadConfigsWithDeferredStats() async {
-        await waitForActiveLoad()
-
-        await runLoadTask {
+        await enqueueLoad {
             let loadedFastConfig = await self.performLoadConfigs(includeStats: false, showLoading: true)
             guard loadedFastConfig, !Task.isCancelled else { return }
             _ = await self.performLoadConfigs(includeStats: true, showLoading: false)
         }
     }
 
-    private func waitForActiveLoad() async {
-        guard let activeLoad else { return }
-        await activeLoad.task.value
-    }
-
-    private func runLoadTask(_ operation: @escaping @MainActor () async -> Void) async {
+    private func enqueueLoad(_ operation: @escaping @MainActor () async -> Void) async {
+        let previousTask = activeLoad?.task
         let loadId = UUID()
         let task = Task { @MainActor in
+            await previousTask?.value
             await operation()
         }
         activeLoad = ActiveConfigLoad(id: loadId, task: task)
