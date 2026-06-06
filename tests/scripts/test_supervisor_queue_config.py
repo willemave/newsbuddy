@@ -30,6 +30,7 @@ def test_supervisor_config_runs_all_queue_partitions() -> None:
         "program:news_app_workers_discussion": "--queue discussion",
         "program:news_app_workers_twitter": "--queue twitter",
         "program:news_app_workers_chat": "--queue chat",
+        "program:news_app_workers_learning": "--queue learning",
     }
 
     assert set(required_programs) == {
@@ -70,6 +71,7 @@ def test_docker_supervisor_config_runs_all_queue_partitions() -> None:
         "program:worker_discussion": "run-worker.sh discussion",
         "program:worker_twitter": "run-worker.sh twitter",
         "program:worker_chat": "run-worker.sh chat",
+        "program:worker_learning": "run-worker.sh learning",
     }
 
     assert set(required_programs) == {f"program:worker_{queue}" for queue in EXPECTED_QUEUE_VALUES}
