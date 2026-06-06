@@ -188,7 +188,7 @@ final class ChatSessionViewModel {
             else if let topic = detail.session.topic, !topic.isEmpty, detail.messages.isEmpty {
                 await sendMessage(text: topic)
             }
-        } catch is CancellationError {
+        } catch where isCancelledOperation(error) {
             logger.debug("[ViewModel] loadSession cancelled | sessionId=\(self.sessionId)")
         } catch {
             errorMessage = error.localizedDescription
@@ -232,7 +232,7 @@ final class ChatSessionViewModel {
             // Use the polling sendMessage which handles the polling loop
             _ = try await pollUntilComplete(messageId: messageId)
             try await refreshTranscriptAfterPolling()
-        } catch is CancellationError {
+        } catch where isCancelledOperation(error) {
             logger.debug("[ViewModel] pollForMessageCompletion cancelled | sessionId=\(self.sessionId)")
         } catch {
             logger.error("[ViewModel] pollForMessageCompletion error | error=\(error.localizedDescription)")
@@ -319,9 +319,8 @@ final class ChatSessionViewModel {
             _ = try await pollUntilComplete(messageId: response.messageId)
             try await refreshTranscriptAfterPolling()
             pendingSends.removeValue(forKey: localId)
-        } catch is CancellationError {
-            pendingSends.removeValue(forKey: localId)
-            timeline.removeAll { $0.id == .local(localId) }
+        } catch where isCancelledOperation(error) {
+            discardPendingSend(localId: localId)
             logger.debug("[ViewModel] sendMessage cancelled | sessionId=\(self.sessionId)")
         } catch {
             errorMessage = error.localizedDescription
@@ -550,6 +549,11 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         publishTimeline(Array(itemsById.values))
     }
 
+    private func discardPendingSend(localId: UUID) {
+        pendingSends.removeValue(forKey: localId)
+        publishTimeline(timeline.filter { $0.id != .local(localId) })
+    }
+
     private func markPendingSendFailed(localId: UUID, error: String) {
         pendingSends.removeValue(forKey: localId)
         guard let existing = timeline.first(where: { $0.id == .local(localId) }) else {
@@ -619,7 +623,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
                 message: trimmed
             )
             applyDetail(detail)
-        } catch is CancellationError {
+        } catch where isCancelledOperation(error) {
             logger.debug("[ViewModel] startCouncil cancelled | sessionId=\(self.sessionId)")
         } catch {
             errorMessage = error.localizedDescription
@@ -661,7 +665,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
                 try Task.checkCancellation()
                 self.applyDetail(detail)
                 self.errorMessage = nil
-            } catch is CancellationError {
+            } catch where self.isCancelledOperation(error) {
                 logger.debug("[ViewModel] selectCouncilBranch cancelled")
             } catch {
                 self.errorMessage = error.localizedDescription
@@ -698,7 +702,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
                 childSessionId: childSessionId
             )
             applyDetail(detail)
-        } catch is CancellationError {
+        } catch where isCancelledOperation(error) {
             logger.debug("[ViewModel] retryCouncilCandidate cancelled | sessionId=\(self.sessionId)")
         } catch {
             errorMessage = error.localizedDescription
@@ -743,6 +747,10 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         thinkingTimer?.invalidate()
         thinkingTimer = nil
         thinkingElapsedSeconds = 0
+    }
+
+    private func isCancelledOperation(_ error: Error) -> Bool {
+        Task.isCancelled || isNetworkCancellation(error)
     }
 
     // MARK: - Voice Dictation

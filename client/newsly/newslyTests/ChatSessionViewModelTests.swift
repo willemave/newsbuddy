@@ -156,9 +156,9 @@ final class ChatSessionViewModelTests: XCTestCase {
         let selectionTask = Task {
             await viewModel.selectCouncilBranch(childSessionId: 201)
         }
-        try? await Task.sleep(nanoseconds: 50_000_000)
 
-        XCTAssertEqual(viewModel.selectingCouncilChildSessionId, 201)
+        let didStartSelection = await waitUntil { viewModel.selectingCouncilChildSessionId == 201 }
+        XCTAssertTrue(didStartSelection)
 
         viewModel.cancelCouncilSelection()
         await selectionTask.value
@@ -240,6 +240,63 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertTrue(viewModel.timeline.isEmpty)
         ActiveChatSessionManager.shared.reset()
+    }
+
+    func testHandleDisappearSuppressesCancelledTransportError() async {
+        let chatService = MockChatSessionService(sendMessageHandler: { _, _ in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 10_000_000)
+                } catch {
+                    // Some URLSession cancellations surface as transport errors after task cancellation.
+                }
+            }
+            throw APIError.networkError(URLError(.networkConnectionLost))
+        })
+        ActiveChatSessionManager.shared.reset()
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService
+            )
+        )
+
+        viewModel.inputText = "Hello"
+        viewModel.performSendMessage()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertTrue(viewModel.isSending)
+        XCTAssertEqual(viewModel.timeline.last?.message.content, "Hello")
+
+        viewModel.handleDisappear()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertFalse(viewModel.isSending)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertTrue(viewModel.timeline.isEmpty)
+        ActiveChatSessionManager.shared.reset()
+    }
+
+    func testSendMessageSurfacesTransportErrorWhenNotCancelled() async {
+        let chatService = MockChatSessionService(sendMessageHandler: { _, _ in
+            throw APIError.networkError(URLError(.networkConnectionLost))
+        })
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService
+            )
+        )
+
+        viewModel.inputText = "Hello"
+
+        await viewModel.sendMessage()
+
+        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertTrue(viewModel.timeline.last?.message.hasFailed ?? false)
+        XCTAssertEqual(viewModel.timeline.last?.retryText, "Hello")
     }
 
     func testHandleDisappearHandsOffContentBackedProcessingMessageToBackgroundTracker() async {
@@ -414,6 +471,16 @@ final class ChatSessionViewModelTests: XCTestCase {
             councilMode: councilMode,
             activeChildSessionId: activeChildSessionId
         )
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<100 {
+            if condition() {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return condition()
     }
 }
 
