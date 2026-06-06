@@ -38,7 +38,6 @@ ALLOWED_SCRIPT_CDN_HOSTS = frozenset(
 )
 HTML_CONTENT_TYPE = "text/html; charset=utf-8"
 MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8"
-TEXT_CONTENT_TYPE = "text/plain; charset=utf-8"
 JSONL_CONTENT_TYPE = "application/x-ndjson; charset=utf-8"
 
 

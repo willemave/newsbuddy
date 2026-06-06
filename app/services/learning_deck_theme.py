@@ -28,10 +28,6 @@ DECK_FONT_LINKS = (
     'family=Spline+Sans+Mono:wght@400;500;600&display=swap">'
 )
 
-# Landscape canvas the deck is configured to at view time.
-DECK_CANVAS_WIDTH = 1280
-DECK_CANVAS_HEIGHT = 720
-
 DECK_THEME_CSS = """
 :root {
   --paper: #fbfaf8;

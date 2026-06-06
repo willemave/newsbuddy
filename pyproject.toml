@@ -141,6 +141,7 @@ paths = [
 ignore_decorators = [
     "@app.*",
     "@router.*",
+    "@public_router.*",
     "@llm_router.*",
     "@agent.tool",
     "@agent.system_prompt",
