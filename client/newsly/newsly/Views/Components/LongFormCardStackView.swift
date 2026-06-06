@@ -288,7 +288,8 @@ struct LongFormCardStackView: View {
         ContentImagePrefetcher.prefetch(content)
         let route = ContentDetailRoute(
             summary: content,
-            allContentIds: items.map(\.id)
+            allContentIds: items.map(\.id),
+            navigationSurface: .longForm
         )
         onSelect(route)
     }

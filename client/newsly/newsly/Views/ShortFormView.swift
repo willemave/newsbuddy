@@ -26,6 +26,8 @@ struct ShortFormView: View {
     @State private var isPreparingFastNewsAudio = false
     @State private var fastNewsAudioErrorMessage: String?
 
+    private let bottomActionScrollPadding: CGFloat = 96
+
     var body: some View {
         let items = viewModel.currentItems()
         let isEmpty = items.isEmpty
@@ -87,7 +89,8 @@ struct ShortFormView: View {
                                     let route = ContentDetailRoute(
                                         contentId: item.id,
                                         contentType: item.contentTypeEnum ?? .news,
-                                        allContentIds: items.map(\.id)
+                                        allContentIds: items.map(\.id),
+                                        navigationSurface: .fastNews
                                     )
                                     onSelect(route)
                                 }
@@ -124,6 +127,10 @@ struct ShortFormView: View {
                         ProgressView()
                             .padding(.vertical, 16)
                     }
+
+                    Color.clear
+                        .frame(height: bottomActionScrollPadding)
+                        .accessibilityHidden(true)
                 }
             }
             .scrollTargetLayout()
@@ -153,16 +160,16 @@ struct ShortFormView: View {
                 await processingCountService.refreshCount()
             }
         }
-        .confirmationDialog(
+        .alert(
             "Mark all news items as read?",
             isPresented: $showMarkAllConfirmation
         ) {
+            Button("Cancel", role: .cancel) {
+                showMarkAllConfirmation = false
+            }
             Button("Mark All as Read", role: .destructive) {
                 showMarkAllConfirmation = false
                 viewModel.markAllVisibleAsRead()
-            }
-            Button("Cancel", role: .cancel) {
-                showMarkAllConfirmation = false
             }
         } message: {
             Text("Marks every unread item currently loaded in the list.")

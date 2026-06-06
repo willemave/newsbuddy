@@ -19,7 +19,8 @@ struct NewsGroupCard: View {
                     destination: ContentDetailView(
                         contentId: item.id,
                         contentType: item.contentTypeEnum ?? .news,
-                        allContentIds: group.items.map { $0.id }
+                        allContentIds: group.items.map(\.id),
+                        navigationSurface: .newsGroup
                     )
                 ) {
                     VStack(alignment: .leading, spacing: 4) {

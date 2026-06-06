@@ -11,16 +11,46 @@ struct ContentDetailRoute: Hashable, Codable {
     let contentId: Int
     let contentType: ContentType
     let allContentIds: [Int]
+    let navigationSurface: ContentDetailNavigationSurface
 
-    init(contentId: Int, contentType: ContentType, allContentIds: [Int]) {
+    enum CodingKeys: String, CodingKey {
+        case contentId
+        case contentType
+        case allContentIds
+        case navigationSurface
+    }
+
+    init(
+        contentId: Int,
+        contentType: ContentType,
+        allContentIds: [Int],
+        navigationSurface: ContentDetailNavigationSurface = .direct
+    ) {
         self.contentId = contentId
         self.contentType = contentType
         self.allContentIds = allContentIds
+        self.navigationSurface = navigationSurface
     }
 
-    init(summary: ContentSummary, allContentIds: [Int]) {
+    init(
+        summary: ContentSummary,
+        allContentIds: [Int],
+        navigationSurface: ContentDetailNavigationSurface = .direct
+    ) {
         self.contentId = summary.id
         self.contentType = summary.contentTypeEnum ?? .article
         self.allContentIds = allContentIds
+        self.navigationSurface = navigationSurface
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        contentId = try container.decode(Int.self, forKey: .contentId)
+        contentType = try container.decode(ContentType.self, forKey: .contentType)
+        allContentIds = try container.decode([Int].self, forKey: .allContentIds)
+        navigationSurface = try container.decodeIfPresent(
+            ContentDetailNavigationSurface.self,
+            forKey: .navigationSurface
+        ) ?? .direct
     }
 }

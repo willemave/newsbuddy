@@ -46,8 +46,8 @@ private struct ViewAlert: Identifiable {
 // MARK: - Design Tokens
 private enum DetailDesign {
     // Spacing
-    static let headerHorizontalPadding: CGFloat = Spacing.screenHorizontal
-    static let horizontalPadding: CGFloat = Spacing.readerHorizontal
+    static let horizontalPadding: CGFloat = Spacing.readerHorizontal * 0.7
+    static let headerHorizontalPadding: CGFloat = horizontalPadding
     static let sectionSpacing: CGFloat = 20
     static let actionBarTopPadding: CGFloat = 0
     static let summaryTopPadding: CGFloat = 14
@@ -65,17 +65,16 @@ private enum DetailDesign {
     static let textOnlyBackButtonTopPadding: CGFloat = 8
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
     static let textOnlyStandardHeaderTopSpacer: CGFloat = 58
-    static let bulletMarkerWidth: CGFloat = 12
-    static let bulletTextSpacing: CGFloat = 8
-    static let edgeBackSwipeWidth: CGFloat = 28
+    static let edgeBackSwipeWidth: CGFloat = 72
 }
 
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
 
 struct ContentDetailView: View {
-    let initialContentId: Int
-    let initialContentType: ContentType?
-    let allContentIds: [Int]
+    private let navigationContext: ContentDetailNavigationContext
+    private var initialContentId: Int { navigationContext.initialContentId }
+    private var initialContentType: ContentType? { navigationContext.initialContentType }
+    private var allContentIds: [Int] { navigationContext.contentIds }
     @StateObject private var viewModel = ContentDetailViewModel()
     @StateObject private var chatSessionManager = ActiveChatSessionManager.shared
     @EnvironmentObject var readingStateStore: ReadingStateStore
@@ -90,6 +89,7 @@ struct ContentDetailView: View {
     @State private var isConverting: Bool = false
     // Modal presentation state
     @State private var activeSheet: DetailSheetDestination?
+    @State private var pendingShareOption: ShareContentOption?
     @State private var isCheckingChatSession: Bool = false
     @State private var isStartingChat: Bool = false
     @State private var chatError: String?
@@ -119,16 +119,17 @@ struct ContentDetailView: View {
     init(
         contentId: Int,
         contentType: ContentType? = nil,
-        allContentIds: [Int] = []
+        allContentIds: [Int] = [],
+        navigationSurface: ContentDetailNavigationSurface = .direct
     ) {
-        self.initialContentId = contentId
-        self.initialContentType = contentType
-        self.allContentIds = allContentIds.isEmpty ? [contentId] : allContentIds
-        if let index = allContentIds.firstIndex(of: contentId) {
-            self._currentIndex = State(initialValue: index)
-        } else {
-            self._currentIndex = State(initialValue: 0)
-        }
+        let context = ContentDetailNavigationContext(
+            initialContentId: contentId,
+            initialContentType: contentType,
+            contentIds: allContentIds,
+            surface: navigationSurface
+        )
+        self.navigationContext = context
+        self._currentIndex = State(initialValue: context.initialIndex)
     }
     
     var body: some View {
@@ -442,6 +443,7 @@ struct ContentDetailView: View {
 
                     if horizontalAmount > verticalAmount * 2 && horizontalAmount > 80 {
                         if value.translation.width > 80 && isLeftEdgeBackSwipe(value) {
+                            logSwipeDecision("dismiss", value: value)
                             let generator = UIImpactFeedbackGenerator(style: .medium)
                             generator.impactOccurred()
                             withAnimation(.easeOut(duration: 0.2)) {
@@ -453,6 +455,7 @@ struct ContentDetailView: View {
                             return
                         } else if value.translation.width > 80 && currentIndex > 0 {
                             // Swipe right - previous
+                            logSwipeDecision("previous", value: value)
                             let generator = UIImpactFeedbackGenerator(style: .medium)
                             generator.impactOccurred()
                             withAnimation(.easeOut(duration: 0.2)) {
@@ -470,6 +473,7 @@ struct ContentDetailView: View {
                             return
                         } else if value.translation.width < -80 && currentIndex < allContentIds.count - 1 {
                             // Swipe left - next
+                            logSwipeDecision("next", value: value)
                             let generator = UIImpactFeedbackGenerator(style: .medium)
                             generator.impactOccurred()
                             withAnimation(.easeOut(duration: 0.2)) {
@@ -489,6 +493,9 @@ struct ContentDetailView: View {
                     }
 
                     // Snap back
+                    if horizontalAmount > verticalAmount * 2 && horizontalAmount > 30 {
+                        logSwipeDecision("snap_back", value: value)
+                    }
                     withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.8)) {
                         dragAmount = 0
                     }
@@ -501,8 +508,13 @@ struct ContentDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         // Hide the main tab bar while viewing details
         .toolbar(.hidden, for: .tabBar)
-        .task {
-            let idToLoad = allContentIds.isEmpty ? initialContentId : allContentIds[currentIndex]
+        .onAppear {
+            detailLogger.info(
+                "[DetailNavigation] appear surface=\(navigationSurfaceName, privacy: .public) contentId=\(contentIdLogValue(at: currentIndex), privacy: .public) index=\(currentIndex, privacy: .public) idsCount=\(allContentIds.count, privacy: .public)"
+            )
+        }
+        .task(id: currentIndex) {
+            guard let idToLoad = contentId(at: currentIndex, context: "load") else { return }
             viewModel.updateContentId(idToLoad, contentType: initialContentType)
             await viewModel.loadContent()
         }
@@ -545,14 +557,10 @@ struct ContentDetailView: View {
                 navigationDirection = 0
             }
         }
-        .onChange(of: currentIndex) { oldValue, newValue in
-            Task {
-                let newContentId = allContentIds[newValue]
-                viewModel.updateContentId(newContentId, contentType: initialContentType)
-                await viewModel.loadContent()
-            }
-        }
         .onDisappear {
+            detailLogger.info(
+                "[DetailNavigation] disappear surface=\(navigationSurfaceName, privacy: .public) contentId=\(contentIdLogValue(at: currentIndex), privacy: .public) index=\(currentIndex, privacy: .public)"
+            )
             if let content = viewModel.content,
                let target = podcastAudioTarget(for: content),
                narrationPlaybackService.speakingTarget == target {
@@ -570,6 +578,7 @@ struct ContentDetailView: View {
         .sheet(item: $activeSheet, onDismiss: {
             chatError = nil
             discussionUnavailableMessage = nil
+            presentPendingShareIfNeeded()
         }) {
             switch $0 {
             case .share:
@@ -1113,6 +1122,21 @@ struct ContentDetailView: View {
     }
 
     // MARK: - Parallax Hero Header
+    private func contentId(at index: Int, context: String) -> Int? {
+        guard let contentId = navigationContext.contentId(at: index) else {
+            detailLogger.error(
+                "[DetailNavigation] invalidContentIndex context=\(context, privacy: .public) surface=\(navigationSurfaceName, privacy: .public) index=\(index, privacy: .public) idsCount=\(allContentIds.count, privacy: .public)"
+            )
+            return nil
+        }
+        return contentId
+    }
+
+    private func contentIdLogValue(at index: Int) -> String {
+        guard let contentId = navigationContext.contentId(at: index) else { return "invalid" }
+        return String(contentId)
+    }
+
     private var hasHeroImage: Bool {
         guard let content = viewModel.content,
               let imageUrlString = content.imageUrl,
@@ -1228,6 +1252,8 @@ struct ContentDetailView: View {
                         .foregroundColor(.white.opacity(0.8))
                     }
                     .shadow(color: .black.opacity(0.4), radius: 3, x: 0, y: 1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(detailMetadataAccessibilityLabel(for: content))
 
                     actionBar(content: content, overlaid: true)
                         .padding(.top, 2)
@@ -1288,6 +1314,8 @@ struct ContentDetailView: View {
                         .font(.caption)
                         .foregroundColor(Color.onSurfaceSecondary)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(detailMetadataAccessibilityLabel(for: content))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, DetailDesign.headerHorizontalPadding)
@@ -1321,8 +1349,22 @@ struct ContentDetailView: View {
         content.contentTypeEnum == .news ? .medium : .bold
     }
 
+    private func detailMetadataAccessibilityLabel(for content: ContentDetail) -> String {
+        [
+            content.detailTypeLabel,
+            content.source,
+            ContentTimestampFormatter.text(from: content.primaryTimestamp, style: .detailMeta) ?? "Recent"
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+        .joined(separator: ", ")
+    }
+
     private var floatingBackButton: some View {
         Button {
+            detailLogger.info(
+                "[DetailNavigation] backButtonTapped surface=\(navigationSurfaceName, privacy: .public) contentId=\(contentIdLogValue(at: currentIndex), privacy: .public) index=\(currentIndex, privacy: .public)"
+            )
             dismiss()
         } label: {
             Image(systemName: "chevron.left")
@@ -1674,8 +1716,7 @@ struct ContentDetailView: View {
                     title: "Title + link",
                     subtitle: "Headline and URL only",
                     action: {
-                        activeSheet = nil
-                        viewModel.shareContent(option: .light)
+                        queueShareContent(.light)
                     }
                 )
                 sheetOptionRow(
@@ -1683,8 +1724,7 @@ struct ContentDetailView: View {
                     title: "Key points",
                     subtitle: "Summary, top quotes, and link",
                     action: {
-                        activeSheet = nil
-                        viewModel.shareContent(option: .medium)
+                        queueShareContent(.medium)
                     }
                 )
                 sheetOptionRow(
@@ -1692,8 +1732,7 @@ struct ContentDetailView: View {
                     title: "Full content",
                     subtitle: "Complete article or transcript",
                     action: {
-                        activeSheet = nil
-                        viewModel.shareContent(option: .full)
+                        queueShareContent(.full)
                     }
                 )
             }
@@ -1720,6 +1759,20 @@ struct ContentDetailView: View {
         .background(Color.surfacePrimary)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("content.share.sheet")
+    }
+
+    private func queueShareContent(_ option: ShareContentOption) {
+        pendingShareOption = option
+        activeSheet = nil
+    }
+
+    private func presentPendingShareIfNeeded() {
+        guard let option = pendingShareOption else { return }
+        pendingShareOption = nil
+
+        DispatchQueue.main.async {
+            viewModel.shareContent(option: option)
+        }
     }
 
     // MARK: - Download Sheet
@@ -2360,9 +2413,12 @@ struct ContentDetailView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(1)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .fixedSize(horizontal: true, vertical: false)
+                    .accessibilityLabel("Open original discussion")
                 }
             }
         }
@@ -2382,18 +2438,11 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func discussionTopicRow(_ topic: DiscussionSummaryTopic) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: DetailDesign.bulletTextSpacing) {
-                Text(verbatim: "\u{2022}")
-                    .font(.callout.weight(.semibold))
-                    .foregroundColor(Color.brandPrimary.opacity(0.85))
-                    .frame(width: DetailDesign.bulletMarkerWidth, alignment: .center)
-
-                Text(topic.summary)
-                    .font(.callout)
-                    .foregroundColor(Color.readerBodyText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(topic.summary)
+                .font(.callout)
+                .foregroundColor(Color.readerBodyText)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             if let stance = topic.stance {
                 Text(stance)
@@ -2404,14 +2453,9 @@ struct ContentDetailView: View {
                     .tracking(0.4)
                     .lineLimit(2)
                     .padding(.top, 1)
-                    .padding(.leading, discussionBulletTextIndent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var discussionBulletTextIndent: CGFloat {
-        DetailDesign.bulletMarkerWidth + DetailDesign.bulletTextSpacing
     }
 
     @ViewBuilder
@@ -2751,6 +2795,7 @@ struct ContentDetailView: View {
                     Image(systemName: "link")
                         .font(.footnote)
                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.75))
+                        .accessibilityHidden(true)
 
                     Text("Links from article or comments")
                         .font(.footnote.weight(.semibold))
@@ -2769,10 +2814,13 @@ struct ContentDetailView: View {
                         .font(.caption2.weight(.bold))
                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.55))
                         .rotationEffect(.degrees(isRelevantLinksExpanded ? 90 : 0))
+                        .accessibilityHidden(true)
                 }
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Links from article or comments, \(links.count)")
 
             if isRelevantLinksExpanded {
                 VStack(alignment: .leading, spacing: 0) {
@@ -3118,11 +3166,28 @@ struct ContentDetailView: View {
             "[ContentDetailView] summary section (\(section)) id=\(content.id) type=\(content.contentType, privacy: .public) points=\(bulletPointCount) insights=\(insightCount)"
         )
     }
+
+    private var navigationSurfaceName: String {
+        navigationContext.surface.logName
+    }
+
+    private func logSwipeDecision(_ decision: String, value: DragGesture.Value) {
+        detailLogger.info(
+            "[DetailSwipe] decision=\(decision, privacy: .public) surface=\(navigationSurfaceName, privacy: .public) contentId=\(contentIdLogValue(at: currentIndex), privacy: .public) index=\(currentIndex, privacy: .public) idsCount=\(allContentIds.count, privacy: .public) startX=\(Int(value.startLocation.x), privacy: .public) translationX=\(Int(value.translation.width), privacy: .public) translationY=\(Int(value.translation.height), privacy: .public) edgeWidth=\(Int(DetailDesign.edgeBackSwipeWidth), privacy: .public)"
+        )
+    }
     
     private func navigateToNext() {
         guard currentIndex < allContentIds.count - 1 else {
             return
         }
+        guard let fromContentId = contentId(at: currentIndex, context: "navigate_next_from"),
+              let toContentId = contentId(at: currentIndex + 1, context: "navigate_next_to") else {
+            return
+        }
+        detailLogger.info(
+            "[DetailNavigation] navigateNext surface=\(navigationSurfaceName, privacy: .public) fromIndex=\(currentIndex, privacy: .public) toIndex=\(currentIndex + 1, privacy: .public) fromContentId=\(fromContentId, privacy: .public) toContentId=\(toContentId, privacy: .public)"
+        )
         didTriggerNavigation = true
         navigationDirection = 1
         currentIndex += 1
@@ -3132,6 +3197,13 @@ struct ContentDetailView: View {
         guard currentIndex > 0 else {
             return
         }
+        guard let fromContentId = contentId(at: currentIndex, context: "navigate_previous_from"),
+              let toContentId = contentId(at: currentIndex - 1, context: "navigate_previous_to") else {
+            return
+        }
+        detailLogger.info(
+            "[DetailNavigation] navigatePrevious surface=\(navigationSurfaceName, privacy: .public) fromIndex=\(currentIndex, privacy: .public) toIndex=\(currentIndex - 1, privacy: .public) fromContentId=\(fromContentId, privacy: .public) toContentId=\(toContentId, privacy: .public)"
+        )
         didTriggerNavigation = true
         navigationDirection = -1
         currentIndex -= 1

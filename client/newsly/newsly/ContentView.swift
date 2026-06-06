@@ -76,6 +76,9 @@ struct ContentView: View {
                     viewModel: tabCoordinator.longContentVM,
                     isActive: tabCoordinator.selectedTab == .longContent,
                     onSelect: { route in
+                        logger.info(
+                            "[Navigation] pushDetail tab=long_form contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(longFormPath.count, privacy: .public)"
+                        )
                         longFormPath.append(route)
                     },
                     onShowNarrations: {
@@ -105,6 +108,9 @@ struct ContentView: View {
                 ShortFormView(
                     viewModel: tabCoordinator.shortNewsVM,
                     onSelect: { route in
+                        logger.info(
+                            "[Navigation] pushDetail tab=fast_news contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(shortFormPath.count, privacy: .public)"
+                        )
                         shortFormPath.append(route)
                     }
                 )
@@ -181,6 +187,21 @@ struct ContentView: View {
             logger.info("[TabChange] selectedTab=\(String(describing: newValue), privacy: .public)")
             tabCoordinator.handleTabChange(to: newValue)
         }
+        .onChange(of: longFormPath.count) { oldValue, newValue in
+            logger.info(
+                "[Navigation] pathChanged tab=long_form oldCount=\(oldValue, privacy: .public) newCount=\(newValue, privacy: .public)"
+            )
+        }
+        .onChange(of: shortFormPath.count) { oldValue, newValue in
+            logger.info(
+                "[Navigation] pathChanged tab=fast_news oldCount=\(oldValue, privacy: .public) newCount=\(newValue, privacy: .public)"
+            )
+        }
+        .onChange(of: knowledgePath.count) { oldValue, newValue in
+            logger.info(
+                "[Navigation] pathChanged tab=knowledge oldCount=\(oldValue, privacy: .public) newCount=\(newValue, privacy: .public)"
+            )
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 restoreIfNeeded()
@@ -232,7 +253,8 @@ struct ContentView: View {
             let route = ContentDetailRoute(
                 contentId: state.contentId,
                 contentType: state.contentType,
-                allContentIds: currentIds
+                allContentIds: currentIds,
+                navigationSurface: isNews ? .fastNews : .longForm
             )
 
             var transaction = Transaction()
@@ -281,7 +303,8 @@ struct ContentView: View {
         let route = ContentDetailRoute(
             contentId: contentId,
             contentType: contentType,
-            allContentIds: [contentId]
+            allContentIds: [contentId],
+            navigationSurface: contentType == .news ? .fastNews : .longForm
         )
 
         Task { @MainActor in
@@ -314,7 +337,8 @@ private extension View {
                 ContentDetailView(
                     contentId: route.contentId,
                     contentType: route.contentType,
-                    allContentIds: route.allContentIds
+                    allContentIds: route.allContentIds,
+                    navigationSurface: route.navigationSurface
                 )
                 .dynamicTypeSize(contentTextSize)
                 .environmentObject(readingStateStore)

@@ -7,11 +7,6 @@
 
 import SwiftUI
 
-private enum NewsItemDetailDesign {
-    static let bulletMarkerWidth: CGFloat = 12
-    static let bulletTextSpacing: CGFloat = 8
-}
-
 struct NewsItemDetailView: View {
     let content: ContentDetail
     let metadata: NewsMetadata
@@ -52,29 +47,24 @@ struct NewsItemDetailView: View {
                             .fontWeight(.medium)
                             .foregroundColor(.onSurfaceSecondary)
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
+                            .frame(minHeight: 44)
                             .background(Color.surfaceTertiary)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("Comments")
                     .accessibilityIdentifier("content.discussion.open")
                 }
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(keyPoints.enumerated()), id: \.offset) { _, point in
-                    HStack(alignment: .firstTextBaseline, spacing: NewsItemDetailDesign.bulletTextSpacing) {
-                        Text(verbatim: "\u{2022}")
-                            .font(.callout.weight(.semibold))
-                            .foregroundColor(Color.brandPrimary.opacity(0.85))
-                            .frame(width: NewsItemDetailDesign.bulletMarkerWidth, alignment: .center)
-
-                        Text(point)
-                            .font(.callout)
-                            .foregroundColor(Color.readerBodyText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(point)
+                        .font(.callout)
+                        .foregroundColor(Color.readerBodyText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }

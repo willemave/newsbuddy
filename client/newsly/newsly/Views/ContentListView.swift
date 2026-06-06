@@ -42,7 +42,8 @@ struct ContentListView: View {
                                     NavigationLink(
                                         value: ContentDetailRoute(
                                             summary: content,
-                                            allContentIds: allContentIds
+                                            allContentIds: allContentIds,
+                                            navigationSurface: .contentList
                                         )
                                     ) {
                                         ContentCard(content: content)
@@ -82,7 +83,8 @@ struct ContentListView: View {
                     ContentDetailView(
                         contentId: route.contentId,
                         contentType: route.contentType,
-                        allContentIds: route.allContentIds
+                        allContentIds: route.allContentIds,
+                        navigationSurface: route.navigationSurface
                     )
                 }
                 

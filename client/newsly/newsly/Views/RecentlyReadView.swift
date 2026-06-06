@@ -32,7 +32,8 @@ struct RecentlyReadView: View {
                         ForEach(viewModel.contents) { content in
                             NavigationLink(destination: ContentDetailView(
                                     contentId: content.id,
-                                    allContentIds: viewModel.contents.map(\.id)
+                                    allContentIds: viewModel.contents.map(\.id),
+                                    navigationSurface: .recentlyRead
                                 )) {
                                 ContentCard(content: content)
                             }

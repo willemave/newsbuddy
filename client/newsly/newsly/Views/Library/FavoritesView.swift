@@ -113,7 +113,8 @@ struct KnowledgeLibraryView: View {
                 NavigationLink(destination: ContentDetailView(
                     contentId: content.id,
                     contentType: content.contentTypeEnum,
-                    allContentIds: displayedContentIds
+                    allContentIds: displayedContentIds,
+                    navigationSurface: .savedLibrary
                 )) {
                     SavedLibraryRow(content: content)
                 }
@@ -204,6 +205,7 @@ struct KnowledgeLibraryView: View {
                     .foregroundStyle(Color.onSurface)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
+                    .frame(minHeight: 44)
                     .background(Color.surfaceSecondary, in: Capsule())
                     .overlay(
                         Capsule()
@@ -239,6 +241,8 @@ struct KnowledgeLibraryView: View {
                 .font(.terracottaBodySmall.weight(.semibold))
                 .foregroundStyle(Color.brandPrimary)
                 .padding(.horizontal, 2)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
         }
         .padding(.horizontal, Spacing.screenHorizontal)
@@ -264,6 +268,8 @@ struct KnowledgeLibraryView: View {
             }
             .font(.terracottaBodySmall.weight(.semibold))
             .foregroundStyle(Color.brandPrimary)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 32)
@@ -332,6 +338,7 @@ private struct LibraryFilterPill: View {
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurface)
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
+            .frame(minHeight: 44)
             .background(isSelected ? Color.brandPrimary : Color.surfaceSecondary, in: Capsule())
             .overlay(
                 Capsule()
