@@ -156,7 +156,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         await assertEventuallyLoadedItems([], in: viewModel)
     }
 
-    func testShortNewsMarkAllVisibleAsReadDropsUnreadItemsAndMarksNewsRows() {
+    func testShortNewsMarkAllVisibleAsReadKeepsItemsVisibleAndMarksNewsRowsRead() {
         let repository = FakeContentRepository()
         let readRepository = FakeReadStatusRepository()
         let viewModel = ShortNewsListViewModel(
@@ -171,11 +171,35 @@ final class TabCoordinatorViewModelTests: XCTestCase {
 
         viewModel.markAllVisibleAsRead()
 
-        XCTAssertEqual(viewModel.currentItems().map(\.id), [])
+        XCTAssertEqual(viewModel.currentItems().map(\.id), [11, 12])
+        XCTAssertEqual(viewModel.currentItems().map(\.isRead), [true, true])
         XCTAssertEqual(readRepository.markReadCalls, [[11, 12]])
     }
 
-    func testShortNewsDetailReadNotificationDropsItemFromUnreadFeed() async {
+    func testShortNewsScrollMarkReadKeepsItemVisibleAndMarksItRead() async {
+        let repository = FakeContentRepository()
+        let readRepository = FakeReadStatusRepository()
+        let viewModel = ShortNewsListViewModel(
+            repository: repository,
+            readRepository: readRepository,
+            unreadCountService: .shared
+        )
+        viewModel.replaceItems([
+            makeSummary(id: 11, contentType: "news"),
+            makeSummary(id: 12, contentType: "news"),
+        ])
+
+        viewModel.itemsScrolledPastTop(ids: [11])
+
+        await assertEventuallyShortNewsItems(
+            ids: [11, 12],
+            readStates: [true, false],
+            in: viewModel
+        )
+        XCTAssertEqual(readRepository.markReadCalls, [[11]])
+    }
+
+    func testShortNewsDetailReadNotificationKeepsItemVisibleAndMarksItRead() async {
         let repository = FakeContentRepository()
         let viewModel = ShortNewsListViewModel(
             repository: repository,
@@ -193,7 +217,11 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             userInfo: ["contentId": 11, "contentType": "news"]
         )
 
-        await assertEventuallyLoadedItems([12], in: viewModel)
+        await assertEventuallyShortNewsItems(
+            ids: [11, 12],
+            readStates: [true, false],
+            in: viewModel
+        )
     }
 
     func testGroupedShortNewsMarkReadUsesNewsItemEndpoint() async {
@@ -275,20 +303,24 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.currentItems().map(\.id), expectedIds, file: file, line: line)
     }
 
-    private func assertEventuallyLoadedItems(
-        _ expectedIds: [Int],
+    private func assertEventuallyShortNewsItems(
+        ids expectedIds: [Int],
+        readStates expectedReadStates: [Bool],
         in viewModel: ShortNewsListViewModel,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
         for _ in 0..<50 {
-            if viewModel.currentItems().map(\.id) == expectedIds {
+            let items = viewModel.currentItems()
+            if items.map(\.id) == expectedIds, items.map(\.isRead) == expectedReadStates {
                 return
             }
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
 
-        XCTAssertEqual(viewModel.currentItems().map(\.id), expectedIds, file: file, line: line)
+        let items = viewModel.currentItems()
+        XCTAssertEqual(items.map(\.id), expectedIds, file: file, line: line)
+        XCTAssertEqual(items.map(\.isRead), expectedReadStates, file: file, line: line)
     }
 
     private func assertEventuallyState(

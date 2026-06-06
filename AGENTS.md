@@ -79,7 +79,11 @@ iOS TestFlight deploy:
 2. Run a local Xcode build before release work, for example `xcodebuild -project client/newsly/newsly.xcodeproj -scheme newsly -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/newsly-codex-derived-data CODE_SIGNING_ALLOWED=NO build`.
 3. Commit the build-number/project changes only when the user explicitly asks for a commit or release commit.
 4. For TestFlight upload requests, use the Xcode app: `Product > Archive`, then Organizer `Distribute App` -> `TestFlight Internal Only`.
-5. Verify the selected Organizer archive and final upload sheet both show the intended version/build, then confirm Organizer `Submission Status` shows `Uploaded` and the expected `Build Number`.
+5. Do not use CLI distribution fallbacks for TestFlight archive, export, upload, or account validation.
+   Avoid `xcodebuild archive`, `xcodebuild -exportArchive`, `altool`, `iTMSTransporter`, or fastlane upload paths because they can disturb or fail against Xcode/App Store Connect account state.
+   This restriction does not apply to simulator validation builds/tests.
+   If the Xcode GUI or Computer Use path is unavailable, stop and ask the user to restore GUI access instead of falling back to CLI upload.
+6. Verify the selected Organizer archive and final upload sheet both show the intended version/build, then confirm Organizer `Submission Status` shows `Uploaded` and the expected `Build Number`.
 
 ## Code Rules
 

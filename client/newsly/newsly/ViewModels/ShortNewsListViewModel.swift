@@ -93,14 +93,7 @@ final class ShortNewsListViewModel: BaseContentListViewModel {
                 }
 
                 logger.info("[ShortNewsList] Updating local read state from notification | contentId=\(contentId)")
-                let shouldDropReadItems = currentReadFilter() == .unread
-                let markedItems = markItemsLocallyRead(
-                    ids: [contentId],
-                    removeReadItems: shouldDropReadItems
-                )
-                if markedItems.isEmpty && shouldDropReadItems {
-                    dropReadItems()
-                }
+                markItemsLocallyRead(ids: [contentId])
             }
             .store(in: &readCancellables)
     }
@@ -110,7 +103,7 @@ final class ShortNewsListViewModel: BaseContentListViewModel {
 
         let markedItems = markItemsLocallyRead(
             ids: ids,
-            removeReadItems: currentReadFilter() == .unread
+            removeReadItems: false
         )
         let markedIds = markedItems.map(\.id)
         guard !markedIds.isEmpty else {

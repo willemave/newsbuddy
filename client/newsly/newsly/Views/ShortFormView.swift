@@ -493,7 +493,7 @@ private struct ShortNewsRow: View, Equatable {
     }
 
     private var titleUIColor: UIColor {
-        .appReaderBodyText
+        item.isRead ? .appOnSurfaceSecondary : .appReaderBodyText
     }
 
     private var titleUIFont: UIFont {
