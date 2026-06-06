@@ -3,56 +3,25 @@
 Source folder: `client/newsly/newsly/Views/Components`
 
 ## Purpose
-Reusable SwiftUI building blocks for cards, summaries, markdown rendering, filters, live voice states, discovery cards, toasts, and media presentation.
+Reusable SwiftUI building blocks for content cards, summaries, markdown/text rendering, discovery cards, media, Learning Decks, narration, Quick Mic, sheets, toasts, and shared presentation states.
 
 ## Runtime behavior
-- Holds composable UI pieces shared by multiple screens so detail and list views can stay thin.
-- Contains summary renderers for interleaved, editorial, bulleted, and structured summary payloads returned by the backend.
-- Packages complex UI atoms such as swipeable cards, async image wrappers, and live voice visual states.
+- Components should be stateless or locally stateful presentation helpers; feature state belongs in view models/services.
+- Summary/card components are reused across long-form, short-form, Knowledge, search, and detail surfaces.
+- Sheet components expose focused feature workflows such as Learning Deck creation/listing, tweet suggestions, download-more, custom narration controls, and feed suggestions.
 
-## Inventory scope
-- Direct file inventory for `client/newsly/newsly/Views/Components`.
-
-## Modules and files
-| File | Key symbols | Notes |
+## Important groups
+| Group | Files | Purpose |
 |---|---|---|
-| `client/newsly/newsly/Views/Components/ArticleCardView.swift` | `struct ArticleCardView` | Types: `struct ArticleCardView` |
-| `client/newsly/newsly/Views/Components/BulletedSummaryView.swift` | `struct BulletedSummaryView` | Types: `struct BulletedSummaryView` |
-| `client/newsly/newsly/Views/Components/CachedAsyncImage.swift` | `struct CachedAsyncImage` | A cached version of AsyncImage that uses ImageCacheService for memory and disk caching |
-| `client/newsly/newsly/Views/Components/CardStackView.swift` | `struct CardStackView` | Types: `struct CardStackView` |
-| `client/newsly/newsly/Views/Components/ChatLoadingView.swift` | `struct ChatLoadingView` | Types: `struct ChatLoadingView` |
-| `client/newsly/newsly/Views/Components/ChatMarkdownTheme.swift` | n/a | A compact markdown theme optimized for chat bubbles |
-| `client/newsly/newsly/Views/Components/ChatStatusBanner.swift` | `struct ChatStatusBanner`, `enum BannerStyle`, `applyBannerStyle` | A small banner that shows the status of an active chat session |
-| `client/newsly/newsly/Views/Components/ContentCard.swift` | `struct ContentCard` | Build a full URL for the image, handling relative paths |
-| `client/newsly/newsly/Views/Components/ContentTypeBadge.swift` | `struct ContentTypeBadge` | Types: `struct ContentTypeBadge` |
-| `client/newsly/newsly/Views/Components/DetectedFeedCard.swift` | `struct DetectedFeedCard` | A card that shows when a feed is detected for the current content, allowing the user to subscribe to it. |
-| `client/newsly/newsly/Views/Components/DiscoveryRunSection.swift` | `struct DiscoveryRunSection` | Types: `struct DiscoveryRunSection` |
-| `client/newsly/newsly/Views/Components/DiscoveryStateViews.swift` | `struct DiscoveryLoadingStateView`, `struct DiscoveryErrorStateView`, `struct DiscoveryProcessingStateView`, `struct DiscoveryEmptyStateView` | Types: `struct DiscoveryLoadingStateView`, `struct DiscoveryErrorStateView`, `struct DiscoveryProcessingStateView`, `struct DiscoveryEmptyStateView` |
-| `client/newsly/newsly/Views/Components/DiscoverySuggestionCard.swift` | `struct DiscoverySuggestionCard`, `struct EditorialCardButtonStyle`, `makeBody` | Types: `struct DiscoverySuggestionCard`, `struct EditorialCardButtonStyle`. Functions: `makeBody` |
-| `client/newsly/newsly/Views/Components/DownloadMoreMenu.swift` | `struct DownloadMoreMenu` | Types: `struct DownloadMoreMenu` |
-| `client/newsly/newsly/Views/Components/EditorialNarrativeSummaryView.swift` | `struct EditorialNarrativeSummaryView` | Types: `struct EditorialNarrativeSummaryView` |
-| `client/newsly/newsly/Views/Components/ErrorView.swift` | `struct ErrorView` | Types: `struct ErrorView` |
-| `client/newsly/newsly/Views/Components/FilterBar.swift` | `struct FilterBar` | Types: `struct FilterBar` |
-| `client/newsly/newsly/Views/Components/FilterSheet.swift` | `struct FilterSheet` | Types: `struct FilterSheet` |
-| `client/newsly/newsly/Views/Components/FullImageView.swift` | `struct FullImageView` | Types: `struct FullImageView` |
-| `client/newsly/newsly/Views/Components/InterleavedSummaryV2View.swift` | `struct InterleavedSummaryV2View` | Types: `struct InterleavedSummaryV2View` |
-| `client/newsly/newsly/Views/Components/InterleavedSummaryView.swift` | `struct InterleavedSummaryView` | Types: `struct InterleavedSummaryView` |
-| `client/newsly/newsly/Views/Components/LiveVoiceActiveView.swift` | `struct LiveVoiceActiveView`, `body` | Types: `struct LiveVoiceActiveView`. Functions: `body` |
-| `client/newsly/newsly/Views/Components/LiveVoiceAmbientBackground.swift` | `struct LiveVoiceAmbientBackground` | Types: `struct LiveVoiceAmbientBackground` |
-| `client/newsly/newsly/Views/Components/LiveVoiceIdleView.swift` | `struct LiveVoiceIdleView` | Types: `struct LiveVoiceIdleView` |
-| `client/newsly/newsly/Views/Components/LoadingView.swift` | `struct LoadingView` | Types: `struct LoadingView` |
-| `client/newsly/newsly/Views/Components/LongFormCard.swift` | `struct LongFormCard` | Types: `struct LongFormCard` |
-| `client/newsly/newsly/Views/Components/LongFormCardStackView.swift` | `struct LongFormCardStackView` | Calculate which index a dot at position i should represent |
-| `client/newsly/newsly/Views/Components/NewsItemDetailView.swift` | `struct NewsItemDetailView` | Types: `struct NewsItemDetailView` |
-| `client/newsly/newsly/Views/Components/NewsGroupCard.swift` | `struct NewsGroupCard` | Format publication date for compact display |
-| `client/newsly/newsly/Views/Components/PagedCardView.swift` | `struct PagedCardView`, `struct GroupHeightPreferenceKey`, `reduce` | Types: `struct PagedCardView`, `struct GroupHeightPreferenceKey`. Functions: `reduce` |
-| `client/newsly/newsly/Views/Components/PlaceholderCard.swift` | `struct PlaceholderCard` | Types: `struct PlaceholderCard` |
-| `client/newsly/newsly/Views/Components/PlatformIcon.swift` | `struct PlatformIcon` | Types: `struct PlatformIcon` |
-| `client/newsly/newsly/Views/Components/SafariView.swift` | `struct SafariView`, `makeUIViewController`, `updateUIViewController` | Types: `struct SafariView`. Functions: `makeUIViewController`, `updateUIViewController` |
-| `client/newsly/newsly/Views/Components/SelectableMarkdownView.swift` | `struct SelectableMarkdownView`, `class Coordinator`, `struct MarkdownNSRenderer`, `makeCoordinator`, `makeUIView`, `render`, `sizeThatFits`, `updateUIView`, `withTraits` | A markdown-rendered text view that supports word-level text selection with "Dig Deeper" in the edit menu, using `DigDeeperTextView`. |
-| `client/newsly/newsly/Views/Components/StructuredSummaryView.swift` | `struct StructuredSummaryView`, `struct ModernKeyPointRow`, `struct FlowLayout`, `struct FlowResult`, `struct Row`, `addToRow`, `finalizeRow`, `placeSubviews`, `sizeThatFits`, `widthInRow` | Types: `struct StructuredSummaryView`, `struct ModernKeyPointRow`, `struct FlowLayout`, `struct FlowResult`, `struct Row`. Functions: `addToRow`, `finalizeRow`, `placeSubviews`, `sizeThatFits`, `widthInRow` |
-| `client/newsly/newsly/Views/Components/SubmissionStatusRow.swift` | `struct SubmissionStatusRow` | Types: `struct SubmissionStatusRow` |
-| `client/newsly/newsly/Views/Components/SuggestionDetailSheet.swift` | `struct SuggestionDetailSheet` | Types: `struct SuggestionDetailSheet` |
-| `client/newsly/newsly/Views/Components/SwipeableCard.swift` | `struct SwipeableCard` | Types: `struct SwipeableCard` |
-| `client/newsly/newsly/Views/Components/ToastView.swift` | `struct ToastView`, `struct ToastModifier`, `body`, `withToast` | Types: `struct ToastView`, `struct ToastModifier`. Functions: `body`, `withToast` |
-| `client/newsly/newsly/Views/Components/TweetSuggestionsSheet.swift` | `struct TweetSuggestionsSheet`, `struct TweetSuggestionCard` | Types: `struct TweetSuggestionsSheet`, `struct TweetSuggestionCard` |
+| Cards and lists | `ArticleCardView.swift`, `ContentCard.swift`, `LongFormCard.swift`, `LongFormCardStackView.swift`, `NewsGroupCard.swift`, `PagedCardView.swift`, `SwipeableCard.swift`, `PlaceholderCard.swift`, `ChatSessionCard.swift` | Reusable content/news/chat cards. |
+| Summary rendering | `BulletedSummaryView.swift`, `EditorialMastheadHeader.swift`, `EditorialNarrativeSummaryView.swift`, `FastReadBriefingComponents.swift`, `InterleavedSummaryView.swift`, `InterleavedSummaryV2View.swift`, `StructuredSummaryView.swift`, `LongformArtifactView.swift` | Summary and artifact presentation. |
+| Markdown/text/media | `ChatMarkdownTheme.swift`, `SelectableMarkdownView.swift`, `SelectableText.swift`, `CachedAsyncImage.swift`, `FullImageView.swift`, `SafariView.swift`, `PlatformIcon.swift` | Markdown, selectable text, images, Safari presentation, and platform icons. |
+| Discovery/source | `DetectedFeedCard.swift`, `DiscoveryRunSection.swift`, `DiscoveryStateViews.swift`, `DiscoverySuggestionCard.swift`, `SourceMetadataSection.swift`, `SuggestionDetailSheet.swift` | Discovery suggestions and source metadata. |
+| Actions and sheets | `DownloadMoreMenu.swift`, `TweetSuggestionsSheet.swift`, `ChatShareSheet.swift`, `LearningDeckCreateSheet.swift`, `LearningDeckContentCreateSheet.swift`, `LearningDeckListSheet.swift`, `LearningDeckRow.swift` | User action surfaces. |
+| Narration and Quick Mic | `NarrationPlaybackControlRow.swift`, `NarrationPressButton.swift`, `QuickMicContext.swift`, `QuickMicOverlay.swift`, `DigDeeperTextView.swift` | Audio/narration and mic interaction components. |
+| Shared states | `LoadingView.swift`, `ChatLoadingView.swift`, `ErrorView.swift`, `ToastView.swift`, `ChatStatusBanner.swift`, `FilterBar.swift`, `FilterSheet.swift`, `ContentTimestampText.swift`, `ContentTypeBadge.swift`, `SubmissionStatusRow.swift` | Loading/error/filter/status primitives. |
+| News detail | `NewsItemDetailView.swift` | Fast Read detail component. |
+
+## Integration points
+- Components are imported by top-level views and should avoid owning API calls directly.
+- Chat-specific components live in `Views/Chat` and are documented separately.

@@ -4,13 +4,13 @@ Start with this file. Open [docs/architecture.md](docs/architecture.md) only whe
 
 Use [docs/codebase/](docs/codebase/) only for the specific folder or surface you are modifying.
 
+Use [docs/coding-guidelines.md](docs/coding-guidelines.md) for local code patterns, test expectations, and common commands.
+
 This file stays minimal and only captures repo-specific working rules.
 
 ## Core Rules
 
-- Keep replies short, technical, and complete.
 - Never commit or push unless explicitly asked.
-- If asked to commit, commit to the current checked-out branch unless explicitly asked to create or use a different branch. This applies even if the current branch is `main`.
 - Prefer small, local changes that follow the existing layer boundaries.
 - Keep durable architecture notes in `docs/architecture.md`; keep this file limited to agent operating rules and routing.
 
@@ -21,16 +21,6 @@ This file stays minimal and only captures repo-specific working rules.
 - UI note: this repo is not a React app. Web UI is Jinja-rendered; mobile UI is SwiftUI.
 - Runtime note: local development should use the normal local services and a local PostgreSQL instance. Treat Docker as a staging/production runtime, not the default local-dev path.
 - Operator note: use the `admin` CLI for Docker-runtime inspection and repairs. `admin logs tail` defaults to the unified `newsly` container log stream.
-
-## Context Routing
-
-| Task | Read |
-| --- | --- |
-| Backend route/API change | `docs/codebase/app/100-routers.md`, relevant router and API model files |
-| Queue or ingestion change | `docs/architecture.md` workers/tasks sections, relevant handler or strategy |
-| iOS UI/API change | Matching files under `docs/codebase/client/` plus the touched Swift files |
-| Admin CLI or production debug | `admin/`, `tests/admin/`, and the operator notes in this file |
-| Unknown ownership | `docs/architecture.md` package ownership section only, then narrow to touched files |
 
 ## Dependency Direction
 
@@ -73,18 +63,6 @@ Production debug:
 4. Prefer DB, log, runtime, and queue evidence over local speculation.
 5. Do not patch production directly unless explicitly asked.
 
-iOS TestFlight deploy:
-
-1. Before archiving, confirm the intended build number is higher than the latest App Store Connect/App Store build; if needed, bump with `xcrun agvtool new-version -all <build>` from `client/newsly`.
-2. Run a local Xcode build before release work, for example `xcodebuild -project client/newsly/newsly.xcodeproj -scheme newsly -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/newsly-codex-derived-data CODE_SIGNING_ALLOWED=NO build`.
-3. Commit the build-number/project changes only when the user explicitly asks for a commit or release commit.
-4. For TestFlight upload requests, use the Xcode app: `Product > Archive`, then Organizer `Distribute App` -> `TestFlight Internal Only`.
-5. Do not use CLI distribution fallbacks for TestFlight archive, export, upload, or account validation.
-   Avoid `xcodebuild archive`, `xcodebuild -exportArchive`, `altool`, `iTMSTransporter`, or fastlane upload paths because they can disturb or fail against Xcode/App Store Connect account state.
-   This restriction does not apply to simulator validation builds/tests.
-   If the Xcode GUI or Computer Use path is unavailable, stop and ask the user to restore GUI access instead of falling back to CLI upload.
-6. Verify the selected Organizer archive and final upload sheet both show the intended version/build, then confirm Organizer `Submission Status` shows `Uploaded` and the expected `Build Number`.
-
 ## Code Rules
 
 - Prefer functions over classes unless stateful objects clearly improve the design.
@@ -94,60 +72,3 @@ iOS TestFlight deploy:
 - Do not hardcode secrets; keep config in `app/core/settings.py`.
 - Use parameterized DB access, never SQL built with f-strings.
 - Log errors with `logger.error()` or `logger.exception()` and structured `extra` fields.
-
-## Local Patterns
-
-FastAPI route shape:
-
-```python
-@router.get("/items", response_model=ContentListResponse)
-def list_news_items(
-    db: Annotated[Session, Depends(get_readonly_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> ContentListResponse:
-    return list_visible_news_items(db, user_id=require_user_id(current_user))
-```
-
-Structured logging shape:
-
-```python
-logger.error(
-    "Unable to resolve feed config for content",
-    extra={
-        "component": "feed_backfill",
-        "operation": "resolve_config",
-        "item_id": str(content.id),
-    },
-)
-```
-
-Settings shape:
-
-```python
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
-
-    database_url: PostgresDsn
-    cors_allow_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
-```
-
-## Tests and Checks
-
-- Add tests for new functionality under `tests/` when you change production behavior.
-- Scripts under `scripts/` do not need tests unless the task specifically asks for them.
-- If you change the admin CLI, bug-test the touched CLI commands with `pytest tests/admin -v` and `ruff check admin tests/admin` before handoff when possible.
-- Run `ruff check` on touched Python files, or the repo, before handoff when possible.
-- Use `pytest tests/ -v` for relevant validation when behavior changes.
-
-## Common Commands
-
-```bash
-uv sync && . .venv/bin/activate
-alembic -c migrations/alembic.ini upgrade head
-scripts/dev.sh
-ruff check .
-ruff format .
-pytest tests/ -v
-uv run -m admin logs exceptions --limit 20
-uv run -m admin logs tail --limit 200
-```

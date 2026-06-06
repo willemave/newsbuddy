@@ -3,17 +3,20 @@
 Source folder: `app/http_client`
 
 ## Purpose
-Resilient low-level HTTP access used by scrapers and URL processors when they need retries, headers, and failure classification outside of higher-level services.
+Low-level synchronous HTTP helper used where URL processing needs consistent headers, timeouts, redirects, streamed downloads, and targeted retry behavior.
 
 ## Runtime behavior
-- Provides the `RobustHttpClient` abstraction for guarded GET/HEAD access with retry behavior and structured logging.
-- Acts as the network primitive beneath processing strategies and scraping flows that need deterministic fetch behavior.
+- `RobustHttpClient` wraps `httpx` GET/HEAD calls with default browser-like headers and timeout handling.
+- Supports response streaming for large downloads.
+- Handles redirects and a narrow hostname-mismatch retry path.
+- Broader HTTP error classification lives in `app/services/http.py`; this package is intentionally lower level.
 
-## Inventory scope
-- Direct file inventory for `app/http_client`.
+## Important files
+| File | Purpose |
+|---|---|
+| `app/http_client/robust_http_client.py` | `RobustHttpClient` implementation. |
+| `app/http_client/__init__.py` | Package marker. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/http_client/__init__.py` | n/a | Supporting module or configuration file. |
-| `app/http_client/robust_http_client.py` | `RobustHttpClient` | This module provides a robust synchronous HTTP client. |
+## Integration points
+- `app/processing_strategies/registry.py` shares one client instance across URL processor strategies.
+- `app/services/gateways/http_gateway.py` provides a gateway abstraction for workflow code that should not depend on concrete client details.

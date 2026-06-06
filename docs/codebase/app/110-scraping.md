@@ -3,28 +3,31 @@
 Source folder: `app/scraping`
 
 ## Purpose
-Scheduled feed and site scrapers plus the orchestration runner that inserts new content rows and enqueues downstream processing.
+Scheduled feed/site scrapers plus base persistence/orchestration helpers that create content/news rows and enqueue downstream processing.
 
 ## Runtime behavior
-- Implements active scraper classes for Hacker News, Reddit, Substack, Techmeme, podcasts, and Atom.
-- Twitter/X and YouTube scraper implementations remain in the folder, but are not part of the default active runner.
-- Normalizes source metadata, deduplicates content creation, and records scraper/event telemetry as new content is inserted.
-- Bridges file-backed configs and DB-backed user scraper configs into runnable scraper payloads.
+- `ScraperRunner` loads YAML-backed news aggregators from `config/aggregators.yml`, then adds Reddit, Substack, Podcast RSS, Atom, and discussion-comment scrapers.
+- `BaseScraper` normalizes source metadata, saves `news_items` or long-form `contents`, dedupes inserts, logs scraper stats, and enqueues follow-up tasks such as `FETCH_NEWS_ITEM_DISCUSSION`, `ENRICH_NEWS_ITEM_ARTICLE`, `PROCESS_CONTENT`, and `FETCH_DISCUSSION`.
+- Scheduled scraper scripts check queue backpressure before and between scraper runs.
+- Twitter/X list scraping is retired from the scheduled runner; X sync now lives in integration services/tasks.
+- YouTube config remains shared runtime configuration for YouTube processing and audio download paths, not a default scheduled scraper.
 
-## Inventory scope
-- Direct file inventory for `app/scraping`.
+## Important files and folders
+| Path | Purpose |
+|---|---|
+| `runner.py` | Builds and runs the default scraper list. |
+| `base.py` | Shared scraper persistence, stats, dedupe, and enqueue behavior. |
+| `aggregators/` | YAML-backed news aggregator registry and scraper subclasses. |
+| `discussion_comments.py` | Discussion comment scraper. |
+| `reddit_unified.py` | Reddit feed scraper. |
+| `substack_unified.py` | Substack scraper. |
+| `podcast_unified.py` | Podcast RSS scraper. |
+| `atom_unified.py` | Atom/RSS feed scraper. |
+| `rss_helpers.py` | Shared feed-source resolution helpers. |
+| `hackernews_unified.py`, `techmeme_unified.py` | Backward-compatible shims to aggregator implementations. |
+| `youtube_config.py` | yt-dlp/cookie/PoToken/player-client config loader. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/scraping/__init__.py` | n/a | Supporting module or configuration file. |
-| `app/scraping/atom_unified.py` | `AtomScraper`, `load_atom_feeds`, `run_atom_scraper` | Unified Atom feed scraper following the new architecture. |
-| `app/scraping/base.py` | `BaseScraper` | Types: `BaseScraper` |
-| `app/scraping/hackernews_unified.py` | `HackerNewsUnifiedScraper` | Types: `HackerNewsUnifiedScraper` |
-| `app/scraping/podcast_unified.py` | `PodcastUnifiedScraper` | Types: `PodcastUnifiedScraper` |
-| `app/scraping/reddit_unified.py` | `RedditUnifiedScraper` | Types: `RedditUnifiedScraper` |
-| `app/scraping/rss_helpers.py` | `resolve_feed_source` | Helpers for shared RSS/Atom feed handling. |
-| `app/scraping/runner.py` | `ScraperRunner` | Types: `ScraperRunner` |
-| `app/scraping/substack_unified.py` | `SubstackScraper`, `load_substack_feeds`, `run_substack_scraper` | Unified Substack scraper following the new architecture. |
-| `app/scraping/techmeme_unified.py` | `TechmemeFeedSettings`, `TechmemeSettings`, `TechmemeScraper`, `load_techmeme_config` | Dedicated scraper for Techmeme clusters. |
-| `app/scraping/youtube_config.py` | `YouTubeChannelConfig`, `YouTubeClientConfig`, `load_youtube_client_config`, `load_youtube_channels` | Shared YouTube yt-dlp configuration for active URL processing and podcast media downloads. |
+## Integration points
+- File-backed config lives in `config/`; per-user subscriptions live in `user_scraper_configs`.
+- Queue routing is defined by `app/pipeline/task_specs.py`.
+- Scraper tests live under `tests/scraping`.

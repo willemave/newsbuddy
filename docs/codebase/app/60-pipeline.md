@@ -3,24 +3,28 @@
 Source folder: `app/pipeline`
 
 ## Purpose
-Queue execution runtime: processor loop, task envelopes/results, dispatcher, and the main content/podcast worker implementations.
+DB-backed task execution runtime: task specs, task envelopes/results, dispatcher, queue processor loop, and worker implementations for content and podcast media.
 
 ## Runtime behavior
-- Runs the sequential task processor that claims DB-backed tasks, dispatches handlers, applies retries, and records completion/failure state.
-- Coordinates worker context so multiple queue consumers can safely share the same task tables.
-- Implements the long-form processing workers that fetch source material, select strategies, and hand off to summarization or downstream tasks.
+- `task_specs.py` is the canonical task-type to queue/payload/dedupe map. It assigns work to queues such as `content`, `media`, `discussion`, `image`, `onboarding`, `backfill`, `twitter`, `chat`, `audio_episode`, and `learning`.
+- `SequentialTaskProcessor` claims queue rows through `QueueService`, validates payloads, dispatches handlers, uses Postgres `LISTEN` when available, falls back to polling, and applies retry/failure results.
+- `QueueService` in `app/services/queue.py` owns enqueue/dequeue/finalization, leases, retry buckets, dedupe keys, `pg_notify`, queue mismatch checks, and backpressure summaries.
+- Content processing still runs through `worker.py`; workflow modules are small adapters around newer service/lifecycle helpers.
 
-## Inventory scope
-- Direct file inventory for `app/pipeline`.
+## Important files
+| File | Purpose |
+|---|---|
+| `dispatcher.py` | Maps `TaskType` values to concrete handlers. |
+| `sequential_task_processor.py` | Worker loop, queue waiting, task execution, retry/failure handling, and handler construction. |
+| `task_context.py` | Shared dependencies passed to handlers. |
+| `task_handler.py` | Handler protocol. |
+| `task_models.py` | `TaskEnvelope` and `TaskResult` models. |
+| `task_specs.py` | Task payload models, queue routing, and dedupe defaults. |
+| `worker.py` | Main content processing worker and strategy orchestration. |
+| `podcast_workers.py` | Podcast media download/transcription worker helpers. |
+| `tweet_video_metadata.py` | Tweet-video metadata helpers used by media tasks. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/pipeline/__init__.py` | n/a | Pipeline modules for content processing. |
-| `app/pipeline/dispatcher.py` | `TaskDispatcher` | Dispatcher for routing tasks to handlers. |
-| `app/pipeline/podcast_workers.py` | `PodcastDownloadWorker`, `PodcastTranscribeWorker`, `sanitize_filename`, `get_file_extension_from_url` | Types: `PodcastDownloadWorker`, `PodcastTranscribeWorker`. Functions: `sanitize_filename`, `get_file_extension_from_url` |
-| `app/pipeline/sequential_task_processor.py` | `SequentialTaskProcessor` | Sequential task processor for robust, simple task processing. |
-| `app/pipeline/task_context.py` | `TaskContext` | Shared dependencies for task handlers. |
-| `app/pipeline/task_handler.py` | `TaskHandler` | Handler protocol for task processing. |
-| `app/pipeline/task_models.py` | `TaskEnvelope`, `TaskResult` | Task models for the sequential pipeline processor. |
-| `app/pipeline/worker.py` | `ContentWorker`, `get_llm_service` | Types: `ContentWorker`. Functions: `get_llm_service` |
+## Integration points
+- Enqueue callers live in commands, services, scrapers, and queue gateways.
+- Queue rows are persisted by the `ProcessingTask` ORM model.
+- Docker and scripts start one or more processors per queue.

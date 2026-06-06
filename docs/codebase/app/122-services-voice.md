@@ -3,23 +3,18 @@
 Source folder: `app/services/voice`
 
 ## Purpose
-Live voice subsystem for streaming STT/TTS, session management, chat persistence, and assistant orchestration across the realtime voice experience.
+Backend narration text-to-speech helpers. This folder no longer contains the older live-voice websocket/orchestration stack.
 
 ## Runtime behavior
-- Creates and manages live voice sessions, including intro-state tracking, persistence, and reconnection behavior.
-- Bridges audio capture/playback, ElevenLabs streaming, narration TTS, and agent orchestration into the websocket-based voice API.
-- Stores or reconstructs live conversation context so voice turns can continue from content detail or chat session state.
+- `narration_tts.py` provides `ContentNarrationTtsService` for one-shot MP3 generation from plain summary text or multi-speaker dialogue turns.
+- The service uses ElevenLabs settings from `app/core/settings.py`, records structured logs, and writes vendor usage/cost telemetry.
+- Public narration/audio episode APIs call higher-level services in `app/services/audio_episodes.py`, `summary_narration.py`, and related modules.
 
-## Inventory scope
-- Direct file inventory for `app/services/voice`.
+## Important files
+| File | Purpose |
+|---|---|
+| `narration_tts.py` | ElevenLabs-backed one-shot narration and dialogue MP3 synthesis. |
+| `__init__.py` | Package marker. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/services/voice/__init__.py` | n/a | Voice conversation services package. |
-| `app/services/voice/agent_streaming.py` | `VoiceAgentDeps`, `VoiceAgentResult`, `get_voice_agent`, `stream_voice_agent_turn` | Haiku-based streaming agent for in-house voice conversations. |
-| `app/services/voice/elevenlabs_streaming.py` | `ElevenLabsSttCallbacks`, `elevenlabs_sdk_available`, `build_voice_health_flags`, `open_realtime_stt_connection`, `send_audio_frame`, `commit_audio`, `close_stt_connection`, `build_realtime_tts_stream`, `next_tts_chunk` | ElevenLabs streaming helpers for realtime STT/TTS. |
-| `app/services/voice/narration_tts.py` | `ContentNarrationTtsService`, `get_content_narration_tts_service` | One-shot TTS helpers for content summary narration. |
-| `app/services/voice/orchestrator.py` | `TurnOutcome`, `VoiceConversationOrchestrator` | Realtime voice turn orchestration for STT -> LLM -> TTS streaming. |
-| `app/services/voice/persistence.py` | `VoiceContentContext`, `load_voice_content_context`, `format_voice_content_context`, `resolve_or_create_voice_chat_session`, `persist_voice_turn`, `mark_live_voice_onboarding_complete`, `build_live_intro_text` | Persistence and context helpers for live voice sessions. |
-| `app/services/voice/session_manager.py` | `VoiceSessionState`, `create_voice_session`, `configure_voice_session`, `set_voice_session_intro_pending`, `get_voice_session`, `get_message_history`, `append_message_history`, `prune_voice_sessions`, `clear_voice_sessions` | In-memory session manager for realtime voice conversations. |
+## Integration points
+- Client-side voice dictation/transcription lives in the iOS client services; backend OpenAI transcription endpoints live in `app/routers/api/openai.py` and `app/services/openai_llm.py`.

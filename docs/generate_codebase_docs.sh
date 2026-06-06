@@ -29,7 +29,7 @@ regenerate_overview() {
   run_codex_prompt "$prompt"
 }
 
-for source_dir in app cli client config; do
+for source_dir in app admin cli client config docker migrations scripts tests; do
   if [[ ! -d "$REPO_ROOT/$source_dir" ]]; then
     continue
   fi

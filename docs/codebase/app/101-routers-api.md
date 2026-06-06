@@ -3,33 +3,41 @@
 Source folder: `app/routers/api`
 
 ## Purpose
-User-facing JSON API surface for content, chat, discovery, onboarding, voice, integrations, stats, submissions, and auxiliary OpenAI/realtime endpoints.
+User-facing and machine-facing JSON API modules for content, news, chat, discovery, onboarding, audio episodes, Learning Decks, integrations, feedback, stats, and OpenAI transcription.
 
 ## Runtime behavior
-- Splits the mobile-facing API into narrow route modules so each endpoint group owns its request validation and response shaping.
-- Coordinates content list/detail actions, chat session lifecycle, discovery suggestions, onboarding state, scraper settings, and live voice sessions.
-- Defines the Pydantic DTO layer consumed by the iOS app and share extension.
+- Modules are narrow route groups; DTOs live in `app/models/api`, not in this folder.
+- Some modules are mounted through `/api/content` for compatibility while others are mounted directly under `/api`.
+- `scraper_configs.router` is mounted both under `/api/content/scrapers*` and `/api/scrapers*`.
+- Learning Decks expose authenticated `/api/learning/decks*` endpoints and public/private hosted artifact routes under `/learning/share/{token}/*` and `/learning/signed/{token}/*`.
+- Audio episodes expose authenticated content-adjacent endpoints and public `/audio/share/{token}/*` playback artifacts.
+- `openai.py` currently exposes transcription health/upload routes; realtime token setup is not part of the live router.
 
-## Inventory scope
-- Direct file inventory for `app/routers/api`.
+## Important files
+| File | Purpose |
+|---|---|
+| `agent.py` | Machine/CLI APIs for jobs, search, onboarding, CLI link, and personal markdown library. |
+| `audio_episodes.py` | Audio episode create/list/share/playback routes. |
+| `chat.py` | Chat session/message lifecycle and initial suggestions. |
+| `content_actions.py` | Convert, download-more, tweet suggestions, and related content actions. |
+| `content_detail.py` | Content detail, discussion, body/chat URL reads. |
+| `content_list.py` | Content list/search and podcast episode matching. |
+| `content_responses.py` | Router-facing content response builders. |
+| `discovery.py` | Discovery suggestions/history/search/refresh/subscription actions. |
+| `feedback.py` | User feedback submission. |
+| `integrations.py` | X OAuth/connection and user LLM integration endpoints. |
+| `interactions.py` | Content interaction analytics. |
+| `knowledge.py` | Save/remove/list Knowledge routes. |
+| `learning_decks.py` | Learning Deck CRUD, share URLs, hosted artifact serving. |
+| `narration.py` | Narration/audio availability and playback data. |
+| `news.py` | Fast Reads list/detail/body/discussion/read-state/convert/audio surface. |
+| `onboarding.py` | Onboarding profile, voice parse, fast/audio discovery, completion, tutorial state. |
+| `openai.py` | Audio transcription availability/upload. |
+| `read_status.py` | Read/unread/recently-read actions. |
+| `scraper_configs.py` | Per-user source config CRUD and feed subscription. |
+| `stats.py` | Unread, processing, and long-form count endpoints. |
+| `submission.py` | One-off URL submission and submission-status listing. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/routers/api/__init__.py` | n/a | API content routers organized by responsibility |
-| `app/routers/api/chat.py` | `list_sessions`, `create_session`, `update_session`, `get_session`, `delete_session`, `send_message`, `get_message_status`, `get_initial_suggestions` | Chat session endpoints for deep-dive conversations. |
-| `app/routers/api/chat_models.py` | `ChatMessageRole`, `ChatMessageDisplayType`, `MessageProcessingStatus`, `CreateChatSessionRequest`, `UpdateChatSessionRequest`, `SendChatMessageRequest`, `ChatMessageDto`, `ChatSessionSummaryDto`, `ChatSessionDetailDto`, `SendMessageResponse`, +3 more | Chat DTOs for API responses. |
-| `app/routers/api/content_actions.py` | `convert_news_to_article`, `download_more_from_series`, `get_tweet_suggestions` | Content transformation and action endpoints. |
-| `app/routers/api/content_detail.py` | `get_content_detail`, `get_content_discussion`, `get_chatgpt_url` | Content detail and chat URL endpoints. |
-| `app/routers/api/content_list.py` | `list_contents`, `search_contents`, `search_podcast_episode_matches` | Content listing and search endpoints. |
-| `app/routers/api/discovery.py` | `get_discovery_suggestions`, `get_discovery_history`, `search_discovery_podcast_episodes`, `refresh_discovery`, `subscribe_discovery_suggestions`, `add_discovery_items`, `dismiss_discovery_suggestions`, `clear_discovery_suggestions` | Discovery suggestions endpoints. |
-| `app/routers/api/favorites.py` | `toggle_favorite`, `unfavorite_content`, `get_favorites` | Favorites management endpoints. |
-| `app/routers/api/integrations.py` | `get_x_connection`, `start_x_oauth_flow`, `exchange_x_oauth_code`, `disconnect_x` | Integration endpoints for external providers (X/Twitter). |
-| `app/routers/api/interactions.py` | `post_content_interaction` | Interaction analytics endpoints. |
-| `app/routers/api/models.py` | `ContentSummaryResponse`, `ContentListResponse`, `NarrationResponse`, `SubmissionStatusResponse`, `SubmissionStatusListResponse`, `DownloadMoreRequest`, `DownloadMoreResponse`, `DiscoverySuggestionResponse`, +51 more | Shared Pydantic models for legacy content endpoints. |
-| `app/routers/api/onboarding.py` | `build_profile`, `parse_voice`, `run_fast_discover`, `start_audio_discovery_flow`, `onboarding_discovery_status`, `complete_onboarding_flow`, `tutorial_complete` | Onboarding endpoints. |
-| `app/routers/api/openai.py` | `AudioTranscriptionResponse`, `create_realtime_token`, `transcribe_audio` | OpenAI-related endpoints. |
-| `app/routers/api/read_status.py` | `mark_content_read`, `mark_content_unread`, `bulk_mark_read`, `get_recently_read` | Read status management endpoints. |
-| `app/routers/api/scraper_configs.py` | `ScraperConfigResponse`, `SubscribeToFeedRequest`, `list_scraper_configs`, `create_scraper_config`, `update_scraper_config`, `delete_scraper_config_endpoint`, `subscribe_to_feed` | CRUD endpoints for per-user scraper configurations. |
-| `app/routers/api/stats.py` | `get_unread_counts`, `get_processing_count`, `get_long_form_stats` | User-scoped unread and processing statistics endpoints. |
-| `app/routers/api/submission.py` | `submit_content`, `list_submission_statuses` | Endpoint for one-off user submissions. |
+## Integration points
+- Request/response models live under `app/models/api`.
+- Use commands for write orchestration and queries for read projections.

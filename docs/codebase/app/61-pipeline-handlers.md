@@ -3,38 +3,35 @@
 Source folder: `app/pipeline/handlers`
 
 ## Purpose
-Concrete queue task handlers that translate task envelopes into service calls or worker actions for each supported task type.
+Concrete queue task handlers that translate normalized task envelopes into service calls, worker calls, and workflow transitions.
 
 ## Runtime behavior
-- Keeps task-specific orchestration out of the processor loop by giving each task type its own handler class.
-- Bridges queue payloads into service and worker calls for content analysis, processing, discovery, onboarding, images, chat, and integrations.
-- Provides the place where retryability and task-result mapping become explicit per task type.
+- Each handler owns one `TaskType` and returns `TaskResult.ok()` or `TaskResult.fail(...)` to control completion and retry behavior.
+- URL analysis handles feed subscription, tweet resolution, instruction link fanout, and content-processing handoff.
+- Tweet video download/transcription failures degrade to text summarization instead of retrying forever.
+- Learning Deck generation retries only when the generation service asks the queue to wait; validation and unexpected generation failures are nonretryable.
+- Integration sync rejects missing users/unsupported providers as nonretryable and cleanly skips when X sync is disabled.
 
-## Inventory scope
-- Direct file inventory for `app/pipeline/handlers`.
+## Important files
+| File | Purpose |
+|---|---|
+| `analyze_url.py` | URL analysis handler with feed subscription, tweet resolution, instruction cleanup, and fanout flows. |
+| `backfill_feeds.py` | Feed backfill task handler. |
+| `dig_deeper.py` | Chat/dig-deeper message processing. |
+| `discover_feeds.py` | Feed discovery task handler. |
+| `download_audio.py`, `transcribe.py`, `process_podcast_media.py` | Podcast/audio media pipeline handlers. |
+| `download_tweet_video.py`, `transcribe_tweet_video.py` | Tweet video/audio media handlers with graceful degradation. |
+| `enrich_news_item_article.py`, `process_news_item.py` | Short-form news enrichment and processing handlers. |
+| `fetch_discussion.py`, `fetch_news_item_discussion.py` | Content and news-item discussion refresh/summary handlers. |
+| `generate_audio_episode.py` | On-demand audio episode generation. |
+| `generate_image.py` | Long-form generated image handler. |
+| `generate_insight_report.py` | Insight report generation handler. |
+| `generate_learning_deck.py` | Learning Deck generation handler. |
+| `onboarding_discover.py` | Onboarding discovery enrichment. |
+| `process_content.py`, `summarize.py` | Long-form content processing and summarization. |
+| `scrape.py` | Scheduled scraper task handler. |
+| `sync_integration.py` | External integration sync jobs. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/pipeline/handlers/__init__.py` | n/a | Task handlers for the sequential pipeline processor. |
-| `app/pipeline/handlers/analyze_url.py` | `FlowOutcome`, `FeedSubscriptionFlow`, `TwitterShareFlow`, `UrlAnalysisFlow`, `InstructionLinkFanout`, `InstructionPayloadCleaner`, `AnalyzeUrlHandler` | Analyze URL task handler. |
-| `app/pipeline/handlers/backfill_feeds.py` | `BackfillFeedsHandler` | Feed backfill task handler for onboarding-selected feed configs. |
-| `app/pipeline/handlers/dig_deeper.py` | `DigDeeperHandler` | Dig-deeper task handler. |
-| `app/pipeline/handlers/discover_feeds.py` | `DiscoverFeedsHandler` | Feed discovery task handler. |
-| `app/pipeline/handlers/download_audio.py` | `DownloadAudioHandler` | Podcast audio download task handler. |
-| `app/pipeline/handlers/download_tweet_video.py` | `DownloadTweetVideoAudioHandler` | Tweet video/audio download task handler. |
-| `app/pipeline/handlers/enrich_news_item_article.py` | `EnrichNewsItemArticleHandler` | News-item article enrichment task handler. |
-| `app/pipeline/handlers/fetch_discussion.py` | `FetchDiscussionHandler` | Discussion fetch task handler. |
-| `app/pipeline/handlers/fetch_news_item_discussion.py` | `FetchNewsItemDiscussionHandler` | News-item discussion refresh and summary task handler. |
-| `app/pipeline/handlers/generate_audio_episode.py` | `GenerateAudioEpisodeHandler` | On-demand audio episode generation task handler. |
-| `app/pipeline/handlers/generate_image.py` | `GenerateImageHandler` | Image generation task handler. |
-| `app/pipeline/handlers/generate_insight_report.py` | `GenerateInsightReportHandler` | Insight report generation task handler. |
-| `app/pipeline/handlers/onboarding_discover.py` | `OnboardingDiscoverHandler` | Onboarding discovery enrichment task handler. |
-| `app/pipeline/handlers/process_content.py` | `ProcessContentHandler` | Content processing task handler. |
-| `app/pipeline/handlers/process_news_item.py` | `ProcessNewsItemHandler` | Short-form news item processing task handler. |
-| `app/pipeline/handlers/process_podcast_media.py` | `ProcessPodcastMediaHandler` | Podcast media processing task handler. |
-| `app/pipeline/handlers/scrape.py` | `ScrapeHandler` | Scrape task handler. |
-| `app/pipeline/handlers/summarize.py` | `SummarizeHandler` | Summarization task handler. |
-| `app/pipeline/handlers/sync_integration.py` | `SyncIntegrationHandler` | Task handler for scheduled external integration sync jobs. |
-| `app/pipeline/handlers/transcribe.py` | `TranscribeHandler` | Podcast transcription task handler. |
-| `app/pipeline/handlers/transcribe_tweet_video.py` | `TranscribeTweetVideoHandler` | Tweet video/audio transcription task handler. |
+## Integration points
+- Handler construction lives in `SequentialTaskProcessor._build_handlers`.
+- Workflow helpers in `app/pipeline/workflows` keep complex state transitions out of individual handler methods.

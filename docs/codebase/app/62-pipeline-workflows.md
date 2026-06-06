@@ -3,18 +3,19 @@
 Source folder: `app/pipeline/workflows`
 
 ## Purpose
-Focused workflow helpers that model multi-step state transitions inside larger queue handlers, especially URL analysis and content processing.
+Small workflow adapters for multi-step state transitions used by queue handlers.
 
 ## Runtime behavior
-- Captures orchestration rules that would otherwise bloat task handlers, including flow protocols and transition models.
-- Makes the ordering of URL-analysis and processing outcomes explicit and easier to test independently from the processor loop.
+- `analyze_url_workflow.py` defines protocols and flow helpers for feed subscription, tweet resolution, URL analysis, instruction link fanout, and instruction payload cleanup.
+- `content_processing_workflow.py` is a thin adapter over `app/services/content_lifecycle.py`; the main source extraction/summarization orchestration still lives in `app/pipeline/worker.py`.
 
-## Inventory scope
-- Direct file inventory for `app/pipeline/workflows`.
+## Important files
+| File | Purpose |
+|---|---|
+| `analyze_url_workflow.py` | `TweetResolutionFlowProtocol`, feed subscription flow, URL analysis flow, and instruction fanout support. |
+| `content_processing_workflow.py` | Content lifecycle transition helpers used by processing handlers. |
+| `__init__.py` | Package marker. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/pipeline/workflows/__init__.py` | n/a | Pipeline workflow orchestrators. |
-| `app/pipeline/workflows/analyze_url_workflow.py` | `FeedFlowProtocol`, `TwitterFlowProtocol`, `AnalysisFlowProtocol`, `InstructionFanoutProtocol`, `PayloadCleanerProtocol`, `AnalyzeUrlWorkflow` | Workflow orchestration for ANALYZE_URL tasks. |
-| `app/pipeline/workflows/content_processing_workflow.py` | `WorkflowTransition`, `ContentProcessingWorkflow` | Workflow orchestration for content processing transitions. |
+## Integration points
+- `app/pipeline/handlers/analyze_url.py` uses these helpers to keep handler logic readable.
+- The workflows depend on service abstractions and queue gateways rather than directly owning persistence.

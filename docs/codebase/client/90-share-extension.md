@@ -3,20 +3,23 @@
 Source folder: `client/newsly/ShareExtension`
 
 ## Purpose
-Share extension target that receives shared URLs from iOS, reads shared auth state, and forwards submissions into the backend pipeline.
+iOS share extension target that receives shared URLs/text from other apps and forwards user-selected actions to the backend using shared app authentication state.
 
 ## Runtime behavior
-- Turns iOS share-sheet invocations into authenticated `POST /api/content/submit` requests.
-- Relies on shared container/keychain state to reuse app authentication and configuration from the main app target.
-- Includes the storyboard/resource metadata needed for the extension UI lifecycle.
+- `ShareViewController.swift` supports multiple modes: `addContent`, `createLearningDeck`, `addLinks`, `addFeed`, and `chat`.
+- Content submissions post to `/api/content/submit` with flags such as crawl links, subscribe-to-feed, title/platform/content-type, or instruction-style link handling.
+- Learning Deck creation posts to `/api/learning/decks`.
+- Feed mode supports feed subscription behavior; chat mode hands shared material into the app chat flow.
+- The extension reads auth/shared state through app group/keychain configuration and must stay aligned with app entitlements.
 
-## Inventory scope
-- Recursive file inventory for `client/newsly/ShareExtension`.
+## Important files
+| File | Purpose |
+|---|---|
+| `ShareViewController.swift` | Share extension controller, mode routing, backend submission calls, and UI state. |
+| `Info.plist` | Extension metadata and activation rules. |
+| `ShareExtension.entitlements` | App-group/keychain entitlements. |
+| `Base.lproj/MainInterface.storyboard` | Extension storyboard entrypoint. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `client/newsly/ShareExtension/Base.lproj/MainInterface.storyboard` | n/a | Supporting module or configuration file. |
-| `client/newsly/ShareExtension/Info.plist` | n/a | Supporting module or configuration file. |
-| `client/newsly/ShareExtension/ShareExtension.entitlements` | n/a | Supporting module or configuration file. |
-| `client/newsly/ShareExtension/ShareViewController.swift` | `class ShareViewController`, `enum ShareError`, `handleOptionTapped`, `handleSubmitTapped` | Types: `class ShareViewController`, `enum ShareError`. Functions: `handleOptionTapped`, `handleSubmitTapped` |
+## Integration points
+- Backend submission routes live under `/api/content/submit` and `/api/learning/decks`.
+- URL routing behavior is covered by `ShareURLRoutingTests.swift`.

@@ -1,19 +1,26 @@
-# Content responses
+# Content response builders
 
-Source files: `app/routers/api/content_responses.py`, `app/models/content_display.py`
+Source files: `app/routers/api/content_responses.py`, `app/models/domain/content_display.py`, plus focused query adapters.
 
 ## Purpose
-Shape normalized content into API DTOs while keeping reusable display rules outside the router layer.
+Shape ORM/domain rows into stable API responses for content list/detail surfaces and related router payloads.
 
 ## Runtime behavior
-- Builds list/detail response DTOs from `ContentData` inside the API transport layer.
-- Resolves public image/thumbnail URLs, list-readiness checks, and feed-subscription affordances from reusable model helpers.
+- `content_responses.py` builds content summary and detail DTOs for `/api/content`.
+- Summary responses add resolved image URLs, news fields, saved-source data, top-comment suppression, and long-form artifact preview fields.
+- Detail responses add sanitized metadata, body flags, detected feed information, image URLs, discussion affordances, and `can_subscribe` state.
+- `content_display.py` owns display helper rules such as `resolve_image_urls`, `is_ready_for_long_form_summary`, and `can_subscribe_for_feed`.
+- Query adapters shape news-item content projections, discussion payloads, and submission statuses where they do not belong in routers.
 
-## Inventory scope
-- Direct file inventory for the response-building helpers that replaced `app/presenters`.
+## Important files
+| File | Purpose |
+|---|---|
+| `app/routers/api/content_responses.py` | Content list/detail DTO builders. |
+| `app/models/domain/content_display.py` | Image URL, list readiness, and feed-subscription display helpers. |
+| `app/queries/news_item_content_adapter.py` | Short-form news item to content-like projection adapter. |
+| `app/queries/get_content_discussion.py` | Content discussion response shaping. |
+| `app/queries/list_submission_statuses.py` | Submission/feed-subscription status projection. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/routers/api/content_responses.py` | `build_content_summary_response`, `build_fallback_content_summary_response`, `build_content_detail_response` | API-layer builders for content list/detail response DTOs. |
-| `app/models/content_display.py` | `resolve_image_urls`, `is_ready_for_list`, `can_subscribe_for_feed` | Reusable display and readiness rules shared by application queries and services. |
+## Integration points
+- Routers should use these builders/adapters rather than duplicating response-shaping logic.
+- Model contracts live under `app/models/api` and metadata helpers live under `app/models/metadata`.

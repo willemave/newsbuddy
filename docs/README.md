@@ -4,6 +4,7 @@ This folder is organized into durable reference docs plus concat-friendly genera
 
 - `docs/architecture.md` — canonical system architecture reference
 - `docs/architecture-improvement-plan-2026-04-27.md` — ranked architecture hardening and execution plan
+- `docs/coding-guidelines.md` — local code patterns, test expectations, and common commands
 - `docs/codebase/` — Codex-generated folder-by-folder codebase reference for `app/`, `cli/`, and `client/`, plus a small `config/` support section
 - `docs/generate_codebase_docs.sh` — thin Codex wrapper for the codebase overview docs
 - `docs/generate_architecture.sh` — thin Codex wrapper for `docs/architecture.md`

@@ -3,20 +3,25 @@
 Source folder: `client/newsly/newsly`
 
 ## Purpose
-SwiftUI app target root containing the `App` entrypoint, primary tab container, Info.plist metadata, and target entitlements.
+Main SwiftUI app target root: app entrypoint, root content shell, target metadata, dependencies, assets, models, services, view models, and screens.
 
 ## Runtime behavior
-- Bootstraps authentication-driven root presentation and injects shared state into the authenticated SwiftUI shell.
-- Defines app-wide configuration such as bundle metadata, entitlements, and the root `ContentView` tab/navigation container.
-- Delegates most feature logic into Models, Services, ViewModels, and Views subfolders documented separately.
+- `newslyApp.swift` initializes app-level services, shared keychain setup, app settings, app chrome, and environment objects.
+- `ContentView.swift` selects authentication versus authenticated root flow and coordinates tab/root state.
+- `App/ChatDependencies.swift` builds chat-related service dependencies.
+- The root flow handles CLI link URLs, tab state, route restoration, app chrome, shared container state, and authenticated service wiring.
 
-## Inventory scope
-- Direct file inventory for `client/newsly/newsly`.
+## Important files and folders
+| Path | Purpose |
+|---|---|
+| `newslyApp.swift` | SwiftUI `App` entrypoint and root dependency setup. |
+| `ContentView.swift` | Top-level authenticated/unauthenticated root switch. |
+| `App/ChatDependencies.swift` | Chat dependency factory. |
+| `Info.plist` | Target metadata and URL/background capabilities. |
+| `newsly.entitlements` | App entitlements, including app-group/keychain capabilities. |
+| `Models/`, `Services/`, `Repositories/`, `Shared/`, `ViewModels/`, `Views/` | Main app source layers. |
+| `Assets.xcassets/`, `Fonts/` | Visual assets and bundled fonts. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `client/newsly/newsly/ContentView.swift` | `struct ContentView`, `withContentRoutes` | Types: `struct ContentView`. Functions: `withContentRoutes` |
-| `client/newsly/newsly/Info.plist` | n/a | Supporting module or configuration file. |
-| `client/newsly/newsly/newsly.entitlements` | n/a | Supporting module or configuration file. |
-| `client/newsly/newsly/newslyApp.swift` | `struct newslyApp` | Types: `struct newslyApp` |
+## Notes
+- `Info.plist.backup` is checked in but should not be treated as an active runtime source without verifying target membership.
+- Generated contracts live under `Models/Generated` and `client/newsly/OpenAPI/Generated`.

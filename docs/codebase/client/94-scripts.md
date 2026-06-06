@@ -3,15 +3,19 @@
 Source folder: `client/newsly/scripts`
 
 ## Purpose
-Client-specific helper scripts for regenerating derived assets such as API contracts.
+Client-local helper scripts, currently focused on regenerating API contract artifacts.
 
 ## Runtime behavior
-- Keeps one-off maintenance tasks out of the Xcode project while preserving reproducible update steps for generated client artifacts.
+- `regenerate_api_contracts.sh` runs from the repo root.
+- It exports backend OpenAPI with `scripts/export_openapi_schema.py`.
+- It regenerates lightweight Swift API contracts with `scripts/generate_ios_contracts.py`.
+- It regenerates Swift OpenAPI client/types with `scripts/generate_ios_openapi_artifacts.sh`.
 
-## Inventory scope
-- Direct file inventory for `client/newsly/scripts`.
+## Important files
+| File | Purpose |
+|---|---|
+| `regenerate_api_contracts.sh` | Full iOS OpenAPI/contract regeneration flow. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `client/newsly/scripts/regenerate_api_contracts.sh` | n/a | Supporting module or configuration file. |
+## Integration points
+- Generated outputs land in `client/newsly/newsly/Models/Generated` and `client/newsly/OpenAPI/Generated`.
+- Run after backend API contract changes.

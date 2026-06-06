@@ -1,19 +1,37 @@
-# client/newsly/newslyTests/
+# client/newsly/newslyTests/ and newslyUITests/
 
-Source folder: `client/newsly/newslyTests`
+Source folders: `client/newsly/newslyTests`, `client/newsly/newslyUITests`
 
 ## Purpose
-Focused iOS unit tests covering share routing, onboarding animation progress, and news dig-deeper behavior.
+iOS unit and UI tests for models, services, view models, routing, onboarding, chat, content detail, Knowledge, narration, tab coordination, and integrations.
 
-## Runtime behavior
-- Provides regression coverage for high-risk client-side behaviors that do not require full UI tests.
+## Unit test inventory
+| File | Focus |
+|---|---|
+| `APIClientAuthTests.swift` | API auth/token behavior. |
+| `AncientScrollRevealProgressTests.swift` | Onboarding reveal progress. |
+| `AppSettingsTests.swift` | App settings persistence/defaults. |
+| `CLILinkServiceTests.swift` | CLI QR link service behavior. |
+| `ChatMessageDisplayTests.swift` | Chat message rendering/display models. |
+| `ChatSessionViewModelTests.swift` | Chat session state. |
+| `ChatTimelineReconcilerTests.swift` | Chat timeline reconciliation. |
+| `ContentDetailTests.swift`, `ContentDetailViewModelTests.swift` | Content detail models and view model behavior. |
+| `ContentDiscussionTests.swift`, `ContentSummaryTests.swift`, `ContentTimestampFormatterTests.swift` | Content discussion/summary/timestamp behavior. |
+| `KnowledgeHubViewModelTests.swift` | Knowledge hub state. |
+| `NarrationPlaybackSpeedOptionTests.swift` | Narration playback-rate options. |
+| `OnboardingStateStoreTests.swift` | Onboarding state persistence. |
+| `QuickMicViewModelTests.swift` | Quick Mic dictation state. |
+| `ShareURLRoutingTests.swift` | Share extension/app URL routing. |
+| `SubmissionStatusViewModelTests.swift` | Submission status state. |
+| `TabCoordinatorViewModelTests.swift` | Tab coordination. |
+| `UserProfileCodingTests.swift` | User profile encoding/decoding. |
+| `XIntegrationServiceTests.swift` | X integration service behavior. |
 
-## Inventory scope
-- Direct file inventory for `client/newsly/newslyTests`.
+## UI tests
+| File | Focus |
+|---|---|
+| `newslyUITests/newslyUITests.swift` | UI smoke test target. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `client/newsly/newslyTests/AncientScrollRevealProgressTests.swift` | `class AncientScrollRevealProgressTests`, `testGlyphPhraseCyclerCanReturnSpacesWhenRequested`, `testGlyphPhraseCyclerSkipsSpacesAndCycles`, `testImpulseVectorIncludesDragVelocityInfluence`, `testImpulseVectorPushesAwayFromTouchPoint`, `testNormalizedImpulseFallsOffByDistance` | Types: `class AncientScrollRevealProgressTests`. Functions: `testGlyphPhraseCyclerCanReturnSpacesWhenRequested`, `testGlyphPhraseCyclerSkipsSpacesAndCycles`, `testImpulseVectorIncludesDragVelocityInfluence`, `testImpulseVectorPushesAwayFromTouchPoint`, `testNormalizedImpulseFallsOffByDistance` |
-| `client/newsly/newslyTests/ChatMessageDisplayTests.swift` | `class ChatMessageDisplayTests`, `testChatMessageDecodesProcessSummaryDisplayMetadata`, `testChatSessionDetailPreservesProcessSummaryOrdering` | Types: `class ChatMessageDisplayTests`. Functions: `testChatMessageDecodesProcessSummaryDisplayMetadata`, `testChatSessionDetailPreservesProcessSummaryOrdering` |
-| `client/newsly/newslyTests/ShareURLRoutingTests.swift` | `class ShareURLRoutingTests`, `testApplePodcastDetectedAsApplePodcastShare`, `testExtractURLsDedupesAndKeepsOrder`, `testPreferredURLPrioritizesSingleVideoOverChannelURL`, `testSpotifyEpisodeDetectedAsPodcastPlatformShare`, `testYouTubeChannelDetectedAsGenericYouTubeShare`, `testYouTubeEmbedDetectedAsSingleVideoHandler`, `testYouTubeLegacyVDetectedAsSingleVideoHandler`, `testYouTubeLiveDetectedAsSingleVideoHandler`, `testYouTubeShortsDetectedAsSingleVideoHandler`, +2 more | Types: `class ShareURLRoutingTests`. Functions: `testApplePodcastDetectedAsApplePodcastShare`, `testExtractURLsDedupesAndKeepsOrder`, `testPreferredURLPrioritizesSingleVideoOverChannelURL`, `testSpotifyEpisodeDetectedAsPodcastPlatformShare`, `testYouTubeChannelDetectedAsGenericYouTubeShare`, `testYouTubeEmbedDetectedAsSingleVideoHandler`, `testYouTubeLegacyVDetectedAsSingleVideoHandler`, `testYouTubeLiveDetectedAsSingleVideoHandler`. +3 more |
+## Integration points
+- Xcode target membership is managed in `newsly.xcodeproj`.
+- Backend contract changes may require both model/service tests and generated contract updates.

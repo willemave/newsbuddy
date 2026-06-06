@@ -3,19 +3,22 @@
 Source folder: `app/services/gateways`
 
 ## Purpose
-Narrow gateway interfaces that isolate HTTP, LLM, and queue dependencies for higher-level services and workflows.
+Small dependency gateways that keep workflows and services from binding directly to concrete HTTP, LLM, queue, or object-storage implementations.
 
 ## Runtime behavior
-- Wraps lower-level infrastructure behind small interfaces so workflows can depend on stable contracts instead of concrete implementations.
-- Makes queue, network, and model-provider dependencies easier to stub or swap during handler/workflow execution.
+- Gateway interfaces are used where orchestration needs a patchable boundary for tests or a provider-agnostic API.
+- Object storage supports local filesystem and S3-compatible providers and records storage API usage out of band.
+- Queue gateway wraps `QueueService` for handlers/workflows that need to enqueue or inspect tasks.
 
-## Inventory scope
-- Direct file inventory for `app/services/gateways`.
+## Important files
+| File | Purpose |
+|---|---|
+| `http_gateway.py` | HTTP access abstraction. |
+| `llm_gateway.py` | LLM call abstraction. |
+| `task_queue_gateway.py` | Queue enqueue/status abstraction over `QueueService`. |
+| `object_storage_gateway.py` | Provider-agnostic text/binary object storage with local and S3-compatible implementations. |
+| `__init__.py` | Package marker. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/services/gateways/__init__.py` | n/a | Infrastructure gateways used by pipeline and service orchestration. |
-| `app/services/gateways/http_gateway.py` | `HttpGateway`, `get_http_gateway` | Unified HTTP gateway for service and workflow orchestration. |
-| `app/services/gateways/llm_gateway.py` | `LlmGateway`, `get_llm_gateway` | Unified gateway for LLM analysis and summarization calls. |
-| `app/services/gateways/task_queue_gateway.py` | `TaskQueueGateway`, `get_task_queue_gateway` | Queue gateway for task orchestration boundaries. |
+## Integration points
+- Content bodies, news article bodies, news item discussions, and Learning Deck artifacts use object storage.
+- Pipeline workflows and handlers use the queue gateway to avoid direct queue-service coupling.

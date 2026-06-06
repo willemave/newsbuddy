@@ -3,18 +3,29 @@
 Source folder: `app/repositories`
 
 ## Purpose
-Query composition helpers for content feeds and visibility rules used by list, search, stats, and recently-read endpoints.
+SQLAlchemy query composition and persistence helpers. Repositories keep DB details out of routers, commands, queries, and services.
 
 ## Runtime behavior
-- Builds shared feed queries so filters for visibility, read state, and pagination stay consistent across API endpoints.
-- Concentrates SQL-specific search and full-text query behavior away from routers and presenters.
+- Content repositories build list/detail/card projections and shared feed visibility rules.
+- Knowledge and read-status repositories mutate user-specific saved/read state.
+- Search repository owns PostgreSQL full-text/trigram-backed search helpers.
+- Stats and API-key repositories provide small persistence/query seams for API surfaces.
+- User-integration repository stores encrypted provider credentials and integration state.
 
-## Inventory scope
-- Direct file inventory for `app/repositories`.
+## Important files
+| File | Purpose |
+|---|---|
+| `api_key_repository.py` | Machine API-key CRUD and lookup helpers. |
+| `content_card_repository.py` | Card/list/recently-read projections. |
+| `content_detail_repository.py` | Detail projection helpers. |
+| `content_feed_query.py` | Shared list visibility, sort timestamp, and cursor helpers. |
+| `content_repository.py` | Content visibility context/filter helpers. |
+| `knowledge_repository.py` | Per-user Knowledge saves. |
+| `read_status_repository.py` | Per-user read/unread state. |
+| `search_repository.py` | Content/news search helpers. |
+| `stats_repository.py` | Unread/processing/long-form metrics. |
+| `user_integration_repository.py` | User-managed provider credentials and integration rows. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/repositories/content_feed_query.py` | `FeedQueryRows`, `apply_created_at_cursor`, `build_user_feed_query` | Shared query builders for user-visible content feed endpoints. |
-| `app/repositories/content_repository.py` | `VisibilityContext`, `build_visibility_context`, `apply_visibility_filters`, `apply_read_filter`, `get_visible_content_query` | Repository helpers for content visibility and flags. |
-| `app/repositories/search_repository.py` | `content_search_supports_full_text`, `search_content_page`, `search_content`, `search_news`, `search_subscription_feeds` | PostgreSQL-native full-text and trigram-backed search entry points for content, news, and subscription-scoped search flows. |
+## Integration points
+- Commands and queries should call repositories/services instead of building route-local SQL.
+- Raw SQL should stay parameterized; prefer SQLAlchemy expressions for shared query fragments.

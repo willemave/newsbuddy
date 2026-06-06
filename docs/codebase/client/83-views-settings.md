@@ -3,16 +3,23 @@
 Source folder: `client/newsly/newsly/Views/Settings`
 
 ## Purpose
-SwiftUI settings screens for account, appearance, integrations, and app-level preferences.
+Settings-related SwiftUI screens and helpers for account/app preferences, reader palette, X integration, CLI linking, and settings layout.
 
 ## Runtime behavior
-- Groups account/profile controls, appearance settings, and service toggles into a dedicated settings surface.
-- Works with `AppSettings`, authentication, and integration services to persist user-facing preferences.
+- `SettingsView` is the main settings surface.
+- `ReaderPaletteSettingsView` controls reader palette/theme preferences.
+- `TwitterSettingsView` manages X/Twitter connection state.
+- `CLILinkScannerSheet` handles CLI QR link approval flow.
+- `SettingsCardModifier` and settings shared rows provide consistent layout/styling.
 
-## Inventory scope
-- Direct file inventory for `client/newsly/newsly/Views/Settings`.
+## Important files
+| File | Purpose |
+|---|---|
+| `SettingsView.swift` | Main settings screen. |
+| `ReaderPaletteSettingsView.swift` | Reader palette settings. |
+| `TwitterSettingsView.swift` | X/Twitter integration settings. |
+| `CLILinkScannerSheet.swift` | CLI QR link scanner/approval sheet. |
+| `SettingsCardModifier.swift` | Settings card styling helper. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `client/newsly/newsly/Views/Settings/SettingsView.swift` | `struct SettingsView`, `description` | Types: `struct SettingsView`. Functions: `description` |
+## Integration points
+- Uses services such as `XIntegrationService`, `CLILinkService`, and shared stores like `ReaderPalette`.

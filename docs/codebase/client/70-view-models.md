@@ -3,37 +3,25 @@
 Source folder: `client/newsly/newsly/ViewModels`
 
 ## Purpose
-ObservableObject view models coordinating repositories, services, and navigation state for list/detail screens, onboarding, discovery, live voice, and chat.
+Observable view-state layer that coordinates services, repositories, navigation state, pagination, background polling, and user actions for SwiftUI screens.
 
 ## Runtime behavior
-- Acts as the main presentation-logic layer between decoded models and SwiftUI views.
-- Owns pagination, filtering, optimistic updates, async loading state, and tab/navigation coordination.
+- List view models manage cursor pagination, filters, loading/error state, and content/news refresh behavior.
+- Detail/chat view models coordinate repositories/services, action sheets, background message polling, timeline reconciliation, and navigation.
+- Feature view models handle Knowledge, discovery, onboarding, Quick Mic, custom narrations, Learning Decks, source settings, search, submissions, and tab coordination.
 
-## Inventory scope
-- Direct file inventory for `client/newsly/newsly/ViewModels`.
-
-## Modules and files
-| File | Key symbols | Notes |
+## Important groups
+| Group | Files | Purpose |
 |---|---|---|
-| `client/newsly/newsly/ViewModels/ArticleDetailViewModel.swift` | `class ArticleDetailViewModel`, `loadArticle`, `markAsRead`, `markAsUnread` | Types: `class ArticleDetailViewModel`. Functions: `loadArticle`, `markAsRead`, `markAsUnread` |
-| `client/newsly/newsly/ViewModels/AuthenticationViewModel.swift` | `enum AuthState`, `class AuthenticationViewModel`, `checkAuthStatus`, `logout`, `signInWithApple`, `updateUser` | Authentication state |
-| `client/newsly/newsly/ViewModels/BaseContentListViewModel.swift` | `enum LoadingState`, `struct Pagination`, `class BaseContentListViewModel`, `currentItems`, `currentReadFilter`, `dropReadItems`, `loadNextPage`, `markItemLocallyRead`, `replaceItems`, `startInitialLoad`, +2 more | Types: `enum LoadingState`, `struct Pagination`, `class BaseContentListViewModel`. Functions: `currentItems`, `currentReadFilter`, `dropReadItems`, `loadNextPage`, `markItemLocallyRead`, `replaceItems`, `startInitialLoad`, `updateItem`. +1 more |
-| `client/newsly/newsly/ViewModels/CardStackKeyPointsLoader.swift` | `struct CardPreviewData`, `class CardStackKeyPointsLoader`, `clearCache`, `hook`, `isLoading`, `keyPoints`, `prefetch`, `previewData`, `topics` | Cached data for a content card including key points, hook, and topics |
-| `client/newsly/newsly/ViewModels/ChatSessionViewModel.swift` | `class ChatSessionViewModel`, `cancelStreaming`, `cancelVoiceRecording`, `checkAndRefreshVoiceDictation`, `digDeeper`, `loadSession`, `sendCounterArgumentsPrompt`, `sendMessage`, `startVoiceRecording`, `stopVoiceRecording`, +1 more | Poll for a processing message to complete |
-| `client/newsly/newsly/ViewModels/ChatSessionsViewModel.swift` | `class ChatSessionsViewModel`, `createSession`, `deleteSessions`, `loadSessions` | Types: `class ChatSessionsViewModel`. Functions: `createSession`, `deleteSessions`, `loadSessions` |
-| `client/newsly/newsly/ViewModels/ContentDetailViewModel.swift` | `enum ShareContentOption`, `class ContentDetailViewModel`, `class MarkdownItemProvider`, `activityViewController`, `activityViewControllerPlaceholderItem`, `downloadMoreFromSeries`, `loadContent`, `openInChatGPT`, `shareContent`, `subscribeToDetectedFeed`, +2 more | Subscribe to the detected feed for this content. |
-| `client/newsly/newsly/ViewModels/ContentListViewModel.swift` | `class ContentListViewModel`, `loadContent`, `loadFavorites`, `loadMoreContent`, `loadRecentlyRead`, `markAllAsRead`, `markAsRead`, `refresh`, `toggleFavorite` | Types: `class ContentListViewModel`. Functions: `loadContent`, `loadFavorites`, `loadMoreContent`, `loadRecentlyRead`, `markAllAsRead`, `markAsRead`, `refresh`, `toggleFavorite` |
-| `client/newsly/newsly/ViewModels/CursorPaginatedViewModel.swift` | `class CursorPaginatedViewModel`, `applyPagination`, `resetPagination` | Types: `class CursorPaginatedViewModel`. Functions: `applyPagination`, `resetPagination` |
-| `client/newsly/newsly/ViewModels/DiscoveryPersonalizeViewModel.swift` | `class DiscoveryPersonalizeViewModel`, `enum Step`, `cancelPersonalization`, `completePersonalization`, `resumeDiscoveryIfNeeded`, `skipToDefaults`, `startAudioCapture`, `startAudioCaptureIfNeeded`, `stopAudioCaptureAndDiscover`, `toggleSource`, +1 more | Types: `class DiscoveryPersonalizeViewModel`, `enum Step`. Functions: `cancelPersonalization`, `completePersonalization`, `resumeDiscoveryIfNeeded`, `skipToDefaults`, `startAudioCapture`, `startAudioCaptureIfNeeded`, `stopAudioCaptureAndDiscover`, `toggleSource`. +1 more |
-| `client/newsly/newsly/ViewModels/DiscoveryViewModel.swift` | `class DiscoveryViewModel`, `addItem`, `addPodcastEpisode`, `clearAll`, `clearPodcastSearch`, `dismiss`, `dismissSuggestions`, `loadSuggestions`, `refreshDiscovery`, `retryPodcastSearch`, +3 more | Whether a discovery job is currently running |
-| `client/newsly/newsly/ViewModels/LiveVoiceViewModel.swift` | `class LiveVoiceViewModel`, `enum ConnectionState`, `cancelResponse`, `connect`, `disconnect`, `startListening`, `stopListening` | Types: `class LiveVoiceViewModel`, `enum ConnectionState`. Functions: `cancelResponse`, `connect`, `disconnect`, `startListening`, `stopListening` |
-| `client/newsly/newsly/ViewModels/LongContentListViewModel.swift` | `class LongContentListViewModel`, `downloadMoreFromSeries`, `markAllVisibleAsRead`, `markAsRead`, `refresh`, `setReadFilter`, `toggleFavorite` | Types: `class LongContentListViewModel`. Functions: `downloadMoreFromSeries`, `markAllVisibleAsRead`, `markAsRead`, `refresh`, `setReadFilter`, `toggleFavorite` |
-| `client/newsly/newsly/ViewModels/NewsGroupViewModel.swift` | `class NewsGroupViewModel`, `clearSessionReads`, `convertToArticle`, `loadMoreGroups`, `loadNewsGroups`, `markGroupAsRead`, `preloadNextGroups`, `refresh`, `setGroupingMetrics`, `toggleFavorite` | Types: `class NewsGroupViewModel`. Functions: `clearSessionReads`, `convertToArticle`, `loadMoreGroups`, `loadNewsGroups`, `markGroupAsRead`, `preloadNextGroups`, `refresh`, `setGroupingMetrics`. +1 more |
-| `client/newsly/newsly/ViewModels/OnboardingViewModel.swift` | `enum OnboardingStep`, `enum OnboardingAudioState`, `class OnboardingViewModel`, `advanceToChoice`, `chooseDefaults`, `completeOnboarding`, `resetAudioState`, `resumeDiscoveryIfNeeded`, `startAudioCapture`, `startAudioCaptureIfNeeded`, +4 more | Types: `enum OnboardingStep`, `enum OnboardingAudioState`, `class OnboardingViewModel`. Functions: `advanceToChoice`, `chooseDefaults`, `completeOnboarding`, `resetAudioState`, `resumeDiscoveryIfNeeded`, `startAudioCapture`, `startAudioCaptureIfNeeded`, `startPersonalized`. +3 more |
-| `client/newsly/newsly/ViewModels/PodcastDetailViewModel.swift` | `class PodcastDetailViewModel`, `loadPodcast`, `markAsPlayed`, `markAsUnplayed`, `toggleTranscript` | Types: `class PodcastDetailViewModel`. Functions: `loadPodcast`, `markAsPlayed`, `markAsUnplayed`, `toggleTranscript` |
-| `client/newsly/newsly/ViewModels/ScraperSettingsViewModel.swift` | `class ScraperSettingsViewModel`, `addConfig`, `deleteConfig`, `loadConfigs`, `updateConfig` | Types: `class ScraperSettingsViewModel`. Functions: `addConfig`, `deleteConfig`, `loadConfigs`, `updateConfig` |
-| `client/newsly/newsly/ViewModels/SearchViewModel.swift` | `class SearchViewModel`, `markAsRead`, `retrySearch`, `toggleFavorite` | Types: `class SearchViewModel`. Functions: `markAsRead`, `retrySearch`, `toggleFavorite` |
-| `client/newsly/newsly/ViewModels/ShortNewsListViewModel.swift` | `class ShortNewsListViewModel`, `itemsScrolledPastTop`, `markAllVisibleAsRead` | Called when items have scrolled past the top of the screen |
-| `client/newsly/newsly/ViewModels/SubmissionStatusViewModel.swift` | `class SubmissionStatusViewModel`, `load`, `loadMore` | Types: `class SubmissionStatusViewModel`. Functions: `load`, `loadMore` |
-| `client/newsly/newsly/ViewModels/TabCoordinatorViewModel.swift` | `enum RootTab`, `class TabCoordinatorViewModel`, `ensureInitialLoads`, `handleTabChange` | Types: `enum RootTab`, `class TabCoordinatorViewModel`. Functions: `ensureInitialLoads`, `handleTabChange` |
-| `client/newsly/newsly/ViewModels/TweetSuggestionsViewModel.swift` | `class TweetSuggestionsViewModel`, `cancelVoiceRecording`, `checkVoiceDictationAvailability`, `copyToClipboard`, `creativityChanged`, `generateSuggestions`, `initialize`, `regenerate`, `selectSuggestion`, `shareToTwitter`, +3 more | Initialize with content ID and generate suggestions. |
+| Auth and root navigation | `AuthenticationViewModel.swift`, `TabCoordinatorViewModel.swift` | Login/profile state and tab routing. |
+| Lists and pagination | `BaseContentListViewModel.swift`, `CursorPaginatedViewModel.swift`, `ContentListViewModel.swift`, `LongContentListViewModel.swift`, `ShortNewsListViewModel.swift`, `NewsGroupViewModel.swift` | Content/news list state and pagination. |
+| Details and readers | `ArticleDetailViewModel.swift`, `ContentDetailViewModel.swift`, `PodcastDetailViewModel.swift`, `CardStackKeyPointsLoader.swift`, `TweetSuggestionsViewModel.swift` | Detail screens, cards, podcast state, and tweet suggestions. |
+| Chat | `ChatSessionViewModel.swift`, `ChatSessionsViewModel.swift`, `ChatTimelineReconciler.swift` | Chat session/message lifecycle and render timeline reconciliation. |
+| Knowledge/search/discovery | `KnowledgeHubViewModel.swift`, `SearchViewModel.swift`, `DiscoveryViewModel.swift`, `DiscoveryPersonalizeViewModel.swift` | Knowledge hub, search, and discovery state. |
+| Onboarding and voice | `OnboardingViewModel.swift`, `QuickMicViewModel.swift` | Onboarding flow and Quick Mic dictation state. |
+| Audio and Learning Decks | `CustomNarrationCreationViewModel.swift`, `CustomNarrationLibraryViewModel.swift`, `LearningDecksViewModel.swift` | Custom narration and Learning Deck sheets/lists. |
+| Sources/submissions/settings | `ScraperSettingsViewModel.swift`, `SubmissionStatusViewModel.swift` | Source settings and submission status state. |
+
+## Integration points
+- View models should call services/repositories rather than constructing API requests in views.
+- Tests under `client/newsly/newslyTests` cover many state transitions.

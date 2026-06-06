@@ -3,27 +3,33 @@
 Source folder: `app/processing_strategies`
 
 ## Purpose
-Ordered URL-specific extraction strategies used by the content worker to turn raw URLs into normalized article, podcast, PDF, or discussion payloads.
+Ordered URL/content extraction strategies used by `ContentWorker` to turn a submitted URL into normalized content for summarization, discussion extraction, media processing, or terminal failure.
 
 ## Runtime behavior
-- Encapsulates source-specific logic for Hacker News, arXiv, PubMed, YouTube, PDFs, general HTML pages, and tweet shares.
-- Uses a registry so worker code can stay generic while specialized strategies decide whether to skip, delegate, or extract content.
+- `registry.py` registers strategies in order: Hacker News, arXiv, PubMed, YouTube, Twitter share, PDF, image, plain text, then HTML.
+- Strategies implement URL matching, download, extraction, and LLM-preparation hooks from `base_strategy.py`.
+- `ContentWorker` treats `NonRetryableError` as terminal content failure and respects strategy `skip_processing` flags.
+- HTML extraction uses crawl4ai/trafilatura paths with Firecrawl fallback.
+- PDF and arXiv paths can use Gemini extraction and fall back to local PDF extraction.
+- YouTube extraction uses `yt-dlp` and `app/scraping/youtube_config.py`.
+- Tweet share extraction uses official X lookup and treats missing text/lookup failures as nonretryable.
 
-## Inventory scope
-- Direct file inventory for `app/processing_strategies`.
+## Important files
+| File | Purpose |
+|---|---|
+| `base_strategy.py` | Abstract `UrlProcessorStrategy` contract. |
+| `registry.py` | Shared strategy registry and ordering. |
+| `hackernews_strategy.py` | HN discussion pages and comment-summary context. |
+| `arxiv_strategy.py` | arXiv abstract/PDF delegation and extraction. |
+| `pubmed_strategy.py` | PubMed-specific article handling/delegation. |
+| `youtube_strategy.py` | YouTube video metadata/transcript handling. |
+| `twitter_share_strategy.py` | Tweet share URL extraction through X lookup. |
+| `pdf_strategy.py` | Direct PDF extraction. |
+| `image_strategy.py` | Direct image URL handling. |
+| `plain_text_strategy.py` | Direct text document handling. |
+| `html_strategy.py` | General webpage extraction fallback. |
 
-## Modules and files
-| File | Key symbols | Notes |
-|---|---|---|
-| `app/processing_strategies/__init__.py` | n/a | Supporting module or configuration file. |
-| `app/processing_strategies/arxiv_strategy.py` | `ArxivProcessorStrategy` | Strategy for processing arXiv content URLs. |
-| `app/processing_strategies/base_strategy.py` | `UrlProcessorStrategy` | This module defines the abstract base class for URL processing strategies. |
-| `app/processing_strategies/hackernews_strategy.py` | `HackerNewsProcessorStrategy` | HackerNews processing strategy that handles HN discussion pages, fetches comments, and generates comment summaries. |
-| `app/processing_strategies/image_strategy.py` | `ImageProcessorStrategy` | This module defines the strategy for handling image URLs |
-| `app/processing_strategies/pdf_strategy.py` | `PdfProcessorStrategy` | Types: `PdfProcessorStrategy` |
-| `app/processing_strategies/plain_text_strategy.py` | `PlainTextProcessorStrategy` | Strategy for processing directly linked plain-text documents. |
-| `app/processing_strategies/html_strategy.py` | `HtmlProcessorStrategy` | This module defines the strategy for processing standard HTML web pages using crawl4ai. |
-| `app/processing_strategies/pubmed_strategy.py` | `PubMedProcessorStrategy` | This module defines the strategy for processing PubMed article pages |
-| `app/processing_strategies/registry.py` | `StrategyRegistry`, `get_strategy_registry` | Types: `StrategyRegistry`. Functions: `get_strategy_registry` |
-| `app/processing_strategies/twitter_share_strategy.py` | `TweetContent`, `TwitterShareProcessorStrategy` | Tweet-only processing strategy for share-sheet ingestion. |
-| `app/processing_strategies/youtube_strategy.py` | `YouTubeProcessorStrategy` | Types: `YouTubeProcessorStrategy` |
+## Integration points
+- `app/pipeline/worker.py` selects and executes strategies.
+- `app/http_client/robust_http_client.py` provides the shared synchronous HTTP client.
+- Provider keys and external extraction settings come from `app/core/settings.py`.
