@@ -15,13 +15,9 @@ enum ContentDetailNavigationSurface: String, Codable, Hashable {
     case savedLibrary = "saved_library"
     case search
     case newsGroup = "news_group"
-
-    var logName: String {
-        rawValue
-    }
 }
 
-struct ContentDetailNavigationContext: Hashable {
+struct ContentDetailNavigationContext {
     let initialContentId: Int
     let initialContentType: ContentType?
     let contentIds: [Int]
@@ -35,12 +31,12 @@ struct ContentDetailNavigationContext: Hashable {
     ) {
         self.initialContentId = initialContentId
         self.initialContentType = initialContentType
-        self.contentIds = contentIds.isEmpty ? [initialContentId] : contentIds
+        self.contentIds = contentIds.contains(initialContentId) ? contentIds : [initialContentId]
         self.surface = surface
     }
 
     var initialIndex: Int {
-        contentIds.firstIndex(of: initialContentId) ?? 0
+        contentIds.firstIndex(of: initialContentId) ?? contentIds.startIndex
     }
 
     func contentId(at index: Int) -> Int? {

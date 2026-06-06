@@ -46,7 +46,8 @@ private struct ViewAlert: Identifiable {
 // MARK: - Design Tokens
 private enum DetailDesign {
     // Spacing
-    static let horizontalPadding: CGFloat = Spacing.readerHorizontal * 0.7
+    static let compactReaderPaddingScale: CGFloat = 0.7
+    static let horizontalPadding: CGFloat = Spacing.readerHorizontal * compactReaderPaddingScale
     static let headerHorizontalPadding: CGFloat = horizontalPadding
     static let sectionSpacing: CGFloat = 20
     static let actionBarTopPadding: CGFloat = 0
@@ -3168,7 +3169,7 @@ struct ContentDetailView: View {
     }
 
     private var navigationSurfaceName: String {
-        navigationContext.surface.logName
+        navigationContext.surface.rawValue
     }
 
     private func logSwipeDecision(_ decision: String, value: DragGesture.Value) {
