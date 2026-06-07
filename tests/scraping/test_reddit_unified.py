@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 from pytest_mock import MockerFixture
 
+from app.constants import SUMMARY_KIND_SHORT_NEWS, SUMMARY_VERSION_V1
 from app.scraping.reddit_unified import RedditTarget, RedditUnifiedScraper
 
 
@@ -69,6 +70,66 @@ def test_reddit_scraper_uses_praw(monkeypatch: pytest.MonkeyPatch, mocker: Mocke
     mock_reddit.subreddit.assert_called_once_with("artificial")
     mock_subreddit.new.assert_called_once_with(limit=5)
     assert mock_reddit.read_only is True
+
+
+def test_reddit_scraper_includes_self_posts_as_ready_summaries(
+    monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+) -> None:
+    from app.scraping import reddit_unified as reddit_module
+
+    submission = mocker.Mock()
+    submission.is_self = True
+    submission.url = "https://www.reddit.com/r/dogs/comments/abc123/what_breed_should_i_get/"
+    submission.permalink = "/r/dogs/comments/abc123/what_breed_should_i_get/"
+    submission.removed_by_category = None
+    submission.title = "What breed should I get?"
+    submission.subreddit = SimpleNamespace(display_name="dogs")
+    submission.score = 7
+    submission.num_comments = 2
+    submission.upvote_ratio = 0.88
+    submission.over_18 = False
+    submission.selftext = "Looking for advice on a medium-energy dog for an apartment."
+    submission.domain = "self.dogs"
+    submission.id = "abc123"
+    submission.author = SimpleNamespace(name="dog_owner")
+
+    mock_subreddit = mocker.Mock()
+    mock_subreddit.new.return_value = [submission]
+    mock_reddit = mocker.Mock()
+    mock_reddit.subreddit.return_value = mock_subreddit
+
+    mocker.patch.object(reddit_module.praw, "Reddit", return_value=mock_reddit)
+
+    scraper = RedditUnifiedScraper()
+    scraper.targets = [
+        RedditTarget(
+            subreddit="dogs",
+            limit=1,
+            visibility_scope="user",
+            owner_user_id=15,
+            user_scraper_config_id=20,
+        )
+    ]
+
+    items = scraper.scrape()
+
+    assert len(items) == 1
+    item = items[0]
+    assert item["url"] == "https://www.reddit.com/r/dogs/comments/abc123/what_breed_should_i_get"
+    assert item["owner_user_id"] == 15
+    assert item["user_scraper_config_id"] == 20
+    assert item["metadata"]["summary"] == {
+        "title": "What breed should I get?",
+        "article_url": "https://www.reddit.com/r/dogs/comments/abc123/what_breed_should_i_get",
+        "key_points": ["Looking for advice on a medium-energy dog for an apartment."],
+        "summary": "Looking for advice on a medium-energy dog for an apartment.",
+    }
+    assert item["metadata"]["summary_kind"] == SUMMARY_KIND_SHORT_NEWS
+    assert item["metadata"]["summary_version"] == SUMMARY_VERSION_V1
+    assert item["metadata"]["items"][0]["summary"] == (
+        "Looking for advice on a medium-energy dog for an apartment."
+    )
+    mock_subreddit.new.assert_called_once_with(limit=1)
 
 
 def test_is_external_url_allows_front_media() -> None:

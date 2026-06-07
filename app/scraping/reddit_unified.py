@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import praw
 import prawcore
 
+from app.constants import SUMMARY_KIND_SHORT_NEWS, SUMMARY_VERSION_V1
 from app.core.db import get_db
 from app.core.logging import get_logger
 from app.core.settings import get_settings
@@ -129,21 +130,22 @@ class RedditUnifiedScraper(BaseScraper):
             subreddit = client.subreddit("popular" if subreddit_name == "front" else subreddit_name)
 
             for submission in subreddit.new(limit=min(limit, 100)):
-                # Skip self posts and posts without external URLs
-                if submission.is_self and subreddit_name != "front":
-                    continue
-
-                if not self._is_external_url(
-                    submission.url, allow_reddit_media=subreddit_name == "front"
-                ):
-                    continue
-
                 # Skip deleted/removed posts
                 if submission.removed_by_category or not submission.title:
                     continue
 
-                normalized_url = self._normalize_url(submission.url)
                 discussion_url = f"https://www.reddit.com{submission.permalink}"
+                is_self_post = bool(submission.is_self and subreddit_name != "front")
+
+                if is_self_post:
+                    normalized_url = self._normalize_url(discussion_url)
+                else:
+                    if not self._is_external_url(
+                        submission.url, allow_reddit_media=subreddit_name == "front"
+                    ):
+                        continue
+
+                    normalized_url = self._normalize_url(submission.url)
 
                 try:
                     source_domain = urlparse(normalized_url).netloc or None
@@ -151,67 +153,80 @@ class RedditUnifiedScraper(BaseScraper):
                     source_domain = None
 
                 timestamp = datetime.now(UTC).isoformat()
+                selftext = (getattr(submission, "selftext", None) or "").strip()
+                summary_text = selftext or submission.title
 
-                item = {
-                    "url": normalized_url,
-                    "title": submission.title,
-                    "content_type": ContentType.NEWS,
-                    "is_aggregate": False,
-                    "owner_user_id": target.owner_user_id,
-                    "visibility_scope": target.visibility_scope,
-                    "user_scraper_config_id": target.user_scraper_config_id,
-                    "metadata": {
-                        "platform": "reddit",  # Scraper identifier
-                        "source": submission.subreddit.display_name,
-                        "source_type": (
-                            "user_reddit" if target.visibility_scope == "user" else "reddit"
-                        ),
-                        "source_label": submission.subreddit.display_name,
-                        "article": {
-                            "url": normalized_url,
-                            "title": submission.title,
-                            "source_domain": source_domain,
+                metadata: dict[str, Any] = {
+                    "platform": "reddit",  # Scraper identifier
+                    "source": submission.subreddit.display_name,
+                    "source_type": (
+                        "user_reddit" if target.visibility_scope == "user" else "reddit"
+                    ),
+                    "source_label": submission.subreddit.display_name,
+                    "article": {
+                        "url": normalized_url,
+                        "title": submission.title,
+                        "source_domain": source_domain,
+                    },
+                    "aggregator": {
+                        "name": "Reddit",
+                        "title": submission.title,
+                        "external_id": submission.id,
+                        "author": getattr(submission, "author", None) and submission.author.name,
+                        "metadata": {
+                            "score": submission.score,
+                            "comments_count": submission.num_comments,
+                            "upvote_ratio": submission.upvote_ratio,
+                            "subreddit": submission.subreddit.display_name,
+                            "over_18": submission.over_18,
                         },
-                        "aggregator": {
-                            "name": "Reddit",
+                    },
+                    "items": [
+                        {
                             "title": submission.title,
-                            "external_id": submission.id,
+                            "url": normalized_url,
+                            "summary": summary_text if is_self_post else None,
+                            "source": submission.domain,
                             "author": getattr(submission, "author", None)
                             and submission.author.name,
+                            "score": submission.score,
+                            "comments_url": discussion_url,
                             "metadata": {
                                 "score": submission.score,
                                 "comments_count": submission.num_comments,
                                 "upvote_ratio": submission.upvote_ratio,
-                                "subreddit": submission.subreddit.display_name,
-                                "over_18": submission.over_18,
+                                "reddit_id": submission.id,
                             },
-                        },
-                        "items": [
-                            {
-                                "title": submission.title,
-                                "url": normalized_url,
-                                "summary": None,
-                                "source": submission.domain,
-                                "author": getattr(submission, "author", None)
-                                and submission.author.name,
-                                "score": submission.score,
-                                "comments_url": discussion_url,
-                                "metadata": {
-                                    "score": submission.score,
-                                    "comments_count": submission.num_comments,
-                                    "upvote_ratio": submission.upvote_ratio,
-                                    "reddit_id": submission.id,
-                                },
-                            }
-                        ],
-                        "discussion_url": discussion_url,
-                        "excerpt": submission.selftext or None,
-                        "discovery_time": timestamp,
-                        "scraped_at": timestamp,
-                    },
+                        }
+                    ],
+                    "discussion_url": discussion_url,
+                    "excerpt": selftext or None,
+                    "discovery_time": timestamp,
+                    "scraped_at": timestamp,
                 }
 
-                items.append(item)
+                if is_self_post:
+                    metadata["summary"] = {
+                        "title": submission.title,
+                        "article_url": normalized_url,
+                        "key_points": [summary_text[:220]],
+                        "summary": summary_text[:500],
+                    }
+                    metadata["summary_kind"] = SUMMARY_KIND_SHORT_NEWS
+                    metadata["summary_version"] = SUMMARY_VERSION_V1
+
+                items.append(
+                    {
+                        "url": normalized_url,
+                        "title": submission.title,
+                        "content_type": ContentType.NEWS,
+                        "is_aggregate": False,
+                        "owner_user_id": target.owner_user_id,
+                        "visibility_scope": target.visibility_scope,
+                        "user_scraper_config_id": target.user_scraper_config_id,
+                        "metadata": metadata,
+                    }
+                )
 
                 if len(items) >= limit:
                     break
