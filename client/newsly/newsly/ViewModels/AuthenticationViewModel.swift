@@ -193,7 +193,7 @@ final class AuthenticationViewModel: ObservableObject {
     private func performE2EAutoLogin() {
         Task {
             do {
-                let session = try await authService.createDebugUser(
+                let session = try await authService.createDebugSession(
                     userId: E2ETestLaunch.userID,
                     hasCompletedOnboarding: E2ETestLaunch.completeOnboarding,
                     hasCompletedNewUserTutorial: E2ETestLaunch.completeTutorial

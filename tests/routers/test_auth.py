@@ -127,6 +127,37 @@ def test_debug_create_user_reuses_existing_user_and_updates_flags(
     assert payload["is_new_user"] is False
 
 
+def test_debug_create_user_can_reset_existing_user_onboarding_flags(
+    auth_client: TestClient,
+    db_session: Session,
+    test_user,
+) -> None:
+    """Debug auth can persistently reset onboarding flags for an existing user."""
+    test_user.has_completed_onboarding = True
+    test_user.has_completed_new_user_tutorial = True
+    db_session.commit()
+
+    response = auth_client.post(
+        "/auth/debug/new-user",
+        json={
+            "user_id": test_user.id,
+            "has_completed_onboarding": False,
+            "has_completed_new_user_tutorial": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["user"]["id"] == test_user.id
+    assert payload["user"]["has_completed_onboarding"] is False
+    assert payload["user"]["has_completed_new_user_tutorial"] is False
+    assert payload["is_new_user"] is False
+
+    db_session.refresh(test_user)
+    assert test_user.has_completed_onboarding is False
+    assert test_user.has_completed_new_user_tutorial is False
+
+
 def test_refresh_token_valid(
     auth_client: TestClient,
     user_factory,

@@ -16,10 +16,10 @@ private let authLogger = Logger(subsystem: "com.newsly", category: "Authenticati
 final class AuthenticationService: NSObject {
     static let shared = AuthenticationService()
 
-    private struct DebugUserRequest: Encodable {
+    private struct DebugSessionRequest: Encodable {
         let userId: Int?
-        let hasCompletedOnboarding: Bool
-        let hasCompletedNewUserTutorial: Bool
+        let hasCompletedOnboarding: Bool?
+        let hasCompletedNewUserTutorial: Bool?
 
         enum CodingKeys: String, CodingKey {
             case userId = "user_id"
@@ -162,19 +162,19 @@ final class AuthenticationService: NSObject {
         }
     }
 
-    /// Create a fresh debug user (debug servers only).
+    /// Create or resume a debug session (debug servers only).
     @MainActor
-    func createDebugUser(
+    func createDebugSession(
         userId: Int? = nil,
-        hasCompletedOnboarding: Bool = false,
-        hasCompletedNewUserTutorial: Bool = false
+        hasCompletedOnboarding: Bool? = nil,
+        hasCompletedNewUserTutorial: Bool? = nil
     ) async throws -> AuthSession {
         let url = URL(string: "\(AppSettings.shared.baseURL)\(APIEndpoints.authDebugNewUser)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
-            DebugUserRequest(
+            DebugSessionRequest(
                 userId: userId,
                 hasCompletedOnboarding: hasCompletedOnboarding,
                 hasCompletedNewUserTutorial: hasCompletedNewUserTutorial
