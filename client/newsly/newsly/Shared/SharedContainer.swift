@@ -103,6 +103,20 @@ enum E2ETestLaunch {
         }
     }
 
+    private static func date(for key: String) -> Date? {
+        guard let value = string(for: key) else { return nil }
+
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalFormatter.date(from: value) {
+            return date
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
+    }
+
     static let enabledKey = "newslyE2EEnabled"
     static let autoLoginKey = "newslyE2EAutoLogin"
     static let serverHostKey = "newslyE2EServerHost"
@@ -117,6 +131,7 @@ enum E2ETestLaunch {
     static let openContentTypeKey = "newslyE2EOpenContentType"
     static let fakeSpeechEnabledKey = "newslyE2EFakeSpeechEnabled"
     static let fakeSpeechTranscriptKey = "newslyE2EFakeSpeechTranscript"
+    static let visualNowKey = "newslyE2EVisualNow"
 
     static var isEnabled: Bool {
         bool(for: enabledKey)
@@ -186,6 +201,11 @@ enum E2ETestLaunch {
     static var fakeSpeechTranscript: String? {
         guard fakeSpeechEnabled else { return nil }
         return string(for: fakeSpeechTranscriptKey)
+    }
+
+    static var visualNow: Date? {
+        guard isEnabled else { return nil }
+        return date(for: visualNowKey)
     }
 }
 

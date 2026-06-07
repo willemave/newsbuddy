@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -40,6 +40,15 @@ BASELINE_FILES = {
     ],
 }
 
+VISUAL_NOW = datetime(2026, 6, 6, 16, 41, tzinfo=UTC)
+VISUAL_ARTICLE_PUBLISHED_AT = VISUAL_NOW - timedelta(hours=2, minutes=15)
+VISUAL_ARTICLE_INGESTED_AT = VISUAL_ARTICLE_PUBLISHED_AT + timedelta(minutes=18)
+VISUAL_ARTICLE_PROCESSED_AT = VISUAL_ARTICLE_PUBLISHED_AT + timedelta(minutes=24)
+VISUAL_NEWS_PUBLISHED_AT = VISUAL_NOW - timedelta(hours=1, minutes=10)
+VISUAL_NEWS_INGESTED_AT = VISUAL_NEWS_PUBLISHED_AT + timedelta(minutes=4)
+VISUAL_NEWS_PROCESSED_AT = VISUAL_NEWS_PUBLISHED_AT + timedelta(minutes=9)
+VISUAL_NOW_LAUNCH_VALUE = VISUAL_NOW.isoformat().replace("+00:00", "Z")
+
 
 def _is_recording_baselines() -> bool:
     return os.environ.get("NEWSLY_MAESTRO_RECORD_VISUAL_BASELINES") == "1"
@@ -70,7 +79,25 @@ def _prepare_baselines(base_name: str) -> None:
 
 
 def _baseline_env() -> dict[str, str]:
-    return {"BASELINE_DIR": str(BASELINE_DIR)}
+    return {
+        "BASELINE_DIR": str(BASELINE_DIR),
+        "VISUAL_NOW": VISUAL_NOW_LAUNCH_VALUE,
+    }
+
+
+def _utc_naive(value: datetime) -> datetime:
+    return value.replace(tzinfo=None)
+
+
+def _apply_article_visual_timestamps(db_session, content):
+    content.created_at = _utc_naive(VISUAL_ARTICLE_INGESTED_AT)
+    content.updated_at = _utc_naive(VISUAL_ARTICLE_PROCESSED_AT)
+    content.processed_at = _utc_naive(VISUAL_ARTICLE_PROCESSED_AT)
+    content.publication_date = _utc_naive(VISUAL_ARTICLE_PUBLISHED_AT)
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+    return content
 
 
 def _create_user_visible_news_item(
@@ -81,6 +108,17 @@ def _create_user_visible_news_item(
     title: str,
     discussion_payload: dict | None = None,
 ) -> NewsItem:
+    summary_text = (
+        "Developers compare compact homelab servers built around Intel's efficient "
+        "N100 and N150 chips."
+    )
+    key_points = [
+        "Several compact NAS systems now pair efficient Intel chips with multiple NVMe slots.",
+        (
+            "The discussion weighs power draw, network throughput, and storage "
+            "tradeoffs for home labs."
+        ),
+    ]
     item = NewsItem(
         ingest_key=ingest_key,
         visibility_scope="user",
@@ -96,27 +134,23 @@ def _create_user_visible_news_item(
         article_domain="example.com",
         discussion_url="https://news.ycombinator.com/item?id=424242",
         summary_title=title,
-        summary_key_points=[
-            "The visual regression fixture keeps Fast News deterministic.",
-            "The sheet should be compact and free of large empty lower regions.",
-        ],
-        summary_text="A deterministic Fast News item for visual regression coverage.",
+        summary_key_points=key_points,
+        summary_text=summary_text,
         raw_metadata={
             "discussion_url": "https://news.ycombinator.com/item?id=424242",
             "summary": {
                 "article_url": "https://example.com/visual-regression-story",
-                "summary": "A deterministic Fast News item for visual regression coverage.",
-                "key_points": [
-                    "The visual regression fixture keeps Fast News deterministic.",
-                    "The sheet should be compact and free of large empty lower regions.",
-                ],
+                "summary": summary_text,
+                "key_points": key_points,
             },
             "discussion_payload": discussion_payload or {},
         },
         status="ready",
-        published_at=datetime(2026, 1, 15, 12, 0, tzinfo=UTC).replace(tzinfo=None),
-        ingested_at=datetime(2026, 1, 15, 12, 5, tzinfo=UTC).replace(tzinfo=None),
-        processed_at=datetime(2026, 1, 15, 12, 10, tzinfo=UTC).replace(tzinfo=None),
+        published_at=_utc_naive(VISUAL_NEWS_PUBLISHED_AT),
+        ingested_at=_utc_naive(VISUAL_NEWS_INGESTED_AT),
+        processed_at=_utc_naive(VISUAL_NEWS_PROCESSED_AT),
+        created_at=_utc_naive(VISUAL_NEWS_INGESTED_AT),
+        updated_at=_utc_naive(VISUAL_NEWS_PROCESSED_AT),
     )
     db_session.add(item)
     db_session.commit()
@@ -134,11 +168,12 @@ def test_primary_tabs_match_visual_baselines(
     """Primary tab screens should keep their known visual shape."""
     _prepare_baselines("visual_main_screens")
     long_content = create_sample_content(sample_article_long)
+    long_content = _apply_article_visual_timestamps(db_session, long_content)
     news_item = _create_user_visible_news_item(
         db_session,
         user_id=test_user.id,
         ingest_key="ios-visual-main-screen",
-        title="Visual Regression Main Screen Fixture",
+        title="Mini NAS Boards Put NVMe Storage in Tiny Homelab Servers",
     )
 
     run_ios_flow(
@@ -155,10 +190,12 @@ def test_content_detail_modals_match_visual_baselines(
     run_ios_flow,
     create_sample_content,
     sample_article_long,
+    db_session,
 ) -> None:
     """Article detail action sheets should stay compact and visually stable."""
     _prepare_baselines("visual_content_modals")
     content = create_sample_content(sample_article_long)
+    content = _apply_article_visual_timestamps(db_session, content)
 
     run_ios_flow(
         _flow_name("visual_content_modals"),
@@ -178,7 +215,7 @@ def test_discussion_modal_matches_visual_baseline(
         db_session,
         user_id=test_user.id,
         ingest_key="ios-visual-discussion-modal",
-        title="Visual Regression Discussion Fixture",
+        title="Mini NAS Boards Put NVMe Storage in Tiny Homelab Servers",
         discussion_payload={
             "mode": "comments",
             "source_url": "https://news.ycombinator.com/item?id=424242",

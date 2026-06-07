@@ -83,7 +83,7 @@ enum ContentTimestampFormatter {
         return utcSecondsFormatter.date(from: rawValue)
     }
 
-    static func detailMetaText(from rawValue: String?, now: Date = Date()) -> String? {
+    static func detailMetaText(from rawValue: String?, now: Date = AppClock.now) -> String? {
         guard let date = parse(rawValue) else { return nil }
 
         let interval = now.timeIntervalSince(date)
@@ -99,12 +99,12 @@ enum ContentTimestampFormatter {
         return monthDayYearFormatter.string(from: date)
     }
 
-    static func compactRelativeText(from rawValue: String?, now: Date = Date()) -> String? {
+    static func compactRelativeText(from rawValue: String?, now: Date = AppClock.now) -> String? {
         guard let date = parse(rawValue) else { return nil }
         return compactRelativeText(from: date, now: now)
     }
 
-    static func compactRelativeText(from date: Date, now: Date = Date()) -> String {
+    static func compactRelativeText(from date: Date, now: Date = AppClock.now) -> String {
         let interval = now.timeIntervalSince(date)
 
         if interval >= 0, interval < 60 {
@@ -126,7 +126,7 @@ enum ContentTimestampFormatter {
         return monthDayFormatter.string(from: date)
     }
 
-    static func text(from rawValue: String?, style: ContentTimestampStyle, now: Date = Date()) -> String? {
+    static func text(from rawValue: String?, style: ContentTimestampStyle, now: Date = AppClock.now) -> String? {
         switch style {
         case .detailMeta:
             return detailMetaText(from: rawValue, now: now)
