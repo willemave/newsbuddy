@@ -7,16 +7,17 @@
 
 import os.log
 import SwiftUI
-import UIKit
 
 private let logger = Logger(subsystem: "com.newsly", category: "ShortFormView")
 
 struct ShortFormView: View {
     @ObservedObject var viewModel: ShortNewsListViewModel
+    let isActive: Bool
     let onSelect: (ContentDetailRoute) -> Void
     @StateObject private var processingCountService = ProcessingCountService.shared
     @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
     @State private var scrollReadTracker = ShortNewsScrollReadTracker()
+    @State private var isScrollReadTrackingEnabled = false
     private let chatService = ChatService.shared
 
     @State private var showMarkAllConfirmation = false
@@ -60,7 +61,7 @@ struct ShortFormView: View {
                         isPlaying: isPlayingFastNewsAudio,
                         onPlay: handleFastNewsAudioEpisode
                     )
-                    .padding(.horizontal, Spacing.screenHorizontal)
+                    .padding(.horizontal, Spacing.fastReadHorizontal)
                     .padding(.bottom, 22)
 
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
@@ -119,7 +120,7 @@ struct ShortFormView: View {
                                 }
                         }
                         .buttonStyle(.plain)
-                        .padding(.horizontal, Spacing.screenHorizontal)
+                        .padding(.horizontal, Spacing.fastReadHorizontal)
                         .padding(.vertical, 8)
                     }
 
@@ -146,6 +147,13 @@ struct ShortFormView: View {
         }
         .onScrollPhaseChange { _, newPhase in
             guard newPhase == .idle else { return }
+            markItemsAboveAsRead()
+        }
+        .task(id: isActive) {
+            isScrollReadTrackingEnabled = false
+            guard isActive else { return }
+            guard await TabActivationTiming.waitForSettle() else { return }
+            isScrollReadTrackingEnabled = true
             markItemsAboveAsRead()
         }
         .refreshable {
@@ -248,6 +256,7 @@ struct ShortFormView: View {
     }
 
     private func markItemsAboveAsRead() {
+        guard isScrollReadTrackingEnabled else { return }
         let items = viewModel.currentItems()
         let idsToMark = scrollReadTracker.idsToMarkAboveTop(in: items)
         guard !idsToMark.isEmpty else { return }
@@ -289,7 +298,7 @@ struct ShortFormView: View {
                         .accessibilityIdentifier("short.quick_action.\(action.id)")
                     }
                 }
-                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.horizontal, Spacing.fastReadHorizontal)
             }
 
             if shouldShowFastNewsAudioControls {
@@ -299,21 +308,21 @@ struct ShortFormView: View {
                     isPreparing: isPreparingFastNewsAudio,
                     onTogglePlayback: handleFastNewsAudioEpisode
                 )
-                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.horizontal, Spacing.fastReadHorizontal)
             }
 
             if let fastNewsAudioErrorMessage {
                 Text(fastNewsAudioErrorMessage)
                     .font(.terracottaBodySmall)
                     .foregroundStyle(Color.statusDestructive)
-                    .padding(.horizontal, Spacing.screenHorizontal)
+                    .padding(.horizontal, Spacing.fastReadHorizontal)
             }
 
             if let quickActionErrorMessage {
                 Text(quickActionErrorMessage)
                     .font(.terracottaBodySmall)
                     .foregroundStyle(Color.statusDestructive)
-                    .padding(.horizontal, Spacing.screenHorizontal)
+                    .padding(.horizontal, Spacing.fastReadHorizontal)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -499,12 +508,12 @@ private struct ShortNewsRow: View, Equatable {
         lhs.item == rhs.item
     }
 
-    private var titleUIColor: UIColor {
-        item.isRead ? .appOnSurfaceSecondary : .appReaderBodyText
+    private var titleColor: Color {
+        item.isRead ? .onSurfaceSecondary : .readerBodyText
     }
 
-    private var titleUIFont: UIFont {
-        .appTerracottaHeadlineCompact
+    private var titleFont: Font {
+        .terracottaHeadlineCompact
     }
 
     private var metadataColor: Color {
@@ -526,30 +535,27 @@ private struct ShortNewsRow: View, Equatable {
         let metadata = metadataParts
 
         VStack(alignment: .leading, spacing: 7) {
-            SelectableText(
+            FeedListText(
                 item.displayTitle,
-                textColor: titleUIColor,
-                font: titleUIFont,
+                textColor: titleColor,
+                font: titleFont,
                 lineLimit: 3,
-                lineBreakMode: .byTruncatingTail,
                 onDigDeeper: onDigDeeper
             )
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
 
             if !metadata.isEmpty || item.commentCountDisplay != nil {
                 metadataRow(parts: metadata)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.horizontal, Spacing.fastReadHorizontal)
         .padding(.vertical, 14)
         .background(Color.surfacePrimary)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.borderSubtle.opacity(0.48))
                 .frame(height: 1)
-                .padding(.horizontal, Spacing.rowHorizontal)
+                .padding(.horizontal, Spacing.fastReadHorizontal)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("short.row.\(item.id)")
@@ -575,7 +581,7 @@ private struct ShortNewsRow: View, Equatable {
                 }
 
                 Image(systemName: "bubble.left")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.appSymbol(size: 11, weight: .medium))
                     .foregroundStyle(metadataColor)
                     .accessibilityHidden(true)
 
@@ -627,7 +633,7 @@ private struct DayDelimiter: View, Equatable {
                 .fill(Color.outlineVariant)
                 .frame(height: 1)
         }
-        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.horizontal, Spacing.fastReadHorizontal)
         .padding(.top, isFirst ? 12 : 20)
         .padding(.bottom, 7)
         .background(Color.surfacePrimary)

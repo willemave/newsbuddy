@@ -50,7 +50,8 @@ struct AuthenticatedRootView: View {
                     Task { await completeTutorial() }
                 }
             case .content:
-                ContentView()
+                ContentView(userId: user.id)
+                    .id(user.id)
                     .environmentObject(authViewModel)
                     .withToast()
                     .task {

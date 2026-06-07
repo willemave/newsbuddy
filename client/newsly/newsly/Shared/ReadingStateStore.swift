@@ -25,9 +25,16 @@ extension Notification.Name {
 final class ReadingStateStore: ObservableObject {
     @Published var current: ReadingState?
 
-    private let storageKey = "currentReadingState"
+    private let defaults: UserDefaults
+    private let storageKey: String
 
-    init() {
+    init(userId: Int? = nil, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.storageKey = if let userId {
+            "currentReadingState.user.\(userId)"
+        } else {
+            "currentReadingState"
+        }
         load()
         logger.info("[ReadingState] Store initialized")
     }
@@ -53,18 +60,18 @@ final class ReadingStateStore: ObservableObject {
     func clear() {
         logger.info("[ReadingState] clear | previousContentId=\(self.current?.contentId ?? -1)")
         current = nil
-        UserDefaults.standard.removeObject(forKey: storageKey)
+        defaults.removeObject(forKey: storageKey)
     }
 
     private func persist() {
         guard let current else { return }
         if let data = try? JSONEncoder().encode(current) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            defaults.set(data, forKey: storageKey)
         }
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+        guard let data = defaults.data(forKey: storageKey),
               let state = try? JSONDecoder().decode(ReadingState.self, from: data)
         else { return }
         current = state

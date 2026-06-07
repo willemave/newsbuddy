@@ -12,7 +12,7 @@ private let logger = Logger(subsystem: "com.newsly", category: "ContentView")
 
 struct ContentView: View {
     @StateObject private var unreadCountService = UnreadCountService.shared
-    @StateObject private var readingStateStore = ReadingStateStore()
+    @StateObject private var readingStateStore: ReadingStateStore
     @StateObject private var tabCoordinator: TabCoordinatorViewModel
     @StateObject private var chatSessionManager = ActiveChatSessionManager.shared
     @StateObject private var chatNavigation = ChatNavigationCoordinator.shared
@@ -29,7 +29,8 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @MainActor
-    init(tabCoordinator: TabCoordinatorViewModel? = nil) {
+    init(userId: Int? = nil, tabCoordinator: TabCoordinatorViewModel? = nil) {
+        _readingStateStore = StateObject(wrappedValue: ReadingStateStore(userId: userId))
         _tabCoordinator = StateObject(wrappedValue: tabCoordinator ?? RootDependencyFactory.makeTabCoordinator())
     }
 
@@ -107,6 +108,7 @@ struct ContentView: View {
             NavigationStack(path: $shortFormPath) {
                 ShortFormView(
                     viewModel: tabCoordinator.shortNewsVM,
+                    isActive: tabCoordinator.selectedTab == .shortNews,
                     onSelect: { route in
                         logger.info(
                             "[Navigation] pushDetail tab=fast_news contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(shortFormPath.count, privacy: .public)"
@@ -171,6 +173,7 @@ struct ContentView: View {
             .badge(moreBadge != nil ? Int(moreBadge!) ?? 0 : 0)
         }
         .tint(Color.appChromeAccent)
+        .font(.appBody)
         .dynamicTypeSize(AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize)
         .environmentObject(readingStateStore)
         .onAppear {
