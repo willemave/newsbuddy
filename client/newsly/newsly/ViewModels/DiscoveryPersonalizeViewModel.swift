@@ -137,7 +137,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
         }
     }
 
-    func skipToDefaults() {
+    func skipPersonalization() {
         stopAudioCapture()
         clearDiscoveryState()
         Task { await completePersonalization() }

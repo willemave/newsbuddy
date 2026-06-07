@@ -70,8 +70,11 @@ struct OnboardingFlowView: View {
         case .suggestions:
             suggestionsView
                 .transition(screenTransition)
-        case .fastNews:
-            fastNewsView
+        case .fastNews, .aggregators:
+            aggregatorsView
+                .transition(screenTransition)
+        case .reddit:
+            redditView
                 .transition(screenTransition)
         }
     }
@@ -98,7 +101,7 @@ struct OnboardingFlowView: View {
         )
     }
 
-    private var progressStepTotal: Int { 4 }
+    private var progressStepTotal: Int { 5 }
 
     // MARK: - Choice
 
@@ -141,9 +144,9 @@ struct OnboardingFlowView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "mic.fill")
-                            .font(.body.weight(.medium))
+                            .font(.appBody.weight(.medium))
                         Text("Personalize with voice")
-                            .font(.callout.weight(.semibold))
+                            .font(.appCallout.weight(.semibold))
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -156,19 +159,19 @@ struct OnboardingFlowView: View {
                 Button {
                     viewModel.chooseDefaults()
                 } label: {
-                    Text("Skip - use popular defaults")
-                        .font(.callout.weight(.medium))
+                    Text("Skip personalization")
+                        .font(.appCallout.weight(.medium))
                         .foregroundColor(.onboardingText.opacity(0.72))
                 }
                 .buttonStyle(OnboardingTextButtonStyle())
-                .accessibilityIdentifier("onboarding.choice.defaults")
+                .accessibilityIdentifier("onboarding.choice.skip")
             }
             .padding(12)
             .background(cardSurface(cornerRadius: 36))
 
             if let error = viewModel.errorMessage {
                 Text(error)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(.statusDestructive)
                     .padding(.top, 8)
             }
@@ -208,7 +211,7 @@ struct OnboardingFlowView: View {
                 Button("Skip") {
                     viewModel.chooseDefaults()
                 }
-                .font(.callout.weight(.medium))
+                .font(.appCallout.weight(.medium))
                 .foregroundColor(.onboardingText.opacity(0.72))
                 .buttonStyle(OnboardingTextButtonStyle())
                 .padding(.bottom, 8)
@@ -217,7 +220,7 @@ struct OnboardingFlowView: View {
 
             if let error = viewModel.errorMessage {
                 Text(error)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(.statusDestructive)
                     .padding(.bottom, 8)
             }
@@ -235,7 +238,7 @@ struct OnboardingFlowView: View {
                 .scaleEffect(1.2)
                 .tint(.onboardingText)
             Text("Processing your interests...")
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.7))
 
             if hasTopicPreview {
@@ -267,52 +270,29 @@ struct OnboardingFlowView: View {
                         .scaleEffect(1.2)
                         .tint(.onboardingText)
                     Text("Preparing search...")
-                        .font(.callout)
+                        .font(.appCallout)
                         .foregroundColor(.onboardingText.opacity(0.7))
                 } else {
-                    VStack(spacing: 14) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("LIVE PROGRESS")
-                                .font(.editorialMeta)
-                                .tracking(1.6)
-                                .foregroundColor(.onboardingText.opacity(0.55))
+                    VStack(spacing: 6) {
+                        ForEach(Array(viewModel.discoveryLanes.enumerated()), id: \.element.id) { index, lane in
+                            LaneStatusRow(lane: lane)
+                                .animation(
+                                    reduceMotion
+                                        ? .linear(duration: 0.01)
+                                        : .easeOut(duration: 0.36).delay(Double(index) * 0.08),
+                                    value: viewModel.discoveryLanes
+                                )
 
-                            Spacer()
-
-                            HStack(spacing: 3) {
-                                Text("\(completedLaneCount)")
-                                    .font(.footnote.weight(.semibold))
-                                    .monospacedDigit()
-                                    .foregroundColor(.onboardingText.opacity(0.78))
-                                Text("/\(viewModel.discoveryLanes.count)")
-                                    .font(.caption.weight(.medium))
-                                    .monospacedDigit()
-                                    .foregroundColor(.onboardingText.opacity(0.42))
+                            if index < viewModel.discoveryLanes.count - 1 || isFinalizingLanes {
+                                Rectangle()
+                                    .fill(Color.onboardingText.opacity(0.06))
+                                    .frame(height: 0.5)
                             }
-                            .contentTransition(.numericText())
                         }
 
-                        VStack(spacing: 6) {
-                            ForEach(Array(viewModel.discoveryLanes.enumerated()), id: \.element.id) { index, lane in
-                                LaneStatusRow(lane: lane)
-                                    .animation(
-                                        reduceMotion
-                                            ? .linear(duration: 0.01)
-                                            : .easeOut(duration: 0.36).delay(Double(index) * 0.08),
-                                        value: viewModel.discoveryLanes
-                                    )
-
-                                if index < viewModel.discoveryLanes.count - 1 || isFinalizingLanes {
-                                    Rectangle()
-                                        .fill(Color.onboardingText.opacity(0.06))
-                                        .frame(height: 0.5)
-                                }
-                            }
-
-                            if isFinalizingLanes {
-                                finalizingRow
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
-                            }
+                        if isFinalizingLanes {
+                            finalizingRow
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
                     .padding(20)
@@ -327,18 +307,20 @@ struct OnboardingFlowView: View {
             Spacer()
 
             VStack(spacing: 14) {
-                Text(loadingFootnote)
-                    .font(.caption)
-                    .foregroundColor(.onboardingText.opacity(0.62))
+                if let loadingFootnote {
+                    Text(loadingFootnote)
+                        .font(.appCaption)
+                        .foregroundColor(.onboardingText.opacity(0.62))
+                }
 
                 if let message = viewModel.discoveryErrorMessage {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.appSymbol(size: 13, weight: .semibold))
                             .foregroundColor(.onboardingText.opacity(0.78))
                             .padding(.top, 1)
                         Text(message)
-                            .font(.footnote)
+                            .font(.appFootnote)
                             .foregroundColor(.onboardingText.opacity(0.84))
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -363,9 +345,9 @@ struct OnboardingFlowView: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "hourglass")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.appSymbol(size: 14, weight: .semibold))
                             Text("Keep waiting")
-                                .font(.callout.weight(.semibold))
+                                .font(.appCallout.weight(.semibold))
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
@@ -385,9 +367,9 @@ struct OnboardingFlowView: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.appSymbol(size: 13, weight: .semibold))
                             Text("Try again")
-                                .font(.callout.weight(.semibold))
+                                .font(.appCallout.weight(.semibold))
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
@@ -406,13 +388,13 @@ struct OnboardingFlowView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
 
-                Button("Use defaults instead") {
+                Button("Skip personalization") {
                     viewModel.chooseDefaults()
                 }
-                .font(.footnote.weight(.medium))
+                .font(.appFootnote.weight(.medium))
                 .foregroundColor(.onboardingText.opacity(0.6))
                 .buttonStyle(OnboardingTextButtonStyle())
-                .accessibilityIdentifier("onboarding.loading.use_defaults")
+                .accessibilityIdentifier("onboarding.loading.skip_personalization")
                 .padding(.top, 2)
             }
             .padding(.bottom, 8)
@@ -440,8 +422,8 @@ struct OnboardingFlowView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     headerBlock(
-                        eyebrow: viewModel.isShowingDefaultConfirmation ? "DEFAULT START" : "FINAL PICKS",
-                        title: viewModel.isShowingDefaultConfirmation ? "Start with defaults" : "Your picks",
+                        eyebrow: viewModel.isShowingDefaultConfirmation ? "QUICK START" : "FINAL PICKS",
+                        title: viewModel.isShowingDefaultConfirmation ? "Start without personalized sources" : "Your picks",
                         subtitle: suggestionsSubtitle,
                         isLeading: true
                     )
@@ -450,7 +432,7 @@ struct OnboardingFlowView: View {
                         && viewModel.podcastSuggestions.isEmpty
                     {
                         Text(emptyStateMessage)
-                            .font(.callout)
+                            .font(.appCallout)
                             .foregroundColor(.onboardingText.opacity(0.7))
                             .padding(.vertical, 20)
                     }
@@ -483,14 +465,14 @@ struct OnboardingFlowView: View {
             VStack(spacing: 10) {
                 if !viewModel.isShowingDefaultConfirmation {
                     Text("\(selectedLongformCount) selected")
-                        .font(.caption.weight(.semibold))
+                        .font(.appCaption.weight(.semibold))
                         .monospacedDigit()
                         .foregroundColor(.onboardingText.opacity(0.65))
                 }
 
                 primaryButton("Continue") {
                     withAnimation(.easeInOut(duration: 0.3)) {
-                        viewModel.advanceToFastNews()
+                        viewModel.advanceToAggregators()
                     }
                 }
                 .disabled(viewModel.isLoading)
@@ -502,7 +484,7 @@ struct OnboardingFlowView: View {
                             viewModel.retryPersonalization()
                         }
                     }
-                    .font(.callout.weight(.medium))
+                    .font(.appCallout.weight(.medium))
                     .foregroundColor(.onboardingText.opacity(0.78))
                     .buttonStyle(OnboardingTextButtonStyle())
                     .accessibilityIdentifier("onboarding.suggestions.retry")
@@ -512,7 +494,7 @@ struct OnboardingFlowView: View {
                             viewModel.retryPersonalization()
                         }
                     }
-                    .font(.callout.weight(.medium))
+                    .font(.appCallout.weight(.medium))
                     .foregroundColor(.onboardingText.opacity(0.78))
                     .buttonStyle(OnboardingTextButtonStyle())
                     .accessibilityIdentifier("onboarding.suggestions.personalize")
@@ -520,7 +502,7 @@ struct OnboardingFlowView: View {
 
                 if let error = viewModel.errorMessage {
                     Text(error)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(.statusDestructive)
                 }
             }
@@ -534,23 +516,81 @@ struct OnboardingFlowView: View {
 
     // MARK: - Fast News
 
-    private var fastNewsView: some View {
+    private var aggregatorsView: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     headerBlock(
                         eyebrow: "FAST NEWS",
-                        title: "Add quick-hit sources",
-                        subtitle:
-                            "Pick aggregators and subreddits for high-frequency headlines. Skip any you don't want.",
+                        title: "Add news aggregators",
+                        subtitle: "Broad headline streams across tech, science, finance, politics, and media.",
                         isLeading: true
                     )
 
                     aggregatorSection
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+                .padding(.bottom, 128)
+            }
 
-                    if !viewModel.subredditSuggestions.isEmpty {
+            VStack(spacing: 10) {
+                Text("\(viewModel.selectedAggregators.count) selected")
+                    .font(.appCaption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundColor(.onboardingText.opacity(0.65))
+
+                primaryButton("Continue") {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        viewModel.advanceToReddit()
+                    }
+                }
+                .disabled(viewModel.isLoading)
+                .accessibilityIdentifier("onboarding.aggregators.continue")
+
+                Button("Back") {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        viewModel.returnToSuggestions()
+                    }
+                }
+                .font(.appCallout.weight(.medium))
+                .foregroundColor(.onboardingText.opacity(0.72))
+                .buttonStyle(OnboardingTextButtonStyle())
+                .accessibilityIdentifier("onboarding.aggregators.back")
+
+                if let error = viewModel.errorMessage {
+                    Text(error)
+                        .font(.appCaption)
+                        .foregroundColor(.statusDestructive)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 14)
+            .padding(.bottom, 16)
+            .background(footerBackground)
+        }
+        .accessibilityIdentifier("onboarding.aggregators.screen")
+    }
+
+    private var redditView: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    headerBlock(
+                        eyebrow: "REDDIT",
+                        title: "Add subreddit feeds",
+                        subtitle: "Focused communities add topic-level posts alongside the broader headline mix.",
+                        isLeading: true
+                    )
+
+                    if viewModel.subredditSuggestions.isEmpty {
+                        Text("No Reddit matches found. You can start without subreddit feeds.")
+                            .font(.appCallout)
+                            .foregroundColor(.onboardingText.opacity(0.7))
+                            .padding(.vertical, 20)
+                    } else {
                         suggestionSection(
-                            title: "REDDIT",
+                            title: "SUBREDDITS",
                             icon: "bubble.left.and.text.bubble.right",
                             items: viewModel.subredditSuggestions,
                             isSelected: { viewModel.selectedSubreddits.contains($0.subreddit ?? "") },
@@ -564,12 +604,12 @@ struct OnboardingFlowView: View {
             }
 
             VStack(spacing: 10) {
-                Text("\(selectedFastNewsCount) selected")
-                    .font(.caption.weight(.semibold))
+                Text("\(viewModel.selectedSubreddits.count) selected")
+                    .font(.appCaption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundColor(.onboardingText.opacity(0.65))
 
-                primaryButton(fastNewsPrimaryTitle) {
+                primaryButton(completionPrimaryTitle) {
                     Task { await viewModel.completeOnboarding() }
                 }
                 .disabled(viewModel.isLoading)
@@ -577,17 +617,17 @@ struct OnboardingFlowView: View {
 
                 Button("Back") {
                     withAnimation(.easeInOut(duration: 0.3)) {
-                        viewModel.returnToSuggestions()
+                        viewModel.returnToAggregators()
                     }
                 }
-                .font(.callout.weight(.medium))
+                .font(.appCallout.weight(.medium))
                 .foregroundColor(.onboardingText.opacity(0.72))
                 .buttonStyle(OnboardingTextButtonStyle())
-                .accessibilityIdentifier("onboarding.fastnews.back")
+                .accessibilityIdentifier("onboarding.reddit.back")
 
                 if let error = viewModel.errorMessage {
                     Text(error)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(.statusDestructive)
                 }
             }
@@ -596,14 +636,14 @@ struct OnboardingFlowView: View {
             .padding(.bottom, 16)
             .background(footerBackground)
         }
-        .accessibilityIdentifier("onboarding.fastnews.screen")
+        .accessibilityIdentifier("onboarding.reddit.screen")
     }
 
     private var aggregatorSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "bolt.horizontal")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.appSymbol(size: 9, weight: .semibold))
                     .foregroundColor(.onboardingText.opacity(0.55))
                 Text("AGGREGATORS")
                     .font(.editorialMeta)
@@ -613,7 +653,7 @@ struct OnboardingFlowView: View {
                 Spacer()
 
                 Text("\(viewModel.selectedAggregators.count)/\(onboardingAggregatorOptions.count)")
-                    .font(.caption.weight(.semibold))
+                    .font(.appCaption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundColor(.onboardingText.opacity(0.68))
                     .padding(.horizontal, 8)
@@ -644,16 +684,16 @@ struct OnboardingFlowView: View {
                             .fill(Color.onboardingText.opacity(isSelected ? 0.16 : 0.08))
                             .frame(width: 36, height: 36)
                         Image(systemName: option.icon)
-                            .font(.system(size: 15, weight: .medium))
+                            .font(.appSymbol(size: 15, weight: .medium))
                             .foregroundColor(.onboardingText)
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(option.title)
-                            .font(.callout.weight(.semibold))
+                            .font(.appCallout.weight(.semibold))
                             .foregroundColor(.onboardingText)
                         Text(option.subtitle)
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundColor(.onboardingText.opacity(0.62))
                             .lineLimit(2)
                     }
@@ -708,7 +748,7 @@ struct OnboardingFlowView: View {
                         viewModel.toggleBrutalistTopic(topic)
                     } label: {
                         Text(topic.capitalized)
-                            .font(.caption.weight(.semibold))
+                            .font(.appCaption.weight(.semibold))
                             .foregroundColor(
                                 isOn
                                     ? Color.onboardingText.opacity(0.95)
@@ -771,7 +811,7 @@ struct OnboardingFlowView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.appSymbol(size: 9, weight: .semibold))
                     .foregroundColor(.onboardingText.opacity(0.55))
                 Text(title)
                     .font(.editorialMeta)
@@ -781,7 +821,7 @@ struct OnboardingFlowView: View {
                 Spacer()
 
                 Text("\(items.count)")
-                    .font(.caption.weight(.semibold))
+                    .font(.appCaption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundColor(.onboardingText.opacity(0.68))
                     .padding(.horizontal, 8)
@@ -808,7 +848,7 @@ struct OnboardingFlowView: View {
     private func primaryButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.callout.weight(.semibold))
+                .font(.appCallout.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .foregroundColor(.onboardingSurface)
@@ -834,12 +874,12 @@ struct OnboardingFlowView: View {
                 .foregroundColor(.onboardingText.opacity(0.58))
 
             Text(title)
-                .font(.title2.bold())
+                .font(.appTitle2.bold())
                 .foregroundColor(.onboardingText)
                 .multilineTextAlignment(textAlignment)
 
             Text(subtitle)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.72))
                 .multilineTextAlignment(textAlignment)
                 .lineSpacing(2)
@@ -855,7 +895,7 @@ struct OnboardingFlowView: View {
                 .foregroundColor(.onboardingText.opacity(0.58))
 
             Text(title)
-                .font(.callout.weight(.semibold))
+                .font(.appCallout.weight(.semibold))
                 .foregroundColor(.onboardingText)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -864,7 +904,7 @@ struct OnboardingFlowView: View {
                     HStack(spacing: 8) {
                         ForEach(Array(viewModel.inferredTopics.prefix(6)), id: \.self) { topic in
                             Text(topic)
-                                .font(.caption.weight(.semibold))
+                                .font(.appCaption.weight(.semibold))
                                 .foregroundColor(.onboardingText)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
@@ -935,10 +975,10 @@ struct OnboardingFlowView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Finalizing")
-                    .font(.callout.weight(.medium))
+                    .font(.appCallout.weight(.medium))
                     .foregroundColor(.onboardingText.opacity(0.95))
                 Text("Shaping your first picks")
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(.onboardingText.opacity(0.55))
             }
 
@@ -955,8 +995,10 @@ struct OnboardingFlowView: View {
             return (2, viewModel.step == .audio ? "Voice setup" : "Matching sources")
         case .suggestions:
             return (3, "Review picks")
-        case .fastNews:
-            return (4, "Fast news")
+        case .fastNews, .aggregators:
+            return (4, "News aggregators")
+        case .reddit:
+            return (5, "Reddit")
         }
     }
 
@@ -964,39 +1006,36 @@ struct OnboardingFlowView: View {
         viewModel.selectedSourceKeys.count
     }
 
-    private var selectedFastNewsCount: Int {
+    private var selectedShortformCount: Int {
         viewModel.selectedAggregators.count + viewModel.selectedSubreddits.count
     }
 
-    private var fastNewsPrimaryTitle: String {
-        if selectedFastNewsCount == 0 {
+    private var completionPrimaryTitle: String {
+        if selectedShortformCount == 0 {
             return "Start reading"
         }
-        return "Start with \(selectedFastNewsCount + selectedLongformCount) sources"
+        return "Start with \(selectedShortformCount + selectedLongformCount) sources"
     }
 
-    private var loadingFootnote: String {
-        if isFinalizingLanes {
-            return "Almost there"
+    private var loadingFootnote: String? {
+        if viewModel.discoveryLanes.isEmpty {
+            return "Usually takes about a minute or two"
         }
-        if !viewModel.discoveryLanes.isEmpty {
-            return "\(completedLaneCount) of \(viewModel.discoveryLanes.count) sources ready"
-        }
-        return "Usually takes about a minute or two"
+        return nil
     }
 
     private var suggestionsSubtitle: String {
         if viewModel.isShowingDefaultConfirmation {
-            return "Review the defaults or personalize instead."
+            return "No searched sources selected yet. You can personalize instead."
         }
         return "Keep the ones that feel right. You can tune this again later."
     }
 
     private var emptyStateMessage: String {
         if viewModel.isShowingDefaultConfirmation {
-            return "We'll set up a solid default feed, and you can personalize it later."
+            return "No newsletters or podcasts will be added automatically. You can add fast-news sources next."
         }
-        return "No matches found yet. You can try again or continue with defaults."
+        return "No matches found yet. You can try again or continue without long-form sources."
     }
 }
 
@@ -1043,7 +1082,7 @@ struct OnboardingSelectionDot: View {
 
             if isSelected {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.appSymbol(size: 11, weight: .bold))
                     .foregroundColor(.onboardingSelectionAccent)
                     .transition(.scale(scale: 0.4).combined(with: .opacity))
             }
@@ -1058,7 +1097,7 @@ private struct FinalizingSparkle: View {
 
     var body: some View {
         Image(systemName: "sparkles")
-            .font(.system(size: 12, weight: .semibold))
+            .font(.appSymbol(size: 12, weight: .semibold))
             .foregroundStyle(
                 LinearGradient(
                     colors: [.onboardingAmbientPrimary, .onboardingSelectionAccent],

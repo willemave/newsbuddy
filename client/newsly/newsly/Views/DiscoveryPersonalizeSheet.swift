@@ -85,26 +85,26 @@ struct DiscoveryPersonalizeSheet: View {
 
             VStack(spacing: 12) {
                 Button("Skip") {
-                    viewModel.skipToDefaults()
+                    viewModel.skipPersonalization()
                 }
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.5))
 
                 Button("Cancel") {
                     viewModel.cancelPersonalization()
                     dismiss()
                 }
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.4))
             }
             .padding(.bottom, 16)
 
-                if let error = viewModel.errorMessage {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundColor(.statusDestructive)
-                        .padding(.bottom, 8)
-                }
+            if let error = viewModel.errorMessage {
+                Text(error)
+                    .font(.appCaption)
+                    .foregroundColor(.statusDestructive)
+                    .padding(.bottom, 8)
+            }
         }
         .padding(.horizontal, 24)
         .task {
@@ -118,7 +118,7 @@ struct DiscoveryPersonalizeSheet: View {
                 .scaleEffect(1.2)
                 .tint(.onboardingText)
             Text("Processing your interests...")
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.6))
         }
     }
@@ -140,7 +140,7 @@ struct DiscoveryPersonalizeSheet: View {
                         .scaleEffect(1.2)
                         .tint(.onboardingText)
                     Text("Preparing search...")
-                        .font(.callout)
+                        .font(.appCallout)
                         .foregroundColor(.onboardingText.opacity(0.6))
                 } else {
                     VStack(spacing: 12) {
@@ -157,12 +157,12 @@ struct DiscoveryPersonalizeSheet: View {
 
             VStack(spacing: 12) {
                 Text("Usually takes under a minute")
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(.onboardingText.opacity(0.5))
 
                 if let message = viewModel.discoveryErrorMessage {
                     Text(message)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(.brandPrimary)
                 }
 
@@ -170,7 +170,7 @@ struct DiscoveryPersonalizeSheet: View {
                     viewModel.cancelPersonalization()
                     dismiss()
                 }
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.4))
             }
             .padding(.bottom, 16)
@@ -186,10 +186,10 @@ struct DiscoveryPersonalizeSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Your picks")
-                            .font(.title2.bold())
+                            .font(.appTitle2.bold())
                             .foregroundColor(.onboardingText)
                         Text("Tap to deselect any you don't want.")
-                            .font(.callout)
+                            .font(.appCallout)
                             .foregroundColor(.onboardingText.opacity(0.6))
                     }
                     .padding(.bottom, 20)
@@ -198,8 +198,8 @@ struct DiscoveryPersonalizeSheet: View {
                         && viewModel.podcastSuggestions.isEmpty
                         && viewModel.subredditSuggestions.isEmpty
                     {
-                        Text("No matches found — we'll add popular defaults.")
-                            .font(.callout)
+                        Text("No matches found. Try again to add searched sources.")
+                            .font(.appCallout)
                             .foregroundColor(.onboardingText.opacity(0.6))
                             .padding(.vertical, 20)
                     }
@@ -245,7 +245,7 @@ struct DiscoveryPersonalizeSheet: View {
                     Task { await viewModel.completePersonalization() }
                 } label: {
                     Text("Add to my feeds")
-                        .font(.callout.weight(.semibold))
+                        .font(.appCallout.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .foregroundColor(.onboardingSurface)
@@ -259,12 +259,12 @@ struct DiscoveryPersonalizeSheet: View {
                     viewModel.cancelPersonalization()
                     dismiss()
                 }
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.4))
 
                 if let error = viewModel.errorMessage {
                     Text(error)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(.statusDestructive)
                 }
             }
@@ -279,10 +279,10 @@ struct DiscoveryPersonalizeSheet: View {
     private func sheetHeader(title: String, subtitle: String) -> some View {
         VStack(spacing: 8) {
             Text(title)
-                .font(.title2.bold())
+                .font(.appTitle2.bold())
                 .foregroundColor(.onboardingText)
             Text(subtitle)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.6))
         }
         .padding(.top, 48)
@@ -298,7 +298,7 @@ struct DiscoveryPersonalizeSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.appSymbol(size: 9, weight: .semibold))
                     .foregroundColor(.onboardingText.opacity(0.5))
                 Text(title)
                     .font(.editorialMeta)

@@ -103,6 +103,81 @@ final class OnboardingStateStoreTests: XCTestCase {
         XCTAssertEqual(viewModel.inferredTopics, ["AI", "startups"])
     }
 
+    func testInitRestoresSplitFastNewsStepAndSelections() {
+        let user = makeUser(id: 44)
+        let response = OnboardingFastDiscoverResponse(
+            recommendedPods: [],
+            recommendedSubstacks: [],
+            recommendedSubreddits: [
+                makeSuggestion(
+                    suggestionType: "reddit",
+                    title: "MachineLearning",
+                    subreddit: "MachineLearning"
+                )
+            ]
+        )
+        store.saveProgress(
+            userId: user.id,
+            snapshot: OnboardingProgressSnapshot(
+                step: .reddit,
+                isPersonalized: true,
+                suggestions: response,
+                selectedSourceKeys: [],
+                selectedSubreddits: ["MachineLearning"],
+                selectedAggregators: ["brutalist"],
+                selectedBrutalistTopics: ["science"],
+                discoveryRunId: 123,
+                discoveryRunStatus: "completed",
+                discoveryErrorMessage: nil,
+                hasReachedPollingLimit: false,
+                topicSummary: "AI and startups",
+                inferredTopics: ["AI", "startups"]
+            )
+        )
+
+        let viewModel = OnboardingViewModel(
+            user: user,
+            dictationService: FakeSpeechTranscriber(),
+            onboardingStateStore: store
+        )
+
+        XCTAssertEqual(viewModel.step, .reddit)
+        XCTAssertEqual(viewModel.selectedSubreddits, ["MachineLearning"])
+        XCTAssertEqual(viewModel.selectedAggregators, ["brutalist"])
+        XCTAssertEqual(viewModel.selectedBrutalistTopics, ["science"])
+    }
+
+    func testLegacyFastNewsSnapshotRestoresToAggregatorStep() {
+        let user = makeUser(id: 45)
+        store.saveProgress(
+            userId: user.id,
+            snapshot: OnboardingProgressSnapshot(
+                step: .fastNews,
+                isPersonalized: true,
+                suggestions: nil,
+                selectedSourceKeys: [],
+                selectedSubreddits: ["MachineLearning"],
+                selectedAggregators: ["sciurls"],
+                discoveryRunId: nil,
+                discoveryRunStatus: "completed",
+                discoveryErrorMessage: nil,
+                hasReachedPollingLimit: false,
+                topicSummary: nil,
+                inferredTopics: []
+            )
+        )
+
+        let viewModel = OnboardingViewModel(
+            user: user,
+            dictationService: FakeSpeechTranscriber(),
+            onboardingStateStore: store
+        )
+
+        XCTAssertEqual(viewModel.step, .aggregators)
+        XCTAssertEqual(viewModel.selectedSubreddits, ["MachineLearning"])
+        XCTAssertEqual(viewModel.selectedAggregators, ["sciurls"])
+    }
+
     func testLegacyDiscoveryRunFallsBackToLoadingSnapshot() throws {
         let user = makeUser(id: 43)
         let encodedRuns = try JSONEncoder().encode([String(user.id): 987])

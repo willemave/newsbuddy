@@ -17,12 +17,14 @@ private func onboardingVoiceElapsedMilliseconds(since start: Date) -> Int {
 }
 
 enum OnboardingStep: Int, Codable {
-    case intro
-    case choice
-    case audio
-    case loading
-    case suggestions
-    case fastNews
+    case intro = 0
+    case choice = 1
+    case audio = 2
+    case loading = 3
+    case suggestions = 4
+    case fastNews = 5
+    case aggregators = 6
+    case reddit = 7
 }
 
 struct OnboardingAggregatorOption: Hashable, Identifiable {
@@ -335,9 +337,21 @@ final class OnboardingViewModel: ObservableObject {
         persistProgress()
     }
 
-    func advanceToFastNews() {
+    func advanceToAggregators() {
         errorMessage = nil
-        step = .fastNews
+        step = .aggregators
+        persistProgress()
+    }
+
+    func advanceToReddit() {
+        errorMessage = nil
+        step = .reddit
+        persistProgress()
+    }
+
+    func returnToAggregators() {
+        errorMessage = nil
+        step = .aggregators
         persistProgress()
     }
 
@@ -669,7 +683,7 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     private func restoreProgress(_ snapshot: OnboardingProgressSnapshot) {
-        step = snapshot.step
+        step = snapshot.step == .fastNews ? .aggregators : snapshot.step
         isPersonalized = snapshot.isPersonalized
         suggestions = snapshot.suggestions
         selectedSourceKeys = Set(snapshot.selectedSourceKeys)
@@ -692,7 +706,12 @@ final class OnboardingViewModel: ObservableObject {
             return
         }
 
-        guard step == .loading || step == .suggestions || step == .fastNews else {
+        guard step == .loading
+            || step == .suggestions
+            || step == .fastNews
+            || step == .aggregators
+            || step == .reddit
+        else {
             onboardingStateStore.clearProgress(userId: user.id)
             return
         }
