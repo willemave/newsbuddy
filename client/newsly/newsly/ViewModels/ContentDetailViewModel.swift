@@ -899,7 +899,7 @@ class MarkdownItemProvider: NSObject, UIActivityItemSource {
     }
 
     private func convertMarkdownToHTML(_ markdown: String) -> String {
-        var html = "<html><body style='font-family: -apple-system, sans-serif; font-size: 14px; line-height: 1.6;'>"
+        var html = "<html><body style='font-family: \(AppFontFamily.sans), -apple-system, sans-serif; font-size: 14px; line-height: 1.6;'>"
 
         // Split into paragraphs and convert
         let paragraphs = markdown.components(separatedBy: "\n\n")

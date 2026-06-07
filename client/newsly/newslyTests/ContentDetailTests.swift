@@ -3,10 +3,93 @@
 //  newslyTests
 //
 
+import CoreGraphics
 import XCTest
 @testable import newsly
 
 final class ContentDetailTests: XCTestCase {
+    func testDetailSwipeIgnoresInteriorTextSelectionDrag() {
+        XCTAssertNil(
+            DetailSwipePolicy.dragOffset(
+                origin: .content,
+                translation: CGSize(width: -120, height: 6),
+                currentIndex: 0,
+                itemCount: 2
+            )
+        )
+
+        XCTAssertNil(
+            DetailSwipePolicy.dragOffset(
+                origin: .content,
+                translation: CGSize(width: 120, height: 6),
+                currentIndex: 1,
+                itemCount: 2
+            )
+        )
+
+        XCTAssertEqual(
+            DetailSwipePolicy.endAction(
+                origin: .content,
+                translation: CGSize(width: -120, height: 6),
+                currentIndex: 0,
+                itemCount: 2
+            ),
+            .ignore
+        )
+
+        XCTAssertEqual(
+            DetailSwipePolicy.endAction(
+                origin: .content,
+                translation: CGSize(width: 120, height: 6),
+                currentIndex: 1,
+                itemCount: 2
+            ),
+            .ignore
+        )
+    }
+
+    func testDetailSwipeStillAllowsEdgeNavigation() {
+        XCTAssertEqual(
+            DetailSwipePolicy.endAction(
+                origin: .leadingEdge,
+                translation: CGSize(width: 120, height: 6),
+                currentIndex: 1,
+                itemCount: 2
+            ),
+            .dismiss
+        )
+
+        XCTAssertEqual(
+            DetailSwipePolicy.endAction(
+                origin: .trailingEdge,
+                translation: CGSize(width: -120, height: 6),
+                currentIndex: 0,
+                itemCount: 2
+            ),
+            .next
+        )
+
+        XCTAssertEqual(
+            DetailSwipePolicy.endAction(
+                origin: .trailingEdge,
+                translation: CGSize(width: 120, height: 6),
+                currentIndex: 1,
+                itemCount: 2
+            ),
+            .previous
+        )
+
+        XCTAssertEqual(
+            DetailSwipePolicy.endAction(
+                origin: .leadingEdge,
+                translation: CGSize(width: 120, height: 6),
+                currentIndex: 0,
+                itemCount: 1
+            ),
+            .dismiss
+        )
+    }
+
     func testResolvedNewsFieldsFallbackToTopLevelPayload() throws {
         let detail = try decodeDetail(
             from: """

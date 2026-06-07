@@ -66,7 +66,7 @@ private enum DetailDesign {
     static let textOnlyBackButtonTopPadding: CGFloat = 8
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
     static let textOnlyStandardHeaderTopSpacer: CGFloat = 58
-    static let edgeBackSwipeWidth: CGFloat = 72
+    static let edgeBackSwipeWidth: CGFloat = 24
 }
 
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
@@ -111,8 +111,6 @@ struct ContentDetailView: View {
     @State private var discussionTab: DiscussionTab = .comments
     @State private var collapsedCommentIDs: Set<String> = Set()
     @State private var discussionRequestToken = UUID()
-    // Swipe haptic feedback
-    @State private var didTriggerSwipeHaptic: Bool = false
     // Transcript/Full Article collapsed state
     @State private var isTranscriptExpanded: Bool = false
     @State private var isRelevantLinksExpanded: Bool = false
@@ -310,7 +308,7 @@ struct ContentDetailView: View {
                                     VStack(alignment: .leading, spacing: 16) {
                                         sectionHeader("News Updates", icon: "newspaper")
                                         Text("No news metadata available.")
-                                            .font(.subheadline)
+                                            .font(.appSubheadline)
                                             .foregroundColor(Color.onSurfaceSecondary)
                                     }
                                 }
@@ -390,6 +388,19 @@ struct ContentDetailView: View {
                 swipeIndicator(direction: .next, progress: min(1.0, abs(dragAmount) / 100))
             }
         }
+        .overlay {
+            ContentDetailSwipeOverlay(
+                currentIndex: currentIndex,
+                contentIds: allContentIds,
+                surfaceName: navigationSurfaceName,
+                edgeWidth: DetailDesign.edgeBackSwipeWidth,
+                dragAmount: $dragAmount,
+                isEdgeBackSwipeActive: $isEdgeBackSwipeActive,
+                onDismiss: { dismiss() },
+                onNext: navigateToNext,
+                onPrevious: navigateToPrevious
+            )
+        }
         .overlay(alignment: .topLeading) {
             GeometryReader { proxy in
                 VStack(alignment: .leading, spacing: 0) {
@@ -402,106 +413,6 @@ struct ContentDetailView: View {
         }
         .offset(x: dragAmount)
         .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragAmount)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 50, coordinateSpace: .global)
-                .onChanged { value in
-                    let horizontalAmount = abs(value.translation.width)
-                    let verticalAmount = abs(value.translation.height)
-
-                    // Require horizontal swipe
-                    if horizontalAmount > verticalAmount * 2 && horizontalAmount > 30 {
-                        let isEdgeBackSwipe = isLeftEdgeBackSwipe(value)
-                        isEdgeBackSwipeActive = isEdgeBackSwipe
-
-                        // More responsive drag with resistance at edges
-                        let canGoLeft = currentIndex < allContentIds.count - 1
-                        let canGoRight = currentIndex > 0 || isEdgeBackSwipe
-
-                        var newOffset = value.translation.width * 0.6
-
-                        // Add resistance if can't navigate in that direction
-                        if newOffset < 0 && !canGoLeft {
-                            newOffset = newOffset * 0.2
-                        } else if newOffset > 0 && !canGoRight {
-                            newOffset = newOffset * 0.2
-                        }
-
-                        dragAmount = newOffset
-
-                        // Haptic feedback when crossing threshold
-                        if abs(newOffset) > 80 && !didTriggerSwipeHaptic {
-                            let generator = UIImpactFeedbackGenerator(style: .light)
-                            generator.impactOccurred()
-                            didTriggerSwipeHaptic = true
-                        }
-                    }
-                }
-                .onEnded { value in
-                    didTriggerSwipeHaptic = false
-                    isEdgeBackSwipeActive = false
-                    let horizontalAmount = abs(value.translation.width)
-                    let verticalAmount = abs(value.translation.height)
-
-                    if horizontalAmount > verticalAmount * 2 && horizontalAmount > 80 {
-                        if value.translation.width > 80 && isLeftEdgeBackSwipe(value) {
-                            logSwipeDecision("dismiss", value: value)
-                            let generator = UIImpactFeedbackGenerator(style: .medium)
-                            generator.impactOccurred()
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                dragAmount = UIScreen.main.bounds.width
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                dismiss()
-                            }
-                            return
-                        } else if value.translation.width > 80 && currentIndex > 0 {
-                            // Swipe right - previous
-                            logSwipeDecision("previous", value: value)
-                            let generator = UIImpactFeedbackGenerator(style: .medium)
-                            generator.impactOccurred()
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                dragAmount = UIScreen.main.bounds.width
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                // Reset without animation, then navigate
-                                var transaction = Transaction()
-                                transaction.disablesAnimations = true
-                                withTransaction(transaction) {
-                                    dragAmount = 0
-                                }
-                                navigateToPrevious()
-                            }
-                            return
-                        } else if value.translation.width < -80 && currentIndex < allContentIds.count - 1 {
-                            // Swipe left - next
-                            logSwipeDecision("next", value: value)
-                            let generator = UIImpactFeedbackGenerator(style: .medium)
-                            generator.impactOccurred()
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                dragAmount = -UIScreen.main.bounds.width
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                // Reset without animation, then navigate
-                                var transaction = Transaction()
-                                transaction.disablesAnimations = true
-                                withTransaction(transaction) {
-                                    dragAmount = 0
-                                }
-                                navigateToNext()
-                            }
-                            return
-                        }
-                    }
-
-                    // Snap back
-                    if horizontalAmount > verticalAmount * 2 && horizontalAmount > 30 {
-                        logSwipeDecision("snap_back", value: value)
-                    }
-                    withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.8)) {
-                        dragAmount = 0
-                    }
-                }
-        )
         .ignoresSafeArea(edges: hasHeroImage ? .top : [])
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
@@ -928,12 +839,11 @@ struct ContentDetailView: View {
             }
         ) {
             HStack(spacing: 12) {
-                sheetOptionIcon(
+                chatSheetIcon(
                     isPodcastAudioActive(for: content)
                         ? "pause.fill"
                         : "person.3.sequence.fill",
-                    color: .terracottaPrimary,
-                    size: 16
+                    color: .terracottaPrimary
                 )
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -942,11 +852,11 @@ struct ContentDetailView: View {
                             ? "Pause podcast overview"
                             : "Podcast overview"
                     )
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .fontWeight(.semibold)
                     .foregroundColor(Color.onSurface)
                     Text(podcastAudioStatusText(for: content))
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
@@ -957,9 +867,13 @@ struct ContentDetailView: View {
                 if isPodcastAudioLoading(for: content) {
                     ProgressView()
                         .controlSize(.small)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundColor(Color.onSurfaceTertiary)
                 }
             }
-            .miniSheetOptionSurface()
+            .chatWideActionSurface()
         }
         .accessibilityIdentifier("content.audio.podcast_overview")
     }
@@ -1035,7 +949,7 @@ struct ContentDetailView: View {
         if isPodcastAudioActive(for: content) {
             return "Playing at \(narrationPlaybackService.playbackSpeedTitle)"
         }
-        return "1-minute podcast-style discussion"
+        return "1-minute discussion"
     }
 
     @MainActor
@@ -1226,9 +1140,9 @@ struct ContentDetailView: View {
                     HStack(spacing: 6) {
                         HStack(spacing: 4) {
                             Image(systemName: contentTypeIcon(for: content))
-                                .font(.caption2)
+                                .font(.appCaption2)
                             Text(content.detailTypeLabel)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .fontWeight(.medium)
                         }
                         .foregroundColor(.white.opacity(0.9))
@@ -1237,7 +1151,7 @@ struct ContentDetailView: View {
                             Text("·")
                                 .foregroundColor(.white.opacity(0.5))
                             Text(source)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .foregroundColor(.white.opacity(0.8))
                         }
 
@@ -1249,7 +1163,7 @@ struct ContentDetailView: View {
                             style: .detailMeta,
                             fallback: "Recent"
                         )
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(.white.opacity(0.8))
                     }
                     .shadow(color: .black.opacity(0.4), radius: 3, x: 0, y: 1)
@@ -1289,9 +1203,9 @@ struct ContentDetailView: View {
                     HStack(spacing: 6) {
                         HStack(spacing: 4) {
                             Image(systemName: contentTypeIcon(for: content))
-                                .font(.caption2)
+                                .font(.appCaption2)
                             Text(content.detailTypeLabel)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .fontWeight(.medium)
                         }
                         .foregroundColor(.onSurfaceSecondary)
@@ -1300,7 +1214,7 @@ struct ContentDetailView: View {
                             Text("·")
                                 .foregroundColor(Color.onSurfaceSecondary.opacity(0.4))
                             Text(source)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .foregroundColor(Color.onSurfaceSecondary)
                         }
 
@@ -1312,7 +1226,7 @@ struct ContentDetailView: View {
                             style: .detailMeta,
                             fallback: "Recent"
                         )
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(Color.onSurfaceSecondary)
                     }
                     .accessibilityElement(children: .ignore)
@@ -1343,7 +1257,7 @@ struct ContentDetailView: View {
     }
 
     private func detailTitleFont(for content: ContentDetail) -> Font {
-        content.contentTypeEnum == .news ? .terracottaHeadlineCompact : .title3
+        content.contentTypeEnum == .news ? .terracottaHeadlineCompact : .appTitle3
     }
 
     private func detailTitleWeight(for content: ContentDetail) -> Font.Weight {
@@ -1369,7 +1283,7 @@ struct ContentDetailView: View {
             dismiss()
         } label: {
             Image(systemName: "chevron.left")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.appSymbol(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(
                     width: DetailDesign.floatingBackButtonSize,
@@ -1420,7 +1334,7 @@ struct ContentDetailView: View {
             .frame(height: DetailDesign.heroHeight)
             .overlay(
                 Image(systemName: contentTypeIcon(for: content))
-                    .font(.system(size: 56, weight: .ultraLight))
+                    .font(.appSymbol(size: 56, weight: .ultraLight))
                     .foregroundColor(.white.opacity(0.3))
             )
     }
@@ -1573,7 +1487,7 @@ struct ContentDetailView: View {
             }) {
                 if isStartingChat {
                     Image(systemName: "brain.head.profile")
-                        .font(.system(size: 20, weight: .regular))
+                        .font(.appSymbol(size: 20, weight: .regular))
                         .foregroundColor(overlaid ? .white : .brandPrimary)
                         .shadow(color: overlaid ? .black.opacity(0.4) : .clear, radius: 3, x: 0, y: 1)
                         .frame(width: 44, height: 44)
@@ -1593,7 +1507,7 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func minimalActionIcon(_ icon: String, color: Color = .onSurfaceSecondary, overlaid: Bool = false) -> some View {
         Image(systemName: icon)
-            .font(.system(size: 20, weight: .regular))
+            .font(.appSymbol(size: 20, weight: .regular))
             .foregroundColor(overlaid ? (color == .onSurfaceSecondary ? .white : color) : color)
             .shadow(color: overlaid ? .black.opacity(0.4) : .clear, radius: 3, x: 0, y: 1)
             .frame(width: 44, height: 44)
@@ -1615,21 +1529,25 @@ struct ContentDetailView: View {
     // MARK: - Mini Sheet Components
 
     @ViewBuilder
-    private func sheetHeader(title: String, dismiss: @escaping () -> Void) -> some View {
+    private func sheetHeader(title: String? = nil, dismiss: @escaping () -> Void) -> some View {
+        let hasTitle = title != nil
+
         VStack(spacing: 0) {
             RoundedRectangle(cornerRadius: 2.5)
-                .fill(Color.outlineVariant.opacity(0.3))
-                .frame(width: 36, height: 5)
+                .fill(Color.outlineVariant.opacity(hasTitle ? 0.3 : 0.38))
+                .frame(width: hasTitle ? 36 : 38, height: 5)
                 .padding(.top, 8)
 
             HStack {
-                Text(title)
-                    .font(.title3)
-                    .fontWeight(.bold)
+                if let title {
+                    Text(title)
+                        .font(.appTitle3)
+                        .fontWeight(.bold)
+                }
                 Spacer()
                 Button(action: dismiss) {
                     Image(systemName: "xmark")
-                        .font(.body)
+                        .font(.appBody)
                         .fontWeight(.semibold)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .frame(width: 44, height: 44)
@@ -1641,8 +1559,8 @@ struct ContentDetailView: View {
                 .accessibilityIdentifier("content.sheet.close")
             }
             .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 16)
+            .padding(.top, hasTitle ? 14 : 10)
+            .padding(.bottom, hasTitle ? 16 : 10)
         }
     }
 
@@ -1662,11 +1580,11 @@ struct ContentDetailView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.subheadline)
+                        .font(.appSubheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(Color.onSurface)
                     Text(subtitle)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.88)
@@ -1676,7 +1594,7 @@ struct ContentDetailView: View {
 
                 if let badge {
                     Text(badge)
-                        .font(.caption2)
+                        .font(.appCaption2)
                         .fontWeight(.semibold)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .padding(.horizontal, 7)
@@ -1698,11 +1616,75 @@ struct ContentDetailView: View {
         size: CGFloat = 17
     ) -> some View {
         Image(systemName: icon)
-            .font(.system(size: size, weight: .semibold))
+            .font(.appSymbol(size: size, weight: .semibold))
             .foregroundColor(color)
             .frame(width: 34, height: 34)
             .background(color.opacity(0.13))
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private var chatTileColumns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10)
+        ]
+    }
+
+    @ViewBuilder
+    private func chatActionTile(
+        icon: String,
+        title: String,
+        badge: String? = nil,
+        disabled: Bool = false,
+        accessibilityIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 8) {
+                    chatSheetIcon(icon, color: .brandPrimary)
+
+                    Spacer(minLength: 0)
+
+                    if let badge {
+                        Text(badge)
+                            .font(.appCaption2.weight(.semibold).monospacedDigit())
+                            .foregroundColor(Color.onSurfaceSecondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(Color.surfaceTertiary.opacity(0.82))
+                            .clipShape(Capsule())
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Text(title)
+                    .font(.appSubheadline.weight(.semibold))
+                    .foregroundColor(Color.onSurface)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.84)
+                    .multilineTextAlignment(.leading)
+            }
+            .chatTileSurface()
+        }
+        .buttonStyle(ChatSheetButtonStyle())
+        .disabled(disabled)
+        .opacity(disabled ? 0.55 : 1)
+        .accessibilityLabel(badge == nil ? title : "\(title), \(badge)")
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    private func chatSheetIcon(
+        _ icon: String,
+        color: Color
+    ) -> some View {
+        Image(systemName: icon)
+            .font(.appSymbol(size: 18, weight: .semibold))
+            .foregroundColor(color)
+            .frame(width: 42, height: 42)
+            .background(color.opacity(0.15))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Share Sheet
@@ -1836,95 +1818,92 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func chatSheet(content: ContentDetail) -> some View {
         VStack(spacing: 0) {
-            sheetHeader(title: "AI Chat") { activeSheet = nil }
+            sheetHeader { activeSheet = nil }
 
             ScrollView {
-                VStack(spacing: 8) {
-                if let chatError {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundColor(.statusDestructive)
-                        Text(chatError)
-                            .font(.footnote)
-                            .foregroundColor(.statusDestructive)
+                VStack(spacing: 12) {
+                    if let chatError {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundColor(.statusDestructive)
+                            Text(chatError)
+                                .font(.appFootnote)
+                                .foregroundColor(.statusDestructive)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.statusDestructive.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.statusDestructive.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
 
-                sheetOptionRow(
-                    icon: "message",
-                    iconColor: .brandPrimary,
-                    title: "Start chat",
-                    subtitle: "Ask your own question about this story",
-                    disabled: isStartingChat,
-                    action: {
-                        Task {
-                            await startChat(
-                                content: content,
-                                provider: .openai
-                            )
+                    LazyVGrid(columns: chatTileColumns, spacing: 10) {
+                        chatActionTile(
+                            icon: "message",
+                            title: "Start chat",
+                            disabled: isStartingChat,
+                            accessibilityIdentifier: "content.chat.start"
+                        ) {
+                            Task {
+                                await startChat(
+                                    content: content,
+                                    provider: .openai
+                                )
+                            }
+                        }
+
+                        chatActionTile(
+                            icon: "doc.text.magnifyingglass",
+                            title: "Dig deeper",
+                            disabled: isStartingChat,
+                            accessibilityIdentifier: "content.chat.dig_deeper"
+                        ) {
+                            Task {
+                                await startChat(
+                                    content: content,
+                                    provider: .openai,
+                                    prompt: deepDivePrompt(for: content)
+                                )
+                            }
+                        }
+
+                        chatActionTile(
+                            icon: "person.3.sequence.fill",
+                            title: "Council Chat",
+                            disabled: isStartingChat,
+                            accessibilityIdentifier: "content.chat.council"
+                        ) {
+                            Task {
+                                await startCouncilWithPrompt(
+                                    councilPrompt(for: content),
+                                    content: content,
+                                    provider: .openai
+                                )
+                            }
+                        }
+
+                        chatActionTile(
+                            icon: "magnifyingglass.circle.fill",
+                            title: "Deep Research",
+                            badge: "2-5 min",
+                            disabled: isStartingChat,
+                            accessibilityIdentifier: "content.chat.deep_research"
+                        ) {
+                            Task { await startDeepResearchWithPrompt(deepResearchPrompt(for: content), content: content) }
                         }
                     }
-                )
-                sheetOptionRow(
-                    icon: "doc.text.magnifyingglass",
-                    iconColor: .brandPrimary,
-                    title: "Dig deeper",
-                    subtitle: "Explore key points in detail",
-                    disabled: isStartingChat,
-                    action: {
-                        Task {
-                            await startChat(
-                                content: content,
-                                provider: .openai,
-                                prompt: deepDivePrompt(for: content)
-                            )
-                        }
+
+                    if supportsPodcastAudio(for: content) {
+                        audioPromptCard(for: content)
                     }
-                )
-                sheetOptionRow(
-                    icon: "person.3.sequence.fill",
-                    iconColor: .brandPrimary,
-                    title: "Council Chat",
-                    subtitle: "Compare four saved perspectives",
-                    disabled: isStartingChat,
-                    action: {
-                        Task {
-                            await startCouncilWithPrompt(
-                                councilPrompt(for: content),
-                                content: content,
-                                provider: .openai
-                            )
-                        }
-                    }
-                )
-                sheetOptionRow(
-                    icon: "magnifyingglass.circle.fill",
-                    iconColor: .brandPrimary,
-                    title: "Deep Research",
-                    subtitle: "Comprehensive analysis with sources",
-                    badge: "~2-5 min",
-                    disabled: isStartingChat,
-                    action: {
-                        Task { await startDeepResearchWithPrompt(deepResearchPrompt(for: content), content: content) }
-                    }
-                )
                 }
                 .padding(.horizontal, 20)
-
-                if supportsPodcastAudio(for: content) {
-                    audioPromptCard(for: content)
-                        .padding(.horizontal, 20)
-                }
 
                 Color.clear.frame(height: 16)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.surfacePrimary)
+        .accessibilityLabel("Chat actions")
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("content.chat.sheet")
     }
@@ -2119,13 +2098,13 @@ struct ContentDetailView: View {
                             VStack(alignment: .leading, spacing: 16) {
                                 if discussion.discussionGroups.isEmpty {
                                     Text("No discussion links available.")
-                                        .font(.subheadline)
+                                        .font(.appSubheadline)
                                         .foregroundColor(Color.onSurfaceSecondary)
                                 } else {
                                     ForEach(discussion.discussionGroups) { group in
                                         VStack(alignment: .leading, spacing: 8) {
                                             Text(group.label)
-                                                .font(.headline)
+                                                .font(.appHeadline)
                                             ForEach(group.items) { item in
                                                 if let url = URL(string: item.url) {
                                                     Button {
@@ -2216,7 +2195,7 @@ struct ContentDetailView: View {
             ProgressView()
                 .controlSize(.large)
             Text("Loading discussion…")
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundColor(Color.onSurfaceSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2228,10 +2207,10 @@ struct ContentDetailView: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Discussion unavailable")
-                    .font(.headline)
+                    .font(.appHeadline)
 
                 Text(discussionUnavailableText)
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundColor(Color.onSurfaceSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -2385,7 +2364,7 @@ struct ContentDetailView: View {
     ) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Text("Comments")
-                .font(.headline)
+                .font(.appHeadline)
                 .fontWeight(.semibold)
                 .foregroundColor(Color.onSurface)
                 .lineLimit(1)
@@ -2397,7 +2376,7 @@ struct ContentDetailView: View {
             HStack(alignment: .center, spacing: 12) {
                 if let commentCount = discussion.commentCount, commentCount > 0 {
                     Text("\(commentCount) summarized")
-                        .font(.subheadline.weight(.medium))
+                        .font(.appSubheadline.weight(.medium))
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
@@ -2411,7 +2390,7 @@ struct ContentDetailView: View {
                             Image(systemName: "arrow.up.right.square")
                             Text("Open")
                         }
-                        .font(.subheadline.weight(.semibold))
+                        .font(.appSubheadline.weight(.semibold))
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(1)
                         .frame(minHeight: 44)
@@ -2440,14 +2419,14 @@ struct ContentDetailView: View {
     private func discussionTopicRow(_ topic: DiscussionSummaryTopic) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(topic.summary)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if let stance = topic.stance {
                 Text(stance)
-                    .font(.caption2)
+                    .font(.appCaption2)
                     .fontWeight(.medium)
                     .foregroundColor(Color.onSurfaceSecondary.opacity(0.85))
                     .textCase(.uppercase)
@@ -2468,19 +2447,19 @@ struct ContentDetailView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(comment.author ?? "unknown")
-                    .font(.caption2)
+                    .font(.appCaption2)
                     .fontWeight(.semibold)
                     .foregroundColor(Color.onSurfaceSecondary)
                     .textCase(.uppercase)
                     .tracking(0.4)
                 Text(comment.text)
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .foregroundColor(Color.readerBodyText)
                     .lineSpacing(1)
                     .fixedSize(horizontal: false, vertical: true)
                 if let reason = comment.reason {
                     Text(reason)
-                        .font(.caption2)
+                        .font(.appCaption2)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(1)
                 }
@@ -2495,10 +2474,10 @@ struct ContentDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Community Summary")
-                        .font(.headline)
+                        .font(.appHeadline)
 
                     Text(summary.overview)
-                        .font(.callout)
+                        .font(.appCallout)
                         .foregroundColor(Color.readerBodyText)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -2510,7 +2489,7 @@ struct ContentDetailView: View {
                             Label("Open original discussion", systemImage: "arrow.up.right.square")
                         }
                         .buttonStyle(.plain)
-                        .font(.subheadline)
+                        .font(.appSubheadline)
                         .padding(.top, 4)
                     }
                 }
@@ -2518,22 +2497,22 @@ struct ContentDetailView: View {
                 if !summary.topics.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Key Topics")
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(Color.onSurfaceSecondary)
 
                         ForEach(summary.topics) { topic in
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(topic.title)
-                                    .font(.callout)
+                                    .font(.appCallout)
                                     .fontWeight(.semibold)
                                 Text(topic.summary)
-                                    .font(.subheadline)
+                                    .font(.appSubheadline)
                                     .foregroundColor(Color.readerBodyText)
                                     .fixedSize(horizontal: false, vertical: true)
                                 if let stance = topic.stance {
                                     Text(stance)
-                                        .font(.caption)
+                                        .font(.appCaption)
                                         .foregroundColor(Color.onSurfaceSecondary)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
@@ -2549,23 +2528,23 @@ struct ContentDetailView: View {
                 if !summary.representativeComments.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Representative Comments")
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(Color.onSurfaceSecondary)
 
                         ForEach(summary.representativeComments) { comment in
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(comment.author ?? "unknown")
-                                    .font(.caption)
+                                    .font(.appCaption)
                                     .fontWeight(.medium)
                                     .foregroundColor(Color.onSurfaceSecondary)
                                 Text(comment.text)
-                                    .font(.subheadline)
+                                    .font(.appSubheadline)
                                     .foregroundColor(Color.readerBodyText)
                                     .fixedSize(horizontal: false, vertical: true)
                                 if let reason = comment.reason {
                                     Text(reason)
-                                        .font(.caption)
+                                        .font(.appCaption)
                                         .foregroundColor(Color.onSurfaceSecondary)
                                 }
                             }
@@ -2580,7 +2559,7 @@ struct ContentDetailView: View {
                 if !summary.notableLinks.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Notable Links")
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(Color.onSurfaceSecondary)
 
@@ -2596,11 +2575,11 @@ struct ContentDetailView: View {
                                                 .fontWeight(.medium)
                                                 .multilineTextAlignment(.leading)
                                         }
-                                        .font(.subheadline)
+                                        .font(.appSubheadline)
 
                                         if let reason = link.reason {
                                             Text(reason)
-                                                .font(.caption)
+                                                .font(.appCaption)
                                                 .foregroundColor(Color.onSurfaceSecondary)
                                                 .multilineTextAlignment(.leading)
                                         }
@@ -2626,7 +2605,7 @@ struct ContentDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             if commentIndex.orderedComments.isEmpty {
                 Text("No comments available.")
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundColor(Color.onSurfaceSecondary)
                     .padding(.top, 20)
                     .frame(maxWidth: .infinity)
@@ -2640,14 +2619,14 @@ struct ContentDetailView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             if !isCollapsed {
                                 Text(comment.compactText ?? comment.text)
-                                    .font(.callout)
+                                    .font(.appCallout)
                                     .fontWeight(.regular)
                                     .foregroundColor(Color.readerBodyText)
                                     .fixedSize(horizontal: false, vertical: true)
                             } else if childCount > 0 {
                                 HStack(spacing: 6) {
                                     Text("+\(childCount)")
-                                        .font(.caption2)
+                                        .font(.appCaption2)
                                         .fontWeight(.semibold)
                                         .foregroundColor(.terracottaPrimary)
                                         .padding(.horizontal, 5)
@@ -2656,7 +2635,7 @@ struct ContentDetailView: View {
                                         .clipShape(Capsule())
 
                                     Image(systemName: "chevron.right")
-                                        .font(.caption2)
+                                        .font(.appCaption2)
                                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
                                 }
                             }
@@ -2701,7 +2680,7 @@ struct ContentDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             if links.isEmpty {
                 Text("No links found.")
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundColor(Color.onSurfaceSecondary)
                     .padding(.top, 20)
                     .frame(maxWidth: .infinity)
@@ -2713,14 +2692,14 @@ struct ContentDetailView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(link.title ?? link.url)
-                                    .font(.callout)
+                                    .font(.appCallout)
                                     .fontWeight(.medium)
                                     .foregroundColor(Color.onSurface)
                                     .multilineTextAlignment(.leading)
                                     .lineLimit(2)
 
                                 Text(link.url)
-                                    .font(.caption2)
+                                    .font(.appCaption2)
                                     .foregroundColor(Color.onSurfaceSecondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -2728,7 +2707,7 @@ struct ContentDetailView: View {
                                 if let commentID = link.commentID,
                                    let comment = commentsByID[commentID] {
                                     Text(comment.compactText ?? String(comment.text.prefix(120)))
-                                        .font(.caption)
+                                        .font(.appCaption)
                                         .foregroundColor(Color.onSurfaceSecondary)
                                         .lineLimit(2)
                                         .padding(.top, 2)
@@ -2736,9 +2715,9 @@ struct ContentDetailView: View {
 
                                 HStack(spacing: 4) {
                                     Image(systemName: "arrow.up.right")
-                                        .font(.caption2)
+                                        .font(.appCaption2)
                                     Text(link.source)
-                                        .font(.caption2)
+                                        .font(.appCaption2)
                                 }
                                 .foregroundColor(.onSurfaceSecondary)
                             }
@@ -2794,16 +2773,16 @@ struct ContentDetailView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "link")
-                        .font(.footnote)
+                        .font(.appFootnote)
                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.75))
                         .accessibilityHidden(true)
 
                     Text("Links from article or comments")
-                        .font(.footnote.weight(.semibold))
+                        .font(.appFootnote.weight(.semibold))
                         .foregroundColor(Color.onSurfaceSecondary)
 
                     Text("\(links.count)")
-                        .font(.caption2.monospacedDigit().weight(.medium))
+                        .font(.appCaption2.monospacedDigit().weight(.medium))
                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.85))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -2812,7 +2791,7 @@ struct ContentDetailView: View {
                     Spacer(minLength: 8)
 
                     Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.bold))
+                        .font(.appCaption2.weight(.bold))
                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.55))
                         .rotationEffect(.degrees(isRelevantLinksExpanded ? 90 : 0))
                         .accessibilityHidden(true)
@@ -2849,20 +2828,20 @@ struct ContentDetailView: View {
                 } label: {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "arrow.up.right")
-                            .font(.caption.weight(.semibold))
+                            .font(.appCaption.weight(.semibold))
                             .foregroundColor(Color.onSurfaceSecondary.opacity(0.75))
                             .frame(width: 20, height: 20)
 
                         VStack(alignment: .leading, spacing: 4) {
                             Text(link.title ?? link.url)
-                                .font(.subheadline)
+                                .font(.appSubheadline)
                                 .fontWeight(.medium)
                                 .foregroundColor(Color.onSurface)
                                 .multilineTextAlignment(.leading)
                                 .lineLimit(2)
 
                             Text(link.reason)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .foregroundColor(Color.onSurfaceSecondary)
                                 .multilineTextAlignment(.leading)
                                 .lineLimit(2)
@@ -2870,12 +2849,12 @@ struct ContentDetailView: View {
                             HStack(spacing: 6) {
                                 if let source = relevantLinkSourceLabel(link.source) {
                                     Text(source)
-                                        .font(.caption2)
+                                        .font(.appCaption2)
                                         .foregroundColor(Color.onSurfaceTertiary)
                                 }
 
                                 Text(link.url)
-                                    .font(.caption2)
+                                    .font(.appCaption2)
                                     .foregroundColor(Color.onSurfaceTertiary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -2900,7 +2879,7 @@ struct ContentDetailView: View {
                             Image(systemName: relevantLinkReadLaterIcon(for: state))
                         }
                     }
-                    .font(.subheadline.weight(.medium))
+                    .font(.appSubheadline.weight(.medium))
                     .foregroundColor(state == .added ? .brandPrimary : Color.onSurfaceSecondary.opacity(0.78))
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
@@ -3016,10 +2995,10 @@ struct ContentDetailView: View {
                 HStack {
                     HStack(spacing: 8) {
                         Image(systemName: icon)
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .foregroundColor(Color.onSurfaceSecondary)
                         Text(title)
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(Color.onSurface)
                     }
@@ -3027,7 +3006,7 @@ struct ContentDetailView: View {
                     Spacer()
 
                     Image(systemName: "chevron.right")
-                        .font(.caption2)
+                        .font(.appCaption2)
                         .fontWeight(.bold)
                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
                         .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
@@ -3067,11 +3046,11 @@ struct ContentDetailView: View {
     private func sectionHeader(_ title: String, icon: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .fontWeight(.semibold)
         }
     }
@@ -3102,7 +3081,7 @@ struct ContentDetailView: View {
             HStack {
                 if direction == .next { Spacer() }
                 Image(systemName: iconName)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.appSymbol(size: 24, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: 44, height: 44)
                     .background(
@@ -3172,12 +3151,6 @@ struct ContentDetailView: View {
         navigationContext.surface.rawValue
     }
 
-    private func logSwipeDecision(_ decision: String, value: DragGesture.Value) {
-        detailLogger.info(
-            "[DetailSwipe] decision=\(decision, privacy: .public) surface=\(navigationSurfaceName, privacy: .public) contentId=\(contentIdLogValue(at: currentIndex), privacy: .public) index=\(currentIndex, privacy: .public) idsCount=\(allContentIds.count, privacy: .public) startX=\(Int(value.startLocation.x), privacy: .public) translationX=\(Int(value.translation.width), privacy: .public) translationY=\(Int(value.translation.height), privacy: .public) edgeWidth=\(Int(DetailDesign.edgeBackSwipeWidth), privacy: .public)"
-        )
-    }
-    
     private func navigateToNext() {
         guard currentIndex < allContentIds.count - 1 else {
             return
@@ -3210,9 +3183,6 @@ struct ContentDetailView: View {
         currentIndex -= 1
     }
 
-    private func isLeftEdgeBackSwipe(_ value: DragGesture.Value) -> Bool {
-        value.startLocation.x <= DetailDesign.edgeBackSwipeWidth && value.translation.width > 0
-    }
 }
 
 private struct SheetOptionButtonStyle: ButtonStyle {
@@ -3220,6 +3190,15 @@ private struct SheetOptionButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .opacity(configuration.isPressed ? 0.82 : 1)
+            .animation(.spring(response: 0.24, dampingFraction: 0.86), value: configuration.isPressed)
+    }
+}
+
+private struct ChatSheetButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
             .animation(.spring(response: 0.24, dampingFraction: 0.86), value: configuration.isPressed)
     }
 }
@@ -3235,6 +3214,37 @@ private extension View {
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.outlineVariant.opacity(0.28), lineWidth: 0.5)
+            )
+    }
+
+    func chatTileSurface() -> some View {
+        self
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.surfaceSecondary)
+                    .shadow(color: Color.black.opacity(0.16), radius: 10, x: 0, y: 5)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.outlineVariant.opacity(0.34), lineWidth: 0.5)
+            )
+    }
+
+    func chatWideActionSurface() -> some View {
+        self
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 66)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.surfaceSecondary)
+                    .shadow(color: Color.black.opacity(0.14), radius: 9, x: 0, y: 4)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.outlineVariant.opacity(0.32), lineWidth: 0.5)
             )
     }
 }
