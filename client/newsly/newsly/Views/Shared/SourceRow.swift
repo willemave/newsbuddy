@@ -29,14 +29,14 @@ struct SourceRow: View {
 
                 if let url {
                     Text(formattedURL(url))
-                        .font(.listMono)
+                        .font(.listValue)
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .lineLimit(1)
                 }
 
                 if let summary = statsLine {
                     Text(summary)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .lineLimit(2)
                 }
@@ -50,7 +50,7 @@ struct SourceRow: View {
                     .accessibilityHidden(true)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.appSymbol(size: 12, weight: .semibold))
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .accessibilityHidden(true)
             }
@@ -107,12 +107,12 @@ struct SourceTypeIcon: View {
         switch metadata.glyph {
         case .system(let name):
             Image(systemName: name)
-                .font(.system(size: 17, weight: .medium))
+                .font(.appSymbol(size: 17, weight: .medium))
                 .foregroundStyle(metadata.color)
                 .frame(width: Spacing.iconSize, height: Spacing.iconSize)
         case .text(let value):
             Text(value)
-                .font(.system(size: 13, weight: .bold))
+                .font(.appSans(size: 13, weight: .bold))
                 .foregroundStyle(metadata.color)
                 .frame(width: Spacing.iconSize, height: Spacing.iconSize)
         }

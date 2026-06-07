@@ -40,7 +40,7 @@ struct ChatSessionCard: View {
                 statusBadge
 
                 Image(systemName: "arrow.right")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.appSymbol(size: 12, weight: .medium))
                     .foregroundColor(.onSurfaceSecondary)
             }
 

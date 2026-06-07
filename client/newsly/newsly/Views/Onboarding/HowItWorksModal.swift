@@ -73,43 +73,14 @@ struct HowItWorksModal: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                VStack(spacing: 14) {
-                    Text("LAST STEP")
-                        .font(.editorialMeta)
-                        .tracking(1.8)
-                        .foregroundColor(.onboardingText.opacity(0.58))
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 10)
-
+                VStack(spacing: 8) {
                     Text("What to expect")
-                        .font(.title2.bold())
+                        .font(.appTitle2.bold())
                         .foregroundColor(.onboardingText)
                         .opacity(appeared ? 1 : 0)
                         .offset(y: appeared ? 0 : 10)
-
-                    Text("A quick handoff before you dive in.")
-                        .font(.callout)
-                        .foregroundColor(.onboardingText.opacity(0.68))
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 10)
-
-                    if feedCount > 0 {
-                        Text("\(feedCount) sources on deck")
-                            .font(.caption.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundColor(.onboardingText)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule()
-                                    .fill(Color.onboardingSurface.opacity(0.84))
-                                    .shadow(color: .black.opacity(0.05), radius: 12, x: 0, y: 8)
-                            )
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 10)
-                    }
                 }
-                .padding(.bottom, 36)
+                .padding(.bottom, 30)
 
                 VStack(spacing: 10) {
                     ForEach(Array(tips.enumerated()), id: \.element.id) { index, tip in
@@ -128,7 +99,7 @@ struct HowItWorksModal: View {
 
                 Button(action: onDone) {
                     Text(primaryButtonTitle)
-                        .font(.callout.weight(.semibold))
+                        .font(.appCallout.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .foregroundColor(.onboardingSurface)
@@ -153,7 +124,7 @@ struct HowItWorksModal: View {
     private func tipRow(_ tip: TutorialTip) -> some View {
         HStack(spacing: 14) {
             Image(systemName: tip.icon)
-                .font(.body.weight(.medium))
+                .font(.appBody.weight(.medium))
                 .foregroundColor(tip.isFeatured ? .onboardingSurface : .onboardingText)
                 .frame(width: 42, height: 42)
                 .background(
@@ -167,10 +138,10 @@ struct HowItWorksModal: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(tip.title)
-                    .font(.callout.weight(.semibold))
+                    .font(.appCallout.weight(.semibold))
                     .foregroundColor(.onboardingText)
                 Text(tip.detail)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(.onboardingText.opacity(0.62))
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -16,7 +16,7 @@ struct PlatformIcon: View {
                 switch metadata.glyph {
                 case .text(let value):
                     Text(value)
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.appSans(size: 13, weight: .bold))
                         .foregroundColor(metadata.color)
                         .frame(width: 18, height: 18)
                         .background(metadata.color.opacity(0.16))
@@ -27,21 +27,21 @@ struct PlatformIcon: View {
                 }
             }
         }
-        .font(.callout)
+        .font(.appCallout)
     }
 }
 
 #Preview {
     VStack(spacing: 8) {
         HStack(spacing: 16) {
-            VStack { PlatformIcon(platform: "hackernews"); Text("HackerNews").font(.caption2) }
-            VStack { PlatformIcon(platform: "reddit"); Text("Reddit").font(.caption2) }
-            VStack { PlatformIcon(platform: "substack"); Text("Substack").font(.caption2) }
+            VStack { PlatformIcon(platform: "hackernews"); Text("HackerNews").font(.appCaption2) }
+            VStack { PlatformIcon(platform: "reddit"); Text("Reddit").font(.appCaption2) }
+            VStack { PlatformIcon(platform: "substack"); Text("Substack").font(.appCaption2) }
         }
         HStack(spacing: 16) {
-            VStack { PlatformIcon(platform: "podcast"); Text("Podcast").font(.caption2) }
-            VStack { PlatformIcon(platform: "twitter"); Text("Twitter").font(.caption2) }
-            VStack { PlatformIcon(platform: "unknown"); Text("Unknown").font(.caption2) }
+            VStack { PlatformIcon(platform: "podcast"); Text("Podcast").font(.appCaption2) }
+            VStack { PlatformIcon(platform: "twitter"); Text("Twitter").font(.appCaption2) }
+            VStack { PlatformIcon(platform: "unknown"); Text("Unknown").font(.appCaption2) }
         }
     }
     .padding()

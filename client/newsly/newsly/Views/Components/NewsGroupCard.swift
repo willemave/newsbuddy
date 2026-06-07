@@ -26,7 +26,7 @@ struct NewsGroupCard: View {
                     VStack(alignment: .leading, spacing: 4) {
                         // Title - full display
                         Text(item.displayTitle)
-                            .font(.body)
+                            .font(.appBody)
                             .fontWeight(.medium)
                             .foregroundColor(item.isRead ? Color.onSurfaceSecondary : Color.onSurface)
                             .lineLimit(nil)
@@ -42,7 +42,7 @@ struct NewsGroupCard: View {
                                     .opacity(item.platform == nil ? 0 : 1)
                                 if let source = item.source {
                                     Text(source)
-                                        .font(.caption)
+                                        .font(.appCaption)
                                         .foregroundColor(Color.onSurfaceSecondary)
                                         .lineLimit(1)
                                 }
@@ -52,7 +52,7 @@ struct NewsGroupCard: View {
 
                             // Date
                             ContentTimestampText(rawValue: item.primaryTimestamp, style: .compactRelative)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .foregroundColor(Color.onSurfaceSecondary)
                         }
                     }

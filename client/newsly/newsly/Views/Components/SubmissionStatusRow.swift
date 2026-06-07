@@ -56,11 +56,11 @@ struct SubmissionStatusRow: View {
                     if let detail = submission.statusDetailText {
                         HStack(alignment: .top, spacing: 4) {
                             Image(systemName: submission.isError ? "info.circle" : "checkmark.circle")
-                                .font(.caption2)
+                                .font(.appCaption2)
                                 .foregroundStyle(statusColor.opacity(0.7))
                                 .padding(.top, 1)
                             Text(detail)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .foregroundStyle(Color.onSurfaceSecondary)
                                 .lineLimit(2)
                         }
@@ -79,7 +79,7 @@ struct SubmissionStatusRow: View {
 
     private var statusIcon: some View {
         Image(systemName: statusIconName)
-            .font(.system(size: 16, weight: .medium))
+            .font(.appSymbol(size: 16, weight: .medium))
             .foregroundStyle(statusColor)
     }
 

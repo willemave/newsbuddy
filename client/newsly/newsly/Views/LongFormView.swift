@@ -81,11 +81,11 @@ struct LongFormView: View {
                                         )
                                     }
                                 }
-                                .padding(.horizontal, Spacing.readerHorizontal)
+                                .padding(.horizontal, Spacing.screenHorizontal)
 
                                 if items.contains(where: { !$0.isRead }) {
                                     markAllLongFormButton
-                                        .padding(.horizontal, Spacing.readerHorizontal)
+                                        .padding(.horizontal, Spacing.screenHorizontal)
                                         .padding(.vertical, 8)
                                 }
 
@@ -391,7 +391,7 @@ struct LongFormView: View {
             showMarkAllConfirmation = true
         } label: {
             Text("Mark All as Read")
-                .font(.subheadline.weight(.semibold))
+                .font(.appSubheadline.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
                 .frame(minHeight: 44)
@@ -503,11 +503,11 @@ struct LongFormView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
                             Image(systemName: totalSourceItemsProcessing > 0 ? "clock.arrow.circlepath" : "dot.radiowaves.left.and.right")
-                                .font(.system(size: 16, weight: .semibold))
+                                .font(.appSymbol(size: 16, weight: .semibold))
                                 .foregroundStyle(Color.terracottaPrimary)
 
                             Text(bootstrapHeadline)
-                                .font(.title3.weight(.semibold))
+                                .font(.appTitle3.weight(.semibold))
                                 .foregroundStyle(Color.onSurface)
                         }
 
@@ -522,7 +522,7 @@ struct LongFormView: View {
 
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Selected Sources")
-                            .font(.headline)
+                            .font(.appHeadline)
                             .foregroundStyle(Color.onSurface)
                             .padding(.bottom, 12)
 
@@ -566,7 +566,7 @@ struct LongFormView: View {
                         .lineLimit(1)
 
                     Text(sourceProgressSummary(for: config))
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .lineLimit(2)
                 }
@@ -641,6 +641,7 @@ struct LongFormView: View {
 
     @MainActor
     private func runLongFormPollingLoop() async {
+        guard await TabActivationTiming.waitForSettle(), shouldPollLongForm else { return }
         await refreshLongFormSurface(forceReload: false)
 
         while !Task.isCancelled {

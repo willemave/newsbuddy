@@ -115,7 +115,7 @@ struct CustomNarrationListSheet: View {
                         Spacer(minLength: 10)
 
                         Image(systemName: viewModel.isPlaying(episode) ? "pause.fill" : "play.fill")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.appSymbol(size: 12, weight: .semibold))
                             .foregroundStyle(episode.isCompleted ? Color.terracottaPrimary : Color.onSurfaceSecondary)
                             .frame(width: 30, height: 30)
                             .background(Color.surfaceSecondary)
@@ -175,7 +175,7 @@ struct CustomNarrationListSheet: View {
                         .tint(Color.terracottaPrimary)
                 } else {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appSymbol(size: 14, weight: .semibold))
                         .foregroundStyle(Color.terracottaPrimary)
                 }
             }
@@ -196,11 +196,11 @@ struct CustomNarrationListSheet: View {
                 .controlSize(.small)
         } else if episode.isFailed {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appSymbol(size: 14, weight: .semibold))
                 .foregroundStyle(Color.statusDestructive)
         } else {
             Image(systemName: viewModel.isPlaying(episode) ? "speaker.wave.3.fill" : "waveform")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appSymbol(size: 14, weight: .semibold))
                 .foregroundStyle(Color.terracottaPrimary)
         }
     }

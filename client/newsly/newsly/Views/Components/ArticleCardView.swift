@@ -115,7 +115,7 @@ struct ArticleCardView: View {
             .frame(height: heroImageHeight)
             .overlay(
                 Image(systemName: contentTypeIcon)
-                    .font(.system(size: 36, weight: .light))
+                    .font(.appSymbol(size: 36, weight: .light))
                     .foregroundColor(Color.onSurfaceSecondary.opacity(0.4))
             )
     }
@@ -123,9 +123,9 @@ struct ArticleCardView: View {
     private var contentTypeBadge: some View {
         HStack(spacing: 4) {
             Image(systemName: contentTypeIcon)
-                .font(.caption)
+                .font(.appCaption)
             Text(content.contentType.capitalized)
-                .font(.caption)
+                .font(.appCaption)
                 .fontWeight(.medium)
         }
         .foregroundColor(.white)
@@ -148,7 +148,7 @@ struct ArticleCardView: View {
         HStack(spacing: 8) {
             if let source = content.source {
                 Text(source)
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundColor(Color.onSurfaceSecondary)
                     .lineLimit(1)
             }
@@ -160,14 +160,14 @@ struct ArticleCardView: View {
             }
 
             Text(content.formattedDate)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundColor(Color.onSurfaceSecondary)
 
             Spacer()
 
             if content.isRead {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(.onSurfaceSecondary)
             }
         }
@@ -177,7 +177,7 @@ struct ArticleCardView: View {
     private var hookSection: some View {
         if let hookText = hook, !hookText.isEmpty {
             Text(hookText)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .italic()
                 .foregroundColor(Color.readerBodyText)
                 .padding(.vertical, 4)
@@ -190,7 +190,7 @@ struct ArticleCardView: View {
             FlowLayout(spacing: 6) {
                 ForEach(topicsList.prefix(5), id: \.self) { topic in
                     Text(topic)
-                        .font(.caption)
+                        .font(.appCaption)
                         .fontWeight(.medium)
                         .foregroundColor(.onSurfaceSecondary)
                         .padding(.horizontal, 10)
@@ -206,7 +206,7 @@ struct ArticleCardView: View {
     private var keyPointsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Key Points")
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .fontWeight(.semibold)
                 .foregroundColor(Color.onSurfaceSecondary)
 
@@ -218,12 +218,12 @@ struct ArticleCardView: View {
                 }
             } else if let summary = content.summaryDisplayText {
                 Text(summary)
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundColor(Color.readerBodyText)
                     .lineLimit(4)
             } else {
                 Text("No summary available")
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundColor(Color.onSurfaceSecondary)
                     .italic()
             }
@@ -238,7 +238,7 @@ struct ArticleCardView: View {
                 .padding(.top, 6)
 
             Text(text)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundColor(Color.readerBodyText)
                 .multilineTextAlignment(.leading)
         }
@@ -268,7 +268,7 @@ struct ArticleCardView: View {
             // Mark as read
             Button(action: onMarkRead) {
                 Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
-                    .font(.system(size: 20, weight: .regular))
+                    .font(.appSymbol(size: 20, weight: .regular))
                     .foregroundColor(Color.onSurfaceSecondary)
             }
             .frame(width: 44, height: 44)
@@ -279,7 +279,7 @@ struct ArticleCardView: View {
             // Download more
             Button { showDownloadSheet = true } label: {
                 Image(systemName: "tray.and.arrow.down")
-                    .font(.system(size: 20, weight: .regular))
+                    .font(.appSymbol(size: 20, weight: .regular))
                     .foregroundColor(Color.onSurfaceSecondary)
             }
             .frame(width: 44, height: 44)
@@ -309,11 +309,11 @@ struct ArticleCardView: View {
 
             HStack {
                 Text("Download More")
-                    .font(.headline)
+                    .font(.appHeadline)
                 Spacer()
                 Button { showDownloadSheet = false } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
+                        .font(.appTitle3)
                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
                         .frame(width: 44, height: 44)
                 }
@@ -343,17 +343,17 @@ struct ArticleCardView: View {
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: "arrow.down.circle.fill")
-                    .font(.title3)
+                    .font(.appTitle3)
                     .foregroundColor(.brandPrimary)
                     .frame(width: 36, height: 36)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(count) episodes")
-                        .font(.body)
+                        .font(.appBody)
                         .fontWeight(.medium)
                         .foregroundColor(Color.onSurface)
                     Text(subtitle)
-                        .font(.subheadline)
+                        .font(.appSubheadline)
                         .foregroundColor(Color.onSurfaceSecondary)
                 }
 

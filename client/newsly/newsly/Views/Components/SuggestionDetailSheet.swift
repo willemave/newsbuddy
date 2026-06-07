@@ -27,11 +27,11 @@ struct SuggestionDetailSheet: View {
             // Type icon + source title
             HStack(spacing: 10) {
                 Image(systemName: metadata.systemImageName)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.appSymbol(size: 16, weight: .medium))
                     .foregroundColor(metadata.color)
 
                 Text(suggestion.displayTitle)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.appSans(size: 17, weight: .semibold))
                     .foregroundColor(.editorialText)
                     .lineLimit(2)
             }
@@ -76,7 +76,7 @@ struct SuggestionDetailSheet: View {
                         dismiss()
                     }) {
                         Label("Subscribe", systemImage: "plus")
-                            .font(.subheadline.weight(.semibold))
+                            .font(.appSubheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
                     }
@@ -89,7 +89,7 @@ struct SuggestionDetailSheet: View {
                     dismiss()
                 }) {
                     Label("Preview", systemImage: "safari")
-                        .font(.subheadline.weight(.medium))
+                        .font(.appSubheadline.weight(.medium))
                         .frame(maxWidth: suggestion.canSubscribe ? nil : .infinity)
                         .padding(.vertical, 12)
                         .padding(.horizontal, suggestion.canSubscribe ? 16 : 0)
@@ -102,7 +102,7 @@ struct SuggestionDetailSheet: View {
                         dismiss()
                     }) {
                         Label(suggestion.addItemLabel, systemImage: "arrow.down.circle")
-                            .font(.subheadline.weight(.medium))
+                            .font(.appSubheadline.weight(.medium))
                             .padding(.vertical, 12)
                             .padding(.horizontal, 12)
                     }
@@ -118,7 +118,7 @@ struct SuggestionDetailSheet: View {
                 dismiss()
             }) {
                 Text("Not interested")
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundColor(.editorialSub)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: RowMetrics.compactHeight)

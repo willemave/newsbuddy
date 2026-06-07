@@ -14,11 +14,11 @@ struct ErrorView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 40, weight: .light))
+                .font(.appSymbol(size: 40, weight: .light))
                 .foregroundStyle(Color.statusDestructive)
 
             Text("Error")
-                .font(.headline)
+                .font(.appHeadline)
                 .foregroundStyle(Color.onSurface)
 
             Text(message)

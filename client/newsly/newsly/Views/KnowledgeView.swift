@@ -152,7 +152,7 @@ struct KnowledgeView: View {
     private var searchFieldSection: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .medium))
+                .font(.appSymbol(size: 16, weight: .medium))
                 .foregroundColor(.onSurfaceSecondary)
                 .accessibilityHidden(true)
 
@@ -175,7 +175,7 @@ struct KnowledgeView: View {
                     sendSearchQuery()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 28))
+                        .font(.appSymbol(size: 28))
                         .foregroundColor(viewModel.isCreatingSession ? .onSurfaceSecondary : .terracottaPrimary)
                         .frame(width: 44, height: 44)
                 }
@@ -268,7 +268,7 @@ struct KnowledgeView: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 6) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.appSymbol(size: 15, weight: .semibold))
                     .foregroundStyle(accent)
                     .frame(width: 30, height: 30)
                     .background(accent.opacity(0.14))
@@ -284,7 +284,7 @@ struct KnowledgeView: View {
                     Spacer(minLength: 0)
 
                     Image(systemName: "arrow.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.appSymbol(size: 12, weight: .semibold))
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
             }
@@ -392,7 +392,7 @@ struct KnowledgeView: View {
                     .tint(accent)
             } else {
                 Image(systemName: systemName)
-                    .font(.system(size: iconSize, weight: .semibold))
+                    .font(.appSymbol(size: iconSize, weight: .semibold))
                     .foregroundColor(accent)
             }
         }

@@ -18,7 +18,7 @@ struct LaneStatusRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(lane.name)
-                        .font(.callout.weight(isCompleted ? .regular : .medium))
+                        .font(.appCallout.weight(isCompleted ? .regular : .medium))
                         .foregroundColor(.onboardingText.opacity(isCompleted ? 0.7 : 0.95))
                         .lineLimit(1)
 
@@ -26,7 +26,7 @@ struct LaneStatusRow: View {
 
                     if showsCountBadge {
                         Text("\(lane.completedQueries)/\(lane.queryCount)")
-                            .font(.caption2.weight(.semibold))
+                            .font(.appCaption2.weight(.semibold))
                             .monospacedDigit()
                             .foregroundColor(.onboardingText.opacity(0.55))
                             .padding(.horizontal, 7)
@@ -48,7 +48,7 @@ struct LaneStatusRow: View {
                     .transition(.opacity)
                 } else if !isCompleted {
                     Text(statusLabel)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(.onboardingText.opacity(0.55))
                         .transition(.opacity)
                 }
@@ -76,12 +76,12 @@ struct LaneStatusRow: View {
             switch lane.status {
             case "completed":
                 Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.appSymbol(size: 11, weight: .bold))
                     .foregroundColor(.statusSuccess)
                     .transition(.scale(scale: 0.4).combined(with: .opacity))
             case "failed":
                 Image(systemName: "exclamationmark")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.appSymbol(size: 11, weight: .bold))
                     .foregroundColor(.statusDestructive)
             case "processing":
                 LanePulsingDot()

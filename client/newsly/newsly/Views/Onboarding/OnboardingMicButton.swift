@@ -80,14 +80,14 @@ struct OnboardingMicButton: View {
     private var iconStack: some View {
         ZStack {
             Image(systemName: "mic.fill")
-                .font(.system(size: 36, weight: .medium))
+                .font(.appSymbol(size: 36, weight: .medium))
                 .foregroundColor(.onboardingText)
                 .opacity(audioState == .idle || audioState == .error ? 1 : 0)
                 .scaleEffect(audioState == .idle || audioState == .error ? 1 : 0.25)
                 .blur(radius: audioState == .idle || audioState == .error ? 0 : 4)
 
             Image(systemName: "stop.fill")
-                .font(.system(size: 30, weight: .medium))
+                .font(.appSymbol(size: 30, weight: .medium))
                 .foregroundColor(.onboardingAmbientTertiary)
                 .opacity(audioState == .recording ? 1 : 0)
                 .scaleEffect(audioState == .recording ? 1 : 0.25)
@@ -106,17 +106,17 @@ struct OnboardingMicButton: View {
         VStack(spacing: 8) {
             if audioState == .recording {
                 Text(formattedDuration)
-                    .font(.title3.monospacedDigit())
+                    .font(.appTitle3.monospacedDigit())
                     .foregroundColor(.onboardingText.opacity(0.66))
             }
 
             Text(statusText)
-                .font(.system(size: 11, weight: .medium))
+                .font(.appSans(size: 11, weight: .medium))
                 .tracking(2.5)
                 .foregroundColor(.onboardingText.opacity(0.55))
 
             Text(statusDetail)
-                .font(.caption)
+                .font(.appCaption)
                 .foregroundColor(.onboardingText.opacity(0.68))
                 .multilineTextAlignment(.center)
         }

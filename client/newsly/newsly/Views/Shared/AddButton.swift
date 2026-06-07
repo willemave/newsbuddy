@@ -13,7 +13,7 @@ struct AddButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.appSymbol(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
                 .background(Color.brandPrimary, in: Circle())

@@ -15,7 +15,7 @@ struct SourceMetadataSection: View {
 
             if let synopsis = metadata.displaySynopsis {
                 Text(synopsis)
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundColor(Color.onSurface)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -29,12 +29,12 @@ struct SourceMetadataSection: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .accessibilityHidden(true)
 
             Text("Paper metadata")
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .fontWeight(.semibold)
         }
     }
@@ -47,7 +47,7 @@ struct SourceMetadataSection: View {
                 ForEach(authors) { author in
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "person")
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundColor(Color.onSurfaceSecondary.opacity(0.75))
                             .frame(width: 18, height: 18)
                             .accessibilityHidden(true)
@@ -55,12 +55,12 @@ struct SourceMetadataSection: View {
                         VStack(alignment: .leading, spacing: 2) {
                             if let name = author.displayName {
                                 Text(name)
-                                    .font(.caption.weight(.medium))
+                                    .font(.appCaption.weight(.medium))
                                     .foregroundColor(Color.onSurface)
                             }
                             if let affiliation = author.displayAffiliation {
                                 Text(affiliation)
-                                    .font(.caption2)
+                                    .font(.appCaption2)
                                     .foregroundColor(Color.onSurfaceSecondary)
                             }
                         }
@@ -92,7 +92,7 @@ struct SourceMetadataSection: View {
                 openURL(url)
             } label: {
                 Label("arXiv", systemImage: "arrow.up.right.square")
-                    .font(.caption.weight(.medium))
+                    .font(.appCaption.weight(.medium))
             }
             .buttonStyle(.plain)
             .foregroundColor(Color.brandPrimary)
@@ -103,13 +103,13 @@ struct SourceMetadataSection: View {
     private func fact(icon: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: icon)
-                .font(.caption2)
+                .font(.appCaption2)
                 .foregroundColor(Color.onSurfaceSecondary.opacity(0.72))
                 .frame(width: 16)
                 .accessibilityHidden(true)
 
             Text(value)
-                .font(.caption)
+                .font(.appCaption)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)

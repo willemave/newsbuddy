@@ -20,7 +20,7 @@ struct InterleavedSummaryV2View: View {
     var body: some View {
         VStack(alignment: .leading, spacing: InterleavedV2Design.sectionSpacing) {
             Text(summary.hook)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -48,7 +48,7 @@ struct InterleavedSummaryV2View: View {
                     ForEach(summary.topics) { topic in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(topic.topic)
-                                .font(.subheadline)
+                                .font(.appSubheadline)
                                 .fontWeight(.semibold)
                                 .foregroundColor(Color.onSurface)
 
@@ -65,7 +65,7 @@ struct InterleavedSummaryV2View: View {
             VStack(alignment: .leading, spacing: 8) {
                 sectionHeader("Takeaway", icon: "lightbulb", tint: .terracottaPrimary, uppercase: false)
                 Text(summary.takeaway)
-                    .font(.callout)
+                    .font(.appCallout)
                     .foregroundColor(Color.readerBodyText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -81,11 +81,11 @@ struct InterleavedSummaryV2View: View {
     ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .fontWeight(.semibold)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .textCase(uppercase ? .uppercase : .none)
@@ -102,7 +102,7 @@ struct InterleavedSummaryV2View: View {
                 .padding(.top, 7)
                 .accessibilityHidden(true)
             Text(text)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -112,14 +112,14 @@ struct InterleavedSummaryV2View: View {
     private func quoteCard(_ quote: Quote) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(quote.text)
-                .font(.callout)
+                .font(.appCallout)
                 .italic()
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attributionLine = quoteAttributionLine(quote) {
                 Text("— \(attributionLine)")
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .fontWeight(.medium)
                     .foregroundColor(Color.onSurfaceSecondary)
             }

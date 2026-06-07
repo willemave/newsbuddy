@@ -59,12 +59,12 @@ struct OnboardingSuggestionCard: View {
                     if !metadata.hidesLabel || sourceDetail != nil {
                         HStack(spacing: 6) {
                             Image(systemName: metadata.icon)
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(.appSymbol(size: 10, weight: .semibold))
                                 .foregroundColor(metadata.accentColor)
 
                             if !metadata.hidesLabel {
                                 Text(metadata.label.uppercased())
-                                    .font(.caption.weight(.semibold))
+                                    .font(.appCaption.weight(.semibold))
                                     .tracking(1.0)
                                     .foregroundColor(.onboardingText.opacity(0.55))
                             }
@@ -77,7 +77,7 @@ struct OnboardingSuggestionCard: View {
                                 }
 
                                 Text(sourceDetail)
-                                    .font(.caption)
+                                    .font(.appCaption)
                                     .foregroundColor(.onboardingText.opacity(0.55))
                                     .lineLimit(1)
                             }
@@ -85,14 +85,14 @@ struct OnboardingSuggestionCard: View {
                     }
 
                     Text(suggestion.displayTitle)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.appSubheadline.weight(.semibold))
                         .foregroundColor(.onboardingText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
 
                     if let rationale = suggestion.rationale, !rationale.isEmpty {
                         Text(rationale)
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundColor(.onboardingText.opacity(0.62))
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)

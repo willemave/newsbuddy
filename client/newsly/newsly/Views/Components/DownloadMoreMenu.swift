@@ -30,9 +30,9 @@ struct DownloadMoreMenu: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.appSymbol(size: 14, weight: .regular))
                 Text(title)
-                    .font(.subheadline)
+                    .font(.appSubheadline)
             }
             .foregroundColor(Color.onSurfaceSecondary)
         }

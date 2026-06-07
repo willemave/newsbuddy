@@ -17,7 +17,7 @@ struct SettingsIcon: View {
 
     var body: some View {
         Image(systemName: systemName)
-            .font(.system(size: 14, weight: .semibold))
+            .font(.appSymbol(size: 14, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: Spacing.iconSize, height: Spacing.iconSize)
             .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -95,7 +95,7 @@ extension SettingsRow where Accessory == NavigationChevron {
 struct NavigationChevron: View {
     var body: some View {
         Image(systemName: "chevron.right")
-            .font(.system(size: 12, weight: .semibold))
+            .font(.appSymbol(size: 12, weight: .semibold))
             .foregroundStyle(Color.onSurfaceSecondary)
             .accessibilityHidden(true)
     }

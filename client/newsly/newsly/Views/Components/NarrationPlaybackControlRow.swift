@@ -72,7 +72,7 @@ struct NarrationPlaybackControlRow: View {
                         .tint(Color.terracottaPrimary)
                 } else {
                     Image(systemName: playbackIconName)
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.appSymbol(size: 12, weight: .bold))
                         .foregroundStyle(Color.terracottaPrimary)
                 }
             }
@@ -93,7 +93,7 @@ struct NarrationPlaybackControlRow: View {
                     playbackService.setPlaybackRate(option.rate)
                 } label: {
                     Text(option.title)
-                        .font(.caption2.weight(.semibold))
+                        .font(.appCaption2.weight(.semibold))
                         .foregroundStyle(isSelected(option) ? Color.terracottaPrimary : Color.onSurfaceSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -199,7 +199,7 @@ private struct PlaybackProgressScrubber: View {
                         .position(x: max(thumbX / 2, 0), y: 19)
 
                     Text(currentTimeText)
-                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                        .font(.appSans(size: 8, weight: .semibold).monospacedDigit())
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -231,7 +231,7 @@ private struct PlaybackProgressScrubber: View {
                 Spacer(minLength: 6)
                 Text(durationText)
             }
-            .font(.system(size: 8, weight: .medium, design: .monospaced))
+            .font(.appSans(size: 8, weight: .medium).monospacedDigit())
             .foregroundStyle(Color.onSurfaceSecondary.opacity(0.75))
         }
         .opacity(isEnabled ? 1 : 0.55)

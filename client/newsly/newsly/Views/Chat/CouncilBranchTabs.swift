@@ -85,7 +85,7 @@ private struct CouncilCandidateTab: View {
                     Image(systemName: "checkmark.circle.fill")
                 }
             }
-            .font(.caption.weight(.semibold))
+            .font(.appCaption.weight(.semibold))
             .foregroundStyle(isSelected ? Color.chatAccent : Color.onSurfaceSecondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

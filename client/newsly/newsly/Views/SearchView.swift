@@ -147,7 +147,7 @@ struct SearchView: View {
                         Text("Search feeds, sources, and podcasts")
                         Spacer()
                         Image(systemName: "arrow.right")
-                            .font(.caption)
+                            .font(.appCaption)
                     }
                 }
             }

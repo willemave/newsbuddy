@@ -38,7 +38,7 @@ struct BulletedSummaryView: View {
                     .accessibilityHidden(true)
 
                 Text(point.text)
-                    .font(.callout)
+                    .font(.appCallout)
                     .foregroundColor(Color.readerBodyText)
                     .multilineTextAlignment(.leading)
 
@@ -47,7 +47,7 @@ struct BulletedSummaryView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Text(point.detail)
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundColor(Color.readerBodyText)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -68,14 +68,14 @@ struct BulletedSummaryView: View {
     private func quoteCard(_ quote: Quote) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(quote.text)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .italic()
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attributionLine = quoteAttributionLine(quote) {
                 Text("— \(attributionLine)")
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .fontWeight(.medium)
                     .foregroundColor(Color.onSurfaceSecondary)
             }

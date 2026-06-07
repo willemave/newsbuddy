@@ -11,9 +11,11 @@ import AuthenticationServices
 /// Login screen with Apple Sign In
 struct AuthenticationView: View {
     @EnvironmentObject var authViewModel: AuthenticationViewModel
+    #if DEBUG && targetEnvironment(simulator)
     @State private var showingDebugMenu = false
     @State private var tapCount = 0
     @State private var lastTapTime: Date?
+    #endif
 
     var body: some View {
         VStack(spacing: 24) {
@@ -22,17 +24,19 @@ struct AuthenticationView: View {
             // App logo or title
             VStack(spacing: 8) {
                 Image(systemName: "newspaper.fill")
-                    .font(.system(size: 60))
+                    .font(.appSymbol(size: 60))
                     .foregroundColor(.brandPrimary)
 
                 Text("Newsbuddy")
-                    .font(.largeTitle)
+                    .font(.appLargeTitle)
                     .fontWeight(.bold)
             }
             .contentShape(Rectangle())
+            #if DEBUG && targetEnvironment(simulator)
             .onTapGesture {
                 handleLogoTap()
             }
+            #endif
 
             Spacer()
 
@@ -57,20 +61,23 @@ struct AuthenticationView: View {
             if let errorMessage = authViewModel.errorMessage {
                 Text(errorMessage)
                     .foregroundColor(.statusDestructive)
-                    .font(.caption)
+                    .font(.appCaption)
                     .padding(.horizontal, 40)
             }
 
             Spacer()
         }
         .padding()
+        #if DEBUG && targetEnvironment(simulator)
         .sheet(isPresented: $showingDebugMenu) {
             DebugMenuView()
                 .environmentObject(authViewModel)
         }
+        #endif
     }
 
     /// Handle tap on Newsbuddy icon - show debug menu after 3 taps within 2 seconds
+    #if DEBUG && targetEnvironment(simulator)
     private func handleLogoTap() {
         let now = Date()
 
@@ -89,6 +96,7 @@ struct AuthenticationView: View {
             lastTapTime = nil
         }
     }
+    #endif
 }
 
 #Preview {

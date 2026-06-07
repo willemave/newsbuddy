@@ -15,7 +15,7 @@ struct UserMessageBubble: View {
 
             VStack(alignment: .trailing, spacing: 4) {
                 Text(message.content)
-                    .font(.callout)
+                    .font(.appCallout)
                     .foregroundStyle(.white)
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
@@ -25,7 +25,7 @@ struct UserMessageBubble: View {
 
                 if !message.formattedTime.isEmpty {
                     Text(message.formattedTime)
-                        .font(.caption2)
+                        .font(.appCaption2)
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .padding(.horizontal, 4)
                 }

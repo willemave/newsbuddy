@@ -179,80 +179,133 @@ extension Color {
 
 // MARK: - Typography
 
-extension Font {
-    static let listTitle = Font.body
-    static let listSubtitle = Font.subheadline
-    static let listCaption = Font.caption
-    static let listMono = Font.system(.caption, design: .monospaced)
+enum AppFontFamily {
+    static let sans = "Inter"
+    static let sansItalic = "Inter-Italic"
+}
 
-    static let sectionHeader = Font.footnote.weight(.semibold)
-    static let chipLabel = Font.caption2.weight(.medium)
+extension Font {
+    static func appSans(
+        size: CGFloat,
+        relativeTo textStyle: Font.TextStyle = .body,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        Font.custom(AppFontFamily.sans, size: size, relativeTo: textStyle).weight(weight)
+    }
+
+    static func appSansItalic(
+        size: CGFloat,
+        relativeTo textStyle: Font.TextStyle = .body,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        Font.custom(AppFontFamily.sansItalic, size: size, relativeTo: textStyle).weight(weight)
+    }
+
+    static func appSymbol(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        Font.system(size: size, weight: weight)
+    }
+
+    static let appLargeTitle = Font.appSans(size: 34, relativeTo: .largeTitle, weight: .semibold)
+    static let appTitle = Font.appSans(size: 28, relativeTo: .title, weight: .semibold)
+    static let appTitle2 = Font.appSans(size: 22, relativeTo: .title2, weight: .semibold)
+    static let appTitle3 = Font.appSans(size: 20, relativeTo: .title3, weight: .semibold)
+    static let appHeadline = Font.appSans(size: 17, relativeTo: .headline, weight: .semibold)
+    static let appSubheadline = Font.appSans(size: 15, relativeTo: .subheadline)
+    static let appBody = Font.appSans(size: 16, relativeTo: .body)
+    static let appCallout = Font.appSans(size: 16, relativeTo: .callout)
+    static let appFootnote = Font.appSans(size: 13, relativeTo: .footnote)
+    static let appCaption = Font.appSans(size: 12, relativeTo: .caption)
+    static let appCaption2 = Font.appSans(size: 11, relativeTo: .caption2)
+
+    static let listTitle = Font.appSans(size: 17)
+    static let listSubtitle = Font.appSans(size: 15)
+    static let listCaption = Font.appSans(size: 12)
+    static let listValue = Font.appCaption.monospacedDigit()
+
+    static let sectionHeader = Font.appSans(size: 13, weight: .semibold)
+    static let chipLabel = Font.appSans(size: 11, weight: .medium)
 
     // Feed card typography
-    static let feedMeta = Font.system(size: 11, weight: .regular)
-    static let feedHeadline = Font.system(size: 18, weight: .regular)
-    static let feedSnippet = Font.system(size: 13)
-    static let cardHeadline = Font.system(size: 22, weight: .bold)
-    static let cardDescription = Font.system(size: 14)
-    static let cardBadge = Font.system(size: 10, weight: .semibold)
-    static let cardFooter = Font.system(size: 11, weight: .medium)
+    static let feedMeta = Font.appSans(size: 11)
+    static let feedHeadline = Font.appSans(size: 18, weight: .medium)
+    static let feedSnippet = Font.appSans(size: 13)
+    static let cardHeadline = Font.appSans(size: 22, weight: .semibold)
+    static let cardDescription = Font.appSans(size: 14)
+    static let cardBadge = Font.appSans(size: 10, weight: .semibold)
+    static let cardFooter = Font.appSans(size: 11, weight: .medium)
 
     // Editorial typography (Discovery redesign)
-    static let editorialDisplay = Font.system(.largeTitle, design: .serif)
-    static let editorialHeadline = Font.system(.title3, design: .serif)
-    static let editorialBody = Font.system(.body, design: .serif)
-    static let editorialMeta = Font.caption2.weight(.bold)
-    static let editorialSubMeta = Font.caption2
+    static let editorialDisplay = Font.appSans(size: 34, weight: .semibold)
+    static let editorialHeadline = Font.appSans(size: 20, weight: .semibold)
+    static let editorialBody = Font.appSans(size: 16)
+    static let editorialMeta = Font.appSans(size: 11, weight: .bold)
+    static let editorialSubMeta = Font.appSans(size: 11)
 
     // Watercolor typography (Landing & Onboarding)
-    static let watercolorDisplay = Font.system(size: 54, weight: .regular, design: .serif)
-    static let watercolorSubtitle = Font.system(size: 17, weight: .light)
+    static let watercolorDisplay = Font.appSans(size: 54, weight: .medium)
+    static let watercolorSubtitle = Font.appSans(size: 17, weight: .light)
 
-    // Terracotta typography — Newsreader (serif) for headlines/display
-    static let terracottaDisplayLarge = Font.custom("Newsreader", size: 44)
-    static let terracottaHeadlineLarge = Font.custom("Newsreader", size: 28)
-    static let terracottaHeadlineMedium = Font.custom("Newsreader", size: 22).weight(.semibold)
-    static let terracottaHeadlineSmall = Font.custom("Newsreader", size: 18)
-    static let terracottaHeadlineCompact = Font.custom("Newsreader", size: 22)
-    static let terracottaHeadlineItalic = Font.custom("Newsreader-Italic", size: 18)
+    // Terracotta typography — app-wide Inter aliases.
+    static let terracottaDisplayLarge = Font.appSans(size: 44, weight: .medium)
+    static let terracottaHeadlineLarge = Font.appSans(size: 28, weight: .medium)
+    static let terracottaHeadlineMedium = Font.appSans(size: 22, weight: .semibold)
+    static let terracottaHeadlineSmall = Font.appSans(size: 18, weight: .medium)
+    static let terracottaHeadlineCompact = Font.appSans(size: 22, weight: .medium)
+    static let terracottaHeadlineItalic = Font.appSansItalic(size: 18)
 
-    // Terracotta typography — Inter (sans-serif) for body/labels/UI
-    static let terracottaBodyLarge = Font.custom("Inter", size: 16)
-    static let terracottaBodyMedium = Font.custom("Inter", size: 14)
-    static let terracottaBodySmall = Font.custom("Inter", size: 12)
-    static let terracottaLabelSmall = Font.custom("Inter", size: 9).weight(.bold)
-    static let terracottaCategoryPill = Font.custom("Inter", size: 10).weight(.semibold)
+    // Terracotta typography — body/labels/UI
+    static let terracottaBodyLarge = Font.appSans(size: 16)
+    static let terracottaBodyMedium = Font.appSans(size: 14)
+    static let terracottaBodySmall = Font.appSans(size: 12)
+    static let terracottaLabelSmall = Font.appSans(size: 9, weight: .bold)
+    static let terracottaCategoryPill = Font.appSans(size: 10, weight: .semibold)
+
+    static let readerTitle = Font.appSans(size: 34, weight: .semibold)
+    static let readerControlLabel = Font.appSans(size: 16, weight: .semibold)
 
     // Reader typography — regular body copy.
-    static let readerBody = Font.custom("Inter", size: ReaderContentStyle.bodyFontSize)
+    static let readerBody = Font.appSans(size: ReaderContentStyle.bodyFontSize)
         .weight(ReaderContentStyle.bodyFontWeight)
-    static let readerSummaryBody = Font.custom("Inter", size: ReaderContentStyle.summaryBodyFontSize)
+    static let readerSummaryBody = Font.appSans(size: ReaderContentStyle.summaryBodyFontSize)
         .weight(ReaderContentStyle.bodyFontWeight)
 }
 
 extension UIFont {
+    static func appSans(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        let baseFont = UIFont(name: AppFontFamily.sans, size: size)
+            ?? UIFont.systemFont(ofSize: size, weight: weight)
+        let descriptor = baseFont.fontDescriptor.addingAttributes([
+            .traits: [UIFontDescriptor.TraitKey.weight: weight.rawValue]
+        ])
+        return UIFont(descriptor: descriptor, size: size)
+    }
+
+    static func appSans(textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
+        let preferred = UIFont.preferredFont(forTextStyle: textStyle)
+        let baseFont = appSans(size: preferred.pointSize, weight: weight)
+        return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: baseFont)
+    }
+
     static var appTerracottaHeadlineCompact: UIFont {
-        UIFont(name: "Newsreader", size: 22) ?? UIFont.systemFont(ofSize: 22, weight: .regular)
+        UIFont.appSans(size: 22, weight: .medium)
     }
 
     static var appEditorialHeadline: UIFont {
-        UIFont(name: "Newsreader", size: 28) ?? UIFont.systemFont(ofSize: 28, weight: .regular)
+        UIFont.appSans(size: 28, weight: .medium)
     }
 
     static var appEditorialSummary: UIFont {
-        UIFont(name: "Inter", size: ReaderContentStyle.summaryBodyFontSize)
-            ?? UIFont.systemFont(
-                ofSize: ReaderContentStyle.summaryBodyFontSize,
-                weight: ReaderContentStyle.uiBodyFontWeight
-            )
+        UIFont.appSans(
+            size: ReaderContentStyle.summaryBodyFontSize,
+            weight: ReaderContentStyle.uiBodyFontWeight
+        )
     }
 
     static var appReaderBody: UIFont {
-        UIFont(name: "Inter", size: ReaderContentStyle.bodyFontSize)
-            ?? UIFont.systemFont(
-                ofSize: ReaderContentStyle.bodyFontSize,
-                weight: ReaderContentStyle.uiBodyFontWeight
-            )
+        UIFont.appSans(
+            size: ReaderContentStyle.bodyFontSize,
+            weight: ReaderContentStyle.uiBodyFontWeight
+        )
     }
 }
 
@@ -339,11 +392,13 @@ enum ContentTextSize: Int, CaseIterable {
 // MARK: - Spacing
 
 enum Spacing {
-    /// Default horizontal padding for rows and screen content (20pt baseline).
-    static let screenHorizontal: CGFloat = 20
+    /// Default horizontal padding for rows and screen content.
+    static let screenHorizontal: CGFloat = 12
+    /// Wider Fast Read gutter for dense headline rows and controls.
+    static let fastReadHorizontal: CGFloat = 16
     /// Reader content gutter for long-form/detail reading surfaces.
-    static let readerHorizontal: CGFloat = 36
-    static let rowHorizontal: CGFloat = 20
+    static let readerHorizontal: CGFloat = 28
+    static let rowHorizontal: CGFloat = 12
     static let rowVertical: CGFloat = 12
     static let sectionTop: CGFloat = 24
     static let sectionBottom: CGFloat = 8

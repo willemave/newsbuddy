@@ -15,22 +15,22 @@ struct ArticlePreviewCard: View {
         VStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(title)
-                    .font(.headline)
+                    .font(.appHeadline)
                     .lineLimit(3)
 
                 if let source {
                     HStack(spacing: 4) {
                         Image(systemName: "doc.text")
-                            .font(.caption)
+                            .font(.appCaption)
                         Text(source)
-                            .font(.caption)
+                            .font(.appCaption)
                     }
                     .foregroundStyle(Color.onSurfaceSecondary)
                 }
 
                 if let summary, !summary.isEmpty {
                     Text(summary)
-                        .font(.subheadline)
+                        .font(.appSubheadline)
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .lineLimit(4)
                 }
@@ -39,9 +39,9 @@ struct ArticlePreviewCard: View {
                     Link(destination: articleUrl) {
                         HStack(spacing: 4) {
                             Text("Read original article")
-                                .font(.caption)
+                                .font(.appCaption)
                             Image(systemName: "arrow.up.right.square")
-                                .font(.caption2)
+                                .font(.appCaption2)
                         }
                         .foregroundStyle(Color.topicAccent)
                     }
@@ -54,10 +54,10 @@ struct ArticlePreviewCard: View {
 
             VStack(spacing: 6) {
                 Text("Ask me anything about this article")
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundStyle(Color.onSurfaceSecondary)
                 Text("I can summarize, explain, find related topics, or answer your questions.")
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
             }

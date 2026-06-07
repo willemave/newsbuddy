@@ -99,7 +99,7 @@ struct SourceDetailSheet: View {
                     SourceTypeIcon(type: config.scraperType)
                         .accessibilityHidden(true)
                     Text(config.scraperType.capitalized)
-                        .font(.listMono)
+                        .font(.listValue)
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
             }
@@ -232,7 +232,7 @@ struct SourceDetailSheet: View {
                 .accessibilityHidden(true)
 
             Text(error)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundStyle(Color.onSurface)
 
             Spacer()
@@ -250,7 +250,7 @@ struct SourceDetailSheet: View {
             HStack {
                 Spacer()
                 Label("Delete Source", systemImage: "trash")
-                    .font(.body.weight(.medium))
+                    .font(.appBody.weight(.medium))
                 Spacer()
             }
             .padding(.vertical, 12)
@@ -320,7 +320,7 @@ struct SourceDetailSheet: View {
                 .foregroundStyle(Color.onSurface)
             Spacer()
             Text(value)
-                .font(.listMono)
+                .font(.listValue)
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .multilineTextAlignment(.trailing)
         }

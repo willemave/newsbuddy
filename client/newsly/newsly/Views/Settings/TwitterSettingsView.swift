@@ -120,7 +120,7 @@ struct TwitterSettingsView: View {
 
                     if let details = connection.issueDetails {
                         Text(details)
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundStyle(Color.statusDestructive)
                             .fixedSize(horizontal: false, vertical: true)
                     }

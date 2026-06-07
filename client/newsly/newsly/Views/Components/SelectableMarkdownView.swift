@@ -316,7 +316,7 @@ struct MarkdownNSRenderer {
     }
 
     private func appendCodeBlock(_ code: String, to result: NSMutableAttributedString) {
-        let codeFont = UIFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.85, weight: .regular)
+        let codeFont = UIFont.appSans(size: baseFont.pointSize * 0.85)
         let bgColor: UIColor =
             traitCollection.userInterfaceStyle == .dark
             ? UIColor(red: 0.14, green: 0.15, blue: 0.17, alpha: 1)
@@ -466,7 +466,7 @@ struct MarkdownNSRenderer {
 
         let tableText = tableLines.joined(separator: "\n")
         let tableAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.86, weight: .regular),
+            .font: UIFont.appSans(size: baseFont.pointSize * 0.86),
             .foregroundColor: textColor
         ]
 
@@ -535,8 +535,7 @@ struct MarkdownNSRenderer {
         let scales: [CGFloat] = [1.36, 1.22, 1.12, 1.02, 0.94, 0.88]
         let scale = scales[min(level - 1, 5)]
         let weight: UIFont.Weight = level <= 1 ? .bold : .semibold
-        let headingFont = UIFont(name: "Newsreader", size: baseFont.pointSize * scale)
-            ?? UIFont.systemFont(ofSize: baseFont.pointSize * scale, weight: weight)
+        let headingFont = UIFont.appSans(size: baseFont.pointSize * scale, weight: weight)
         let descriptor = headingFont.fontDescriptor.addingAttributes([
             .traits: [UIFontDescriptor.TraitKey.weight: weight.rawValue]
         ])
@@ -561,7 +560,7 @@ struct MarkdownNSRenderer {
         attrStr.insert(NSAttributedString(string: "  "), at: 0)
         attrStr.insert(NSAttributedString(string: "| ", attributes: [
             .foregroundColor: UIColor.appAccent.resolvedColor(with: traitCollection),
-            .font: UIFont.systemFont(ofSize: baseFont.pointSize, weight: .semibold)
+            .font: UIFont.appSans(size: baseFont.pointSize, weight: .semibold)
         ]), at: 0)
 
         // Apply italic where possible
@@ -641,7 +640,7 @@ struct MarkdownNSRenderer {
                     font = font.withTraits(.traitItalic) ?? font
                 }
                 if inlineIntent.contains(.code) {
-                    font = UIFont.monospacedSystemFont(ofSize: baseFont.pointSize * 0.88, weight: .regular)
+                    font = UIFont.appSans(size: baseFont.pointSize * 0.88)
                     let bgColor: UIColor =
                         traitCollection.userInterfaceStyle == .dark
                         ? UIColor(red: 0.2, green: 0.21, blue: 0.23, alpha: 1)

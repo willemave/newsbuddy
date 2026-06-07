@@ -20,16 +20,16 @@ struct DetectedFeedCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: feed.systemIcon)
-                    .font(.title2)
+                    .font(.appTitle2)
                     .foregroundColor(.onSurfaceSecondary)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Subscribe to \(feed.feedTypeName)")
-                        .font(.headline)
+                        .font(.appHeadline)
 
                     if let title = feed.title, !title.isEmpty {
                         Text(title)
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .foregroundColor(Color.onSurfaceSecondary)
                             .lineLimit(1)
                     }
@@ -40,7 +40,7 @@ struct DetectedFeedCard: View {
                 if hasSubscribed {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.brandPrimary)
-                        .font(.title2)
+                        .font(.appTitle2)
                 } else {
                     Button(action: onSubscribe) {
                         if isSubscribing {
@@ -48,7 +48,7 @@ struct DetectedFeedCard: View {
                                 .scaleEffect(0.8)
                         } else {
                             Text("Subscribe")
-                                .font(.subheadline.weight(.medium))
+                                .font(.appSubheadline.weight(.medium))
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -58,15 +58,15 @@ struct DetectedFeedCard: View {
 
             if hasSubscribed {
                 Text("You'll now receive new content from this source")
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(.onSurfaceSecondary)
             } else if let error = subscriptionError {
                 Text(error)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(.statusDestructive)
             } else {
                 Text("Get new content from this source automatically")
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(Color.onSurfaceSecondary)
             }
         }

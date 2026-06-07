@@ -22,7 +22,7 @@ struct InterleavedSummaryView: View {
         VStack(alignment: .leading, spacing: InterleavedDesign.sectionSpacing) {
             // Hook
             Text(summary.hook)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -37,17 +37,17 @@ struct InterleavedSummaryView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "lightbulb")
-                        .font(.subheadline)
+                        .font(.appSubheadline)
                         .foregroundColor(.terracottaPrimary)
                         .accessibilityHidden(true)
                     Text("Takeaway")
-                        .font(.subheadline)
+                        .font(.appSubheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(Color.onSurfaceSecondary)
                 }
 
                 Text(summary.takeaway)
-                    .font(.callout)
+                    .font(.appCallout)
                     .foregroundColor(Color.readerBodyText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -60,13 +60,13 @@ struct InterleavedSummaryView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Topic as bold header
             Text(insight.topic)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .fontWeight(.bold)
                 .foregroundColor(Color.onSurface)
 
             // Insight text
             Text(insight.insight)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -74,14 +74,14 @@ struct InterleavedSummaryView: View {
             if let quote = insight.supportingQuote, !quote.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(quote)
-                        .font(.callout)
+                        .font(.appCallout)
                         .italic()
                         .foregroundColor(Color.readerBodyText)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let attribution = insight.quoteAttribution, !attribution.isEmpty {
                         Text("— \(attribution)")
-                            .font(.footnote)
+                            .font(.appFootnote)
                             .fontWeight(.medium)
                             .foregroundColor(Color.onSurfaceSecondary)
                     }

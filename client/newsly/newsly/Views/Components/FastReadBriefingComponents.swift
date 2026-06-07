@@ -61,7 +61,7 @@ struct BriefingStackCard: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 14) {
                 Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(.appSymbol(size: 28, weight: .semibold))
                     .foregroundStyle(Color.onSurfaceSecondary.opacity(0.86))
                     .frame(width: 44, height: 44)
                     .accessibilityHidden(true)
@@ -99,7 +99,7 @@ struct BriefingStackCard: View {
                                 .tint(Color.brandPrimary)
                         } else {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 20, weight: .bold))
+                                .font(.appSymbol(size: 20, weight: .bold))
                                 .foregroundStyle(Color.onSurface)
                                 .offset(x: isPlaying ? 0 : 2)
                         }
@@ -156,7 +156,7 @@ struct ShortNewsAudioActionChip: View {
                     .tint(Color.brandPrimary)
             } else {
                 Image(systemName: isPlaying ? "pause.fill" : "waveform")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.appSymbol(size: 13, weight: .semibold))
                     .foregroundStyle(Color.brandPrimary)
             }
 
@@ -189,7 +189,7 @@ struct ShortNewsQuickActionChip: View {
                     .tint(Color.brandPrimary)
             } else {
                 Image(systemName: action.systemImage)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.appSymbol(size: 13, weight: .semibold))
                     .foregroundStyle(Color.brandPrimary)
             }
 

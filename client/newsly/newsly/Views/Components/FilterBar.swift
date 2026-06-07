@@ -21,7 +21,7 @@ struct FilterBar: View {
             // Content Type Filter
             VStack(alignment: .leading, spacing: 4) {
                 Text("Content Type")
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(Color.onSurfaceSecondary)
                 
                 Picker("Content Type", selection: $selectedContentType) {
@@ -41,7 +41,7 @@ struct FilterBar: View {
                 // Date Filter
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Date")
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(Color.onSurfaceSecondary)
                     
                     Picker("Date", selection: $selectedDate) {
@@ -60,7 +60,7 @@ struct FilterBar: View {
                 // Read Status Filter
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Read Status")
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(Color.onSurfaceSecondary)
                     
                     Picker("Read Status", selection: $selectedReadFilter) {

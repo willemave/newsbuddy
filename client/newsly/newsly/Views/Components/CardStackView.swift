@@ -28,13 +28,13 @@ struct CardStackView: View {
                     // Empty state - all cards swiped away
                     VStack(spacing: 16) {
                         Image(systemName: "newspaper")
-                            .font(.largeTitle)
+                            .font(.appLargeTitle)
                             .foregroundColor(Color.onSurfaceSecondary)
                         Text("No more news")
-                            .font(.title3)
+                            .font(.appTitle3)
                             .foregroundColor(Color.onSurfaceSecondary)
                         Text("Pull to refresh")
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundColor(Color.onSurfaceSecondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

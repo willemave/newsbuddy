@@ -167,7 +167,7 @@ struct CustomNarrationPickerSheet: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "waveform")
-                .font(.system(size: 34, weight: .medium))
+                .font(.appSymbol(size: 34, weight: .medium))
                 .foregroundStyle(Color.onSurfaceSecondary)
 
             Text("No narration sources")
@@ -198,7 +198,7 @@ struct CustomNarrationPickerSheet: View {
                 Spacer()
 
                 Image(systemName: isSelected(item, kind: kind) ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.appSymbol(size: 22, weight: .semibold))
                     .foregroundStyle(
                         isSelected(item, kind: kind)
                             ? Color.terracottaPrimary

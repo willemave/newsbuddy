@@ -37,14 +37,14 @@ struct ThinkingBubbleView: View {
 
             if let statusText, !statusText.isEmpty {
                 Text(statusText)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 4)
             }
 
             Text(formattedDuration)
-                .font(.caption2)
+                .font(.appCaption2)
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .monospacedDigit()
                 .padding(.horizontal, 4)
@@ -92,11 +92,11 @@ struct InitialSuggestionsLoadingView: View {
 
             VStack(spacing: 6) {
                 Text("Preparing suggestions")
-                    .font(.headline)
+                    .font(.appHeadline)
                     .foregroundStyle(Color.onSurface)
 
                 Text("Analyzing the article for you")
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundStyle(Color.onSurfaceSecondary)
             }
         }

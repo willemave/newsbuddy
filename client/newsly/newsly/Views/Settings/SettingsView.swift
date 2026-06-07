@@ -120,10 +120,10 @@ struct SettingsView: View {
 
             VStack(spacing: 2) {
                 Text("Newsbuddy")
-                    .font(.title2.weight(.semibold))
+                    .font(.appTitle2.weight(.semibold))
                     .foregroundStyle(Color.onSurface)
                 Text(appVersionLabel)
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .foregroundStyle(Color.onSurfaceSecondary)
             }
         }
@@ -273,13 +273,13 @@ struct SettingsView: View {
                             .frame(width: 36, height: 36)
                             .overlay(
                                 Text(persona.displayName.prefix(1).uppercased())
-                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                    .font(.appSans(size: 15, weight: .semibold))
                                     .foregroundStyle(expertColor(for: index))
                             )
                             .accessibilityHidden(true)
 
                         Text(persona.displayName)
-                            .font(.body)
+                            .font(.appBody)
                             .foregroundStyle(Color.onSurface)
 
                         Spacer()
@@ -288,7 +288,7 @@ struct SettingsView: View {
                             removeExpert(at: index)
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 20))
+                                .font(.appSymbol(size: 20))
                                 .foregroundStyle(Color.onSurfaceSecondary.opacity(0.5))
                                 .frame(width: 44, height: 44)
                         }
@@ -318,7 +318,7 @@ struct SettingsView: View {
                             addExpert()
                         } label: {
                             Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 24))
+                                .font(.appSymbol(size: 24))
                                 .foregroundStyle(Color.brandPrimary)
                                 .frame(width: 44, height: 44)
                         }
@@ -332,11 +332,11 @@ struct SettingsView: View {
                 HStack {
                     if councilPersonasDraft.count < CouncilPersona.minExperts {
                         Text("Add at least \(CouncilPersona.minExperts) experts to enable council chat.")
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundStyle(Color.onSurfaceSecondary)
                     } else {
                         Text("Tap the council button in chat to hear from your experts.")
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundStyle(Color.onSurfaceSecondary)
                     }
                     Spacer()
@@ -350,7 +350,7 @@ struct SettingsView: View {
                                     .tint(.white)
                             } else {
                                 Text("Save")
-                                    .font(.callout.weight(.semibold))
+                                    .font(.appCallout.weight(.semibold))
                             }
                         }
                         .foregroundStyle(.white)
@@ -461,7 +461,7 @@ struct SettingsView: View {
 
             HStack(spacing: 8) {
                 Text("A")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.appSans(size: 13, weight: .medium))
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .accessibilityHidden(true)
 
@@ -472,7 +472,7 @@ struct SettingsView: View {
                     .accessibilityValue(textSizeAccessibilityValue(value.wrappedValue, range: range))
 
                 Text("A")
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.appSans(size: 22, weight: .medium))
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .accessibilityHidden(true)
             }
@@ -725,7 +725,7 @@ private struct FeedbackSheet: View {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $message)
                         .scrollContentBackground(.hidden)
-                        .font(.body)
+                        .font(.appBody)
                         .foregroundStyle(Color.onSurface)
                         .frame(minHeight: 180)
                         .accessibilityLabel("Feedback message")
@@ -735,7 +735,7 @@ private struct FeedbackSheet: View {
 
                     if message.isEmpty {
                         Text("What should we improve?")
-                            .font(.body)
+                            .font(.appBody)
                             .foregroundStyle(Color.onSurfaceSecondary)
                             .padding(.horizontal, 17)
                             .padding(.vertical, 18)
@@ -745,7 +745,7 @@ private struct FeedbackSheet: View {
 
                 if let errorMessage {
                     Text(errorMessage)
-                        .font(.footnote)
+                        .font(.appFootnote)
                         .foregroundStyle(Color.statusDestructive)
                 }
 
@@ -803,7 +803,7 @@ private struct AccountCard: View {
     var body: some View {
         HStack(spacing: 12) {
             Text(user.email.prefix(1).uppercased())
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .font(.appSans(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: Spacing.iconSize, height: Spacing.iconSize)
                 .background(Color.terracottaPrimary, in: Circle())

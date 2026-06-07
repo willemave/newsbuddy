@@ -54,7 +54,7 @@ struct ChatLoadingView: View {
 
             // Simple loading text
             Text("Loading conversation")
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundColor(Color.onSurfaceSecondary)
         }
     }

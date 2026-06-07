@@ -13,7 +13,7 @@ struct ChatErrorBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.appSymbol(size: 15, weight: .semibold))
                 .foregroundStyle(Color.statusDestructive)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -41,7 +41,7 @@ struct ChatErrorBanner: View {
 
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.appSymbol(size: 12, weight: .semibold))
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .frame(width: 24, height: 24)
             }

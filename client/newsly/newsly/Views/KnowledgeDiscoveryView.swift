@@ -219,10 +219,10 @@ struct KnowledgeDiscoveryView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appSymbol(size: 14, weight: .semibold))
 
                 Text("Generate More")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.appSans(size: 15, weight: .semibold))
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
@@ -239,10 +239,10 @@ struct KnowledgeDiscoveryView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.appSymbol(size: 14, weight: .semibold))
 
                 Text("Personalize")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.appSans(size: 15, weight: .semibold))
             }
             .foregroundColor(Color.onSurface)
             .frame(maxWidth: .infinity)
@@ -353,7 +353,7 @@ private struct PodcastEpisodeSearchCard: View {
             // Metadata bar
             HStack(spacing: 6) {
                 Image(systemName: "waveform")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.appSymbol(size: 10, weight: .semibold))
                     .foregroundColor(.onSurfaceSecondary)
 
                 if let podcastTitle = result.podcastTitle, !podcastTitle.isEmpty {

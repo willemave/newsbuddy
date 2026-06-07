@@ -95,14 +95,6 @@ private enum GlyphDepth: Int {
         }
     }
 
-    var fontNames: [String] {
-        switch self {
-        case .far:  return ["Baskerville", "Palatino-Roman", "Georgia"]
-        case .mid:  return ["Georgia", "Baskerville-SemiBold", "Palatino-Roman"]
-        case .near: return ["Georgia-Bold", "Baskerville-Bold", "Palatino-Bold"]
-        }
-    }
-
     var restitutionRange: ClosedRange<CGFloat> {
         switch self {
         case .far:  return 0.06...0.14
@@ -316,9 +308,8 @@ final class RevealPhysicsScene: SKScene {
         let y = size.height + CGFloat.random(in: 20...80, using: &seededGenerator)
 
         let word = Self.wordBank.randomElement(using: &seededGenerator) ?? "News"
-        let fontName = depth.fontNames.randomElement(using: &seededGenerator) ?? "AvenirNext-Medium"
         let fontSize = CGFloat.random(in: depth.fontSizeRange, using: &seededGenerator)
-        let font = UIFont(name: fontName, size: fontSize) ?? UIFont.systemFont(ofSize: fontSize, weight: .medium)
+        let font = UIFont.appSans(size: fontSize, weight: .medium)
 
         let label = SKLabelNode(fontNamed: font.fontName)
         label.name = glyphNodeName

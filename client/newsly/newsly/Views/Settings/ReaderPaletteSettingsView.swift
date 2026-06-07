@@ -68,7 +68,7 @@ private struct ReaderPaletteOptionRow: View {
 
             if isSelected {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.appSymbol(size: 20, weight: .semibold))
                     .foregroundStyle(Color.brandPrimary)
                     .accessibilityLabel("Selected")
             }

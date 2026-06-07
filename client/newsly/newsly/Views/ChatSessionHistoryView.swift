@@ -99,7 +99,7 @@ struct ChatSessionHistoryView: View {
     private var emptyStateView: some View {
         VStack(spacing: 20) {
             Image(systemName: "brain.head.profile")
-                .font(.system(size: 48, weight: .light))
+                .font(.appSymbol(size: 48, weight: .light))
                 .foregroundStyle(Color.terracottaPrimary.opacity(0.7))
 
             VStack(spacing: 6) {
@@ -121,7 +121,7 @@ struct ChatSessionHistoryView: View {
     private var noResultsRow: some View {
         VStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: Spacing.iconSize))
+                .font(.appSymbol(size: Spacing.iconSize))
                 .foregroundStyle(Color.onSurfaceSecondary)
             Text("No matching chats")
                 .font(.terracottaHeadlineSmall)

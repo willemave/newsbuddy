@@ -66,7 +66,7 @@ struct FullImageView: View {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.title)
+                            .font(.appTitle)
                             .foregroundColor(.white.opacity(0.8))
                             .padding()
                     }

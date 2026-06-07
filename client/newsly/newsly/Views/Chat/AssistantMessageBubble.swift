@@ -34,7 +34,7 @@ struct AssistantMessageBubble: View {
 
             if !message.formattedTime.isEmpty {
                 Text(message.formattedTime)
-                    .font(.caption2)
+                    .font(.appCaption2)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .padding(.horizontal, 4)
             }
@@ -87,7 +87,7 @@ struct AssistantMessageBubble: View {
                 SelectableMarkdownView(
                     markdown: message.content,
                     textColor: textColor,
-                    baseFont: .preferredFont(forTextStyle: .callout),
+                    baseFont: .appSans(textStyle: .callout),
                     onDigDeeper: onDigDeeper
                 )
             }

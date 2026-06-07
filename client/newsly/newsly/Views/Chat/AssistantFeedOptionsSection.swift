@@ -73,28 +73,28 @@ struct AssistantFeedOptionsSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
                         Image(systemName: option.systemIcon)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.appSymbol(size: 13, weight: .semibold))
                             .foregroundStyle(Color.terracottaPrimary)
                         Text(option.feedTypeLabel.uppercased())
-                            .font(.caption2.weight(.semibold))
+                            .font(.appCaption2.weight(.semibold))
                             .foregroundStyle(Color.onSurfaceSecondary)
                         Text("·")
-                            .font(.caption2)
+                            .font(.appCaption2)
                             .foregroundStyle(Color.onSurfaceSecondary.opacity(0.6))
                         Text(option.hostLabel)
-                            .font(.caption2)
+                            .font(.appCaption2)
                             .foregroundStyle(Color.onSurfaceSecondary)
                             .lineLimit(1)
                     }
 
                     Text(option.title)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.appSubheadline.weight(.semibold))
                         .foregroundStyle(Color.onSurface)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let subtitle = option.subtitleText {
                         Text(subtitle)
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundStyle(Color.onSurfaceSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -186,11 +186,11 @@ private struct FeedOptionActionLabel: View {
                     .tint(loadingTint)
             } else {
                 Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.appSymbol(size: 15, weight: .semibold))
             }
 
             Text(title)
-                .font(.footnote.weight(.semibold))
+                .font(.appFootnote.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
         }

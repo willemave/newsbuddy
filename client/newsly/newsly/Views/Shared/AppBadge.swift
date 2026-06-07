@@ -14,7 +14,7 @@ struct CountBadge: View {
 
     var body: some View {
         Text("\(count)")
-            .font(.system(size: 14, weight: .medium))
+            .font(.appSans(size: 14, weight: .medium))
             .foregroundStyle(color)
             .monospacedDigit()
     }

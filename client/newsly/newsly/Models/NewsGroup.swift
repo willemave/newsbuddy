@@ -9,11 +9,8 @@ import Foundation
 import UIKit
 
 enum NewsRowTypography {
-    static let title: UIFont = {
-        let base = UIFont.preferredFont(forTextStyle: .body)
-        return UIFont.systemFont(ofSize: base.pointSize, weight: .medium)
-    }()
-    static let metadata: UIFont = UIFont.preferredFont(forTextStyle: .caption1)
+    static let title: UIFont = UIFont.appSans(textStyle: .body, weight: .medium)
+    static let metadata: UIFont = UIFont.appSans(textStyle: .caption1)
 }
 
 enum NewsRowLayout {

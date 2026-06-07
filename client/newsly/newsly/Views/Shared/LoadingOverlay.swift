@@ -15,7 +15,7 @@ struct LoadingOverlay: View {
             ProgressView()
                 .tint(.onboardingText)
             Text(message)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.6))
         }
         .padding(20)

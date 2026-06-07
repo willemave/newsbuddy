@@ -55,7 +55,7 @@ struct FilterSheet: View {
                                     .foregroundStyle(Color.onSurface)
                                 Spacer()
                                 Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .font(.appSymbol(size: 13, weight: .semibold))
                                     .foregroundStyle(Color.onSurfaceSecondary)
                                     .accessibilityHidden(true)
                             }

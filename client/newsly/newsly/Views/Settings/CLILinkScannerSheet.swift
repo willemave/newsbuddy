@@ -23,14 +23,14 @@ struct CLILinkScannerSheet: View {
                 } else {
                     VStack(spacing: 16) {
                         Image(systemName: "camera.viewfinder")
-                            .font(.system(size: 44, weight: .medium))
+                            .font(.appSymbol(size: 44, weight: .medium))
                             .foregroundStyle(Color.brandPrimary)
 
                         Text("Camera access is required")
-                            .font(.headline)
+                            .font(.appHeadline)
 
                         Text("Allow camera access to scan the QR code shown by the Newsbuddy CLI.")
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .foregroundStyle(Color.onSurfaceSecondary)
                             .multilineTextAlignment(.center)
 

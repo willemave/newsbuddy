@@ -251,7 +251,7 @@ struct LongFormCardStackView: View {
                 }
 
                 Text("\(currentIndex + 1)/\(items.count)")
-                    .font(.caption2)
+                    .font(.appCaption2)
                     .foregroundColor(Color.onSurfaceSecondary)
                     .monospacedDigit()
             }

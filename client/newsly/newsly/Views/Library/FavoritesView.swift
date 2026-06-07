@@ -77,7 +77,7 @@ struct KnowledgeLibraryView: View {
     private var emptyState: some View {
         VStack(spacing: 20) {
             Image(systemName: "books.vertical")
-                .font(.system(size: 48, weight: .light))
+                .font(.appSymbol(size: 48, weight: .light))
                 .foregroundStyle(Color.onSurfaceTertiary.opacity(0.78))
 
             VStack(spacing: 6) {
@@ -198,7 +198,7 @@ struct KnowledgeLibraryView: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.up.arrow.down")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.appSymbol(size: 11, weight: .semibold))
                         Text(selectedSort.shortTitle)
                     }
                     .font(.terracottaBodySmall.weight(.semibold))
@@ -254,7 +254,7 @@ struct KnowledgeLibraryView: View {
     private var filteredEmptyRow: some View {
         VStack(spacing: 10) {
             Image(systemName: "line.3.horizontal.decrease.circle")
-                .font(.system(size: 28, weight: .light))
+                .font(.appSymbol(size: 28, weight: .light))
                 .foregroundStyle(Color.onSurfaceSecondary)
 
             Text("No saved items match these filters")
@@ -306,7 +306,7 @@ private struct SavedLibraryRow: View {
 
             if content.savedSource == "x_bookmark" {
                 Image(systemName: "bookmark.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.appSymbol(size: 11, weight: .semibold))
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .padding(.top, 4)
                     .accessibilityLabel("X bookmark")
@@ -330,7 +330,7 @@ private struct LibraryFilterPill: View {
             HStack(spacing: 5) {
                 if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.appSymbol(size: 11, weight: .semibold))
                 }
                 Text(title)
             }

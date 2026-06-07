@@ -48,7 +48,7 @@ struct ContentCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 // Title
                 Text(content.displayTitle)
-                    .font(.body)
+                    .font(.appBody)
                     .fontWeight(titleWeight)
                     .foregroundColor(titleColor)
                     .lineLimit(3)
@@ -60,14 +60,14 @@ struct ContentCard: View {
                         .opacity(content.platform == nil ? 0 : 1)
                     if let source = content.source {
                         Text(source)
-                            .font(.footnote)
+                            .font(.appFootnote)
                             .foregroundColor(Color.onSurfaceSecondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
                     if let processedDate = content.processedDateDisplay {
                         Text(processedDate)
-                            .font(.footnote)
+                            .font(.appFootnote)
                             .foregroundColor(Color.onSurfaceSecondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -106,7 +106,7 @@ struct ContentCard: View {
             .frame(width: thumbnailSize, height: thumbnailSize)
             .overlay(
                 Image(systemName: contentTypeIcon)
-                    .font(.system(size: 20))
+                    .font(.appSymbol(size: 20))
                     .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
             )
     }

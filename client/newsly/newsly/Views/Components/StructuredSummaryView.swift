@@ -106,10 +106,10 @@ struct StructuredSummaryView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 8) {
                         Image(systemName: "tag")
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .foregroundColor(Color.onSurfaceSecondary)
                         Text("Topics")
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(Color.onSurfaceSecondary)
                             .textCase(.uppercase)
@@ -149,11 +149,11 @@ struct StructuredSummaryView: View {
                 HStack {
                     HStack(spacing: 8) {
                         Image(systemName: icon)
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .foregroundColor(iconColor)
                             .accessibilityHidden(true)
                         Text(title)
-                            .font(.subheadline)
+                            .font(.appSubheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(Color.onSurface)
                     }
@@ -161,7 +161,7 @@ struct StructuredSummaryView: View {
                     Spacer()
 
                     Image(systemName: "chevron.right")
-                        .font(.caption2)
+                        .font(.appCaption2)
                         .fontWeight(.bold)
                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
                         .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
@@ -181,14 +181,14 @@ struct StructuredSummaryView: View {
     private func modernQuoteCard(quote: Quote) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(quote.text)
-                .font(.callout)
+                .font(.appCallout)
                 .italic()
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let context = quote.context {
                 Text("— \(context)")
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .fontWeight(.medium)
                     .foregroundColor(Color.onSurfaceSecondary)
             }
@@ -214,7 +214,7 @@ struct StructuredSummaryView: View {
     private func modernQuestionRow(index: Int, question: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(index)")
-                .font(.caption)
+                .font(.appCaption)
                 .fontWeight(.bold)
                 .foregroundColor(.white)
                 .frame(width: 22, height: 22)
@@ -224,7 +224,7 @@ struct StructuredSummaryView: View {
                 )
 
             Text(question)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -235,13 +235,13 @@ struct StructuredSummaryView: View {
     private func modernCounterArgRow(argument: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.caption)
+                .font(.appCaption)
                 .foregroundColor(.onSurfaceSecondary)
                 .frame(width: 16)
                 .padding(.top, 2)
 
             Text(argument)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -251,7 +251,7 @@ struct StructuredSummaryView: View {
     @ViewBuilder
     private func modernTopicPill(topic: String) -> some View {
         Text(topic)
-            .font(.footnote)
+            .font(.appFootnote)
             .fontWeight(.medium)
             .foregroundColor(Color.onSurfaceSecondary)
             .padding(.horizontal, 10)
@@ -354,7 +354,7 @@ struct ModernKeyPointRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(point.text)
-                    .font(.callout)
+                    .font(.appCallout)
                     .foregroundColor(Color.readerBodyText)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -362,9 +362,9 @@ struct ModernKeyPointRow: View {
                     let config = categoryConfig(for: category)
                     HStack(spacing: 4) {
                         Image(systemName: config.icon)
-                            .font(.caption2)
+                            .font(.appCaption2)
                         Text(category.replacingOccurrences(of: "_", with: " ").capitalized)
-                            .font(.caption)
+                            .font(.appCaption)
                             .fontWeight(.medium)
                     }
                     .foregroundColor(config.color.opacity(0.9))

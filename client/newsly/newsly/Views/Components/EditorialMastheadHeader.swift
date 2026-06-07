@@ -2,7 +2,7 @@
 //  EditorialMastheadHeader.swift
 //  newsly
 //
-//  Tab-level masthead: small uppercase date subhead above the serif page title.
+//  Tab-level masthead: small uppercase date subhead above the page title.
 //
 
 import SwiftUI
@@ -10,7 +10,7 @@ import SwiftUI
 struct EditorialMastheadHeader: View {
     let title: String
     var subtitle: String? = nil
-    var date: Date = Date()
+    var date: Date = AppClock.now
     var trailingAccessory: AnyView? = nil
 
     private static let mastheadFormatter: DateFormatter = {

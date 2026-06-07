@@ -28,7 +28,7 @@ struct ContentListView: View {
                             VStack(spacing: 16) {
                                 Spacer()
                                 Image(systemName: "doc.text.magnifyingglass")
-                                    .font(.largeTitle)
+                                    .font(.appLargeTitle)
                                     .foregroundColor(Color.onSurfaceSecondary)
                                 Text("No content found matching your filters.")
                                     .foregroundColor(Color.onSurfaceSecondary)
@@ -95,7 +95,7 @@ struct ContentListView: View {
                             showingFilters.toggle()
                         }) {
                             Image(systemName: "line.3.horizontal.decrease.circle.fill")
-                                .font(.system(size: 44))
+                                .font(.appSymbol(size: 44))
                                 .foregroundColor(.brandPrimary)
                                 .background(Circle().fill(Color.surfaceSecondary))
                                 .shadow(radius: 4)

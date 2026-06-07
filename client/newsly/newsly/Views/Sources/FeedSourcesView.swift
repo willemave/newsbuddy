@@ -70,7 +70,7 @@ struct FeedSourcesView: View {
         VStack(spacing: 12) {
             ProgressView()
             Text("Loading sources...")
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundStyle(Color.onSurfaceSecondary)
         }
         .frame(maxWidth: .infinity)
@@ -112,7 +112,7 @@ struct FeedSourcesView: View {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(Color.statusDestructive)
             Text(error)
-                .font(.caption)
+                .font(.appCaption)
                 .foregroundStyle(Color.onSurfaceSecondary)
         }
         .padding()

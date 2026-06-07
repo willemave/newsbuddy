@@ -33,7 +33,7 @@ struct NewsItemDetailView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("Key Points")
-                    .font(.headline)
+                    .font(.appHeadline)
                     .fontWeight(.semibold)
 
                 Spacer()
@@ -43,7 +43,7 @@ struct NewsItemDetailView: View {
                         onDiscussionTap?(url)
                     }) {
                         Label("Comments", systemImage: "bubble.left.and.bubble.right")
-                            .font(.caption)
+                            .font(.appCaption)
                             .fontWeight(.medium)
                             .foregroundColor(.onSurfaceSecondary)
                             .padding(.horizontal, 10)
@@ -61,7 +61,7 @@ struct NewsItemDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(keyPoints.enumerated()), id: \.offset) { _, point in
                     Text(point)
-                        .font(.callout)
+                        .font(.appCallout)
                         .foregroundColor(Color.readerBodyText)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)

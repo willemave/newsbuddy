@@ -16,9 +16,15 @@ enum AppChrome {
 
         let itemAppearance = UITabBarItemAppearance()
         itemAppearance.selected.iconColor = chromeAccent
-        itemAppearance.selected.titleTextAttributes = [.foregroundColor: chromeAccent]
+        itemAppearance.selected.titleTextAttributes = [
+            .foregroundColor: chromeAccent,
+            .font: UIFont.appSans(size: 10, weight: .medium)
+        ]
         itemAppearance.normal.iconColor = unselected
-        itemAppearance.normal.titleTextAttributes = [.foregroundColor: unselected]
+        itemAppearance.normal.titleTextAttributes = [
+            .foregroundColor: unselected,
+            .font: UIFont.appSans(size: 10, weight: .medium)
+        ]
 
         let tabAppearance = UITabBarAppearance()
         tabAppearance.configureWithTransparentBackground()
@@ -35,6 +41,14 @@ enum AppChrome {
         navigationAppearance.configureWithTransparentBackground()
         navigationAppearance.backgroundColor = surface.withAlphaComponent(0.92)
         navigationAppearance.shadowColor = UIColor.separator
+        navigationAppearance.titleTextAttributes = [
+            .foregroundColor: UIColor.appOnSurface,
+            .font: UIFont.appSans(size: 17, weight: .semibold)
+        ]
+        navigationAppearance.largeTitleTextAttributes = [
+            .foregroundColor: UIColor.appOnSurface,
+            .font: UIFont.appSans(size: 34, weight: .semibold)
+        ]
         UINavigationBar.appearance().standardAppearance = navigationAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navigationAppearance
         UINavigationBar.appearance().tintColor = chromeAccent

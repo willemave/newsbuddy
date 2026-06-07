@@ -139,8 +139,6 @@
     <!-- Custom fonts -->
     <key>UIAppFonts</key>
     <array>
-        <string>Newsreader.ttf</string>
-        <string>Newsreader-Italic.ttf</string>
         <string>Inter.ttf</string>
         <string>Inter-Italic.ttf</string>
     </array>

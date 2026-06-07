@@ -121,7 +121,7 @@ struct ChatSessionView: View {
             dismiss()
         } label: {
             Image(systemName: "chevron.left")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.appSymbol(size: 20, weight: .semibold))
                 .foregroundStyle(Color.onSurface)
                 .frame(width: 44, height: 44)
                 .background(Color.surfacePrimary.opacity(0.72), in: Circle())

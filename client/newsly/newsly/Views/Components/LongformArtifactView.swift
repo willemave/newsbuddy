@@ -76,7 +76,7 @@ private struct ExtraSection: View {
 
                         ForEach(section.items, id: \.self) { item in
                             Text(item)
-                                .font(.callout)
+                                .font(.appCallout)
                                 .foregroundColor(Color.readerBodyText)
                                 .lineSpacing(3)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -116,7 +116,7 @@ private struct KeyPointList: View {
                         ArtifactEyebrowText(point.heading)
 
                         Text(point.content)
-                            .font(.callout)
+                            .font(.appCallout)
                             .foregroundColor(Color.readerBodyText)
                             .lineSpacing(3)
                             .fixedSize(horizontal: false, vertical: true)
@@ -135,7 +135,7 @@ private struct TakeawayBanner: View {
         VStack(alignment: .leading, spacing: 8) {
             ArtifactSectionHeader("Takeaway", icon: "checkmark.seal", tint: tint)
             Text(text)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundStyle(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -149,7 +149,7 @@ private struct ArtifactQuoteCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(quote.text)
-                .font(.callout)
+                .font(.appCallout)
                 .italic()
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -157,7 +157,7 @@ private struct ArtifactQuoteCard: View {
             if let attribution = quote.attribution?.trimmingCharacters(in: .whitespacesAndNewlines),
                !attribution.isEmpty {
                 Text("- \(attribution)")
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .fontWeight(.medium)
                     .foregroundColor(Color.onSurfaceSecondary)
             }
@@ -181,7 +181,7 @@ private struct ArtifactEyebrowText: View {
 
     var body: some View {
         Text(title)
-            .font(.footnote)
+            .font(.appFootnote)
             .fontWeight(.semibold)
             .foregroundColor(Color.onSurfaceSecondary)
             .textCase(.uppercase)
@@ -204,11 +204,11 @@ private struct ArtifactSectionHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .fontWeight(.semibold)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .textCase(.uppercase)

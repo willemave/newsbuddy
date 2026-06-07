@@ -8,6 +8,22 @@
 import UIKit
 import UniformTypeIdentifiers
 
+fileprivate enum ShareExtensionTypography {
+    // The Share Extension is a separate target, so it cannot depend on the app's SwiftUI design tokens.
+    static let family = "Inter"
+
+    static func font(textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
+        let preferred = UIFont.preferredFont(forTextStyle: textStyle)
+        let baseFont = UIFont(name: family, size: preferred.pointSize)
+            ?? UIFont.systemFont(ofSize: preferred.pointSize, weight: weight)
+        let descriptor = baseFont.fontDescriptor.addingAttributes([
+            .traits: [UIFontDescriptor.TraitKey.weight: weight.rawValue]
+        ])
+        let weightedFont = UIFont(descriptor: descriptor, size: preferred.pointSize)
+        return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: weightedFont)
+    }
+}
+
 fileprivate enum LinkHandlingMode: String, CaseIterable {
     case addContent
     case createLearningDeck
@@ -115,7 +131,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         contentStack.setContentHuggingPriority(.required, for: .vertical)
 
         titleLabel.text = "How should Newsbuddy handle this link?"
-        titleLabel.font = .preferredFont(forTextStyle: .headline)
+        titleLabel.font = ShareExtensionTypography.font(textStyle: .headline, weight: .semibold)
         titleLabel.numberOfLines = 0
 
         optionsStack.axis = .vertical
@@ -167,11 +183,11 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         chatPromptStack.isHidden = true
 
         chatPromptLabel.text = "First message"
-        chatPromptLabel.font = .preferredFont(forTextStyle: .subheadline)
+        chatPromptLabel.font = ShareExtensionTypography.font(textStyle: .subheadline, weight: .medium)
         chatPromptLabel.textColor = .secondaryLabel
 
         chatPromptTextView.delegate = self
-        chatPromptTextView.font = .preferredFont(forTextStyle: .body)
+        chatPromptTextView.font = ShareExtensionTypography.font(textStyle: .body)
         chatPromptTextView.backgroundColor = .secondarySystemBackground
         chatPromptTextView.layer.cornerRadius = 10
         chatPromptTextView.layer.borderWidth = 1
@@ -470,11 +486,11 @@ private final class OptionRowView: UIControl {
         isUserInteractionEnabled = true
 
         titleLabel.text = title
-        titleLabel.font = UIFont.preferredFont(forTextStyle: .body)
+        titleLabel.font = ShareExtensionTypography.font(textStyle: .body, weight: .medium)
         titleLabel.textColor = .label
 
         descriptionLabel.text = description
-        descriptionLabel.font = UIFont.preferredFont(forTextStyle: .footnote)
+        descriptionLabel.font = ShareExtensionTypography.font(textStyle: .footnote)
         descriptionLabel.textColor = .secondaryLabel
         descriptionLabel.numberOfLines = 0
 
@@ -568,11 +584,11 @@ private final class ToggleRowView: UIControl {
         isUserInteractionEnabled = true
 
         titleLabel.text = title
-        titleLabel.font = UIFont.preferredFont(forTextStyle: .body)
+        titleLabel.font = ShareExtensionTypography.font(textStyle: .body, weight: .medium)
         titleLabel.textColor = .label
 
         descriptionLabel.text = description
-        descriptionLabel.font = UIFont.preferredFont(forTextStyle: .footnote)
+        descriptionLabel.font = ShareExtensionTypography.font(textStyle: .footnote)
         descriptionLabel.textColor = .secondaryLabel
         descriptionLabel.numberOfLines = 0
 

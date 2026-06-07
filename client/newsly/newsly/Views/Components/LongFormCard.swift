@@ -6,12 +6,9 @@
 //
 
 import SwiftUI
-import UIKit
 
 private enum LongFormCardDesign {
     static let imageHeight: CGFloat = 220
-    static let headlineFont = UIFont.appEditorialHeadline
-    static let summaryFont = UIFont.appEditorialSummary
 }
 
 struct LongFormCard: View {
@@ -74,17 +71,14 @@ struct LongFormCard: View {
                     .padding(.bottom, 8)
                 }
 
-                SelectableText(
+                FeedListText(
                     content.displayTitle,
-                    textColor: .appReaderBodyText,
-                    font: headlineUIFont,
+                    textColor: .readerBodyText,
+                    font: .terracottaHeadlineLarge,
                     lineLimit: 3,
-                    lineBreakMode: .byTruncatingTail,
                     onDigDeeper: onDigDeeper,
                     onTap: onOpen
                 )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 8)
                 .accessibilityLabel(content.displayTitle)
                 .accessibilityAddTraits(.isButton)
@@ -94,16 +88,14 @@ struct LongFormCard: View {
                 }
 
                 if let summary = summaryText {
-                    SelectableText(
+                    FeedListText(
                         summary,
-                        textColor: .appReaderBodyText,
-                        font: summaryUIFont,
+                        textColor: .readerBodyText,
+                        font: .readerSummaryBody,
                         lineLimit: 3,
-                        lineBreakMode: .byTruncatingTail,
                         onDigDeeper: onDigDeeper,
                         onTap: onOpen
                     )
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 12)
                     .accessibilityLabel(summary)
                     .accessibilityAddTraits(.isButton)
@@ -116,7 +108,7 @@ struct LongFormCard: View {
                 HStack {
                     HStack(spacing: 8) {
                         Image(systemName: contentTypeIcon)
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.appSymbol(size: 15, weight: .semibold))
                             .foregroundStyle(Color.onSurfaceSecondary)
                             .frame(width: 18, height: 18)
                             .accessibilityHidden(true)
@@ -145,7 +137,7 @@ struct LongFormCard: View {
                             onMarkRead?()
                         } label: {
                             Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
-                                .font(.system(size: 20))
+                                .font(.appSymbol(size: 20))
                                 .foregroundStyle(Color.onSurfaceSecondary)
                                 .frame(width: 44, height: 44)
                         }
@@ -186,7 +178,7 @@ struct LongFormCard: View {
 
                 if let audioErrorMessage {
                     Text(audioErrorMessage)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(Color.statusDestructive)
                         .lineLimit(2)
                         .padding(.top, 8)
@@ -232,7 +224,7 @@ struct LongFormCard: View {
                         .tint(Color.terracottaPrimary)
                 } else {
                     Image(systemName: isAudioPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.appSymbol(size: 14, weight: .bold))
                         .foregroundStyle(Color.terracottaPrimary)
                 }
             }
@@ -278,7 +270,7 @@ struct LongFormCard: View {
         )
         .overlay(
             Image(systemName: contentTypeIcon)
-                .font(.system(size: 40))
+                .font(.appSymbol(size: 40))
                 .foregroundStyle(Color.onSurfaceSecondary.opacity(0.3))
         )
     }
@@ -292,14 +284,6 @@ struct LongFormCard: View {
             return summary
         }
         return nil
-    }
-
-    private var headlineUIFont: UIFont {
-        LongFormCardDesign.headlineFont
-    }
-
-    private var summaryUIFont: UIFont {
-        LongFormCardDesign.summaryFont
     }
 
     private var sourceLabel: String {

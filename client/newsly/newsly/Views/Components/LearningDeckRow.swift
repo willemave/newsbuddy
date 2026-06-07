@@ -124,7 +124,7 @@ struct LearningDeckRow: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "rectangle.stack")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.appSymbol(size: 16, weight: .semibold))
                     .foregroundStyle(statusColor)
                     .frame(width: 34, height: 34)
                     .background(statusColor.opacity(0.13))
@@ -197,7 +197,7 @@ struct LearningDeckRow: View {
                     ZStack {
                         Color.clear
                         Image(systemName: "trash")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.appSymbol(size: 14, weight: .semibold))
                             .foregroundStyle(Color.onSurfaceSecondary)
                             .accessibilityHidden(true)
                     }

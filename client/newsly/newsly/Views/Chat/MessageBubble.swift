@@ -51,13 +51,13 @@ struct ProcessSummaryRow: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "sparkles")
-                        .font(.caption2)
+                        .font(.appCaption2)
                     Text(message.processSummaryText)
                         .lineLimit(isExpanded ? nil : 1)
                         .truncationMode(.tail)
                     if detail != nil {
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption2.weight(.semibold))
+                            .font(.appCaption2.weight(.semibold))
                     }
                 }
                 .font(.terracottaBodySmall)
@@ -71,7 +71,7 @@ struct ProcessSummaryRow: View {
 
             if isExpanded, let detail {
                 Text(detail)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, 20)

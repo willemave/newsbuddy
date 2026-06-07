@@ -23,7 +23,7 @@ struct EditorialNarrativeSummaryView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(summary.narrativeParagraphs.enumerated()), id: \.offset) { _, paragraph in
                         Text(paragraph)
-                            .font(.callout)
+                            .font(.appCallout)
                             .foregroundColor(Color.readerBodyText)
                             .lineSpacing(5)
                             .fixedSize(horizontal: false, vertical: true)
@@ -51,7 +51,7 @@ struct EditorialNarrativeSummaryView: View {
                     ForEach(summary.sourceDetailSections) { section in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(section.title)
-                                .font(.footnote)
+                                .font(.appFootnote)
                                 .fontWeight(.semibold)
                                 .foregroundColor(Color.onSurfaceSecondary)
                                 .textCase(.uppercase)
@@ -87,11 +87,11 @@ struct EditorialNarrativeSummaryView: View {
     ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .fontWeight(.semibold)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .textCase(uppercase ? .uppercase : .none)
@@ -108,7 +108,7 @@ struct EditorialNarrativeSummaryView: View {
                 .padding(.top, 7)
                 .accessibilityHidden(true)
             Text(text)
-                .font(.callout)
+                .font(.appCallout)
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -118,14 +118,14 @@ struct EditorialNarrativeSummaryView: View {
     private func quoteCard(_ quote: Quote) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(quote.text)
-                .font(.callout)
+                .font(.appCallout)
                 .italic()
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let attributionLine = quoteAttributionLine(quote) {
                 Text("— \(attributionLine)")
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .fontWeight(.medium)
                     .foregroundColor(Color.onSurfaceSecondary)
             }

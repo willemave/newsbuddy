@@ -56,16 +56,16 @@ private struct CouncilCandidateCard: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(candidate.personaName)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.appSubheadline.weight(.semibold))
                         .foregroundStyle(Color.onSurface)
 
                     if isActive {
                         Text("Current branch")
-                            .font(.caption2.weight(.semibold))
+                            .font(.appCaption2.weight(.semibold))
                             .foregroundStyle(Color.chatAccent)
                     } else {
                         Text("Use the branch switcher below to change perspectives")
-                            .font(.caption2)
+                            .font(.appCaption2)
                             .foregroundStyle(Color.onSurfaceSecondary)
                     }
                 }
@@ -74,7 +74,7 @@ private struct CouncilCandidateCard: View {
 
                 if isActive {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(Color.chatAccent)
                 }
             }
@@ -85,7 +85,7 @@ private struct CouncilCandidateCard: View {
                     ProgressView()
                         .controlSize(.small)
                     Text("Thinking")
-                        .font(.callout)
+                        .font(.appCallout)
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,7 +97,7 @@ private struct CouncilCandidateCard: View {
                         Text("This perspective could not be generated.")
                             .foregroundStyle(Color.onSurfaceSecondary)
                     }
-                    .font(.callout)
+                    .font(.appCallout)
 
                     Button(action: onRetry) {
                         HStack(spacing: 8) {
@@ -128,7 +128,7 @@ private struct CouncilCandidateCard: View {
                 SelectableMarkdownView(
                     markdown: candidate.content,
                     textColor: textColor,
-                    baseFont: .preferredFont(forTextStyle: .callout)
+                    baseFont: .appSans(textStyle: .callout)
                 )
             }
         }

@@ -76,7 +76,7 @@ struct DiscoveryRunSection: View {
 
                 if let body = parts.body {
                     Text(body)
-                        .font(.subheadline)
+                        .font(.appSubheadline)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)

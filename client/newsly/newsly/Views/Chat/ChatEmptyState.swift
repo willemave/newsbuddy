@@ -11,14 +11,14 @@ struct ChatEmptyState: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 44))
+                .font(.appSymbol(size: 44))
                 .foregroundStyle(Color.onSurfaceSecondary.opacity(0.4))
             Text("Start the conversation")
-                .font(.headline)
+                .font(.appHeadline)
                 .foregroundStyle(Color.onSurfaceSecondary)
             if let topic {
                 Text("Topic: \(topic)")
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .foregroundStyle(Color.topicAccent)
             }
         }

@@ -90,7 +90,7 @@ struct ProcessingStatsView: View {
     ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appSymbol(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
                 .background(color.gradient)
@@ -99,12 +99,12 @@ struct ProcessingStatsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(subtitle)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
             }
             Spacer()
             Text("\(count)")
-                .font(.callout)
+                .font(.appCallout)
                 .fontWeight(.semibold)
                 .foregroundStyle(Color.onSurface)
         }
@@ -143,7 +143,7 @@ struct ProcessingStatsView: View {
     private func predictionRow(title: String, summary: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "sparkles.rectangle.stack")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.appSymbol(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
                 .background(Color.brandPrimary.gradient)
@@ -152,7 +152,7 @@ struct ProcessingStatsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(summary)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
             }
         }
@@ -173,20 +173,20 @@ struct ProcessingStatsView: View {
                 SourceTypeIcon(type: config.scraperType)
                     .accessibilityHidden(true)
                 Text(title)
-                    .font(.callout)
+                    .font(.appCallout)
                     .foregroundStyle(Color.onSurface)
                     .lineLimit(1)
                 Spacer()
                 if let unreadSummary {
                     Text(unreadSummary)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
             }
 
             if let meta {
                 Text(meta)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .padding(.leading, 40)
             }

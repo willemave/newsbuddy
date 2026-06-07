@@ -117,7 +117,7 @@ struct ChatComposerDock: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.appSymbol(size: 16, weight: .semibold))
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .frame(width: 44, height: 44)
                 .background(
@@ -179,7 +179,7 @@ struct ChatComposerDock: View {
                             .tint(sendButtonDisabled ? Color.onSurfaceSecondary : .white)
                     } else {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.appSymbol(size: 16, weight: .medium))
                     }
                 }
                 .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : .white)

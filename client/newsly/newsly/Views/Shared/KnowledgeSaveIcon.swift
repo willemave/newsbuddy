@@ -15,7 +15,7 @@ struct KnowledgeSaveIcon: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Image(systemName: isSaved ? "books.vertical.fill" : "books.vertical")
-                .font(.system(size: size, weight: .regular))
+                .font(.appSymbol(size: size, weight: .regular))
                 .foregroundStyle(isSaved ? savedColor : unsavedColor)
 
             if !isSaved {
@@ -23,7 +23,7 @@ struct KnowledgeSaveIcon: View {
                     Circle()
                         .fill(badgeColor)
                     Image(systemName: "plus")
-                        .font(.system(size: max(size * 0.34, 7), weight: .bold))
+                        .font(.appSymbol(size: max(size * 0.34, 7), weight: .bold))
                         .foregroundStyle(.white)
                 }
                 .frame(width: max(size * 0.52, 10), height: max(size * 0.52, 10))

@@ -79,7 +79,7 @@ struct DiscoveryErrorStateView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 28, weight: .light))
+                .font(.appSymbol(size: 28, weight: .light))
                 .foregroundColor(Color.onSurfaceSecondary)
 
             VStack(spacing: 6) {
@@ -119,7 +119,7 @@ struct DiscoveryProcessingStateView: View {
     var body: some View {
         VStack(spacing: 24) {
             Image(systemName: "sparkles")
-                .font(.system(size: 32, weight: .light))
+                .font(.appSymbol(size: 32, weight: .light))
                 .foregroundColor(Color.onSurfaceSecondary)
 
             VStack(spacing: 8) {
@@ -163,7 +163,7 @@ struct DiscoveryEmptyStateView: View {
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "sparkles")
-                .font(.system(size: 48, weight: .light))
+                .font(.appSymbol(size: 48, weight: .light))
                 .foregroundStyle(Color.onSurfaceTertiary.opacity(0.72))
 
             VStack(spacing: 6) {

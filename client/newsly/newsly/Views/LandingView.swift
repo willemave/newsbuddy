@@ -7,9 +7,11 @@ import SwiftUI
 
 struct LandingView: View {
     @EnvironmentObject var authViewModel: AuthenticationViewModel
+    #if DEBUG && targetEnvironment(simulator)
     @State private var showingDebugMenu = false
     @State private var tapCount = 0
     @State private var lastTapTime: Date?
+    #endif
 
     private var isLoading: Bool {
         if case .loading = authViewModel.authState { return true }
@@ -31,10 +33,12 @@ struct LandingView: View {
             }
         }
         .accessibilityIdentifier("auth.landing.screen")
+        #if DEBUG && targetEnvironment(simulator)
         .sheet(isPresented: $showingDebugMenu) {
             DebugMenuView()
                 .environmentObject(authViewModel)
         }
+        #endif
     }
 
     // MARK: - Title
@@ -50,9 +54,11 @@ struct LandingView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 220, height: 220)
+                    #if DEBUG && targetEnvironment(simulator)
                     .onTapGesture {
                         handleLogoTap()
                     }
+                    #endif
                     .accessibilityLabel("Newsbuddy mascot")
 
                 VStack(spacing: 10) {
@@ -84,9 +90,9 @@ struct LandingView: View {
                     } else {
                         HStack(spacing: 8) {
                             Image(systemName: "apple.logo")
-                                .font(.body.weight(.medium))
+                                .font(.appBody.weight(.medium))
                             Text("Continue with Apple")
-                                .font(.callout.weight(.semibold))
+                                .font(.appCallout.weight(.semibold))
                         }
                         .foregroundColor(.onboardingSurface)
                     }
@@ -102,7 +108,7 @@ struct LandingView: View {
 
             if let errorMessage = authViewModel.errorMessage {
                 Text(errorMessage)
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(.statusDestructive)
                     .multilineTextAlignment(.center)
             }
@@ -115,6 +121,7 @@ struct LandingView: View {
 
     // MARK: - Debug
 
+    #if DEBUG && targetEnvironment(simulator)
     private func handleLogoTap() {
         let now = Date()
         if let lastTap = lastTapTime, now.timeIntervalSince(lastTap) > 2.0 {
@@ -128,4 +135,5 @@ struct LandingView: View {
             lastTapTime = nil
         }
     }
+    #endif
 }

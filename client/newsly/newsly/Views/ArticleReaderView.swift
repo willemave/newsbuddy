@@ -67,7 +67,7 @@ struct ArticleReaderView: View {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.appSymbol(size: 15, weight: .semibold))
                     .frame(width: 44, height: 44)
                     .background(Color.surfaceTertiary.opacity(0.78), in: Circle())
                     .contentShape(Rectangle())
@@ -84,7 +84,7 @@ struct ArticleReaderView: View {
                     openURL(url)
                 } label: {
                     Image(systemName: "safari")
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.appSymbol(size: 17, weight: .regular))
                         .frame(width: 44, height: 44)
                         .background(Color.surfaceTertiary.opacity(0.78), in: Circle())
                         .contentShape(Rectangle())
@@ -100,7 +100,7 @@ struct ArticleReaderView: View {
                     updateBodyFontSize(by: -1)
                 } label: {
                     Image(systemName: "minus")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appSymbol(size: 14, weight: .semibold))
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -110,7 +110,7 @@ struct ArticleReaderView: View {
                 .accessibilityIdentifier("article.reader.text_size.decrease")
 
                 Text("Aa")
-                    .font(.custom("Newsreader", size: 16).weight(.semibold))
+                    .font(.readerControlLabel)
                     .foregroundStyle(Color.onSurface)
                     .frame(width: 34, height: 34)
                     .accessibilityHidden(true)
@@ -119,7 +119,7 @@ struct ArticleReaderView: View {
                     updateBodyFontSize(by: 1)
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.appSymbol(size: 14, weight: .semibold))
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -152,7 +152,7 @@ struct ArticleReaderView: View {
     private var readerHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(content.displayTitle)
-                .font(.custom("Newsreader", size: 34).weight(.semibold))
+                .font(.readerTitle)
                 .foregroundStyle(Color.onSurface)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
@@ -236,8 +236,7 @@ struct ArticleReaderView: View {
     }
 
     private var readerUIFont: UIFont {
-        UIFont(name: "Newsreader", size: bodyFontSize)
-            ?? .systemFont(ofSize: bodyFontSize, weight: .regular)
+        UIFont.appSans(size: bodyFontSize, weight: .regular)
     }
 
     private var estimatedReadTime: String? {

@@ -208,11 +208,11 @@ private struct ChatLoadErrorState: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 36))
+                .font(.appSymbol(size: 36))
                 .foregroundStyle(Color.statusDestructive.opacity(0.8))
 
             Text(error)
-                .font(.subheadline)
+                .font(.appSubheadline)
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .multilineTextAlignment(.center)
 

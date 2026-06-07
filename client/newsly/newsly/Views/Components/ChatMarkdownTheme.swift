@@ -10,11 +10,11 @@ import SwiftUI
 
 extension Theme {
     /// A compact markdown theme optimized for chat bubbles.
-    /// Uses Newsreader serif for body text and terracotta accent for strong text.
+    /// Uses the app sans family for body text and terracotta accent for strong text.
     static let chat = Theme()
         // MARK: - Text styles
         .text {
-            FontFamily(.custom("Newsreader"))
+            FontFamily(.custom(AppFontFamily.sans))
             ForegroundColor(Color.onSurface)
             FontSize(.em(1.0))
         }
@@ -26,7 +26,6 @@ extension Theme {
             ForegroundColor(Color.chatAccent)
         }
         .code {
-            FontFamilyVariant(.monospaced)
             FontSize(.em(0.88))
             BackgroundColor(Color.surfaceContainer)
         }
@@ -109,7 +108,6 @@ extension Theme {
             ScrollView(.horizontal) {
                 configuration.label
                     .markdownTextStyle {
-                        FontFamilyVariant(.monospaced)
                         FontSize(.em(0.85))
                     }
             }

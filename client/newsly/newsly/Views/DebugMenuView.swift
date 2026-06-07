@@ -17,6 +17,7 @@ struct DebugMenuView: View {
     @State private var refreshToken = ""
     @State private var showingAlert = false
     @State private var alertMessage = ""
+    @State private var suppressNextAuthenticatedDismiss = false
 
     var body: some View {
         NavigationStack {
@@ -24,10 +25,10 @@ struct DebugMenuView: View {
                 Section(header: Text("Server Configuration")) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Current Endpoint")
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundColor(Color.onSurfaceSecondary)
                         Text(appSettings.baseURL)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.listValue)
                             .foregroundColor(.brandSecondary)
                             .textSelection(.enabled)
                     }
@@ -117,9 +118,14 @@ struct DebugMenuView: View {
                         showingTokenInput = true
                     }
 
-                    Button("Force Onboarding (New User)") {
-                        forceOnboarding()
+                    Button("Create New Onboarding User") {
+                        createNewOnboardingUser()
                     }
+
+                    Button("Reset Current User Onboarding") {
+                        resetCurrentUserOnboarding()
+                    }
+                    .disabled(currentUser == nil)
 
                     Button("Reset Auth (Clear Tokens)") {
                         resetAuth()
@@ -137,9 +143,13 @@ struct DebugMenuView: View {
                 }
             }
         }
-        .onChange(of: authViewModel.authState) { oldValue, newValue in
+        .onChange(of: authViewModel.authState) { _, newValue in
             // Auto-dismiss when authentication succeeds
             if case .authenticated = newValue {
+                if suppressNextAuthenticatedDismiss {
+                    suppressNextAuthenticatedDismiss = false
+                    return
+                }
                 dismiss()
             }
         }
@@ -242,18 +252,36 @@ struct DebugMenuView: View {
 
         showingTokenInput = false
 
+        let shouldResetOnboarding = forceOnboardingAfterTokenSave
+
         // Validate token with backend
         Task {
             do {
                 authViewModel.authState = .loading
                 let user = try await AuthenticationService.shared.getCurrentUser()
-                await MainActor.run {
-                    if forceOnboardingAfterTokenSave {
-                        triggerForcedOnboarding(user: user)
-                    } else {
-                        authViewModel.authState = .authenticated(user)
+
+                if shouldResetOnboarding {
+                    do {
+                        let resetUser = try await resetOnboardingSession(for: user)
+                        await MainActor.run {
+                            applyOnboardingDebugSession(user: resetUser)
+                            forceOnboardingAfterTokenSave = false
+                        }
+                    } catch {
+                        await MainActor.run {
+                            forceOnboardingAfterTokenSave = false
+                            presentDebugSessionFailure(
+                                error,
+                                fallbackUser: user,
+                                action: "reset onboarding for this token"
+                            )
+                        }
                     }
-                    forceOnboardingAfterTokenSave = false
+                } else {
+                    await MainActor.run {
+                        authViewModel.authState = .authenticated(user)
+                        forceOnboardingAfterTokenSave = false
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -268,75 +296,108 @@ struct DebugMenuView: View {
         }
     }
 
-    private func forceOnboarding() {
-        let previousUserId = currentUser?.id
+    private func createNewOnboardingUser() {
         let previousUser = currentUser
 
         Task {
+            await MainActor.run {
+                authViewModel.authState = .loading
+            }
+
             do {
-                let session = try await AuthenticationService.shared.createDebugUser()
-                if let previousUserId {
-                    OnboardingStateStore.shared.clearDiscoveryRun(userId: previousUserId)
+                let session = try await AuthenticationService.shared.createDebugSession(
+                    hasCompletedOnboarding: false,
+                    hasCompletedNewUserTutorial: false
+                )
+                if let previousUser {
+                    OnboardingStateStore.shared.clearProgress(userId: previousUser.id)
                 }
                 await MainActor.run {
-                    triggerForcedOnboarding(user: session.user)
-                }
-            } catch let authError as AuthError {
-                await MainActor.run {
-                    switch authError {
-                    case .serverError(let statusCode, _) where statusCode == 404:
-                        if let previousUser {
-                            authViewModel.authState = .authenticated(previousUser)
-                        } else {
-                            authViewModel.authState = .unauthenticated
-                        }
-                        alertMessage = "Debug new-user endpoint is disabled on this server. Enable DEBUG=true or run with ENVIRONMENT=development."
-                        showingAlert = true
-                    default:
-                        if let previousUser {
-                            authViewModel.authState = .authenticated(previousUser)
-                        } else {
-                            authViewModel.authState = .unauthenticated
-                        }
-                        alertMessage = "Failed to create debug user: \(authError.localizedDescription)"
-                        showingAlert = true
-                    }
+                    applyOnboardingDebugSession(user: session.user)
                 }
             } catch {
                 await MainActor.run {
-                    if let previousUser {
-                        authViewModel.authState = .authenticated(previousUser)
-                    } else {
-                        authViewModel.authState = .unauthenticated
-                    }
-                    alertMessage = "Failed to create debug user: \(error.localizedDescription)"
-                    showingAlert = true
+                    presentDebugSessionFailure(
+                        error,
+                        fallbackUser: previousUser,
+                        action: "create onboarding debug user"
+                    )
                 }
             }
         }
     }
 
-    @MainActor
-    private func triggerForcedOnboarding(user: User) {
-        OnboardingStateStore.shared.clearDiscoveryRun(userId: user.id)
-        authViewModel.authState = .authenticated(userWithResetOnboardingFlags(user))
+    private func resetCurrentUserOnboarding() {
+        guard let user = currentUser else {
+            alertMessage = "Sign in before resetting onboarding for the current user."
+            showingAlert = true
+            return
+        }
+
+        Task {
+            await MainActor.run {
+                authViewModel.authState = .loading
+            }
+
+            do {
+                let resetUser = try await resetOnboardingSession(for: user)
+                await MainActor.run {
+                    applyOnboardingDebugSession(user: resetUser)
+                }
+            } catch {
+                await MainActor.run {
+                    presentDebugSessionFailure(
+                        error,
+                        fallbackUser: user,
+                        action: "reset current user onboarding"
+                    )
+                }
+            }
+        }
     }
 
-    private func userWithResetOnboardingFlags(_ user: User) -> User {
-        User(
-            id: user.id,
-            appleId: user.appleId,
-            email: user.email,
-            fullName: user.fullName,
-            twitterUsername: user.twitterUsername,
-            hasXBookmarkSync: user.hasXBookmarkSync,
-            isAdmin: user.isAdmin,
-            isActive: user.isActive,
+    private func resetOnboardingSession(for user: User) async throws -> User {
+        let session = try await AuthenticationService.shared.createDebugSession(
+            userId: user.id,
             hasCompletedOnboarding: false,
-            hasCompletedNewUserTutorial: false,
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt
+            hasCompletedNewUserTutorial: false
         )
+        return session.user
+    }
+
+    @MainActor
+    private func applyOnboardingDebugSession(user: User) {
+        OnboardingStateStore.shared.clearProgress(userId: user.id)
+        authViewModel.authState = .authenticated(user)
+    }
+
+    @MainActor
+    private func presentDebugSessionFailure(
+        _ error: Error,
+        fallbackUser: User?,
+        action: String
+    ) {
+        if let fallbackUser {
+            let fallbackState = AuthState.authenticated(fallbackUser)
+            if authViewModel.authState != fallbackState {
+                suppressNextAuthenticatedDismiss = true
+            }
+            authViewModel.authState = .authenticated(fallbackUser)
+        } else {
+            authViewModel.authState = .unauthenticated
+        }
+
+        if let authError = error as? AuthError {
+            switch authError {
+            case .serverError(let statusCode, _) where statusCode == 404:
+                alertMessage = "Debug onboarding is disabled on this server. Enable DEBUG=true or run with ENVIRONMENT=development."
+            default:
+                alertMessage = "Failed to \(action): \(authError.localizedDescription)"
+            }
+        } else {
+            alertMessage = "Failed to \(action): \(error.localizedDescription)"
+        }
+        showingAlert = true
     }
 
     private func resetAuth() {
@@ -363,19 +424,19 @@ struct TokenInputView: View {
                 Section(header: Text("Access Token (Required)")) {
                     TextEditor(text: $accessToken)
                         .frame(height: 100)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.listValue)
                         .accessibilityLabel("Access token")
                 }
 
                 Section(header: Text("Refresh Token (Optional)")) {
                     TextEditor(text: $refreshToken)
                         .frame(height: 100)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.listValue)
                         .accessibilityLabel("Refresh token")
                 }
 
                 Section {
-                    Toggle("Force onboarding after sign-in", isOn: $forceOnboardingAfterSave)
+                    Toggle("Reset onboarding after sign-in", isOn: $forceOnboardingAfterSave)
                 }
 
                 Section {

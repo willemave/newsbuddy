@@ -28,12 +28,12 @@ struct ChatStatusBanner: View {
             // Message
             VStack(alignment: .leading, spacing: 2) {
                 Text(statusTitle)
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .fontWeight(.medium)
 
                 if style == .floating {
                     Text(session.contentTitle)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(1)
                 }
@@ -75,12 +75,12 @@ struct ChatStatusBanner: View {
 
         case .completed:
             Image(systemName: "checkmark.circle.fill")
-                .font(.title3)
+                .font(.appTitle3)
                 .foregroundColor(Color.statusActive)
 
         case .failed:
             Image(systemName: "exclamationmark.circle.fill")
-                .font(.title3)
+                .font(.appTitle3)
                 .foregroundColor(Color.statusDestructive)
         }
     }
@@ -106,7 +106,7 @@ struct ChatStatusBanner: View {
         case .completed:
             Button(action: onTap) {
                 Text("Open")
-                    .font(.subheadline)
+                    .font(.appSubheadline)
                     .fontWeight(.semibold)
             }
             .buttonStyle(.borderedProminent)
@@ -116,7 +116,7 @@ struct ChatStatusBanner: View {
         case .failed:
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundColor(Color.onSurfaceSecondary)
             }
         }

@@ -87,7 +87,7 @@ struct MoreView: View {
 
     private func minimalIcon(_ name: String) -> some View {
         Image(systemName: name)
-            .font(.system(size: Spacing.smallIcon, weight: .regular))
+            .font(.appSymbol(size: Spacing.smallIcon, weight: .regular))
             .foregroundStyle(Color.onSurfaceSecondary)
             .frame(width: 24, height: 24)
     }

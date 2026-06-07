@@ -28,7 +28,7 @@ struct DiscoverySuggestionCard: View {
                 // Metadata bar: type icon + source name + dot + URL
                 HStack(spacing: 6) {
                     Image(systemName: metadata.systemImageName)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.appSymbol(size: 10, weight: .semibold))
                         .foregroundColor(metadata.color)
 
                     Text(metadata.label.uppercased())

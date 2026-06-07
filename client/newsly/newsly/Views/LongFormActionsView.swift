@@ -86,7 +86,7 @@ private struct LongFormActionChip: View {
                     .tint(Color.terracottaPrimary)
             } else {
                 Image(systemName: systemImage)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.appSymbol(size: 13, weight: .semibold))
                     .foregroundStyle(Color.terracottaPrimary)
             }
 

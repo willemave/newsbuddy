@@ -24,7 +24,7 @@ struct SectionHeader: View {
             if let action, let actionLabel {
                 Button(action: action) {
                     Text(actionLabel)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(.tint)
                 }
             }

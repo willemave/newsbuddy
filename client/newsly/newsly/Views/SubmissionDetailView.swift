@@ -171,12 +171,12 @@ private struct LinkRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .font(.caption)
+                .font(.appCaption)
                 .foregroundStyle(Color.onSurfaceSecondary)
             if let url = URL(string: value) {
                 Link(destination: url) {
                     Text(value)
-                        .font(.footnote)
+                        .font(.appFootnote)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
@@ -184,7 +184,7 @@ private struct LinkRow: View {
                 .accessibilityLabel("\(label): \(value)")
             } else {
                 Text(value)
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }
