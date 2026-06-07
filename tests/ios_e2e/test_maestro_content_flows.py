@@ -621,12 +621,6 @@ def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(
     def _fake_run_discover_output_with_fallback(**_kwargs) -> _DiscoverOutput:
         return _personalized_onboarding_output()
 
-    empty_curated_defaults: dict[str, list[object]] = {
-        "substack": [],
-        "atom": [],
-        "podcast_rss": [],
-        "reddit": [],
-    }
     queue_gateway = ImmediateOnboardingQueueGateway()
 
     processing_article = content_factory(
@@ -683,10 +677,6 @@ def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(
     monkeypatch.setattr(
         "app.services.onboarding._run_discover_output_with_fallback",
         _fake_run_discover_output_with_fallback,
-    )
-    monkeypatch.setattr(
-        "app.services.onboarding._load_curated_defaults",
-        lambda: empty_curated_defaults,
     )
     monkeypatch.setattr(
         "app.services.onboarding.get_task_queue_gateway",

@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-import yaml
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -55,8 +54,6 @@ from app.models.db.users import User
 from app.models.internal.feed_backfill import FeedBatchBackfillRequest
 from app.models.internal.scraper_configs import CreateUserScraperConfig
 from app.repositories.content_repository import apply_visibility_filters, build_visibility_context
-from app.scraping.atom_unified import load_atom_feeds
-from app.scraping.substack_unified import load_substack_feeds
 from app.services.exa_client import ExaSearchResult, exa_search
 from app.services.feed_detection import FeedDetector
 from app.services.feed_resolution import resolve_feed_candidate
@@ -70,7 +67,6 @@ from app.services.scraper_configs import (
     create_user_scraper_config,
 )
 from app.services.x_integration import normalize_twitter_username
-from app.utils.paths import resolve_config_path
 
 logger = get_logger(__name__)
 
@@ -103,8 +99,6 @@ ENRICH_MAX_QUERIES = 10
 ENRICH_EXA_RESULTS = 12
 DISCOVERY_PROMPT_MAX_WEB_RESULTS = 200
 DISCOVERY_PROMPT_SNIPPET_CHARS = 280
-DISCOVERY_PROMPT_MAX_FILL_IN_FEEDS = 8
-DISCOVERY_PROMPT_MAX_FILL_IN_REDDIT = 8
 ONBOARDING_FEED_SUGGESTION_LIMIT = 5
 EXA_DISCOVERY_MAX_WORKERS = 8
 
@@ -567,22 +561,15 @@ def fast_discover(request: OnboardingFastDiscoverRequest) -> OnboardingFastDisco
     Returns:
         OnboardingFastDiscoverResponse with grouped recommendations.
     """
-    curated = _load_curated_defaults()
     queries = _build_discovery_queries(request)
     results = _run_discovery_exa_queries(queries, num_results=FAST_DISCOVER_EXA_RESULTS)
     prompt_results = _select_prompt_results(results)
 
     if not prompt_results:
-        return _fast_discover_from_defaults(
-            curated,
-            profile_summary=request.profile_summary,
-            inferred_topics=request.inferred_topics,
-        )
+        return OnboardingFastDiscoverResponse()
 
     try:
-        prompt = _format_discovery_prompt(
-            request, prompt_results, _curated_fill_in_candidates(curated)
-        )
+        prompt = _format_discovery_prompt(request, prompt_results)
         output = _run_discover_output_with_fallback(
             prompt=prompt,
             timeout_seconds=FAST_DISCOVER_TIMEOUT_SECONDS,
@@ -590,7 +577,6 @@ def fast_discover(request: OnboardingFastDiscoverRequest) -> OnboardingFastDisco
         )
         return _build_discovery_response(
             output,
-            curated,
             profile_summary=request.profile_summary,
             inferred_topics=request.inferred_topics,
         )
@@ -603,11 +589,7 @@ def fast_discover(request: OnboardingFastDiscoverRequest) -> OnboardingFastDisco
                 "context_data": {"error": str(exc)},
             },
         )
-        return _fast_discover_from_defaults(
-            curated,
-            profile_summary=request.profile_summary,
-            inferred_topics=request.inferred_topics,
-        )
+        return OnboardingFastDiscoverResponse()
 
 
 def complete_onboarding(
@@ -632,10 +614,6 @@ def complete_onboarding(
 
     created_types: set[str] = set()
     selections = request.selected_sources
-
-    if not selections:
-        curated = _load_curated_defaults()
-        selections = _defaults_to_selected_sources(curated)
 
     for selection in selections:
         config_payload = {**(selection.config or {})}
@@ -707,7 +685,7 @@ def complete_onboarding(
         )
 
     try:
-        _seed_default_feed_content_for_user(db, user_id, selections)
+        _seed_selected_feed_content_for_user(db, user_id, selections)
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "Failed to seed feed content for onboarding",
@@ -790,7 +768,6 @@ def run_discover_enrich(
         )
     except Exception:  # noqa: BLE001
         return None
-    curated = _load_curated_defaults()
     queries = _build_discovery_queries(request, max_queries=ENRICH_MAX_QUERIES)
     results = _run_discovery_exa_queries(
         queries,
@@ -806,9 +783,7 @@ def run_discover_enrich(
         return None
 
     try:
-        prompt = _format_discovery_prompt(
-            request, prompt_results, _curated_fill_in_candidates(curated)
-        )
+        prompt = _format_discovery_prompt(request, prompt_results)
         output = _run_discover_output_with_fallback(
             prompt=prompt,
             timeout_seconds=ENRICH_TIMEOUT_SECONDS,
@@ -829,7 +804,6 @@ def run_discover_enrich(
 
     suggestions = _build_discovery_response(
         output,
-        curated,
         profile_summary=request.profile_summary,
         inferred_topics=request.inferred_topics,
     )
@@ -964,20 +938,13 @@ def run_audio_discovery(db: Session, run_id: int) -> None:
                 },
             )
 
-        curated = _load_curated_defaults()
         prompt_results = _select_prompt_results(results, lane_balanced=True)
         if not prompt_results:
-            suggestions = _fast_discover_from_defaults(
-                curated,
-                profile_summary=run.topic_summary,
-                inferred_topics=list(run.inferred_topics or []),
-            )
-            _persist_onboarding_suggestions(db, run, suggestions)
             run.status = "completed"
             run.completed_at = datetime.now(UTC)
             db.commit()
             logger.info(
-                "Onboarding audio discovery completed with defaults",
+                "Onboarding audio discovery completed without suggestions",
                 extra={
                     "component": "onboarding",
                     "operation": "audio_discover",
@@ -988,7 +955,7 @@ def run_audio_discovery(db: Session, run_id: int) -> None:
                     "context_data": {
                         "lane_count": len(lanes),
                         "search_result_count": len(results),
-                        "suggestion_source": "defaults",
+                        "suggestion_source": "none",
                     },
                 },
             )
@@ -998,9 +965,7 @@ def run_audio_discovery(db: Session, run_id: int) -> None:
             profile_summary=run.topic_summary or "News interests",
             inferred_topics=list(run.inferred_topics or []),
         )
-        prompt = _format_discovery_prompt(
-            request, prompt_results, _curated_fill_in_candidates(curated)
-        )
+        prompt = _format_discovery_prompt(request, prompt_results)
         suggestions_started_at = time.perf_counter()
         output = _run_discover_output_with_fallback(
             prompt=prompt,
@@ -1011,7 +976,6 @@ def run_audio_discovery(db: Session, run_id: int) -> None:
         suggestions_duration_ms = _duration_ms(suggestions_started_at)
         suggestions = _build_discovery_response(
             output,
-            curated,
             profile_summary=request.profile_summary,
             inferred_topics=request.inferred_topics,
         )
@@ -1813,37 +1777,9 @@ def _build_profile_fallback_summary(first_name: str, topics: list[str]) -> str:
     return first_name
 
 
-def _curated_fill_in_candidates(
-    curated: dict[str, list[OnboardingSuggestion]],
-) -> dict[str, list[OnboardingSuggestion]]:
-    feed_defaults = curated.get("substack", []) + curated.get("atom", [])
-    return {
-        "feeds": feed_defaults[:DISCOVERY_PROMPT_MAX_FILL_IN_FEEDS],
-        "reddit": curated.get("reddit", [])[:DISCOVERY_PROMPT_MAX_FILL_IN_REDDIT],
-    }
-
-
-def _format_curated_candidate(item: OnboardingSuggestion) -> str:
-    if item.suggestion_type == "reddit":
-        label = item.subreddit or item.title or ""
-        label = label.removeprefix("r/").strip("/")
-        rationale = (item.rationale or "").strip()
-        if rationale:
-            return f"subreddit: {label} | rationale_hint: {rationale}"
-        return f"subreddit: {label}"
-
-    title = (item.title or "").strip() or "<untitled>"
-    feed_url = (item.feed_url or "").strip() or (item.site_url or "").strip() or "<missing>"
-    rationale = (item.rationale or "").strip()
-    if rationale:
-        return f"title: {title} | feed_url: {feed_url} | rationale_hint: {rationale}"
-    return f"title: {title} | feed_url: {feed_url}"
-
-
 def _format_discovery_prompt(
     request: OnboardingFastDiscoverRequest,
     results: list[_DiscoveryWebResult],
-    curated_fill_ins: dict[str, list[OnboardingSuggestion]] | None = None,
 ) -> str:
     web_lines: list[str] = []
     for idx, item in enumerate(results[:DISCOVERY_PROMPT_MAX_WEB_RESULTS], start=1):
@@ -1857,64 +1793,30 @@ def _format_discovery_prompt(
             f"summary: {_prompt_snippet(item.snippet)}"
         )
 
-    curated_lines: list[str] = []
-    fill_ins = curated_fill_ins or {}
-    for section_name in ("feeds", "reddit"):
-        section_items = fill_ins.get(section_name, [])
-        curated_lines.append(f"{section_name}:")
-        if not section_items:
-            curated_lines.append("  - none")
-            continue
-        for idx, curated_item in enumerate(section_items, start=1):
-            curated_lines.append(f"  {idx}. {_format_curated_candidate(curated_item)}")
     return render_prompt(
         "onboarding/fast_discover#user",
         profile_summary=request.profile_summary,
         topics=", ".join(request.inferred_topics),
         web_results="\n".join(web_lines),
-        curated_fill_ins="\n".join(curated_lines),
-    )
-
-
-def _fast_discover_from_defaults(
-    curated: dict[str, list[OnboardingSuggestion]],
-    profile_summary: str | None = None,
-    inferred_topics: list[str] | None = None,
-) -> OnboardingFastDiscoverResponse:
-    feed_defaults = curated.get("substack", []) + curated.get("atom", [])
-    response = OnboardingFastDiscoverResponse(
-        recommended_pods=[],
-        recommended_substacks=feed_defaults[:ONBOARDING_FEED_SUGGESTION_LIMIT],
-        recommended_subreddits=curated.get("reddit", [])[: DEFAULT_SOURCE_LIMITS["reddit"]],
-    )
-    return _ensure_response_rationales(
-        response,
-        profile_summary=profile_summary,
-        inferred_topics=inferred_topics,
     )
 
 
 def _build_discovery_response(
     output: _DiscoverOutput,
-    curated: dict[str, list[OnboardingSuggestion]],
     profile_summary: str | None = None,
     inferred_topics: list[str] | None = None,
 ) -> OnboardingFastDiscoverResponse:
-    feed_defaults = curated.get("substack", []) + curated.get("atom", [])
     feed_limit = ONBOARDING_FEED_SUGGESTION_LIMIT
-    substacks = _merge_suggestions(
+    substacks = _dedupe_suggestions(
         _normalize_suggestions(output.substacks, "substack"),
-        feed_defaults,
         feed_limit,
     )
-    podcasts = _merge_suggestions(
+    podcasts = _dedupe_suggestions(
         _normalize_suggestions(output.podcasts, "podcast_rss"),
-        [],
         DEFAULT_SOURCE_LIMITS["podcast_rss"],
     )
-    subreddits = _merge_suggestions(
+    subreddits = _dedupe_suggestions(
         _normalize_suggestions(output.subreddits, "reddit"),
-        curated.get("reddit", []),
         DEFAULT_SOURCE_LIMITS["reddit"],
     )
 
@@ -2024,15 +1926,14 @@ def _normalize_suggestions(
     return normalized
 
 
-def _merge_suggestions(
-    primary: list[OnboardingSuggestion],
-    defaults: list[OnboardingSuggestion],
+def _dedupe_suggestions(
+    suggestions: list[OnboardingSuggestion],
     limit: int,
 ) -> list[OnboardingSuggestion]:
     merged: list[OnboardingSuggestion] = []
     seen: set[str] = set()
 
-    for item in list(primary) + list(defaults):
+    for item in suggestions:
         key = _suggestion_key(item)
         if not key or key in seen:
             continue
@@ -2073,124 +1974,6 @@ def _extract_subreddit(site_url: str | None) -> str | None:
         return name.strip()
     except Exception:
         return None
-
-
-def _load_curated_defaults() -> dict[str, list[OnboardingSuggestion]]:
-    defaults: dict[str, list[OnboardingSuggestion]] = {
-        "substack": _load_substack_defaults(),
-        "atom": _load_atom_defaults(),
-        "reddit": _load_reddit_defaults(),
-    }
-    return defaults
-
-
-def _extract_curated_rationale(item: dict[str, Any]) -> str | None:
-    for field in ("rationale", "description", "summary", "about", "notes"):
-        value = item.get(field)
-        if not isinstance(value, str):
-            continue
-        cleaned = value.strip()
-        if cleaned:
-            return cleaned
-    return None
-
-
-def _load_substack_defaults() -> list[OnboardingSuggestion]:
-    feeds = load_substack_feeds()
-    suggestions = []
-    for feed in feeds:
-        feed_url = (feed.get("url") or "").strip()
-        if not feed_url:
-            continue
-        suggestions.append(
-            OnboardingSuggestion(
-                suggestion_type="substack",
-                title=feed.get("name"),
-                feed_url=feed_url,
-                site_url=feed_url,
-                rationale=_extract_curated_rationale(feed) if isinstance(feed, dict) else None,
-                is_default=True,
-            )
-        )
-    return suggestions
-
-
-def _load_atom_defaults() -> list[OnboardingSuggestion]:
-    feeds = load_atom_feeds()
-    suggestions = []
-    for feed in feeds:
-        feed_url = (feed.get("url") or "").strip()
-        if not feed_url:
-            continue
-        suggestions.append(
-            OnboardingSuggestion(
-                suggestion_type="atom",
-                title=feed.get("name"),
-                feed_url=feed_url,
-                site_url=feed_url,
-                rationale=_extract_curated_rationale(feed) if isinstance(feed, dict) else None,
-                is_default=True,
-            )
-        )
-    return suggestions
-
-
-def _load_reddit_defaults() -> list[OnboardingSuggestion]:
-    path = resolve_config_path("REDDIT_CONFIG_PATH", "reddit.yml")
-    if not path.exists():
-        return []
-    try:
-        with open(path, encoding="utf-8") as handle:
-            payload = yaml.safe_load(handle) or {}
-    except Exception:
-        logger.warning("Failed to load reddit defaults", exc_info=True)
-        return []
-
-    subreddits = payload.get("subreddits") or []
-    suggestions: list[OnboardingSuggestion] = []
-    for sub in subreddits:
-        if not isinstance(sub, dict):
-            continue
-        name = _normalize_subreddit_name((sub.get("name") or "").strip())
-        if not name:
-            continue
-        suggestions.append(
-            OnboardingSuggestion(
-                suggestion_type="reddit",
-                title=name,
-                site_url=f"https://www.reddit.com/r/{name}/",
-                subreddit=name,
-                rationale=_extract_curated_rationale(sub),
-                is_default=True,
-            )
-        )
-    return suggestions
-
-
-def _defaults_to_selected_sources(
-    curated: dict[str, list[OnboardingSuggestion]],
-) -> list[OnboardingSelectedSource]:
-    selections: list[OnboardingSelectedSource] = []
-    feed_selections = 0
-    for suggestion_type in ("substack", "atom"):
-        defaults = curated.get(suggestion_type, [])
-        limit = ONBOARDING_FEED_SUGGESTION_LIMIT - feed_selections
-        if limit <= 0:
-            continue
-        for suggestion in defaults[:limit]:
-            selected_type = _normalize_selected_suggestion_type(suggestion.suggestion_type)
-            if selected_type is None:
-                continue
-            selections.append(
-                OnboardingSelectedSource(
-                    suggestion_type=selected_type,
-                    title=suggestion.title,
-                    feed_url=suggestion.feed_url or "",
-                    config={"feed_url": suggestion.feed_url or ""},
-                )
-            )
-            feed_selections += 1
-    return selections
 
 
 def _persist_scraper_config_idempotent(
@@ -2355,7 +2138,7 @@ def _seed_recent_news_for_user(db: Session, user_id: int, limit: int = NEWS_SEED
     return len(news_ids)
 
 
-def _seed_default_feed_content_for_user(
+def _seed_selected_feed_content_for_user(
     db: Session,
     user_id: int,
     selections: list[OnboardingSelectedSource],

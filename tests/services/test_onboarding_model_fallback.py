@@ -68,10 +68,7 @@ def test_discover_generation_does_not_use_secondary_model(monkeypatch) -> None:
     assert attempts == [FAST_DISCOVER_MODEL]
 
 
-def test_fast_discover_returns_defaults_when_generation_fails(monkeypatch) -> None:
-    fallback = OnboardingFastDiscoverResponse()
-
-    monkeypatch.setattr("app.services.onboarding._load_curated_defaults", lambda: {})
+def test_fast_discover_returns_empty_when_generation_fails(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.services.onboarding._run_discovery_exa_queries",
         lambda *_args, **_kwargs: ["result"],
@@ -88,11 +85,6 @@ def test_fast_discover_returns_defaults_when_generation_fails(monkeypatch) -> No
         "app.services.onboarding._run_discover_output_with_fallback",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("primary timeout")),
     )
-    monkeypatch.setattr(
-        "app.services.onboarding._fast_discover_from_defaults",
-        lambda *_args, **_kwargs: fallback,
-    )
-
     response = fast_discover(
         OnboardingFastDiscoverRequest(
             profile_summary="AI engineer",
@@ -100,7 +92,7 @@ def test_fast_discover_returns_defaults_when_generation_fails(monkeypatch) -> No
         )
     )
 
-    assert response == fallback
+    assert response == OnboardingFastDiscoverResponse()
 
 
 @pytest.mark.asyncio

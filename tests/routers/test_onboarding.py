@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.api.onboarding import OnboardingSuggestion
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import (
     Content,
@@ -94,6 +93,83 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     assert test_user.has_completed_onboarding is True
 
 
+@pytest.mark.usefixtures("stub_valid_feed_url")
+def test_onboarding_complete_persists_selected_feed_reddit_and_aggregator(
+    client,
+    db_session,
+    monkeypatch,
+    test_user,
+) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    class FakeQueueGateway:
+        def enqueue(self, task_type, content_id=None, payload=None, queue_name=None, dedupe=None):
+            del content_id, queue_name, dedupe
+            calls.append((task_type.value, payload or {}))
+            return 45
+
+    monkeypatch.setattr(
+        "app.services.onboarding.get_task_queue_gateway",
+        lambda: FakeQueueGateway(),
+    )
+
+    response = client.post(
+        "/api/onboarding/complete",
+        json={
+            "selected_sources": [
+                {
+                    "suggestion_type": "atom",
+                    "title": "Generated Dog Tech Feed",
+                    "feed_url": "https://example.com/dog-tech.xml",
+                }
+            ],
+            "selected_subreddits": ["dogs"],
+            "selected_aggregators": [
+                {"key": "brutalist", "title": "Brutalist Report", "topics": ["science"]}
+            ],
+            "profile_summary": "Interested in technology and dogs",
+            "inferred_topics": ["technology", "dogs"],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["configured_source_count"] == 3
+
+    configs = (
+        db_session.query(UserScraperConfig)
+        .filter(UserScraperConfig.user_id == test_user.id)
+        .order_by(UserScraperConfig.id.asc())
+        .all()
+    )
+    atom_config = next(config for config in configs if config.scraper_type == "atom")
+    reddit_config = next(config for config in configs if config.scraper_type == "reddit")
+    aggregator_config = next(config for config in configs if config.scraper_type == "aggregator")
+
+    assert atom_config.display_name == "Generated Dog Tech Feed"
+    assert atom_config.config["feed_url"] == "https://example.com/dog-tech.xml"
+    assert reddit_config.config["subreddit"] == "dogs"
+    assert aggregator_config.config["key"] == "brutalist"
+    assert aggregator_config.config["topics"] == ["science"]
+
+    backfill_calls = [
+        payload for task_type, payload in calls if task_type == TaskType.BACKFILL_FEEDS.value
+    ]
+    assert len(backfill_calls) == 1
+    assert backfill_calls[0]["config_ids"] == [atom_config.id]
+
+    scrape_calls = [payload for task_type, payload in calls if task_type == TaskType.SCRAPE.value]
+    assert scrape_calls
+    assert set(scrape_calls[0]["sources"]) == {"Reddit", "brutalist"}
+
+    discovery_calls = [
+        payload for task_type, payload in calls if task_type == TaskType.ONBOARDING_DISCOVER.value
+    ]
+    assert discovery_calls
+    assert discovery_calls[0]["profile_summary"] == "Interested in technology and dogs"
+    assert discovery_calls[0]["inferred_topics"] == ["technology", "dogs"]
+
+
 def test_onboarding_complete_queues_selected_aggregator_scrapes(
     client,
     db_session,
@@ -112,7 +188,6 @@ def test_onboarding_complete_queues_selected_aggregator_scrapes(
         "app.services.onboarding.get_task_queue_gateway",
         lambda: FakeQueueGateway(),
     )
-    monkeypatch.setattr("app.services.onboarding._load_curated_defaults", lambda: {})
 
     response = client.post(
         "/api/onboarding/complete",
@@ -156,7 +231,6 @@ def test_onboarding_complete_ignores_reddit_aggregator(
         "app.services.onboarding.get_task_queue_gateway",
         lambda: FakeQueueGateway(),
     )
-    monkeypatch.setattr("app.services.onboarding._load_curated_defaults", lambda: {})
 
     response = client.post(
         "/api/onboarding/complete",
@@ -199,7 +273,7 @@ def test_onboarding_tutorial_complete(client, db_session, test_user):
     assert test_user.has_completed_new_user_tutorial is True
 
 
-def test_onboarding_fast_discover_defaults(client, monkeypatch):
+def test_onboarding_fast_discover_returns_empty_without_search_results(client, monkeypatch):
     monkeypatch.setattr(
         "app.services.onboarding._run_discovery_exa_queries",
         lambda *_args, **_kwargs: [],
@@ -213,29 +287,15 @@ def test_onboarding_fast_discover_defaults(client, monkeypatch):
     assert "recommended_substacks" in data
     assert "recommended_pods" in data
     assert "recommended_subreddits" in data
+    assert data["recommended_substacks"] == []
+    assert data["recommended_pods"] == []
+    assert data["recommended_subreddits"] == []
 
 
-def test_onboarding_fast_discover_defaults_have_rationale(client, monkeypatch):
+def test_onboarding_fast_discover_does_not_use_static_defaults(client, monkeypatch):
     monkeypatch.setattr(
         "app.services.onboarding._run_discovery_exa_queries",
         lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        "app.services.onboarding._load_curated_defaults",
-        lambda: {
-            "substack": [
-                OnboardingSuggestion(
-                    suggestion_type="substack",
-                    title="Example Feed",
-                    feed_url="https://example.com/feed.xml",
-                    site_url="https://example.com",
-                    is_default=True,
-                )
-            ],
-            "atom": [],
-            "podcast_rss": [],
-            "reddit": [],
-        },
     )
 
     response = client.post(
@@ -245,8 +305,9 @@ def test_onboarding_fast_discover_defaults_have_rationale(client, monkeypatch):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["recommended_substacks"]
-    assert data["recommended_substacks"][0]["rationale"]
+    assert data["recommended_substacks"] == []
+    assert data["recommended_pods"] == []
+    assert data["recommended_subreddits"] == []
 
 
 def test_onboarding_profile_requires_interests(client, monkeypatch):
@@ -424,8 +485,6 @@ def test_onboarding_discovery_status_returns_suggestions(client, db_session, tes
 
 
 def test_onboarding_complete_seeds_news(client, db_session, monkeypatch, test_user):
-    monkeypatch.setattr("app.services.onboarding._load_curated_defaults", lambda: {})
-
     news_items = [
         Content(
             url=f"https://example.com/news-{idx}",
@@ -457,8 +516,6 @@ def test_onboarding_complete_seeds_selected_feed_content(
     monkeypatch,
     test_user,
 ):
-    monkeypatch.setattr("app.services.onboarding._load_curated_defaults", lambda: {})
-
     selected_feed_url = "https://example.substack.com/feed"
     matching_items = [
         Content(
