@@ -43,11 +43,11 @@ enum AppChrome {
         navigationAppearance.shadowColor = UIColor.separator
         navigationAppearance.titleTextAttributes = [
             .foregroundColor: UIColor.appOnSurface,
-            .font: UIFont.appSans(size: 17, weight: .semibold)
+            .font: UIFont.appSerif(size: 17)
         ]
         navigationAppearance.largeTitleTextAttributes = [
             .foregroundColor: UIColor.appOnSurface,
-            .font: UIFont.appSans(size: 34, weight: .semibold)
+            .font: UIFont.appSerif(size: 34)
         ]
         UINavigationBar.appearance().standardAppearance = navigationAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navigationAppearance

@@ -141,6 +141,10 @@
     <array>
         <string>Inter.ttf</string>
         <string>Inter-Italic.ttf</string>
+        <string>LibreFranklin-Regular.ttf</string>
+        <string>LibreFranklin-Italic.ttf</string>
+        <string>SourceSerif4-Light.ttf</string>
+        <string>SourceSerif4-LightItalic.ttf</string>
     </array>
 </dict>
 </plist>

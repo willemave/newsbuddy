@@ -180,8 +180,10 @@ extension Color {
 // MARK: - Typography
 
 enum AppFontFamily {
-    static let sans = "Inter"
-    static let sansItalic = "Inter-Italic"
+    static let sans = "LibreFranklin-Regular"
+    static let sansItalic = "LibreFranklin-Italic"
+    static let serif = "SourceSerif4-Light"
+    static let serifItalic = "SourceSerif4-LightItalic"
 }
 
 extension Font {
@@ -201,15 +203,31 @@ extension Font {
         Font.custom(AppFontFamily.sansItalic, size: size, relativeTo: textStyle).weight(weight)
     }
 
+    static func appSerif(
+        size: CGFloat,
+        relativeTo textStyle: Font.TextStyle = .title,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        Font.custom(AppFontFamily.serif, size: size, relativeTo: textStyle).weight(weight)
+    }
+
+    static func appSerifItalic(
+        size: CGFloat,
+        relativeTo textStyle: Font.TextStyle = .body,
+        weight: Font.Weight = .regular
+    ) -> Font {
+        Font.custom(AppFontFamily.serifItalic, size: size, relativeTo: textStyle).weight(weight)
+    }
+
     static func appSymbol(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         Font.system(size: size, weight: weight)
     }
 
-    static let appLargeTitle = Font.appSans(size: 34, relativeTo: .largeTitle, weight: .semibold)
-    static let appTitle = Font.appSans(size: 28, relativeTo: .title, weight: .semibold)
-    static let appTitle2 = Font.appSans(size: 22, relativeTo: .title2, weight: .semibold)
-    static let appTitle3 = Font.appSans(size: 20, relativeTo: .title3, weight: .semibold)
-    static let appHeadline = Font.appSans(size: 17, relativeTo: .headline, weight: .semibold)
+    static let appLargeTitle = Font.appSerif(size: 34, relativeTo: .largeTitle)
+    static let appTitle = Font.appSerif(size: 28, relativeTo: .title)
+    static let appTitle2 = Font.appSerif(size: 22, relativeTo: .title2)
+    static let appTitle3 = Font.appSerif(size: 20, relativeTo: .title3)
+    static let appHeadline = Font.appSerif(size: 17, relativeTo: .headline)
     static let appSubheadline = Font.appSans(size: 15, relativeTo: .subheadline)
     static let appBody = Font.appSans(size: 16, relativeTo: .body)
     static let appCallout = Font.appSans(size: 16, relativeTo: .callout)
@@ -227,31 +245,31 @@ extension Font {
 
     // Feed card typography
     static let feedMeta = Font.appSans(size: 11)
-    static let feedHeadline = Font.appSans(size: 18, weight: .medium)
+    static let feedHeadline = Font.appSerif(size: 18)
     static let feedSnippet = Font.appSans(size: 13)
-    static let cardHeadline = Font.appSans(size: 22, weight: .semibold)
+    static let cardHeadline = Font.appSerif(size: 22)
     static let cardDescription = Font.appSans(size: 14)
     static let cardBadge = Font.appSans(size: 10, weight: .semibold)
     static let cardFooter = Font.appSans(size: 11, weight: .medium)
 
     // Editorial typography (Discovery redesign)
-    static let editorialDisplay = Font.appSans(size: 34, weight: .semibold)
-    static let editorialHeadline = Font.appSans(size: 20, weight: .semibold)
+    static let editorialDisplay = Font.appSerif(size: 34)
+    static let editorialHeadline = Font.appSerif(size: 20)
     static let editorialBody = Font.appSans(size: 16)
     static let editorialMeta = Font.appSans(size: 11, weight: .bold)
     static let editorialSubMeta = Font.appSans(size: 11)
 
     // Watercolor typography (Landing & Onboarding)
-    static let watercolorDisplay = Font.appSans(size: 54, weight: .medium)
+    static let watercolorDisplay = Font.appSerif(size: 54)
     static let watercolorSubtitle = Font.appSans(size: 17, weight: .light)
 
-    // Terracotta typography — app-wide Inter aliases.
-    static let terracottaDisplayLarge = Font.appSans(size: 44, weight: .medium)
-    static let terracottaHeadlineLarge = Font.appSans(size: 28, weight: .medium)
-    static let terracottaHeadlineMedium = Font.appSans(size: 22, weight: .semibold)
-    static let terracottaHeadlineSmall = Font.appSans(size: 18, weight: .medium)
-    static let terracottaHeadlineCompact = Font.appSans(size: 22, weight: .medium)
-    static let terracottaHeadlineItalic = Font.appSansItalic(size: 18)
+    // Terracotta typography — title aliases use Tiempos, body/labels use Graphik.
+    static let terracottaDisplayLarge = Font.appSerif(size: 44)
+    static let terracottaHeadlineLarge = Font.appSerif(size: 28)
+    static let terracottaHeadlineMedium = Font.appSerif(size: 22)
+    static let terracottaHeadlineSmall = Font.appSerif(size: 18)
+    static let terracottaHeadlineCompact = Font.appSerif(size: 22)
+    static let terracottaHeadlineItalic = Font.appSerifItalic(size: 18)
 
     // Terracotta typography — body/labels/UI
     static let terracottaBodyLarge = Font.appSans(size: 16)
@@ -260,7 +278,7 @@ extension Font {
     static let terracottaLabelSmall = Font.appSans(size: 9, weight: .bold)
     static let terracottaCategoryPill = Font.appSans(size: 10, weight: .semibold)
 
-    static let readerTitle = Font.appSans(size: 34, weight: .semibold)
+    static let readerTitle = Font.appSerif(size: 34)
     static let readerControlLabel = Font.appSans(size: 16, weight: .semibold)
 
     // Reader typography — regular body copy.
@@ -271,6 +289,15 @@ extension Font {
 }
 
 extension UIFont {
+    static func appSerif(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        let baseFont = UIFont(name: AppFontFamily.serif, size: size)
+            ?? UIFont.systemFont(ofSize: size, weight: weight)
+        let descriptor = baseFont.fontDescriptor.addingAttributes([
+            .traits: [UIFontDescriptor.TraitKey.weight: weight.rawValue]
+        ])
+        return UIFont(descriptor: descriptor, size: size)
+    }
+
     static func appSans(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         let baseFont = UIFont(name: AppFontFamily.sans, size: size)
             ?? UIFont.systemFont(ofSize: size, weight: weight)
@@ -287,11 +314,11 @@ extension UIFont {
     }
 
     static var appTerracottaHeadlineCompact: UIFont {
-        UIFont.appSans(size: 22, weight: .medium)
+        UIFont.appSerif(size: 22)
     }
 
     static var appEditorialHeadline: UIFont {
-        UIFont.appSans(size: 28, weight: .medium)
+        UIFont.appSerif(size: 28)
     }
 
     static var appEditorialSummary: UIFont {

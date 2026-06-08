@@ -64,7 +64,8 @@ struct MoreView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.large)
         .accessibilityIdentifier("more.screen")
         .task {
             await submissionsViewModel.load()

@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 
 fileprivate enum ShareExtensionTypography {
     // The Share Extension is a separate target, so it cannot depend on the app's SwiftUI design tokens.
-    static let family = "Inter"
+    static let family = "LibreFranklin-Regular"
 
     static func font(textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
         let preferred = UIFont.preferredFont(forTextStyle: textStyle)
