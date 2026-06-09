@@ -44,18 +44,14 @@ struct EditorialNarrativeSummaryView: View {
                 sectionHeader(
                     summary.sourceTemplateDisplayName ?? "Structured Details",
                     icon: "square.stack.3d.up",
-                    tint: .summarySecondaryAccent,
-                    uppercase: false
+                    tint: .summarySecondaryAccent
                 )
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(summary.sourceDetailSections) { section in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(section.title)
-                                .font(.appFootnote)
-                                .fontWeight(.semibold)
+                                .font(.readerBody)
                                 .foregroundColor(Color.onSurfaceSecondary)
-                                .textCase(.uppercase)
-                                .tracking(0.5)
 
                             VStack(alignment: .leading, spacing: EditorialNarrativeDesign.itemSpacing) {
                                 ForEach(section.items, id: \.self) { item in
@@ -82,20 +78,16 @@ struct EditorialNarrativeSummaryView: View {
     private func sectionHeader(
         _ title: String,
         icon: String,
-        tint: Color,
-        uppercase: Bool = true
+        tint: Color
     ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.appSubheadline)
+                .font(.readerBody)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.appSubheadline)
-                .fontWeight(.semibold)
+                .font(.readerBody)
                 .foregroundColor(Color.onSurfaceSecondary)
-                .textCase(uppercase ? .uppercase : .none)
-                .tracking(uppercase ? 0.5 : 0)
         }
     }
 

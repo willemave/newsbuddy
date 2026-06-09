@@ -29,13 +29,13 @@ struct SourceMetadataSection: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.appSubheadline)
+                .font(.readerBody)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .accessibilityHidden(true)
 
             Text("Paper metadata")
-                .font(.appSubheadline)
-                .fontWeight(.semibold)
+                .font(.readerBody)
+                .foregroundColor(Color.onSurfaceSecondary)
         }
     }
 

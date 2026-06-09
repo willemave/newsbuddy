@@ -48,8 +48,7 @@ struct InterleavedSummaryV2View: View {
                     ForEach(summary.topics) { topic in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(topic.topic)
-                                .font(.appSubheadline)
-                                .fontWeight(.semibold)
+                                .font(.readerBody)
                                 .foregroundColor(Color.onSurface)
 
                             VStack(alignment: .leading, spacing: InterleavedV2Design.itemSpacing) {
@@ -63,7 +62,7 @@ struct InterleavedSummaryV2View: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                sectionHeader("Takeaway", icon: "lightbulb", tint: .terracottaPrimary, uppercase: false)
+                sectionHeader("Takeaway", icon: "lightbulb", tint: .terracottaPrimary)
                 Text(summary.takeaway)
                     .font(.appCallout)
                     .foregroundColor(Color.readerBodyText)
@@ -76,20 +75,16 @@ struct InterleavedSummaryV2View: View {
     private func sectionHeader(
         _ title: String,
         icon: String,
-        tint: Color,
-        uppercase: Bool = true
+        tint: Color
     ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.appSubheadline)
+                .font(.readerBody)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.appSubheadline)
-                .fontWeight(.semibold)
+                .font(.readerBody)
                 .foregroundColor(Color.onSurfaceSecondary)
-                .textCase(uppercase ? .uppercase : .none)
-                .tracking(uppercase ? 0.5 : 0)
         }
     }
 

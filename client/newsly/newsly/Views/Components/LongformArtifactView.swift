@@ -22,6 +22,7 @@ struct LongformArtifactView: View {
 
     var body: some View {
         ArtifactScaffold(artifact: artifact, accent: accent)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -40,6 +41,7 @@ private struct ArtifactScaffold: View {
                 ArtifactDetailSectionView(section: section, tint: accent)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -181,11 +183,8 @@ private struct ArtifactEyebrowText: View {
 
     var body: some View {
         Text(title)
-            .font(.appFootnote)
-            .fontWeight(.semibold)
+            .font(.readerBody)
             .foregroundColor(Color.onSurfaceSecondary)
-            .textCase(.uppercase)
-            .tracking(0.5)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -204,15 +203,12 @@ private struct ArtifactSectionHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.appSubheadline)
+                .font(.readerBody)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.appSubheadline)
-                .fontWeight(.semibold)
+                .font(.readerBody)
                 .foregroundColor(Color.onSurfaceSecondary)
-                .textCase(.uppercase)
-                .tracking(0.5)
         }
     }
 }

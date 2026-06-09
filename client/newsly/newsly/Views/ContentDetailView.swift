@@ -46,8 +46,7 @@ private struct ViewAlert: Identifiable {
 // MARK: - Design Tokens
 private enum DetailDesign {
     // Spacing
-    static let compactReaderPaddingScale: CGFloat = 0.7
-    static let horizontalPadding: CGFloat = Spacing.readerHorizontal * compactReaderPaddingScale
+    static let horizontalPadding: CGFloat = Spacing.readerHorizontal
     static let headerHorizontalPadding: CGFloat = horizontalPadding
     static let sectionSpacing: CGFloat = 20
     static let actionBarTopPadding: CGFloat = 0
@@ -366,11 +365,13 @@ struct ContentDetailView: View {
                         Spacer()
                             .frame(height: 40)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     LoadingView()
                         .frame(minHeight: 400)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .coordinateSpace(name: "detailScroll")
         .scrollClipDisabled()
@@ -1178,6 +1179,7 @@ struct ContentDetailView: View {
                             .padding(.top, 2)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, DetailDesign.headerHorizontalPadding)
                 .padding(.bottom, 10)
             }
@@ -1261,7 +1263,7 @@ struct ContentDetailView: View {
     }
 
     private func detailTitleWeight(for content: ContentDetail) -> Font.Weight {
-        content.contentTypeEnum == .news ? .medium : .bold
+        content.contentTypeEnum == .news ? .semibold : .bold
     }
 
     private func detailMetadataAccessibilityLabel(for content: ContentDetail) -> String {
@@ -2364,8 +2366,7 @@ struct ContentDetailView: View {
     ) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Text("Comments")
-                .font(.appHeadline)
-                .fontWeight(.semibold)
+                .font(.readerBody)
                 .foregroundColor(Color.onSurface)
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
@@ -2474,7 +2475,7 @@ struct ContentDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Community Summary")
-                        .font(.appHeadline)
+                        .font(.readerBody)
 
                     Text(summary.overview)
                         .font(.appCallout)
@@ -2497,8 +2498,7 @@ struct ContentDetailView: View {
                 if !summary.topics.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Key Topics")
-                            .font(.appSubheadline)
-                            .fontWeight(.semibold)
+                            .font(.readerBody)
                             .foregroundColor(Color.onSurfaceSecondary)
 
                         ForEach(summary.topics) { topic in
@@ -2528,8 +2528,7 @@ struct ContentDetailView: View {
                 if !summary.representativeComments.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Representative Comments")
-                            .font(.appSubheadline)
-                            .fontWeight(.semibold)
+                            .font(.readerBody)
                             .foregroundColor(Color.onSurfaceSecondary)
 
                         ForEach(summary.representativeComments) { comment in
@@ -2559,8 +2558,7 @@ struct ContentDetailView: View {
                 if !summary.notableLinks.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Notable Links")
-                            .font(.appSubheadline)
-                            .fontWeight(.semibold)
+                            .font(.readerBody)
                             .foregroundColor(Color.onSurfaceSecondary)
 
                         ForEach(summary.notableLinks) { link in
@@ -2995,11 +2993,10 @@ struct ContentDetailView: View {
                 HStack {
                     HStack(spacing: 8) {
                         Image(systemName: icon)
-                            .font(.appSubheadline)
+                            .font(.readerBody)
                             .foregroundColor(Color.onSurfaceSecondary)
                         Text(title)
-                            .font(.appSubheadline)
-                            .fontWeight(.semibold)
+                            .font(.readerBody)
                             .foregroundColor(Color.onSurface)
                     }
 
@@ -3046,12 +3043,12 @@ struct ContentDetailView: View {
     private func sectionHeader(_ title: String, icon: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.appSubheadline)
+                .font(.readerBody)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.appSubheadline)
-                .fontWeight(.semibold)
+                .font(.readerBody)
+                .foregroundColor(Color.onSurfaceSecondary)
         }
     }
 

@@ -106,14 +106,11 @@ struct StructuredSummaryView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 8) {
                         Image(systemName: "tag")
-                            .font(.appSubheadline)
+                            .font(.readerBody)
                             .foregroundColor(Color.onSurfaceSecondary)
                         Text("Topics")
-                            .font(.appSubheadline)
-                            .fontWeight(.semibold)
+                            .font(.readerBody)
                             .foregroundColor(Color.onSurfaceSecondary)
-                            .textCase(.uppercase)
-                            .tracking(0.5)
                     }
 
                     FlowLayout(spacing: 8) {
@@ -149,12 +146,11 @@ struct StructuredSummaryView: View {
                 HStack {
                     HStack(spacing: 8) {
                         Image(systemName: icon)
-                            .font(.appSubheadline)
+                            .font(.readerBody)
                             .foregroundColor(iconColor)
                             .accessibilityHidden(true)
                         Text(title)
-                            .font(.appSubheadline)
-                            .fontWeight(.semibold)
+                            .font(.readerBody)
                             .foregroundColor(Color.onSurface)
                     }
 
