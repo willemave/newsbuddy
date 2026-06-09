@@ -10,62 +10,69 @@ struct MoreView: View {
     @StateObject private var processingCountService = ProcessingCountService.shared
 
     var body: some View {
-        List {
-            Section {
-                menuRow(
-                    destination: SearchView(),
-                    icon: "magnifyingglass",
-                    title: "Search"
-                )
+        VStack(spacing: 0) {
+            EditorialMastheadHeader(title: "Settings")
 
-                menuRow(
-                    destination: RecentlyReadView(),
-                    icon: "clock",
-                    title: "Recently Read"
-                )
+            List {
+                Section {
+                    menuRow(
+                        destination: SearchView(),
+                        icon: "magnifyingglass",
+                        title: "Search"
+                    )
 
-                NavigationLink {
-                    SubmissionsView(viewModel: submissionsViewModel)
-                } label: {
-                    HStack(spacing: 16) {
-                        minimalIcon("tray.and.arrow.up")
-                        Text("Submissions")
-                            .foregroundStyle(Color.onSurface)
-                        Spacer()
-                        if submissionsViewModel.unseenCount > 0 {
-                            CountBadge(count: submissionsViewModel.unseenCount, color: .brandPrimary)
+                    menuRow(
+                        destination: RecentlyReadView(),
+                        icon: "clock",
+                        title: "Recently Read"
+                    )
+
+                    NavigationLink {
+                        SubmissionsView(viewModel: submissionsViewModel)
+                    } label: {
+                        HStack(spacing: 16) {
+                            minimalIcon("tray.and.arrow.up")
+                            Text("Submissions")
+                                .foregroundStyle(Color.onSurface)
+                            Spacer()
+                            if submissionsViewModel.unseenCount > 0 {
+                                CountBadge(count: submissionsViewModel.unseenCount, color: .brandPrimary)
+                            }
                         }
+                        .frame(minHeight: RowMetrics.compactHeight)
                     }
-                    .frame(minHeight: RowMetrics.compactHeight)
+
+                    NavigationLink {
+                        ProcessingStatsView()
+                    } label: {
+                        HStack(spacing: 16) {
+                            minimalIcon("clock.arrow.circlepath")
+                            Text("Processing")
+                                .foregroundStyle(Color.onSurface)
+                            Spacer()
+                            if processingCountService.processingCount > 0 {
+                                CountBadge(count: processingCountService.processingCount, color: .brandPrimary)
+                            }
+                        }
+                        .frame(minHeight: RowMetrics.compactHeight)
+                    }
                 }
 
-                NavigationLink {
-                    ProcessingStatsView()
-                } label: {
-                    HStack(spacing: 16) {
-                        minimalIcon("clock.arrow.circlepath")
-                        Text("Processing")
-                            .foregroundStyle(Color.onSurface)
-                        Spacer()
-                        if processingCountService.processingCount > 0 {
-                            CountBadge(count: processingCountService.processingCount, color: .brandPrimary)
-                        }
-                    }
-                    .frame(minHeight: RowMetrics.compactHeight)
+                Section {
+                    menuRow(
+                        destination: SettingsView(),
+                        icon: "gearshape",
+                        title: "Settings"
+                    )
                 }
             }
-
-            Section {
-                menuRow(
-                    destination: SettingsView(),
-                    icon: "gearshape",
-                    title: "Settings"
-                )
-            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .contentMargins(.top, 0, for: .scrollContent)
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.large)
+        .background(Color.surfacePrimary.ignoresSafeArea())
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("more.screen")
         .task {
             await submissionsViewModel.load()
