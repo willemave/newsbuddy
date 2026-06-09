@@ -38,6 +38,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     let artifactType: String?
     let previewBullets: [String]?
     let reasonToRead: String?
+    let keyTakeaway: String?
     let savedSource: String?
     private let cachedDisplayDate: Date?
     private let cachedProcessedDate: Date?
@@ -70,6 +71,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         case artifactType = "artifact_type"
         case previewBullets = "preview_bullets"
         case reasonToRead = "reason_to_read"
+        case keyTakeaway = "key_takeaway"
         case savedSource = "saved_source"
     }
 
@@ -125,6 +127,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         artifactType: String? = nil,
         previewBullets: [String]? = nil,
         reasonToRead: String? = nil,
+        keyTakeaway: String? = nil,
         savedSource: String? = nil
     ) {
         self.id = id
@@ -152,6 +155,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         self.artifactType = artifactType
         self.previewBullets = previewBullets
         self.reasonToRead = reasonToRead
+        self.keyTakeaway = keyTakeaway
         self.savedSource = savedSource
         let displayDate = Self.parseDate(processedAt ?? createdAt)
         let processedDate = processedAt.flatMap(Self.parseDate)
@@ -190,6 +194,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
             artifactType: try container.decodeIfPresent(String.self, forKey: .artifactType),
             previewBullets: try container.decodeIfPresent([String].self, forKey: .previewBullets),
             reasonToRead: try container.decodeIfPresent(String.self, forKey: .reasonToRead),
+            keyTakeaway: try container.decodeIfPresent(String.self, forKey: .keyTakeaway),
             savedSource: try container.decodeIfPresent(String.self, forKey: .savedSource)
         )
     }
@@ -221,6 +226,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(artifactType, forKey: .artifactType)
         try container.encodeIfPresent(previewBullets, forKey: .previewBullets)
         try container.encodeIfPresent(reasonToRead, forKey: .reasonToRead)
+        try container.encodeIfPresent(keyTakeaway, forKey: .keyTakeaway)
         try container.encodeIfPresent(savedSource, forKey: .savedSource)
     }
 
@@ -257,6 +263,11 @@ struct ContentSummary: Codable, Identifiable, Equatable {
 
     var secondaryLine: String? {
         summaryDisplayText
+    }
+
+    var keyTakeawayDisplayText: String? {
+        guard contentTypeEnum != .news else { return nil }
+        return Self.normalizedText(keyTakeaway)
     }
 
     /// Discussion snippet for feed card preview
@@ -328,6 +339,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
             artifactType: artifactType,
             previewBullets: previewBullets,
             reasonToRead: reasonToRead,
+            keyTakeaway: keyTakeaway,
             savedSource: savedSource
         )
     }

@@ -48,6 +48,70 @@ def _build_podcast_summary(title: str) -> dict[str, object]:
     }
 
 
+def _build_longform_artifact_summary() -> dict[str, object]:
+    return {
+        "title": "Artifact Article",
+        "one_line": "A concise preview that is not the key takeaway.",
+        "ask": "judge",
+        "artifact": {
+            "type": "argument",
+            "payload": {
+                "overview": (
+                    "This overview is long enough to satisfy the typed artifact contract "
+                    "while staying focused on the source argument."
+                ),
+                "quotes": [
+                    {"text": "A first source quote with enough useful detail."},
+                    {"text": "A second source quote with enough useful detail."},
+                ],
+                "extras": {
+                    "thesis": "The source thesis is concrete enough to judge on its merits.",
+                    "counterpoint": "The source also names a limitation worth considering.",
+                },
+                "key_points": [
+                    {
+                        "heading": "Claim",
+                        "content": "The argument is specific enough to inspect closely.",
+                    },
+                    {
+                        "heading": "Evidence",
+                        "content": "The evidence gives readers a concrete comparison point.",
+                    },
+                    {
+                        "heading": "Risk",
+                        "content": "The risk section explains where the argument can fail.",
+                    },
+                    {
+                        "heading": "Action",
+                        "content": "The action item keeps the source tied to a decision.",
+                    },
+                ],
+                "takeaway": "The artifact payload takeaway is the card subtitle.",
+            },
+        },
+        "source_context": {
+            "url": "https://example.com/artifact-article",
+            "source_name": "Example",
+            "publication_date": None,
+            "platform": "web",
+        },
+        "selection_trace": {
+            "source_hint": "test",
+            "candidates": ["argument"],
+            "selected": "argument",
+            "reason": "The source is shaped around a direct argument.",
+            "confidence": 0.92,
+        },
+        "feed_preview": {
+            "title": "Artifact Article",
+            "one_line": "A feed preview line that should not be the card subtitle.",
+            "preview_bullets": ["One useful preview point"],
+            "reason_to_read": "Open this to judge the argument with the available evidence.",
+            "artifact_type": "argument",
+        },
+    }
+
+
 def _add_inbox_status(db_session, user_id: int | None, content_id: int | None) -> None:
     assert user_id is not None
     assert content_id is not None
@@ -146,6 +210,69 @@ def test_list_keeps_article_with_short_summary_even_without_bullet_points(
     ids = {item["id"] for item in response.json()["contents"]}
 
     assert bookmark_article.id in ids
+
+
+def test_list_projects_longform_key_takeaway_from_artifact_payload(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    article = Content(
+        url="https://example.com/artifact-article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={
+            "summary": _build_longform_artifact_summary(),
+            "summary_kind": "longform_artifact",
+            "summary_version": 1,
+        },
+    )
+
+    db_session.add(article)
+    db_session.commit()
+    db_session.refresh(article)
+
+    _add_inbox_status(db_session, test_user.id, article.id)
+    db_session.commit()
+
+    response = client.get("/api/content/", params={"content_type": "article"})
+    assert response.status_code == 200
+    returned_item = next(item for item in response.json()["contents"] if item["id"] == article.id)
+
+    assert returned_item["key_takeaway"] == "The artifact payload takeaway is the card subtitle."
+    assert returned_item["short_summary"] == (
+        "A feed preview line that should not be the card subtitle."
+    )
+
+
+def test_list_projects_longform_key_takeaway_from_editorial_key_point(
+    client,
+    db_session,
+    test_user,
+) -> None:
+    article = Content(
+        url="https://example.com/editorial-article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={
+            "summary": _build_podcast_summary("Editorial Article"),
+            "summary_kind": "long_editorial_narrative",
+            "summary_version": 1,
+        },
+    )
+
+    db_session.add(article)
+    db_session.commit()
+    db_session.refresh(article)
+
+    _add_inbox_status(db_session, test_user.id, article.id)
+    db_session.commit()
+
+    response = client.get("/api/content/", params={"content_type": "article"})
+    assert response.status_code == 200
+    returned_item = next(item for item in response.json()["contents"] if item["id"] == article.id)
+
+    assert returned_item["key_takeaway"] == "Point one with concrete detail."
 
 
 def test_list_hides_news_images_even_when_metadata_has_urls(

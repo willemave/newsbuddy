@@ -107,13 +107,42 @@ final class ContentSummaryTests: XCTestCase {
         XCTAssertEqual(summary.secondaryLine, "Summary")
     }
 
+    func testArticleKeyTakeawayDecodesAndSurvivesLocalUpdates() throws {
+        let data = """
+        {
+          "id": 7,
+          "content_type": "article",
+          "url": "https://example.com/story",
+          "title": "Example story",
+          "source": "Example",
+          "platform": "web",
+          "status": "completed",
+          "short_summary": "Current list summary",
+          "key_takeaway": "  The key takeaway belongs under the title.  ",
+          "created_at": "2026-03-18T05:00:00Z",
+          "is_read": false,
+          "is_saved_to_knowledge": false
+        }
+        """.data(using: .utf8)!
+
+        let summary = try JSONDecoder().decode(ContentSummary.self, from: data)
+        let updated = summary.updating(isRead: true)
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(updated)) as? [String: Any]
+
+        XCTAssertEqual(summary.keyTakeaway, "  The key takeaway belongs under the title.  ")
+        XCTAssertEqual(summary.keyTakeawayDisplayText, "The key takeaway belongs under the title.")
+        XCTAssertEqual(updated.keyTakeaway, summary.keyTakeaway)
+        XCTAssertEqual(encoded?["key_takeaway"] as? String, summary.keyTakeaway)
+    }
+
     private func makeSummary(
         contentType: String = "news",
         createdAt: String,
         processedAt: String?,
         publicationDate: String?,
         shortSummary: String? = "Summary",
-        newsSummary: String? = nil
+        newsSummary: String? = nil,
+        keyTakeaway: String? = nil
     ) -> ContentSummary {
         ContentSummary(
             id: 7,
@@ -136,7 +165,8 @@ final class ContentSummaryTests: XCTestCase {
             topComment: nil,
             commentCount: nil,
             newsSummary: newsSummary,
-            newsKeyPoints: nil
+            newsKeyPoints: nil,
+            keyTakeaway: keyTakeaway
         )
     }
 }

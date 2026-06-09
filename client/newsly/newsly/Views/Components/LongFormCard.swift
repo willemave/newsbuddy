@@ -277,13 +277,7 @@ struct LongFormCard: View {
 
     private var summaryText: String? {
         guard content.contentTypeEnum != .news else { return nil }
-        if let oneLine = content.feedPreview?.oneLine, !oneLine.isEmpty {
-            return oneLine
-        }
-        if let summary = content.summaryDisplayText {
-            return summary
-        }
-        return nil
+        return content.keyTakeawayDisplayText
     }
 
     private var sourceLabel: String {

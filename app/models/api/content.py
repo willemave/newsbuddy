@@ -94,6 +94,9 @@ class ContentSummaryResponse(BaseModel):
     reason_to_read: str | None = Field(
         None, description="Feed-preview reason explaining why the item is worth opening"
     )
+    key_takeaway: str | None = Field(
+        None, description="Key takeaway to display under long-form list titles"
+    )
     saved_source: Literal["knowledge", "x_bookmark"] | None = Field(
         None,
         description="Saved-library source for this content when it appears in saved views",

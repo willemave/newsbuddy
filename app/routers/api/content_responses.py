@@ -41,6 +41,49 @@ def _string_map_list(
     return normalized
 
 
+def _clean_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _extract_key_takeaway(metadata: dict[str, Any]) -> str | None:
+    summary = metadata.get("summary")
+    if not isinstance(summary, dict):
+        return None
+
+    artifact = summary.get("artifact")
+    if isinstance(artifact, dict):
+        payload = artifact.get("payload")
+        if isinstance(payload, dict):
+            artifact_takeaway = _clean_string(payload.get("takeaway"))
+            if artifact_takeaway:
+                return artifact_takeaway
+
+    takeaway = _clean_string(summary.get("takeaway"))
+    if takeaway:
+        return takeaway
+
+    for collection_key, text_keys in (
+        ("key_points", ("point", "text")),
+        ("points", ("text",)),
+        ("bullet_points", ("text",)),
+    ):
+        raw_items = summary.get(collection_key)
+        if not isinstance(raw_items, list):
+            continue
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            for text_key in text_keys:
+                item_takeaway = _clean_string(item.get(text_key))
+                if item_takeaway:
+                    return item_takeaway
+
+    return None
+
+
 def _extract_news_summary(domain_content: ContentData) -> dict[str, Any]:
     view = metadata_view(domain_content.metadata)
     fields = view.news_fields()
@@ -231,6 +274,7 @@ def build_content_summary_response(
         artifact_type=artifact_fields["artifact_type"],
         preview_bullets=artifact_fields["preview_bullets"],
         reason_to_read=artifact_fields["reason_to_read"],
+        key_takeaway=_extract_key_takeaway(domain_content.metadata),
         saved_source=_resolve_saved_source(
             metadata=domain_content.metadata,
             is_saved_to_knowledge=is_saved_to_knowledge,
@@ -319,6 +363,7 @@ def build_fallback_content_summary_response(
         artifact_type=None,
         preview_bullets=None,
         reason_to_read=None,
+        key_takeaway=None,
         saved_source=_resolve_saved_source(
             metadata=content.content_metadata if isinstance(content.content_metadata, dict) else {},
             is_saved_to_knowledge=is_saved_to_knowledge,

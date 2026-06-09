@@ -168,6 +168,7 @@ def present_news_item_summary(
         artifact_type=None,
         preview_bullets=None,
         reason_to_read=None,
+        key_takeaway=None,
     )
 
 
