@@ -52,17 +52,7 @@ struct ShortFormView: View {
                     )
 
                     shortNewsQuickActions(items: items)
-                        .padding(.bottom, shouldShowFastNewsAudioControls ? 10 : 16)
-
-                    BriefingStackCard(
-                        items: items,
-                        durationSeconds: fastNewsAudioEpisode?.durationSeconds,
-                        isPreparing: isPreparingFastNewsAudio,
-                        isPlaying: isPlayingFastNewsAudio,
-                        onPlay: handleFastNewsAudioEpisode
-                    )
-                    .padding(.horizontal, Spacing.fastReadHorizontal)
-                    .padding(.bottom, 22)
+                        .padding(.bottom, shouldShowFastNewsAudioControls ? 10 : 18)
 
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         // Day delimiter: show when this item starts a new day
