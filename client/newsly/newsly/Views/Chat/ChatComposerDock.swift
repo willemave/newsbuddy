@@ -60,7 +60,7 @@ struct ChatComposerDock: View {
                 )
                 .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
         )
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Spacing.chatHorizontal)
     }
 
     private var moreActionsMenu: some View {
@@ -176,13 +176,13 @@ struct ChatComposerDock: View {
                 Group {
                     if isSending {
                         ProgressView()
-                            .tint(sendButtonDisabled ? Color.onSurfaceSecondary : .white)
+                            .tint(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
                     } else {
                         Image(systemName: "arrow.up")
                             .font(.appSymbol(size: 16, weight: .medium))
                     }
                 }
-                .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : .white)
+                .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
                 .frame(width: 44, height: 44, alignment: .center)
                 .background(sendButtonDisabled ? Color.surfaceContainer : Color.chatUserBubble)
                 .clipShape(Circle())

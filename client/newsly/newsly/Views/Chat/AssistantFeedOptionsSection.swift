@@ -176,7 +176,7 @@ private struct FeedOptionActionLabel: View {
     let title: String
     let systemImage: String
     let isLoading: Bool
-    var loadingTint: Color = .white
+    var loadingTint: Color = .chatUserBubbleText
 
     var body: some View {
         HStack(spacing: 7) {
@@ -227,7 +227,7 @@ private struct FeedOptionActionButtonStyle: ButtonStyle {
     private var foregroundColor: Color {
         switch role {
         case .primary:
-            return .white.opacity(0.96)
+            return .chatUserBubbleText
         case .secondary:
             return .onSurface
         case .subscribed:
@@ -249,7 +249,7 @@ private struct FeedOptionActionButtonStyle: ButtonStyle {
     private var borderColor: Color {
         switch role {
         case .primary:
-            return Color.white.opacity(0.16)
+            return Color.outlineVariant.opacity(0.42)
         case .secondary, .subscribed:
             return Color.outlineVariant.opacity(0.42)
         }

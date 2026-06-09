@@ -74,6 +74,9 @@ extension Color {
     static var chatUserBubble: Color {
         Color(ReaderPalette.selectedUIColor(\.chatUserBubble))
     }
+    static var chatUserBubbleText: Color {
+        Color.onSurface
+    }
     static var chatAccent: Color {
         Color.brandPrimary
     }
@@ -425,6 +428,8 @@ enum Spacing {
     static let fastReadHorizontal: CGFloat = 16
     /// Reader content gutter for long-form/detail reading surfaces.
     static let readerHorizontal: CGFloat = 28
+    /// Chat transcript and composer gutter; chat is a reading surface, not masthead chrome.
+    static let chatHorizontal: CGFloat = readerHorizontal
     static let rowHorizontal: CGFloat = 12
     static let rowVertical: CGFloat = 12
     static let sectionTop: CGFloat = 24

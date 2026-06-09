@@ -16,7 +16,7 @@ struct UserMessageBubble: View {
             VStack(alignment: .trailing, spacing: 4) {
                 Text(message.content)
                     .font(.appCallout)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.chatUserBubbleText)
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
