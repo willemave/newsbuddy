@@ -37,8 +37,6 @@ enum DetailSwipePolicy {
         switch origin {
         case .leadingEdge where translation.width > previewThreshold:
             return translation.width * 0.6
-        case .trailingEdge where translation.width > previewThreshold && currentIndex > 0:
-            return translation.width * 0.6
         case .trailingEdge where translation.width < -previewThreshold && currentIndex < itemCount - 1:
             return translation.width * 0.6
         default:
@@ -57,10 +55,10 @@ enum DetailSwipePolicy {
         }
 
         switch origin {
+        case .leadingEdge where translation.width > actionThreshold && currentIndex > 0:
+            return .previous
         case .leadingEdge where translation.width > actionThreshold:
             return .dismiss
-        case .trailingEdge where translation.width > actionThreshold && currentIndex > 0:
-            return .previous
         case .trailingEdge where translation.width < -actionThreshold && currentIndex < itemCount - 1:
             return .next
         default:
@@ -81,7 +79,7 @@ struct ContentDetailSwipeOverlay: View {
     let surfaceName: String
     let edgeWidth: CGFloat
     @Binding var dragAmount: CGFloat
-    @Binding var isEdgeBackSwipeActive: Bool
+    @Binding var isLeadingEdgeSwipeActive: Bool
     let onDismiss: () -> Void
     let onNext: () -> Void
     let onPrevious: () -> Void
@@ -119,7 +117,7 @@ struct ContentDetailSwipeOverlay: View {
                     return
                 }
 
-                isEdgeBackSwipeActive = origin == .leadingEdge && newOffset > 0
+                isLeadingEdgeSwipeActive = origin == .leadingEdge && newOffset > 0
                 dragAmount = newOffset
 
                 if abs(newOffset) > 80 && !didTriggerHaptic {
@@ -130,7 +128,7 @@ struct ContentDetailSwipeOverlay: View {
             }
             .onEnded { value in
                 didTriggerHaptic = false
-                isEdgeBackSwipeActive = false
+                isLeadingEdgeSwipeActive = false
 
                 let action = DetailSwipePolicy.endAction(
                     origin: origin,

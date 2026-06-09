@@ -874,7 +874,7 @@ struct OnboardingFlowView: View {
                 .foregroundColor(.onboardingText.opacity(0.58))
 
             Text(title)
-                .font(.appTitle2.bold())
+                .font(.appTitle2)
                 .foregroundColor(.onboardingText)
                 .multilineTextAlignment(textAlignment)
 

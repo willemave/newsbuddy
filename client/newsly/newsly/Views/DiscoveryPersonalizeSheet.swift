@@ -186,7 +186,7 @@ struct DiscoveryPersonalizeSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Your picks")
-                            .font(.appTitle2.bold())
+                            .font(.appTitle2)
                             .foregroundColor(.onboardingText)
                         Text("Tap to deselect any you don't want.")
                             .font(.appCallout)
@@ -279,7 +279,7 @@ struct DiscoveryPersonalizeSheet: View {
     private func sheetHeader(title: String, subtitle: String) -> some View {
         VStack(spacing: 8) {
             Text(title)
-                .font(.appTitle2.bold())
+                .font(.appTitle2)
                 .foregroundColor(.onboardingText)
             Text(subtitle)
                 .font(.appCallout)

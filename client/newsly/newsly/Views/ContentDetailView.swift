@@ -65,7 +65,7 @@ private enum DetailDesign {
     static let textOnlyBackButtonTopPadding: CGFloat = 8
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
     static let textOnlyStandardHeaderTopSpacer: CGFloat = 58
-    static let edgeBackSwipeWidth: CGFloat = 24
+    static let edgeNavigationSwipeWidth: CGFloat = 44
 }
 
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
@@ -84,7 +84,7 @@ struct ContentDetailView: View {
     // Navigation skipping state
     @State private var didTriggerNavigation: Bool = false
     @State private var navigationDirection: Int = 0 // +1 next, -1 previous
-    @State private var isEdgeBackSwipeActive: Bool = false
+    @State private var isLeadingEdgeSwipeActive: Bool = false
     // Convert button state
     @State private var isConverting: Bool = false
     // Modal presentation state
@@ -379,7 +379,7 @@ struct ContentDetailView: View {
         .accessibilityIdentifier("content.detail.screen")
         .overlay(alignment: .leading) {
             // Left indicator for previous article or edge-back dismissal.
-            if dragAmount > 30 && (currentIndex > 0 || isEdgeBackSwipeActive) {
+            if dragAmount > 30 && (currentIndex > 0 || isLeadingEdgeSwipeActive) {
                 swipeIndicator(direction: .previous, progress: min(1.0, dragAmount / 100))
             }
         }
@@ -394,9 +394,9 @@ struct ContentDetailView: View {
                 currentIndex: currentIndex,
                 contentIds: allContentIds,
                 surfaceName: navigationSurfaceName,
-                edgeWidth: DetailDesign.edgeBackSwipeWidth,
+                edgeWidth: DetailDesign.edgeNavigationSwipeWidth,
                 dragAmount: $dragAmount,
-                isEdgeBackSwipeActive: $isEdgeBackSwipeActive,
+                isLeadingEdgeSwipeActive: $isLeadingEdgeSwipeActive,
                 onDismiss: { dismiss() },
                 onNext: navigateToNext,
                 onPrevious: navigateToPrevious

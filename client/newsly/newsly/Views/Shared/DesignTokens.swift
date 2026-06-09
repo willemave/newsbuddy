@@ -262,9 +262,9 @@ extension Font {
     static let editorialMeta = Font.appSans(size: 11, weight: .bold)
     static let editorialSubMeta = Font.appSans(size: 11)
 
-    // Watercolor typography (Landing & Onboarding)
-    static let watercolorDisplay = Font.appSerif(size: 54)
-    static let watercolorSubtitle = Font.appSans(size: 17, weight: .light)
+    // Watercolor typography (Landing & Onboarding) follows the app title/body split.
+    static let watercolorDisplay = Font.appSerif(size: 54, weight: .semibold)
+    static let watercolorSubtitle = Font.appSans(size: 17)
 
     // Terracotta typography - title aliases use the serif family, body/labels use the sans family.
     static let terracottaDisplayLarge = Font.appSerif(size: 44, weight: .semibold)

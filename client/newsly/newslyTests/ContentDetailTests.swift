@@ -48,23 +48,23 @@ final class ContentDetailTests: XCTestCase {
         )
     }
 
-    func testDetailSwipeStillAllowsEdgeNavigation() {
+    func testDetailSwipeUsesLeftEdgeForBackAndRightEdgeForForward() {
         XCTAssertEqual(
             DetailSwipePolicy.endAction(
                 origin: .leadingEdge,
                 translation: CGSize(width: 120, height: 6),
                 currentIndex: 1,
-                itemCount: 2
+                itemCount: 3
             ),
-            .dismiss
+            .previous
         )
 
         XCTAssertEqual(
             DetailSwipePolicy.endAction(
                 origin: .trailingEdge,
                 translation: CGSize(width: -120, height: 6),
-                currentIndex: 0,
-                itemCount: 2
+                currentIndex: 1,
+                itemCount: 3
             ),
             .next
         )
@@ -74,9 +74,9 @@ final class ContentDetailTests: XCTestCase {
                 origin: .trailingEdge,
                 translation: CGSize(width: 120, height: 6),
                 currentIndex: 1,
-                itemCount: 2
+                itemCount: 3
             ),
-            .previous
+            .ignore
         )
 
         XCTAssertEqual(

@@ -75,7 +75,7 @@ struct HowItWorksModal: View {
 
                 VStack(spacing: 8) {
                     Text("What to expect")
-                        .font(.appTitle2.bold())
+                        .font(.appTitle2)
                         .foregroundColor(.onboardingText)
                         .opacity(appeared ? 1 : 0)
                         .offset(y: appeared ? 0 : 10)

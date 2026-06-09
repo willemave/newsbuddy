@@ -106,7 +106,10 @@ struct OnboardingMicButton: View {
         VStack(spacing: 8) {
             if audioState == .recording {
                 Text(formattedDuration)
-                    .font(.appTitle3.monospacedDigit())
+                    .font(
+                        .appSans(size: 20, relativeTo: .title3, weight: .semibold)
+                            .monospacedDigit()
+                    )
                     .foregroundColor(.onboardingText.opacity(0.66))
             }
 
