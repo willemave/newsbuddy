@@ -112,6 +112,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         configureOptions()
         configureChatPrompt()
         configureSubmitButton()
+        registerKeyboardObservers()
 
         extractSharedURL()
         updateSubmitState()
@@ -119,6 +120,10 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
         let sharedURLString = sharedURL?.absoluteString ?? "nil"
         print("🔗 [ShareExt] viewDidLoad sharedURL=\(sharedURLString)")
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidLayoutSubviews() {
@@ -162,6 +167,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         contentStack.addArrangedSubview(submitButton)
 
         scrollView.alwaysBounceVertical = false
+        scrollView.keyboardDismissMode = .interactive
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
         scrollView.addSubview(contentStack)
@@ -170,7 +176,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
 
             contentStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 16),
             contentStack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 16),
@@ -238,6 +244,9 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             view.isSelected = (mode == linkHandlingMode)
         }
         chatPromptStack.isHidden = linkHandlingMode != .chat
+        if linkHandlingMode != .chat && chatPromptTextView.isFirstResponder {
+            chatPromptTextView.resignFirstResponder()
+        }
         updateSubmitButtonTitle()
         updateBookmarkOnlyToggleAvailability()
         updateSubmitState()
@@ -255,7 +264,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         linkHandlingMode = match
         updateSelectionUI()
         if match == .chat {
-            chatPromptTextView.becomeFirstResponder()
+            focusChatPrompt()
         }
     }
 
@@ -341,15 +350,9 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }
 
     private func updateBookmarkOnlyToggleAvailability() {
-        bookmarkOnlyToggleView.isHidden = linkHandlingMode == .createLearningDeck
-        if linkHandlingMode == .createLearningDeck {
-            bookmarkOnlyToggleView.isOn = true
-            bookmarkOnlyToggleView.isEnabled = false
-            return
-        }
-
-        if linkHandlingMode == .chat {
-            bookmarkOnlyToggleView.isOn = true
+        let shouldHideBookmarkOnlyToggle = linkHandlingMode == .createLearningDeck || linkHandlingMode == .chat
+        bookmarkOnlyToggleView.isHidden = shouldHideBookmarkOnlyToggle
+        if shouldHideBookmarkOnlyToggle {
             bookmarkOnlyToggleView.isEnabled = false
             return
         }
@@ -375,6 +378,48 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         configuration.title = title
         submitButton.configuration = configuration
         keyboardSubmitButton.title = title
+    }
+
+    // MARK: - Keyboard
+
+    private func registerKeyboardObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleKeyboardFrameWillChange(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil
+        )
+    }
+
+    private func focusChatPrompt() {
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        chatPromptTextView.becomeFirstResponder()
+        scrollChatPromptIntoView(animated: true)
+    }
+
+    @objc private func handleKeyboardFrameWillChange(_ notification: Notification) {
+        guard linkHandlingMode == .chat else { return }
+
+        let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? TimeInterval
+            ?? 0.25
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            options: [.beginFromCurrentState, .curveEaseInOut]
+        ) {
+            self.view.layoutIfNeeded()
+            self.scrollChatPromptIntoView(animated: false)
+        }
+    }
+
+    private func scrollChatPromptIntoView(animated: Bool) {
+        guard linkHandlingMode == .chat, !chatPromptStack.isHidden else { return }
+
+        view.layoutIfNeeded()
+        let promptFrame = chatPromptStack.convert(chatPromptStack.bounds, to: scrollView)
+        let submitFrame = submitButton.convert(submitButton.bounds, to: scrollView)
+        scrollView.scrollRectToVisible(promptFrame.union(submitFrame).insetBy(dx: 0, dy: -16), animated: animated)
     }
 
     // MARK: - API Submission
