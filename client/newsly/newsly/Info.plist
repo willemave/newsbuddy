@@ -141,10 +141,10 @@
     <array>
         <string>Inter.ttf</string>
         <string>Inter-Italic.ttf</string>
-        <string>LibreFranklin-Regular.ttf</string>
-        <string>LibreFranklin-Italic.ttf</string>
-        <string>SourceSerif4-Light.ttf</string>
-        <string>SourceSerif4-LightItalic.ttf</string>
+        <string>Roboto.ttf</string>
+        <string>Roboto-Italic.ttf</string>
+        <string>Lora.ttf</string>
+        <string>Lora-Italic.ttf</string>
     </array>
 </dict>
 </plist>

@@ -10,9 +10,22 @@ import UniformTypeIdentifiers
 
 fileprivate enum ShareExtensionTypography {
     // The Share Extension is a separate target, so it cannot depend on the app's SwiftUI design tokens.
-    static let family = "LibreFranklin-Regular"
+    static let bodyFamily = "Roboto-Regular"
+    static let titleFamily = "Lora-Regular"
 
     static func font(textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
+        scaledFont(named: bodyFamily, textStyle: textStyle, weight: weight)
+    }
+
+    static func titleFont(textStyle: UIFont.TextStyle) -> UIFont {
+        scaledFont(named: titleFamily, textStyle: textStyle)
+    }
+
+    private static func scaledFont(
+        named family: String,
+        textStyle: UIFont.TextStyle,
+        weight: UIFont.Weight = .regular
+    ) -> UIFont {
         let preferred = UIFont.preferredFont(forTextStyle: textStyle)
         let baseFont = UIFont(name: family, size: preferred.pointSize)
             ?? UIFont.systemFont(ofSize: preferred.pointSize, weight: weight)
@@ -131,7 +144,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         contentStack.setContentHuggingPriority(.required, for: .vertical)
 
         titleLabel.text = "How should Newsbuddy handle this link?"
-        titleLabel.font = ShareExtensionTypography.font(textStyle: .headline, weight: .semibold)
+        titleLabel.font = ShareExtensionTypography.titleFont(textStyle: .headline)
         titleLabel.numberOfLines = 0
 
         optionsStack.axis = .vertical

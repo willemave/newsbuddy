@@ -180,10 +180,10 @@ extension Color {
 // MARK: - Typography
 
 enum AppFontFamily {
-    static let sans = "LibreFranklin-Regular"
-    static let sansItalic = "LibreFranklin-Italic"
-    static let serif = "SourceSerif4-Light"
-    static let serifItalic = "SourceSerif4-LightItalic"
+    static let sans = "Roboto-Regular"
+    static let sansItalic = "Roboto-Italic"
+    static let serif = "Lora-Regular"
+    static let serifItalic = "Lora-Italic"
 }
 
 extension Font {
@@ -223,11 +223,11 @@ extension Font {
         Font.system(size: size, weight: weight)
     }
 
-    static let appLargeTitle = Font.appSerif(size: 34, relativeTo: .largeTitle)
-    static let appTitle = Font.appSerif(size: 28, relativeTo: .title)
-    static let appTitle2 = Font.appSerif(size: 22, relativeTo: .title2)
-    static let appTitle3 = Font.appSerif(size: 20, relativeTo: .title3)
-    static let appHeadline = Font.appSerif(size: 17, relativeTo: .headline)
+    static let appLargeTitle = Font.appSerif(size: 34, relativeTo: .largeTitle, weight: .semibold)
+    static let appTitle = Font.appSerif(size: 28, relativeTo: .title, weight: .semibold)
+    static let appTitle2 = Font.appSerif(size: 22, relativeTo: .title2, weight: .semibold)
+    static let appTitle3 = Font.appSerif(size: 20, relativeTo: .title3, weight: .semibold)
+    static let appHeadline = Font.appSerif(size: 17, relativeTo: .headline, weight: .semibold)
     static let appSubheadline = Font.appSans(size: 15, relativeTo: .subheadline)
     static let appBody = Font.appSans(size: 16, relativeTo: .body)
     static let appCallout = Font.appSans(size: 16, relativeTo: .callout)
@@ -245,16 +245,16 @@ extension Font {
 
     // Feed card typography
     static let feedMeta = Font.appSans(size: 11)
-    static let feedHeadline = Font.appSerif(size: 18)
+    static let feedHeadline = Font.appSerif(size: 18, weight: .semibold)
     static let feedSnippet = Font.appSans(size: 13)
-    static let cardHeadline = Font.appSerif(size: 22)
+    static let cardHeadline = Font.appSerif(size: 22, weight: .semibold)
     static let cardDescription = Font.appSans(size: 14)
     static let cardBadge = Font.appSans(size: 10, weight: .semibold)
     static let cardFooter = Font.appSans(size: 11, weight: .medium)
 
     // Editorial typography (Discovery redesign)
-    static let editorialDisplay = Font.appSerif(size: 34)
-    static let editorialHeadline = Font.appSerif(size: 20)
+    static let editorialDisplay = Font.appSerif(size: 34, weight: .semibold)
+    static let editorialHeadline = Font.appSerif(size: 20, weight: .semibold)
     static let editorialBody = Font.appSans(size: 16)
     static let editorialMeta = Font.appSans(size: 11, weight: .bold)
     static let editorialSubMeta = Font.appSans(size: 11)
@@ -263,12 +263,12 @@ extension Font {
     static let watercolorDisplay = Font.appSerif(size: 54)
     static let watercolorSubtitle = Font.appSans(size: 17, weight: .light)
 
-    // Terracotta typography — title aliases use Tiempos, body/labels use Graphik.
-    static let terracottaDisplayLarge = Font.appSerif(size: 44)
-    static let terracottaHeadlineLarge = Font.appSerif(size: 28)
-    static let terracottaHeadlineMedium = Font.appSerif(size: 22)
-    static let terracottaHeadlineSmall = Font.appSerif(size: 18)
-    static let terracottaHeadlineCompact = Font.appSerif(size: 22)
+    // Terracotta typography - title aliases use the serif family, body/labels use the sans family.
+    static let terracottaDisplayLarge = Font.appSerif(size: 44, weight: .semibold)
+    static let terracottaHeadlineLarge = Font.appSerif(size: 28, weight: .semibold)
+    static let terracottaHeadlineMedium = Font.appSerif(size: 22, weight: .semibold)
+    static let terracottaHeadlineSmall = Font.appSerif(size: 18, weight: .semibold)
+    static let terracottaHeadlineCompact = Font.appSerif(size: 22, weight: .semibold)
     static let terracottaHeadlineItalic = Font.appSerifItalic(size: 18)
 
     // Terracotta typography — body/labels/UI
@@ -278,7 +278,7 @@ extension Font {
     static let terracottaLabelSmall = Font.appSans(size: 9, weight: .bold)
     static let terracottaCategoryPill = Font.appSans(size: 10, weight: .semibold)
 
-    static let readerTitle = Font.appSerif(size: 34)
+    static let readerTitle = Font.appSerif(size: 34, weight: .semibold)
     static let readerControlLabel = Font.appSans(size: 16, weight: .semibold)
 
     // Reader typography — regular body copy.
@@ -314,11 +314,11 @@ extension UIFont {
     }
 
     static var appTerracottaHeadlineCompact: UIFont {
-        UIFont.appSerif(size: 22)
+        UIFont.appSerif(size: 22, weight: .semibold)
     }
 
     static var appEditorialHeadline: UIFont {
-        UIFont.appSerif(size: 28)
+        UIFont.appSerif(size: 28, weight: .semibold)
     }
 
     static var appEditorialSummary: UIFont {
