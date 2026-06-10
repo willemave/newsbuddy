@@ -1137,7 +1137,6 @@ def follow_audio_episode_stream_chunks(*, audio_episode_id: int, user_id: int) -
     )
     deadline = started_at + AUDIO_EPISODE_FOLLOW_TIMEOUT_SECONDS
     while time.perf_counter() < deadline:
-        should_take_over_generation = False
         with SessionLocal() as db:
             episode = get_user_audio_episode(
                 db,
@@ -1190,32 +1189,8 @@ def follow_audio_episode_stream_chunks(*, audio_episode_id: int, user_id: int) -
 
             if episode.status == "failed":
                 raise RuntimeError(episode.error_message or "Audio episode generation failed")
-            if episode.status != "processing":
-                if episode.status == "pending" and _script_from_episode(episode) is not None:
-                    should_take_over_generation = True
-                else:
-                    raise AudioEpisodeAlreadyProcessingError(
-                        "Audio episode is not actively generating"
-                    )
-
-        if should_take_over_generation:
-            logger.info(
-                "Audio episode stream follower taking over generation",
-                extra={
-                    "component": "audio_episodes",
-                    "operation": "stream_follow",
-                    "status": "taking_over_generation",
-                    "duration_ms": _duration_ms(started_at),
-                    "item_id": audio_episode_id,
-                    "user_id": user_id,
-                    "context_data": {"kind": episode_kind},
-                },
-            )
-            yield from stream_audio_episode_chunks(
-                audio_episode_id=audio_episode_id,
-                user_id=user_id,
-            )
-            return
+            if episode.status not in {"pending", "processing"}:
+                raise AudioEpisodeAlreadyProcessingError("Audio episode is not actively generating")
 
         time.sleep(AUDIO_EPISODE_FOLLOW_POLL_SECONDS)
 

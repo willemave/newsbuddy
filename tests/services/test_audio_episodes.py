@@ -536,7 +536,7 @@ def test_stream_audio_episode_chunks_persists_streamed_audio(
     assert not (tmp_path / "audio_episodes" / f"audio-episode-{episode.id}.mp3.part").exists()
 
 
-def test_follow_audio_episode_stream_takes_over_pending_script(
+def test_follow_audio_episode_stream_waits_for_pending_generation(
     db_session,
     monkeypatch,
 ) -> None:
@@ -568,18 +568,11 @@ def test_follow_audio_episode_stream_takes_over_pending_script(
     db_session.refresh(episode)
     assert episode.id is not None
 
-    def fake_stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int):
-        assert audio_episode_id == episode.id
-        assert user_id == 123
-        yield b"takeover"
+    monkeypatch.setattr(service, "AUDIO_EPISODE_FOLLOW_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(service, "AUDIO_EPISODE_FOLLOW_POLL_SECONDS", 0.001)
 
-    monkeypatch.setattr(service, "stream_audio_episode_chunks", fake_stream_audio_episode_chunks)
-
-    chunks = list(
-        service.follow_audio_episode_stream_chunks(audio_episode_id=episode.id, user_id=123)
-    )
-
-    assert chunks == [b"takeover"]
+    with pytest.raises(service.AudioEpisodeAlreadyProcessingError):
+        list(service.follow_audio_episode_stream_chunks(audio_episode_id=episode.id, user_id=123))
 
 
 def test_fit_script_to_dialogue_limit_trims_overlong_turns() -> None:

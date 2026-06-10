@@ -1069,7 +1069,7 @@ Supported suggestion targets:
 
 ### 12.2 Onboarding discovery
 
-`app/services/onboarding.py` handles the new-user source discovery experience.
+`app/services/onboarding/__init__.py` handles the new-user source discovery experience.
 
 Capabilities:
 
@@ -1143,7 +1143,7 @@ Audio support is intentionally non-live. The active voice path is authenticated 
 
 Active modules:
 
-- `app/services/audio_episodes.py`
+- `app/services/audio_episodes/__init__.py`
 - `app/services/voice/narration_tts.py`
 - `app/routers/api/openai.py`
 
@@ -1279,7 +1279,6 @@ The canonical public HTTP contract is the checked-in OpenAPI export:
 Derived generated client artifacts are checked in under:
 
 - `client/newsly/newsly/Models/Generated/`
-- `client/newsly/OpenAPI/Generated/`
 - `cli/openapi/agent-openapi.json`
 - `cli/internal/api/`
 
@@ -1288,7 +1287,6 @@ Supporting scripts:
 - `scripts/export_openapi_schema.py`
 - `scripts/export_agent_openapi_schema.py`
 - `scripts/generate_ios_contracts.py`
-- `scripts/generate_ios_openapi_artifacts.sh`
 - `scripts/generate_agent_cli_artifacts.sh`
 - `scripts/regenerate_public_contracts.sh`
 - `scripts/check_public_contracts.sh`
@@ -1442,7 +1440,6 @@ Server mode intentionally starts only API/bootstrap processes.
 - `scripts/export_openapi_schema.py`
 - `scripts/export_agent_openapi_schema.py`
 - `scripts/generate_ios_contracts.py`
-- `scripts/generate_ios_openapi_artifacts.sh`
 - `scripts/generate_agent_cli_artifacts.sh`
 - `scripts/regenerate_public_contracts.sh`
 - `scripts/check_public_contracts.sh`

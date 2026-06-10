@@ -8,7 +8,7 @@ Backend narration text-to-speech helpers. This folder no longer contains the old
 ## Runtime behavior
 - `narration_tts.py` provides `ContentNarrationTtsService` for one-shot MP3 generation from plain summary text or multi-speaker dialogue turns.
 - The service uses ElevenLabs settings from `app/core/settings.py`, records structured logs, and writes vendor usage/cost telemetry.
-- Public narration/audio episode APIs call higher-level services in `app/services/audio_episodes.py`, `summary_narration.py`, and related modules.
+- Public narration/audio episode APIs call higher-level services in `app/services/audio_episodes/__init__.py`, `summary_narration.py`, and related modules.
 
 ## Important files
 | File | Purpose |

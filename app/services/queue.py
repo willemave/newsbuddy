@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -27,6 +28,7 @@ TASK_QUEUE_BY_TYPE: dict[TaskType, TaskQueue] = {
 TASK_QUEUE_VALUE_BY_TYPE: dict[str, str] = {
     task_type.value: queue.value for task_type, queue in TASK_QUEUE_BY_TYPE.items()
 }
+RETRY_BUCKET_CACHE_SECONDS = 5.0
 
 
 def _utc_now() -> datetime:
@@ -160,6 +162,7 @@ class QueueService:
         # Cursor used for best-effort rotation across retry buckets.
         # Keyed by (queue_name, task_type) so busy queues do not starve retries.
         self._retry_bucket_cursor: dict[tuple[str | None, str | None], int] = {}
+        self._retry_bucket_cache: dict[tuple[str | None, str | None], tuple[float, list[int]]] = {}
 
     @staticmethod
     def _normalize_queue_name(
@@ -187,6 +190,40 @@ class QueueService:
         ordered = available_retry_counts[cursor:] + available_retry_counts[:cursor]
         self._retry_bucket_cursor[cursor_key] = (cursor + 1) % len(available_retry_counts)
         return ordered
+
+    def _available_retry_counts(
+        self,
+        db,
+        *,
+        base_filters: list[Any],
+        cursor_key: tuple[str | None, str | None],
+        use_cache: bool,
+    ) -> list[int]:
+        """Return claimable retry buckets, caching briefly to avoid per-claim scans."""
+        now_monotonic = time.monotonic()
+        if use_cache:
+            cached = self._retry_bucket_cache.get(cursor_key)
+            if cached is not None:
+                expires_at, retry_counts = cached
+                if expires_at > now_monotonic:
+                    return retry_counts
+
+        retry_rows = (
+            db.query(func.coalesce(ProcessingTask.retry_count, 0).label("retry_count"))
+            .filter(*base_filters)
+            .distinct()
+            .order_by("retry_count")
+            .all()
+        )
+        retry_counts = [int(row.retry_count or 0) for row in retry_rows]
+        if retry_counts:
+            self._retry_bucket_cache[cursor_key] = (
+                now_monotonic + RETRY_BUCKET_CACHE_SECONDS,
+                retry_counts,
+            )
+        else:
+            self._retry_bucket_cache.pop(cursor_key, None)
+        return retry_counts
 
     def enqueue(
         self,
@@ -364,73 +401,74 @@ class QueueService:
             if normalized_queue:
                 base_filters.append(ProcessingTask.queue_name == normalized_queue)
 
-            retry_rows = (
-                db.query(func.coalesce(ProcessingTask.retry_count, 0).label("retry_count"))
-                .filter(*base_filters)
-                .distinct()
-                .order_by("retry_count")
-                .all()
-            )
-            if not retry_rows:
-                return None
-
-            available_retry_counts = [int(row.retry_count or 0) for row in retry_rows]
             cursor_key = (
                 normalized_queue,
                 task_type.value if task_type is not None else None,
             )
-            for selected_retry in self._ordered_retry_counts(
-                available_retry_counts,
-                cursor_key,
-            ):
-                candidate_id_subquery = (
-                    select(ProcessingTask.id)
-                    .where(
-                        *base_filters,
-                        func.coalesce(ProcessingTask.retry_count, 0) == selected_retry,
-                    )
-                    .order_by(
-                        task_order.asc(),
-                        ProcessingTask.created_at.asc(),
-                        ProcessingTask.id.asc(),
-                    )
-                    .with_for_update(skip_locked=True)
-                    .limit(1)
+            for use_cache in (True, False):
+                available_retry_counts = self._available_retry_counts(
+                    db,
+                    base_filters=base_filters,
+                    cursor_key=cursor_key,
+                    use_cache=use_cache,
                 )
-                claim_stmt = (
-                    update(ProcessingTask)
-                    .where(ProcessingTask.id == candidate_id_subquery.scalar_subquery())
-                    .values(
-                        status=TaskStatus.PROCESSING.value,
-                        started_at=now,
-                        locked_at=now,
-                        locked_by=worker_id,
-                        lease_expires_at=now + timedelta(seconds=_task_lease_seconds()),
+                if not available_retry_counts:
+                    return None
+
+                for selected_retry in self._ordered_retry_counts(
+                    available_retry_counts,
+                    cursor_key,
+                ):
+                    candidate_id_subquery = (
+                        select(ProcessingTask.id)
+                        .where(
+                            *base_filters,
+                            func.coalesce(ProcessingTask.retry_count, 0) == selected_retry,
+                        )
+                        .order_by(
+                            task_order.asc(),
+                            ProcessingTask.created_at.asc(),
+                            ProcessingTask.id.asc(),
+                        )
+                        .with_for_update(skip_locked=True)
+                        .limit(1)
                     )
-                    .returning(
-                        ProcessingTask.id,
-                        ProcessingTask.task_type,
-                        ProcessingTask.content_id,
-                        ProcessingTask.payload,
-                        ProcessingTask.retry_count,
-                        ProcessingTask.status,
-                        ProcessingTask.queue_name,
-                        ProcessingTask.created_at,
-                        ProcessingTask.available_at,
-                        ProcessingTask.started_at,
-                        ProcessingTask.completed_at,
-                        ProcessingTask.locked_at,
-                        ProcessingTask.locked_by,
-                        ProcessingTask.lease_expires_at,
+                    claim_stmt = (
+                        update(ProcessingTask)
+                        .where(ProcessingTask.id == candidate_id_subquery.scalar_subquery())
+                        .values(
+                            status=TaskStatus.PROCESSING.value,
+                            started_at=now,
+                            locked_at=now,
+                            locked_by=worker_id,
+                            lease_expires_at=now + timedelta(seconds=_task_lease_seconds()),
+                        )
+                        .returning(
+                            ProcessingTask.id,
+                            ProcessingTask.task_type,
+                            ProcessingTask.content_id,
+                            ProcessingTask.payload,
+                            ProcessingTask.retry_count,
+                            ProcessingTask.status,
+                            ProcessingTask.queue_name,
+                            ProcessingTask.created_at,
+                            ProcessingTask.available_at,
+                            ProcessingTask.started_at,
+                            ProcessingTask.completed_at,
+                            ProcessingTask.locked_at,
+                            ProcessingTask.locked_by,
+                            ProcessingTask.lease_expires_at,
+                        )
                     )
-                )
-                task_row = db.execute(claim_stmt).mappings().first()
-                if task_row is None:
-                    continue
-                task_data = dict(task_row)
-                task_data["retry_count"] = int(task_data.get("retry_count") or 0)
-                _log_dequeued_task(task_data, worker_id=worker_id)
-                return task_data
+                    task_row = db.execute(claim_stmt).mappings().first()
+                    if task_row is None:
+                        continue
+                    task_data = dict(task_row)
+                    task_data["retry_count"] = int(task_data.get("retry_count") or 0)
+                    _log_dequeued_task(task_data, worker_id=worker_id)
+                    return task_data
+
+                self._retry_bucket_cache.pop(cursor_key, None)
 
             return None
 

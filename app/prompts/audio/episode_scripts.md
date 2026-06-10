@@ -2,7 +2,7 @@
 id: audio/episode_scripts
 description: Sectioned prompts for generating structured audio episode scripts from content snapshots.
 used_by:
-  system: app/services/audio_episodes.py:_generate_script_with_model
+  system: app/services/audio_episodes/__init__.py:_generate_script_with_model
   system_description: "System prompt for turning an audio episode source prompt into structured spoken dialogue."
   fast_news_digest_user: app/services/audio_episode_kinds.py:_build_fast_news_prompt
   fast_news_digest_user_description: "User prompt template for creating a one-minute quick-hit audio episode from unread Fast Reads."

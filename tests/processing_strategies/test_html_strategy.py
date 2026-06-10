@@ -5,6 +5,7 @@ import httpx  # For creating mock Headers
 import pytest
 
 from app.http_client.robust_http_client import RobustHttpClient
+from app.processing_strategies import html_strategy as html_strategy_module
 from app.processing_strategies.html_strategy import HtmlProcessorStrategy
 from app.services.firecrawl_client import FirecrawlScrapeResult, FirecrawlUnavailableError
 
@@ -54,6 +55,14 @@ def disable_firecrawl_network(monkeypatch):
         "app.processing_strategies.html_strategy.scrape_url_with_firecrawl",
         _raise_unavailable,
     )
+
+
+@pytest.fixture(autouse=True)
+def reset_reusable_crawler():
+    """Keep reusable crawl4ai browser state isolated between tests."""
+    html_strategy_module._close_reusable_crawler_for_tests()
+    yield
+    html_strategy_module._close_reusable_crawler_for_tests()
 
 
 def test_detect_source(html_strategy: HtmlProcessorStrategy):
@@ -805,6 +814,84 @@ def test_extract_data_with_browser_close_error(html_strategy: HtmlProcessorStrat
         assert extracted_data["final_url_after_redirects"] == url
         # Extraction succeeded; error marker should be empty.
         assert extracted_data.get("extraction_error") is None
+
+
+def test_extract_data_reuses_crawler_across_retry_attempts(
+    html_strategy: HtmlProcessorStrategy,
+    monkeypatch,
+):
+    """Transient crawl retries should not relaunch Chromium for each attempt."""
+    url = "https://example.com/retry-once"
+    monkeypatch.setattr(
+        html_strategy,
+        "_get_source_specific_config",
+        lambda _source: {"max_crawl_attempts": 2, "crawl_retry_delay_seconds": 0},
+    )
+
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.metadata = {"title": "Retry Article"}
+    mock_result.url = url
+    mock_result.cleaned_html = "<html>...</html>"
+    mock_markdown = MagicMock()
+    mock_markdown.raw_markdown = "Retry article body"
+    mock_result.markdown = mock_markdown
+
+    mock_crawler = AsyncMock()
+    mock_crawler.arun = AsyncMock(side_effect=[Exception("timeout"), mock_result])
+    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+
+    with patch(
+        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+    ) as crawler_class:
+        extracted_data = html_strategy.extract_data("", url)
+
+    assert extracted_data["title"] == "Retry Article"
+    assert mock_crawler.arun.await_count == 2
+    crawler_class.assert_called_once()
+    mock_crawler.__aenter__.assert_awaited_once()
+    mock_crawler.__aexit__.assert_not_awaited()
+
+
+def test_extract_data_reuses_crawler_across_extractions(html_strategy: HtmlProcessorStrategy):
+    """Separate article crawls should reuse the process-lifetime crawler."""
+    first_url = "https://example.com/first"
+    second_url = "https://example.com/second"
+
+    def make_result(url: str, title: str):
+        result = MagicMock()
+        result.success = True
+        result.metadata = {"title": title}
+        result.url = url
+        result.cleaned_html = "<html>...</html>"
+        markdown = MagicMock()
+        markdown.raw_markdown = f"{title} body"
+        result.markdown = markdown
+        return result
+
+    mock_crawler = AsyncMock()
+    mock_crawler.arun = AsyncMock(
+        side_effect=[
+            make_result(first_url, "First Article"),
+            make_result(second_url, "Second Article"),
+        ]
+    )
+    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+
+    with patch(
+        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+    ) as crawler_class:
+        first = html_strategy.extract_data("", first_url)
+        second = html_strategy.extract_data("", second_url)
+
+    assert first["title"] == "First Article"
+    assert second["title"] == "Second Article"
+    assert mock_crawler.arun.await_count == 2
+    crawler_class.assert_called_once()
+    mock_crawler.__aenter__.assert_awaited_once()
+    mock_crawler.__aexit__.assert_not_awaited()
 
 
 def test_extract_data_uses_firecrawl_for_discussion_only_extraction(

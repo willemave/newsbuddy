@@ -452,7 +452,7 @@ def test_list_custom_narration_audio_episodes_is_user_scoped(
     assert payload[0]["audio_url"] == f"/api/content/audio-episodes/{visible.id}/audio"
 
 
-def test_stream_audio_episode_returns_generated_chunks(
+def test_stream_audio_episode_enqueues_and_follows_generation(
     client,
     db_session,
     test_user,
@@ -472,15 +472,25 @@ def test_stream_audio_episode_returns_generated_chunks(
     db_session.commit()
     db_session.refresh(episode)
 
-    def fake_stream_audio_episode_chunks(*, audio_episode_id: int, user_id: int):
+    enqueued_ids: list[int] = []
+
+    def fake_enqueue_audio_episode_generation(audio_episode_id: int) -> int:
+        enqueued_ids.append(audio_episode_id)
+        return 42
+
+    def fake_follow_audio_episode_stream_chunks(*, audio_episode_id: int, user_id: int):
         assert audio_episode_id == episode.id
         assert user_id == test_user.id
         yield b"abc"
         yield b"def"
 
     monkeypatch.setattr(
-        "app.routers.api.audio_episodes.stream_audio_episode_chunks",
-        fake_stream_audio_episode_chunks,
+        "app.routers.api.audio_episodes.enqueue_audio_episode_generation",
+        fake_enqueue_audio_episode_generation,
+    )
+    monkeypatch.setattr(
+        "app.routers.api.audio_episodes.follow_audio_episode_stream_chunks",
+        fake_follow_audio_episode_stream_chunks,
     )
 
     response = client.get(f"/api/content/audio-episodes/{episode.id}/stream")
@@ -488,6 +498,7 @@ def test_stream_audio_episode_returns_generated_chunks(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("audio/mpeg")
     assert response.content == b"abcdef"
+    assert enqueued_ids == [episode.id]
 
 
 def test_stream_audio_episode_follows_active_generation(

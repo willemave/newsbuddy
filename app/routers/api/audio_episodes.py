@@ -33,13 +33,13 @@ from app.services.audio_episodes import (
     create_content_council_episode,
     create_custom_narration_episode,
     create_fast_news_digest_episode,
+    enqueue_audio_episode_generation,
     follow_audio_episode_stream_chunks,
     get_user_audio_episode,
     is_audio_episode_processing_stale,
     list_custom_narration_episodes,
     mark_audio_episode_sources_read_on_play,
     present_audio_episode,
-    stream_audio_episode_chunks,
 )
 
 router = APIRouter()
@@ -251,7 +251,7 @@ def stream_audio_episode(
     audio_episode_id: Annotated[int, Path(..., gt=0)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
-    """Stream cached audio or generate the episode inline for low-latency playback."""
+    """Stream cached audio or enqueue generation and follow the background result."""
 
     started_at = time.perf_counter()
     user_id = require_user_id(current_user)
@@ -322,19 +322,39 @@ def stream_audio_episode(
                 },
             )
 
+        episode.status = "pending"
+        episode.error_message = None
+        episode.started_at = None
+        episode.completed_at = None
+        db.commit()
+        task_id = enqueue_audio_episode_generation(audio_episode_id)
+        logger.info(
+            "Audio episode stream enqueued background generation",
+            extra={
+                "component": "audio_episodes",
+                "operation": "stream_route",
+                "status": "enqueued_generation",
+                "duration_ms": _duration_ms(started_at),
+                "item_id": audio_episode_id,
+                "task_id": task_id,
+                "user_id": user_id,
+                "context_data": {"kind": episode.kind},
+            },
+        )
+
     logger.info(
         "Audio episode streaming response opened",
         extra={
             "component": "audio_episodes",
             "operation": "stream_route",
-            "status": "streaming_response",
+            "status": "following_queued_generation",
             "duration_ms": _duration_ms(started_at),
             "item_id": audio_episode_id,
             "user_id": user_id,
         },
     )
     return StreamingResponse(
-        stream_audio_episode_chunks(audio_episode_id=audio_episode_id, user_id=user_id),
+        follow_audio_episode_stream_chunks(audio_episode_id=audio_episode_id, user_id=user_id),
         media_type="audio/mpeg",
         headers={
             "Cache-Control": "no-store",
