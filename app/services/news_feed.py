@@ -21,7 +21,7 @@ from app.models.contracts import (
     NewsItemVisibilityScope,
 )
 from app.models.db import NewsItem, NewsItemDiscussion, NewsItemReadStatus, UserScraperConfig
-from app.queries.news_item_content_adapter import (
+from app.presenters.news_item_content_adapter import (
     present_news_item_detail,
     present_news_item_summary,
 )
@@ -168,8 +168,8 @@ def list_visible_news_items(
     last_sort_timestamp = None
     if cursor:
         cursor_data = PaginationCursor.decode_cursor(cursor)
-        last_id = cursor_data["last_id"]
-        last_sort_timestamp = cursor_data["last_created_at"]
+        last_id = cursor_data.last_id
+        last_sort_timestamp = cursor_data.last_created_at
 
     is_read = _news_item_is_read_clause(user_id=user_id)
     sort_expr = _news_item_sort_timestamp_expr()

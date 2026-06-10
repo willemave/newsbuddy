@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from datetime import date as date_type
 
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
@@ -243,6 +244,8 @@ def get_recently_read(
     db: Session,
     *,
     user_id: int,
+    content_types: list[str] | None,
+    read_date: date_type | None,
     last_id: int | None,
     last_read_at: datetime | None,
     limit: int,
@@ -251,6 +254,19 @@ def get_recently_read(
     query = build_user_feed_query(db, user_id, mode="recently_read").add_columns(
         ContentReadStatus.read_at.label("read_at")
     )
+
+    filtered_types = _filtered_content_types(content_types)
+    if filtered_types:
+        query = query.filter(Content.content_type.in_(filtered_types))
+
+    if read_date:
+        start_dt = datetime.combine(read_date, datetime.min.time())  # noqa: DTZ001
+        end_dt = start_dt + timedelta(days=1)
+        query = query.filter(
+            ContentReadStatus.read_at >= start_dt,
+            ContentReadStatus.read_at < end_dt,
+        )
+
     if last_id and last_read_at:
         query = query.filter(
             or_(
@@ -261,6 +277,33 @@ def get_recently_read(
     return (
         query.order_by(ContentReadStatus.read_at.desc(), Content.id.desc()).limit(limit + 1).all()
     )
+
+
+def list_recently_read_dates(
+    db: Session,
+    *,
+    user_id: int,
+    content_types: list[str] | None,
+) -> list[str]:
+    """Return read-date filters for recently-read cards."""
+    lookback_start = datetime.now(UTC) - timedelta(days=AVAILABLE_DATES_LOOKBACK_DAYS)
+    query = build_user_feed_query(db, user_id, mode="recently_read").with_entities(
+        func.date(ContentReadStatus.read_at).label("date")
+    )
+
+    filtered_types = _filtered_content_types(content_types)
+    if filtered_types:
+        query = query.filter(Content.content_type.in_(filtered_types))
+
+    query = query.filter(ContentReadStatus.read_at >= lookback_start)
+    query = query.distinct().order_by(func.date(ContentReadStatus.read_at).desc()).limit(90)
+
+    dates: list[str] = []
+    for row in query.all():
+        if not row.date:
+            continue
+        dates.append(row.date if isinstance(row.date, str) else row.date.strftime("%Y-%m-%d"))
+    return dates
 
 
 def list_content_types() -> list[str]:

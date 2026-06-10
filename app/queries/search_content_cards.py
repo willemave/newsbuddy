@@ -14,9 +14,9 @@ from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import ContentType
 from app.models.domain.content_display import is_ready_for_long_form_summary, resolve_image_urls
 from app.models.domain.content_mapper import content_to_domain
+from app.presenters.content_responses import build_content_summary_response
 from app.repositories.content_card_repository import list_content_types
 from app.repositories.search_repository import search_content_page
-from app.routers.api.content_responses import build_content_summary_response
 from app.utils.pagination import PaginationCursor
 
 logger = get_logger(__name__)
@@ -71,9 +71,9 @@ def execute(
                     status_code=400,
                     detail="Cursor invalid: search params changed. Start a new search.",
                 )
-            last_id = cursor_data["last_id"]
-            last_created_at = cursor_data["last_created_at"]
-            last_rank = cursor_data.get("last_rank")
+            last_id = cursor_data.last_id
+            last_created_at = cursor_data.last_created_at
+            last_rank = cursor_data.last_rank
             if last_rank is not None:
                 last_rank = float(last_rank)
         except ValueError as exc:

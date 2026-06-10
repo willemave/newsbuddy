@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+
+from app.models.api.base import UTCDateTime
 
 
 class ScraperConfigStatsResponse(BaseModel):
@@ -15,9 +16,9 @@ class ScraperConfigStatsResponse(BaseModel):
     completed_count: int
     unread_count: int
     processing_count: int
-    latest_processed_at: datetime | None = None
-    latest_publication_at: datetime | None = None
-    next_expected_at: datetime | None = None
+    latest_processed_at: UTCDateTime | None = None
+    latest_publication_at: UTCDateTime | None = None
+    next_expected_at: UTCDateTime | None = None
     average_interval_hours: float | None = None
     interval_sample_size: int = 0
 
@@ -32,7 +33,7 @@ class ScraperConfigResponse(BaseModel):
     feed_url: str | None = None
     limit: int | None = None
     is_active: bool
-    created_at: datetime
+    created_at: UTCDateTime
     stats: ScraperConfigStatsResponse | None = None
 
     model_config = ConfigDict(

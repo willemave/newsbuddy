@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.models.api.base import UTCDateTime
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import LLMProvider, MessageProcessingStatus
 from app.models.domain.chat_render import AssistantFeedOption, CouncilCandidate
@@ -135,7 +135,7 @@ class ChatMessageDto(BaseModel):
     session_id: int = Field(..., description="Chat session ID")
     role: ChatMessageRole = Field(..., description="Message role")
     content: str = Field(..., description="Message content")
-    timestamp: datetime = Field(..., description="Timestamp when message was stored")
+    timestamp: UTCDateTime = Field(..., description="Timestamp when message was stored")
     display_type: ChatMessageDisplayType = Field(
         default=ChatMessageDisplayType.MESSAGE,
         description="Display treatment for this row in the chat transcript",
@@ -182,9 +182,9 @@ class ChatSessionSummaryDto(BaseModel):
     topic: str | None
     llm_model: str
     llm_provider: str
-    created_at: datetime
-    updated_at: datetime | None
-    last_message_at: datetime | None
+    created_at: UTCDateTime
+    updated_at: UTCDateTime | None
+    last_message_at: UTCDateTime | None
     is_archived: bool
     article_title: str | None = None
     article_url: str | None = None

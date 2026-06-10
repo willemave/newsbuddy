@@ -1,13 +1,13 @@
 # ruff: noqa: F401
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.constants import TWEET_SUGGESTION_MODEL
+from app.models.api.base import UTCDateTime
 from app.models.api.onboarding import OnboardingSelectedAggregator
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
@@ -25,7 +25,7 @@ class AgentLibraryDocumentResponse(BaseModel):
     relative_path: str
     content_id: int
     variant: Literal["source", "summary"]
-    updated_at: datetime | None = None
+    updated_at: UTCDateTime | None = None
     size_bytes: int
     checksum_sha256: str
 
@@ -33,7 +33,7 @@ class AgentLibraryDocumentResponse(BaseModel):
 class AgentLibraryManifestResponse(BaseModel):
     """Manifest of markdown documents available for CLI sync."""
 
-    generated_at: datetime
+    generated_at: UTCDateTime
     include_source: bool = True
     documents: list[AgentLibraryDocumentResponse]
 
@@ -44,7 +44,7 @@ class AgentLibraryFileResponse(BaseModel):
     relative_path: str
     content_id: int
     variant: Literal["source", "summary"]
-    updated_at: datetime | None = None
+    updated_at: UTCDateTime | None = None
     checksum_sha256: str
     text: str
 

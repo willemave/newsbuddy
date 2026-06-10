@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.models.api.base import UTCDateTime
 from app.models.domain.user_profile import (
     MAX_COUNCIL_EXPERTS,
     MIN_COUNCIL_EXPERTS,
@@ -31,8 +31,8 @@ class UserResponse(UserBase):
     has_x_bookmark_sync: bool = False
     has_completed_onboarding: bool
     has_completed_new_user_tutorial: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
 
     @field_validator("council_personas", mode="before")
     @classmethod
@@ -44,25 +44,6 @@ class UserResponse(UserBase):
         if value is None:
             return []
         return value
-
-    @field_serializer("created_at", "updated_at")
-    def serialize_datetime(self, dt: datetime, _info) -> str:
-        """
-        Serialize datetime to ISO8601 with 'Z' timezone indicator.
-
-        Ensures iOS Swift compatibility - ISO8601DateFormatter requires timezone.
-
-        Args:
-            dt: Datetime to serialize (assumed UTC if naive)
-
-        Returns:
-            ISO8601 string with 'Z' suffix (e.g., '2025-11-01T15:29:31Z')
-        """
-        # Ensure datetime has UTC timezone info
-        dt = dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
-
-        # Format as ISO8601 with 'Z' suffix
-        return dt.isoformat().replace("+00:00", "Z")
 
     model_config = ConfigDict(from_attributes=True)
 

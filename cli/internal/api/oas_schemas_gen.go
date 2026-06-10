@@ -4,7 +4,6 @@ package api
 
 import (
 	"net/url"
-	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/jx"
@@ -17,7 +16,7 @@ type AgentLibraryDocumentResponse struct {
 	ContentID      int                                 `json:"content_id"`
 	RelativePath   string                              `json:"relative_path"`
 	SizeBytes      int                                 `json:"size_bytes"`
-	UpdatedAt      OptNilDateTime                      `json:"updated_at"`
+	UpdatedAt      OptNilString                        `json:"updated_at"`
 	Variant        AgentLibraryDocumentResponseVariant `json:"variant"`
 }
 
@@ -42,7 +41,7 @@ func (s *AgentLibraryDocumentResponse) GetSizeBytes() int {
 }
 
 // GetUpdatedAt returns the value of UpdatedAt.
-func (s *AgentLibraryDocumentResponse) GetUpdatedAt() OptNilDateTime {
+func (s *AgentLibraryDocumentResponse) GetUpdatedAt() OptNilString {
 	return s.UpdatedAt
 }
 
@@ -72,7 +71,7 @@ func (s *AgentLibraryDocumentResponse) SetSizeBytes(val int) {
 }
 
 // SetUpdatedAt sets the value of UpdatedAt.
-func (s *AgentLibraryDocumentResponse) SetUpdatedAt(val OptNilDateTime) {
+func (s *AgentLibraryDocumentResponse) SetUpdatedAt(val OptNilString) {
 	s.UpdatedAt = val
 }
 
@@ -129,7 +128,7 @@ type AgentLibraryFileResponse struct {
 	ContentID      int                             `json:"content_id"`
 	RelativePath   string                          `json:"relative_path"`
 	Text           string                          `json:"text"`
-	UpdatedAt      OptNilDateTime                  `json:"updated_at"`
+	UpdatedAt      OptNilString                    `json:"updated_at"`
 	Variant        AgentLibraryFileResponseVariant `json:"variant"`
 }
 
@@ -154,7 +153,7 @@ func (s *AgentLibraryFileResponse) GetText() string {
 }
 
 // GetUpdatedAt returns the value of UpdatedAt.
-func (s *AgentLibraryFileResponse) GetUpdatedAt() OptNilDateTime {
+func (s *AgentLibraryFileResponse) GetUpdatedAt() OptNilString {
 	return s.UpdatedAt
 }
 
@@ -184,7 +183,7 @@ func (s *AgentLibraryFileResponse) SetText(val string) {
 }
 
 // SetUpdatedAt sets the value of UpdatedAt.
-func (s *AgentLibraryFileResponse) SetUpdatedAt(val OptNilDateTime) {
+func (s *AgentLibraryFileResponse) SetUpdatedAt(val OptNilString) {
 	s.UpdatedAt = val
 }
 
@@ -240,7 +239,7 @@ func (s *AgentLibraryFileResponseVariant) UnmarshalText(data []byte) error {
 // Ref: #/components/schemas/AgentLibraryManifestResponse
 type AgentLibraryManifestResponse struct {
 	Documents     []AgentLibraryDocumentResponse `json:"documents"`
-	GeneratedAt   time.Time                      `json:"generated_at"`
+	GeneratedAt   string                         `json:"generated_at"`
 	IncludeSource OptBool                        `json:"include_source"`
 }
 
@@ -250,7 +249,7 @@ func (s *AgentLibraryManifestResponse) GetDocuments() []AgentLibraryDocumentResp
 }
 
 // GetGeneratedAt returns the value of GeneratedAt.
-func (s *AgentLibraryManifestResponse) GetGeneratedAt() time.Time {
+func (s *AgentLibraryManifestResponse) GetGeneratedAt() string {
 	return s.GeneratedAt
 }
 
@@ -265,7 +264,7 @@ func (s *AgentLibraryManifestResponse) SetDocuments(val []AgentLibraryDocumentRe
 }
 
 // SetGeneratedAt sets the value of GeneratedAt.
-func (s *AgentLibraryManifestResponse) SetGeneratedAt(val time.Time) {
+func (s *AgentLibraryManifestResponse) SetGeneratedAt(val string) {
 	s.GeneratedAt = val
 }
 
@@ -673,14 +672,14 @@ func (s *CliLinkApproveRequest) SetDeviceName(val OptNilString) {
 // Approval response after issuing a CLI API key.
 // Ref: #/components/schemas/CliLinkApproveResponse
 type CliLinkApproveResponse struct {
-	ExpiresAt time.Time `json:"expires_at"`
-	KeyPrefix string    `json:"key_prefix"`
-	SessionID string    `json:"session_id"`
-	Status    string    `json:"status"`
+	ExpiresAt string `json:"expires_at"`
+	KeyPrefix string `json:"key_prefix"`
+	SessionID string `json:"session_id"`
+	Status    string `json:"status"`
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
-func (s *CliLinkApproveResponse) GetExpiresAt() time.Time {
+func (s *CliLinkApproveResponse) GetExpiresAt() string {
 	return s.ExpiresAt
 }
 
@@ -700,7 +699,7 @@ func (s *CliLinkApproveResponse) GetStatus() string {
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
-func (s *CliLinkApproveResponse) SetExpiresAt(val time.Time) {
+func (s *CliLinkApproveResponse) SetExpiresAt(val string) {
 	s.ExpiresAt = val
 }
 
@@ -725,7 +724,7 @@ func (*CliLinkApproveResponse) approveCliLinkRes() {}
 // Ref: #/components/schemas/CliLinkPollResponse
 type CliLinkPollResponse struct {
 	APIKey    OptNilString              `json:"api_key"`
-	ExpiresAt time.Time                 `json:"expires_at"`
+	ExpiresAt string                    `json:"expires_at"`
 	KeyPrefix OptNilString              `json:"key_prefix"`
 	SessionID string                    `json:"session_id"`
 	Status    CliLinkPollResponseStatus `json:"status"`
@@ -737,7 +736,7 @@ func (s *CliLinkPollResponse) GetAPIKey() OptNilString {
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
-func (s *CliLinkPollResponse) GetExpiresAt() time.Time {
+func (s *CliLinkPollResponse) GetExpiresAt() string {
 	return s.ExpiresAt
 }
 
@@ -762,7 +761,7 @@ func (s *CliLinkPollResponse) SetAPIKey(val OptNilString) {
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
-func (s *CliLinkPollResponse) SetExpiresAt(val time.Time) {
+func (s *CliLinkPollResponse) SetExpiresAt(val string) {
 	s.ExpiresAt = val
 }
 
@@ -857,12 +856,12 @@ func (s *CliLinkStartRequest) SetDeviceName(val OptNilString) {
 // Unauthenticated response for bootstrapping CLI QR login.
 // Ref: #/components/schemas/CliLinkStartResponse
 type CliLinkStartResponse struct {
-	ApproveURL          string    `json:"approve_url"`
-	ExpiresAt           time.Time `json:"expires_at"`
-	PollIntervalSeconds OptInt    `json:"poll_interval_seconds"`
-	PollToken           string    `json:"poll_token"`
-	SessionID           string    `json:"session_id"`
-	Status              string    `json:"status"`
+	ApproveURL          string `json:"approve_url"`
+	ExpiresAt           string `json:"expires_at"`
+	PollIntervalSeconds OptInt `json:"poll_interval_seconds"`
+	PollToken           string `json:"poll_token"`
+	SessionID           string `json:"session_id"`
+	Status              string `json:"status"`
 }
 
 // GetApproveURL returns the value of ApproveURL.
@@ -871,7 +870,7 @@ func (s *CliLinkStartResponse) GetApproveURL() string {
 }
 
 // GetExpiresAt returns the value of ExpiresAt.
-func (s *CliLinkStartResponse) GetExpiresAt() time.Time {
+func (s *CliLinkStartResponse) GetExpiresAt() string {
 	return s.ExpiresAt
 }
 
@@ -901,7 +900,7 @@ func (s *CliLinkStartResponse) SetApproveURL(val string) {
 }
 
 // SetExpiresAt sets the value of ExpiresAt.
-func (s *CliLinkStartResponse) SetExpiresAt(val time.Time) {
+func (s *CliLinkStartResponse) SetExpiresAt(val string) {
 	s.ExpiresAt = val
 }
 
@@ -1861,6 +1860,8 @@ type ContentSummaryResponse struct {
 	IsRead OptBool `json:"is_read"`
 	// Whether the content has been saved to the user's knowledge library.
 	IsSavedToKnowledge OptBool `json:"is_saved_to_knowledge"`
+	// Key takeaway to display under long-form list titles.
+	KeyTakeaway OptNilString `json:"key_takeaway"`
 	// Canonical article link for news content.
 	NewsArticleURL OptNilString `json:"news_article_url"`
 	// Aggregator discussion URL (HN thread, tweet, etc.).
@@ -1956,6 +1957,11 @@ func (s *ContentSummaryResponse) GetIsRead() OptBool {
 // GetIsSavedToKnowledge returns the value of IsSavedToKnowledge.
 func (s *ContentSummaryResponse) GetIsSavedToKnowledge() OptBool {
 	return s.IsSavedToKnowledge
+}
+
+// GetKeyTakeaway returns the value of KeyTakeaway.
+func (s *ContentSummaryResponse) GetKeyTakeaway() OptNilString {
+	return s.KeyTakeaway
 }
 
 // GetNewsArticleURL returns the value of NewsArticleURL.
@@ -2111,6 +2117,11 @@ func (s *ContentSummaryResponse) SetIsRead(val OptBool) {
 // SetIsSavedToKnowledge sets the value of IsSavedToKnowledge.
 func (s *ContentSummaryResponse) SetIsSavedToKnowledge(val OptBool) {
 	s.IsSavedToKnowledge = val
+}
+
+// SetKeyTakeaway sets the value of KeyTakeaway.
+func (s *ContentSummaryResponse) SetKeyTakeaway(val OptNilString) {
+	s.KeyTakeaway = val
 }
 
 // SetNewsArticleURL sets the value of NewsArticleURL.
@@ -2536,21 +2547,21 @@ func (*HTTPValidationError) subscribeScrapersToFeedRes()       {}
 // Status payload for an async processing job.
 // Ref: #/components/schemas/JobStatusResponse
 type JobStatusResponse struct {
-	CompletedAt  OptNilDateTime              `json:"completed_at"`
+	CompletedAt  OptNilString                `json:"completed_at"`
 	ContentID    OptNilInt                   `json:"content_id"`
-	CreatedAt    OptNilDateTime              `json:"created_at"`
+	CreatedAt    OptNilString                `json:"created_at"`
 	ErrorMessage OptNilString                `json:"error_message"`
 	ID           int                         `json:"id"`
 	Payload      OptJobStatusResponsePayload `json:"payload"`
 	QueueName    string                      `json:"queue_name"`
 	RetryCount   OptInt                      `json:"retry_count"`
-	StartedAt    OptNilDateTime              `json:"started_at"`
+	StartedAt    OptNilString                `json:"started_at"`
 	Status       string                      `json:"status"`
 	TaskType     string                      `json:"task_type"`
 }
 
 // GetCompletedAt returns the value of CompletedAt.
-func (s *JobStatusResponse) GetCompletedAt() OptNilDateTime {
+func (s *JobStatusResponse) GetCompletedAt() OptNilString {
 	return s.CompletedAt
 }
 
@@ -2560,7 +2571,7 @@ func (s *JobStatusResponse) GetContentID() OptNilInt {
 }
 
 // GetCreatedAt returns the value of CreatedAt.
-func (s *JobStatusResponse) GetCreatedAt() OptNilDateTime {
+func (s *JobStatusResponse) GetCreatedAt() OptNilString {
 	return s.CreatedAt
 }
 
@@ -2590,7 +2601,7 @@ func (s *JobStatusResponse) GetRetryCount() OptInt {
 }
 
 // GetStartedAt returns the value of StartedAt.
-func (s *JobStatusResponse) GetStartedAt() OptNilDateTime {
+func (s *JobStatusResponse) GetStartedAt() OptNilString {
 	return s.StartedAt
 }
 
@@ -2605,7 +2616,7 @@ func (s *JobStatusResponse) GetTaskType() string {
 }
 
 // SetCompletedAt sets the value of CompletedAt.
-func (s *JobStatusResponse) SetCompletedAt(val OptNilDateTime) {
+func (s *JobStatusResponse) SetCompletedAt(val OptNilString) {
 	s.CompletedAt = val
 }
 
@@ -2615,7 +2626,7 @@ func (s *JobStatusResponse) SetContentID(val OptNilInt) {
 }
 
 // SetCreatedAt sets the value of CreatedAt.
-func (s *JobStatusResponse) SetCreatedAt(val OptNilDateTime) {
+func (s *JobStatusResponse) SetCreatedAt(val OptNilString) {
 	s.CreatedAt = val
 }
 
@@ -2645,7 +2656,7 @@ func (s *JobStatusResponse) SetRetryCount(val OptInt) {
 }
 
 // SetStartedAt sets the value of StartedAt.
-func (s *JobStatusResponse) SetStartedAt(val OptNilDateTime) {
+func (s *JobStatusResponse) SetStartedAt(val OptNilString) {
 	s.StartedAt = val
 }
 
@@ -3892,69 +3903,6 @@ func (o OptNilContentSummaryResponseTopComment) Or(d ContentSummaryResponseTopCo
 	return d
 }
 
-// NewOptNilDateTime returns new OptNilDateTime with value set to v.
-func NewOptNilDateTime(v time.Time) OptNilDateTime {
-	return OptNilDateTime{
-		Value: v,
-		Set:   true,
-	}
-}
-
-// OptNilDateTime is optional nullable time.Time.
-type OptNilDateTime struct {
-	Value time.Time
-	Set   bool
-	Null  bool
-}
-
-// IsSet returns true if OptNilDateTime was set.
-func (o OptNilDateTime) IsSet() bool { return o.Set }
-
-// Reset unsets value.
-func (o *OptNilDateTime) Reset() {
-	var v time.Time
-	o.Value = v
-	o.Set = false
-	o.Null = false
-}
-
-// SetTo sets value to v.
-func (o *OptNilDateTime) SetTo(v time.Time) {
-	o.Set = true
-	o.Null = false
-	o.Value = v
-}
-
-// IsNull returns true if value is Null.
-func (o OptNilDateTime) IsNull() bool { return o.Null }
-
-// SetToNull sets value to null.
-func (o *OptNilDateTime) SetToNull() {
-	o.Set = true
-	o.Null = true
-	var v time.Time
-	o.Value = v
-}
-
-// Get returns value and boolean that denotes whether value was set.
-func (o OptNilDateTime) Get() (v time.Time, ok bool) {
-	if o.Null {
-		return v, false
-	}
-	if !o.Set {
-		return v, false
-	}
-	return o.Value, true
-}
-
-// Or returns value if set, or given parameter if does not.
-func (o OptNilDateTime) Or(d time.Time) time.Time {
-	if v, ok := o.Get(); ok {
-		return v
-	}
-	return d
-}
-
 // NewOptNilFloat64 returns new OptNilFloat64 with value set to v.
 func NewOptNilFloat64(v float64) OptNilFloat64 {
 	return OptNilFloat64{
@@ -4678,7 +4626,7 @@ func (s *PaginationMetadata) SetTotal(val OptNilInt) {
 // Ref: #/components/schemas/ScraperConfigResponse
 type ScraperConfigResponse struct {
 	Config      ScraperConfigResponseConfig   `json:"config"`
-	CreatedAt   time.Time                     `json:"created_at"`
+	CreatedAt   string                        `json:"created_at"`
 	DisplayName OptNilString                  `json:"display_name"`
 	FeedURL     OptNilString                  `json:"feed_url"`
 	ID          int                           `json:"id"`
@@ -4694,7 +4642,7 @@ func (s *ScraperConfigResponse) GetConfig() ScraperConfigResponseConfig {
 }
 
 // GetCreatedAt returns the value of CreatedAt.
-func (s *ScraperConfigResponse) GetCreatedAt() time.Time {
+func (s *ScraperConfigResponse) GetCreatedAt() string {
 	return s.CreatedAt
 }
 
@@ -4739,7 +4687,7 @@ func (s *ScraperConfigResponse) SetConfig(val ScraperConfigResponseConfig) {
 }
 
 // SetCreatedAt sets the value of CreatedAt.
-func (s *ScraperConfigResponse) SetCreatedAt(val time.Time) {
+func (s *ScraperConfigResponse) SetCreatedAt(val string) {
 	s.CreatedAt = val
 }
 
@@ -4794,15 +4742,15 @@ func (s *ScraperConfigResponseConfig) init() ScraperConfigResponseConfig {
 // Derived stats for a single scraper configuration.
 // Ref: #/components/schemas/ScraperConfigStatsResponse
 type ScraperConfigStatsResponse struct {
-	AverageIntervalHours OptNilFloat64  `json:"average_interval_hours"`
-	CompletedCount       int            `json:"completed_count"`
-	IntervalSampleSize   OptInt         `json:"interval_sample_size"`
-	LatestProcessedAt    OptNilDateTime `json:"latest_processed_at"`
-	LatestPublicationAt  OptNilDateTime `json:"latest_publication_at"`
-	NextExpectedAt       OptNilDateTime `json:"next_expected_at"`
-	ProcessingCount      int            `json:"processing_count"`
-	TotalCount           int            `json:"total_count"`
-	UnreadCount          int            `json:"unread_count"`
+	AverageIntervalHours OptNilFloat64 `json:"average_interval_hours"`
+	CompletedCount       int           `json:"completed_count"`
+	IntervalSampleSize   OptInt        `json:"interval_sample_size"`
+	LatestProcessedAt    OptNilString  `json:"latest_processed_at"`
+	LatestPublicationAt  OptNilString  `json:"latest_publication_at"`
+	NextExpectedAt       OptNilString  `json:"next_expected_at"`
+	ProcessingCount      int           `json:"processing_count"`
+	TotalCount           int           `json:"total_count"`
+	UnreadCount          int           `json:"unread_count"`
 }
 
 // GetAverageIntervalHours returns the value of AverageIntervalHours.
@@ -4821,17 +4769,17 @@ func (s *ScraperConfigStatsResponse) GetIntervalSampleSize() OptInt {
 }
 
 // GetLatestProcessedAt returns the value of LatestProcessedAt.
-func (s *ScraperConfigStatsResponse) GetLatestProcessedAt() OptNilDateTime {
+func (s *ScraperConfigStatsResponse) GetLatestProcessedAt() OptNilString {
 	return s.LatestProcessedAt
 }
 
 // GetLatestPublicationAt returns the value of LatestPublicationAt.
-func (s *ScraperConfigStatsResponse) GetLatestPublicationAt() OptNilDateTime {
+func (s *ScraperConfigStatsResponse) GetLatestPublicationAt() OptNilString {
 	return s.LatestPublicationAt
 }
 
 // GetNextExpectedAt returns the value of NextExpectedAt.
-func (s *ScraperConfigStatsResponse) GetNextExpectedAt() OptNilDateTime {
+func (s *ScraperConfigStatsResponse) GetNextExpectedAt() OptNilString {
 	return s.NextExpectedAt
 }
 
@@ -4866,17 +4814,17 @@ func (s *ScraperConfigStatsResponse) SetIntervalSampleSize(val OptInt) {
 }
 
 // SetLatestProcessedAt sets the value of LatestProcessedAt.
-func (s *ScraperConfigStatsResponse) SetLatestProcessedAt(val OptNilDateTime) {
+func (s *ScraperConfigStatsResponse) SetLatestProcessedAt(val OptNilString) {
 	s.LatestProcessedAt = val
 }
 
 // SetLatestPublicationAt sets the value of LatestPublicationAt.
-func (s *ScraperConfigStatsResponse) SetLatestPublicationAt(val OptNilDateTime) {
+func (s *ScraperConfigStatsResponse) SetLatestPublicationAt(val OptNilString) {
 	s.LatestPublicationAt = val
 }
 
 // SetNextExpectedAt sets the value of NextExpectedAt.
-func (s *ScraperConfigStatsResponse) SetNextExpectedAt(val OptNilDateTime) {
+func (s *ScraperConfigStatsResponse) SetNextExpectedAt(val OptNilString) {
 	s.NextExpectedAt = val
 }
 

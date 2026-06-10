@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.models.api.content_actions import (
+    BadgeStatsResponse,
     LongFormStatsResponse,
     ProcessingCountResponse,
     UnreadCountsResponse,
@@ -51,6 +52,20 @@ def get_processing_count(
 ) -> ProcessingCountResponse:
     """Return processing counts for long-form, news, and total."""
     return get_stats.get_processing_count(db, user_id=require_user_id(current_user))
+
+
+@router.get(
+    "/badge",
+    response_model=BadgeStatsResponse,
+    summary="Get combined app badge stats",
+    description="Return unread and processing counts in one response for app badge refreshes.",
+)
+def get_badge_stats(
+    db: Annotated[Session, Depends(get_readonly_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> BadgeStatsResponse:
+    """Return unread and processing counts for app badge refreshes."""
+    return get_stats.get_badge_stats(db, user_id=require_user_id(current_user))
 
 
 @router.get(

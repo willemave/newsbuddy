@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from app.models.contracts import ContentStatus, ContentType
-from app.routers.api.content_responses import (
+from app.presenters.content_responses import (
     build_content_detail_response,
     build_content_summary_response,
 )

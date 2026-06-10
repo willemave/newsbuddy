@@ -1,13 +1,13 @@
 # ruff: noqa: F401
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.constants import TWEET_SUGGESTION_MODEL
+from app.models.api.base import UTCDateTime
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
     ContentClassification,
@@ -48,7 +48,7 @@ class XConnectionResponse(BaseModel):
     provider_user_id: str | None = None
     provider_username: str | None = None
     scopes: list[str] = Field(default_factory=list)
-    last_synced_at: datetime | None = None
+    last_synced_at: UTCDateTime | None = None
     last_status: str | None = None
     last_error: str | None = None
     twitter_username: str | None = None
@@ -66,7 +66,7 @@ class UserLlmIntegrationResponse(BaseModel):
 
     provider: Literal["anthropic", "openai", "google"]
     configured: bool
-    updated_at: datetime | None = None
+    updated_at: UTCDateTime | None = None
 
 
 class UpsertUserLlmIntegrationRequest(BaseModel):

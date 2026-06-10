@@ -70,6 +70,20 @@ def _long_form_metadata(*, with_artwork: bool) -> dict[str, Any]:
     return metadata
 
 
+def test_badge_stats_returns_combined_counts(client) -> None:
+    response = client.get("/api/content/stats/badge")
+    assert response.status_code == 200
+    assert response.json() == {
+        "unread": {"article": 0, "podcast": 0, "news": 0},
+        "processing": {
+            "processing_count": 0,
+            "long_form_count": 0,
+            "news_count": 0,
+            "news_crawl_count": 0,
+        },
+    }
+
+
 def test_processing_count_includes_news_and_new_status(
     client,
     db_session,

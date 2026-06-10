@@ -22,6 +22,8 @@ from app.processing_strategies.pdf_strategy import PdfProcessorStrategy
 
 logger = get_logger(__name__)
 
+COMMENT_FETCH_CONCURRENCY = 10
+
 
 def _run_coro_sync[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run a coroutine from sync code, even if an event loop is already active."""
@@ -111,21 +113,34 @@ class HackerNewsProcessorStrategy(UrlProcessorStrategy):
 
         return None
 
-    async def _fetch_item_data(self, item_id: str) -> dict[str, Any] | None:
+    async def _fetch_item_data(
+        self,
+        item_id: str,
+        client: httpx.AsyncClient | None = None,
+    ) -> dict[str, Any] | None:
         """Fetch item data from HN Firebase API."""
+        if client is None:
+            async with httpx.AsyncClient() as scoped_client:
+                return await self._fetch_item_data(item_id, client=scoped_client)
+
         try:
             url = f"{self.hn_api_base}/item/{item_id}.json"
 
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, timeout=30.0)
-                response.raise_for_status()
-                return response.json()
+            response = await client.get(url, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
 
         except Exception as e:
             logger.error(f"Failed to fetch HN item {item_id}: {e}")
             return None
 
-    async def _fetch_comment(self, comment_id: int, depth: int = 0) -> dict[str, Any] | None:
+    async def _fetch_comment(
+        self,
+        comment_id: int,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+        depth: int = 0,
+    ) -> dict[str, Any] | None:
         """Fetch a single comment by ID."""
         if depth > 2:  # Limit depth to avoid too deep recursion
             return None
@@ -133,7 +148,7 @@ class HackerNewsProcessorStrategy(UrlProcessorStrategy):
         try:
             url = f"{self.hn_api_base}/item/{comment_id}.json"
 
-            async with httpx.AsyncClient() as client:
+            async with semaphore:
                 response = await client.get(url, timeout=10.0)
                 response.raise_for_status()
                 data = response.json()
@@ -154,7 +169,10 @@ class HackerNewsProcessorStrategy(UrlProcessorStrategy):
         return None
 
     async def _fetch_comments(
-        self, item_data: dict[str, Any], max_comments: int = 30
+        self,
+        item_data: dict[str, Any],
+        max_comments: int = 30,
+        client: httpx.AsyncClient | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch top-level comments for an item."""
         comments: list[dict[str, Any]] = []
@@ -163,8 +181,17 @@ class HackerNewsProcessorStrategy(UrlProcessorStrategy):
         if not comment_ids:
             return comments
 
+        if client is None:
+            async with httpx.AsyncClient() as scoped_client:
+                return await self._fetch_comments(
+                    item_data,
+                    max_comments=max_comments,
+                    client=scoped_client,
+                )
+
         # Fetch comments concurrently
-        tasks = [self._fetch_comment(cid) for cid in comment_ids]
+        semaphore = asyncio.Semaphore(COMMENT_FETCH_CONCURRENCY)
+        tasks = [self._fetch_comment(cid, client, semaphore) for cid in comment_ids]
         results = await asyncio.gather(*tasks)
 
         # Filter out None results
@@ -235,12 +262,13 @@ class HackerNewsProcessorStrategy(UrlProcessorStrategy):
 
         # Fetch item data and comments asynchronously
         async def fetch_all_data():
-            item_data = await self._fetch_item_data(item_id)
-            if not item_data:
-                return None, []
+            async with httpx.AsyncClient() as client:
+                item_data = await self._fetch_item_data(item_id, client=client)
+                if not item_data:
+                    return None, []
 
-            comments = await self._fetch_comments(item_data)
-            return item_data, comments
+                comments = await self._fetch_comments(item_data, client=client)
+                return item_data, comments
 
         item_data, comments = _run_coro_sync(fetch_all_data())
 

@@ -97,6 +97,13 @@ class ProcessingCountResponse(BaseModel):
     )
 
 
+class BadgeStatsResponse(BaseModel):
+    """Combined stats used for app badge refreshes."""
+
+    unread: UnreadCountsResponse
+    processing: ProcessingCountResponse
+
+
 class LongFormStatsResponse(BaseModel):
     """Response containing unread long-form count for a user."""
 

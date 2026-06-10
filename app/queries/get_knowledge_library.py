@@ -11,11 +11,11 @@ from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import ContentType
 from app.models.domain.content_display import resolve_image_urls
 from app.models.domain.content_mapper import content_to_domain
+from app.presenters.content_responses import build_content_summary_response
 from app.repositories.content_card_repository import (
     get_knowledge_library_entries,
     list_content_types,
 )
-from app.routers.api.content_responses import build_content_summary_response
 from app.utils.pagination import PaginationCursor
 
 logger = get_logger(__name__)
@@ -34,8 +34,8 @@ def execute(
     if cursor:
         try:
             cursor_data = PaginationCursor.decode_cursor(cursor)
-            last_id = cursor_data["last_id"]
-            last_sort_timestamp = cursor_data["last_created_at"]
+            last_id = cursor_data.last_id
+            last_sort_timestamp = cursor_data.last_created_at
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

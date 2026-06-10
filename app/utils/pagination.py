@@ -1,10 +1,24 @@
 """Pagination utilities for cursor-based pagination with opaque tokens."""
 
 import base64
+import binascii
 import hashlib
 import json
 from datetime import datetime
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, StrictInt, ValidationError
+
+
+class CursorData(BaseModel):
+    """Validated payload stored inside an opaque pagination cursor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    last_id: StrictInt
+    last_created_at: datetime
+    filters_hash: str | None = None
+    last_rank: float | None = None
 
 
 class PaginationCursor:
@@ -40,14 +54,14 @@ class PaginationCursor:
         return base64.urlsafe_b64encode(json_str.encode()).decode()
 
     @staticmethod
-    def decode_cursor(cursor: str) -> dict[str, Any]:
+    def decode_cursor(cursor: str) -> CursorData:
         """Decode an opaque cursor token into pagination state.
 
         Args:
             cursor: Base64-encoded cursor string
 
         Returns:
-            Dict with last_id, last_created_at, and optional filters_hash
+            Validated cursor data with last_id, last_created_at, and optional filters_hash
 
         Raises:
             ValueError: If cursor is invalid or malformed
@@ -59,15 +73,18 @@ class PaginationCursor:
             if not isinstance(cursor_data, dict):
                 raise ValueError("Cursor payload must be a JSON object")
 
-            # Parse datetime
-            cursor_data["last_created_at"] = datetime.fromisoformat(cursor_data["last_created_at"])
-
-            return cursor_data
-        except (ValueError, KeyError, json.JSONDecodeError) as e:
+            return CursorData.model_validate(cursor_data)
+        except (
+            UnicodeDecodeError,
+            binascii.Error,
+            ValueError,
+            json.JSONDecodeError,
+            ValidationError,
+        ) as e:
             raise ValueError(f"Invalid pagination cursor: {str(e)}") from e
 
     @staticmethod
-    def validate_cursor(cursor_data: dict[str, Any], current_filters: dict[str, Any]) -> bool:
+    def validate_cursor(cursor_data: CursorData, current_filters: dict[str, Any]) -> bool:
         """Validate that cursor filters match current request filters.
 
         Args:
@@ -77,7 +94,7 @@ class PaginationCursor:
         Returns:
             True if filters match or no filter hash in cursor, False otherwise
         """
-        cursor_hash = cursor_data.get("filters_hash")
+        cursor_hash = cursor_data.filters_hash
         if not isinstance(cursor_hash, str) or not cursor_hash:
             # No filter hash in cursor, assume valid for backwards compatibility
             return True

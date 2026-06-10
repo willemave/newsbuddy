@@ -1,13 +1,13 @@
 # ruff: noqa: F401
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.constants import TWEET_SUGGESTION_MODEL
+from app.models.api.base import UTCDateTime
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
     ContentClassification,
@@ -28,7 +28,7 @@ class JobStatusResponse(BaseModel):
     content_id: int | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     retry_count: int = 0
-    created_at: datetime | None = None
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
+    created_at: UTCDateTime | None = None
+    started_at: UTCDateTime | None = None
+    completed_at: UTCDateTime | None = None
     error_message: str | None = None

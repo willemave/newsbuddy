@@ -38,8 +38,8 @@ def execute(
     last_created_at = None
     if cursor:
         cursor_data = PaginationCursor.decode_cursor(cursor)
-        last_id = cursor_data["last_id"]
-        last_created_at = cursor_data["last_created_at"]
+        last_id = cursor_data.last_id
+        last_created_at = cursor_data.last_created_at
 
     status_filter = [
         ContentStatus.NEW.value,

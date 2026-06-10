@@ -1,13 +1,13 @@
 # ruff: noqa: F401
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.constants import TWEET_SUGGESTION_MODEL
+from app.models.api.base import UTCDateTime
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
     ContentClassification,
@@ -31,7 +31,7 @@ class CliLinkStartResponse(BaseModel):
     status: Literal["pending"]
     poll_token: str
     approve_url: str
-    expires_at: datetime
+    expires_at: UTCDateTime
     poll_interval_seconds: int = 2
 
 
@@ -48,7 +48,7 @@ class CliLinkApproveResponse(BaseModel):
     session_id: str
     status: Literal["approved"]
     key_prefix: str
-    expires_at: datetime
+    expires_at: UTCDateTime
 
 
 class CliLinkPollResponse(BaseModel):
@@ -56,6 +56,6 @@ class CliLinkPollResponse(BaseModel):
 
     session_id: str
     status: Literal["pending", "approved", "claimed", "expired"]
-    expires_at: datetime
+    expires_at: UTCDateTime
     api_key: str | None = None
     key_prefix: str | None = None

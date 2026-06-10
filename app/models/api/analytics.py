@@ -1,13 +1,13 @@
 # ruff: noqa: F401
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.constants import TWEET_SUGGESTION_MODEL
+from app.models.api.base import UTCDateTime
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
     ContentClassification,
@@ -32,7 +32,7 @@ class RecordContentInteractionRequest(BaseModel):
         ...,
         description="Interaction type. V1 supports opened.",
     )
-    occurred_at: datetime | None = Field(
+    occurred_at: UTCDateTime | None = Field(
         None,
         description="Optional ISO timestamp of when interaction occurred",
     )

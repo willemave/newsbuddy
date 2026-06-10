@@ -136,7 +136,6 @@
             "type": "integer"
           },
           "updated_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Updated At",
             "type": "string"
@@ -180,7 +179,6 @@
             "type": "string"
           },
           "updated_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Updated At",
             "type": "string"
@@ -215,7 +213,6 @@
             "type": "array"
           },
           "generated_at": {
-            "format": "date-time",
             "title": "Generated At",
             "type": "string"
           },
@@ -657,7 +654,6 @@
             "type": "string"
           },
           "created_at": {
-            "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
@@ -755,7 +751,6 @@
             "type": "string"
           },
           "updated_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Updated At",
             "type": "string"
@@ -826,6 +821,23 @@
           "transcript"
         ],
         "title": "AudioTranscriptionResponse",
+        "type": "object"
+      },
+      "BadgeStatsResponse": {
+        "description": "Combined stats used for app badge refreshes.",
+        "properties": {
+          "processing": {
+            "$ref": "#/components/schemas/ProcessingCountResponse"
+          },
+          "unread": {
+            "$ref": "#/components/schemas/UnreadCountsResponse"
+          }
+        },
+        "required": [
+          "unread",
+          "processing"
+        ],
+        "title": "BadgeStatsResponse",
         "type": "object"
       },
       "Body_adminApiKeysCreate": {
@@ -1018,7 +1030,6 @@
           },
           "timestamp": {
             "description": "Timestamp when message was stored",
-            "format": "date-time",
             "title": "Timestamp",
             "type": "string"
           }
@@ -1128,7 +1139,6 @@
             "type": "boolean"
           },
           "created_at": {
-            "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
@@ -1159,7 +1169,6 @@
             "type": "boolean"
           },
           "last_message_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Last Message At",
             "type": "string"
@@ -1205,7 +1214,6 @@
             "type": "string"
           },
           "updated_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Updated At",
             "type": "string"
@@ -1254,7 +1262,6 @@
         "description": "Approval response after issuing a CLI API key.",
         "properties": {
           "expires_at": {
-            "format": "date-time",
             "title": "Expires At",
             "type": "string"
           },
@@ -1290,7 +1297,6 @@
             "type": "string"
           },
           "expires_at": {
-            "format": "date-time",
             "title": "Expires At",
             "type": "string"
           },
@@ -1343,7 +1349,6 @@
             "type": "string"
           },
           "expires_at": {
-            "format": "date-time",
             "title": "Expires At",
             "type": "string"
           },
@@ -2153,6 +2158,12 @@
             "description": "Whether the content has been saved to the user's knowledge library",
             "title": "Is Saved To Knowledge",
             "type": "boolean"
+          },
+          "key_takeaway": {
+            "description": "Key takeaway to display under long-form list titles",
+            "nullable": true,
+            "title": "Key Takeaway",
+            "type": "string"
           },
           "news_article_url": {
             "description": "Canonical article link for news content",
@@ -3283,7 +3294,6 @@
         "description": "Status payload for an async processing job.",
         "properties": {
           "completed_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Completed At",
             "type": "string"
@@ -3294,7 +3304,6 @@
             "type": "integer"
           },
           "created_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Created At",
             "type": "string"
@@ -3323,7 +3332,6 @@
             "type": "integer"
           },
           "started_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Started At",
             "type": "string"
@@ -3411,7 +3419,6 @@
         "description": "Client-visible Learning Deck state.",
         "properties": {
           "created_at": {
-            "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
@@ -3470,7 +3477,6 @@
             "type": "string"
           },
           "updated_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Updated At",
             "type": "string"
@@ -3494,13 +3500,11 @@
         "description": "Client-visible generation attempt state.",
         "properties": {
           "completed_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Completed At",
             "type": "string"
           },
           "created_at": {
-            "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
@@ -3519,7 +3523,6 @@
             "type": "string"
           },
           "started_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Started At",
             "type": "string"
@@ -3535,7 +3538,6 @@
             "type": "array"
           },
           "updated_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Updated At",
             "type": "string"
@@ -3612,7 +3614,6 @@
         "description": "One coarse user-visible generation note.",
         "properties": {
           "created_at": {
-            "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
@@ -3636,7 +3637,6 @@
         "description": "A URL the client can open in Safari.",
         "properties": {
           "expires_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Expires At",
             "type": "string"
@@ -4734,7 +4734,6 @@
             "type": "object"
           },
           "created_at": {
-            "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
@@ -4798,19 +4797,16 @@
             "type": "integer"
           },
           "latest_processed_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Latest Processed At",
             "type": "string"
           },
           "latest_publication_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Latest Publication At",
             "type": "string"
           },
           "next_expected_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Next Expected At",
             "type": "string"
@@ -5673,7 +5669,6 @@
             "type": "string"
           },
           "updated_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Updated At",
             "type": "string"
@@ -5849,7 +5844,6 @@
             "type": "string"
           },
           "last_synced_at": {
-            "format": "date-time",
             "nullable": true,
             "title": "Last Synced At",
             "type": "string"

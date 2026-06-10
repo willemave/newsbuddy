@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+from app.models.api.base import UTCDateTime
 
 AudioEpisodeKind = Literal[
     "fast_news_digest",
@@ -55,8 +56,8 @@ class AudioEpisodeResponse(BaseModel):
     stream_url: str | None = None
     script_text: str | None = None
     error_message: str | None = None
-    created_at: datetime
-    updated_at: datetime | None = None
+    created_at: UTCDateTime
+    updated_at: UTCDateTime | None = None
 
 
 class AudioEpisodeShareResponse(BaseModel):

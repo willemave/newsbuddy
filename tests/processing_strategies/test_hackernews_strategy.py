@@ -139,6 +139,31 @@ class TestHackerNewsProcessorStrategy:
             assert comments[0]["author"] == "user1"
             assert comments[1]["author"] == "user2"
 
+    @pytest.mark.asyncio
+    async def test_fetch_comments_reuses_one_async_client(self, hn_strategy):
+        """Comment fan-out should share one HTTP client per batch."""
+        mock_item = {
+            "kids": [1001, 1002, 1003],
+        }
+
+        with (
+            patch("app.processing_strategies.hackernews_strategy.httpx.AsyncClient") as mock_client,
+            patch.object(hn_strategy, "_fetch_comment", new_callable=AsyncMock) as mock_fetch,
+        ):
+            mock_async_client = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_async_client
+            mock_fetch.side_effect = [
+                {"id": 1001, "author": "user1", "text": "First comment"},
+                {"id": 1002, "author": "user2", "text": "Second comment"},
+                None,
+            ]
+
+            comments = await hn_strategy._fetch_comments(mock_item)
+
+            assert len(comments) == 2
+            assert mock_client.call_count == 1
+            assert mock_fetch.call_count == 3
+
     def test_clean_html_text(self, hn_strategy):
         """Test HTML cleaning from HN comments."""
         test_cases = [

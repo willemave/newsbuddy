@@ -79,7 +79,8 @@ def test_twitter_share_download_content_uses_metadata_snapshot_without_fetch(
 def test_hackernews_extract_data_contains_text(mocker, monkeypatch):
     strategy = HackerNewsProcessorStrategy(http_client=mocker.Mock())
 
-    async def fake_fetch_item_data(_item_id):
+    async def fake_fetch_item_data(_item_id, *, client):
+        del client
         return {
             "title": "Ask HN",
             "by": "alice",
@@ -90,7 +91,8 @@ def test_hackernews_extract_data_contains_text(mocker, monkeypatch):
             "text": "<p>What are you building?</p>",
         }
 
-    async def fake_fetch_comments(_item_data, max_comments=30):
+    async def fake_fetch_comments(_item_data, *, client, max_comments=30):
+        del client
         return [{"author": "bob", "text": "Nice!", "time": 1_700_000_100, "kids": [], "depth": 0}]
 
     monkeypatch.setattr(strategy, "_fetch_item_data", fake_fetch_item_data)

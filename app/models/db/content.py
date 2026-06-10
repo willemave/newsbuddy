@@ -133,7 +133,10 @@ class ContentReadStatus(Base):
     read_at = Column(DateTime, default=_utcnow, nullable=False)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
 
-    __table_args__ = (Index("idx_content_read_user_content", "user_id", "content_id", unique=True),)
+    __table_args__ = (
+        Index("idx_content_read_user_content", "user_id", "content_id", unique=True),
+        Index("idx_content_read_user_read_at", "user_id", "read_at"),
+    )
 
 
 class ContentKnowledgeSave(Base):

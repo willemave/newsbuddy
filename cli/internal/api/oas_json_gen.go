@@ -5,7 +5,6 @@ package api
 import (
 	"math/bits"
 	"strconv"
-	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/jx"
@@ -41,7 +40,7 @@ func (s *AgentLibraryDocumentResponse) encodeFields(e *jx.Encoder) {
 	{
 		if s.UpdatedAt.Set {
 			e.FieldStart("updated_at")
-			s.UpdatedAt.Encode(e, json.EncodeDateTime)
+			s.UpdatedAt.Encode(e)
 		}
 	}
 	{
@@ -119,7 +118,7 @@ func (s *AgentLibraryDocumentResponse) Decode(d *jx.Decoder) error {
 		case "updated_at":
 			if err := func() error {
 				s.UpdatedAt.Reset()
-				if err := s.UpdatedAt.Decode(d, decodeFlexibleDateTime); err != nil {
+				if err := s.UpdatedAt.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -260,7 +259,7 @@ func (s *AgentLibraryFileResponse) encodeFields(e *jx.Encoder) {
 	{
 		if s.UpdatedAt.Set {
 			e.FieldStart("updated_at")
-			s.UpdatedAt.Encode(e, json.EncodeDateTime)
+			s.UpdatedAt.Encode(e)
 		}
 	}
 	{
@@ -338,7 +337,7 @@ func (s *AgentLibraryFileResponse) Decode(d *jx.Decoder) error {
 		case "updated_at":
 			if err := func() error {
 				s.UpdatedAt.Reset()
-				if err := s.UpdatedAt.Decode(d, decodeFlexibleDateTime); err != nil {
+				if err := s.UpdatedAt.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -470,7 +469,7 @@ func (s *AgentLibraryManifestResponse) encodeFields(e *jx.Encoder) {
 	}
 	{
 		e.FieldStart("generated_at")
-		json.EncodeDateTime(e, s.GeneratedAt)
+		e.Str(s.GeneratedAt)
 	}
 	{
 		if s.IncludeSource.Set {
@@ -517,8 +516,8 @@ func (s *AgentLibraryManifestResponse) Decode(d *jx.Decoder) error {
 		case "generated_at":
 			requiredBitSet[0] |= 1 << 1
 			if err := func() error {
-				v, err := decodeFlexibleDateTime(d)
-				s.GeneratedAt = v
+				v, err := d.Str()
+				s.GeneratedAt = string(v)
 				if err != nil {
 					return err
 				}
@@ -1813,7 +1812,7 @@ func (s *CliLinkApproveResponse) Encode(e *jx.Encoder) {
 func (s *CliLinkApproveResponse) encodeFields(e *jx.Encoder) {
 	{
 		e.FieldStart("expires_at")
-		json.EncodeDateTime(e, s.ExpiresAt)
+		e.Str(s.ExpiresAt)
 	}
 	{
 		e.FieldStart("key_prefix")
@@ -1848,8 +1847,8 @@ func (s *CliLinkApproveResponse) Decode(d *jx.Decoder) error {
 		case "expires_at":
 			requiredBitSet[0] |= 1 << 0
 			if err := func() error {
-				v, err := decodeFlexibleDateTime(d)
-				s.ExpiresAt = v
+				v, err := d.Str()
+				s.ExpiresAt = string(v)
 				if err != nil {
 					return err
 				}
@@ -1966,7 +1965,7 @@ func (s *CliLinkPollResponse) encodeFields(e *jx.Encoder) {
 	}
 	{
 		e.FieldStart("expires_at")
-		json.EncodeDateTime(e, s.ExpiresAt)
+		e.Str(s.ExpiresAt)
 	}
 	{
 		if s.KeyPrefix.Set {
@@ -2014,8 +2013,8 @@ func (s *CliLinkPollResponse) Decode(d *jx.Decoder) error {
 		case "expires_at":
 			requiredBitSet[0] |= 1 << 1
 			if err := func() error {
-				v, err := decodeFlexibleDateTime(d)
-				s.ExpiresAt = v
+				v, err := d.Str()
+				s.ExpiresAt = string(v)
 				if err != nil {
 					return err
 				}
@@ -2233,7 +2232,7 @@ func (s *CliLinkStartResponse) encodeFields(e *jx.Encoder) {
 	}
 	{
 		e.FieldStart("expires_at")
-		json.EncodeDateTime(e, s.ExpiresAt)
+		e.Str(s.ExpiresAt)
 	}
 	{
 		if s.PollIntervalSeconds.Set {
@@ -2289,8 +2288,8 @@ func (s *CliLinkStartResponse) Decode(d *jx.Decoder) error {
 		case "expires_at":
 			requiredBitSet[0] |= 1 << 1
 			if err := func() error {
-				v, err := decodeFlexibleDateTime(d)
-				s.ExpiresAt = v
+				v, err := d.Str()
+				s.ExpiresAt = string(v)
 				if err != nil {
 					return err
 				}
@@ -4227,6 +4226,12 @@ func (s *ContentSummaryResponse) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.KeyTakeaway.Set {
+			e.FieldStart("key_takeaway")
+			s.KeyTakeaway.Encode(e)
+		}
+	}
+	{
 		if s.NewsArticleURL.Set {
 			e.FieldStart("news_article_url")
 			s.NewsArticleURL.Encode(e)
@@ -4344,7 +4349,7 @@ func (s *ContentSummaryResponse) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfContentSummaryResponse = [31]string{
+var jsonFieldsNameOfContentSummaryResponse = [32]string{
 	0:  "artifact_type",
 	1:  "classification",
 	2:  "comment_count",
@@ -4356,26 +4361,27 @@ var jsonFieldsNameOfContentSummaryResponse = [31]string{
 	8:  "image_url",
 	9:  "is_read",
 	10: "is_saved_to_knowledge",
-	11: "news_article_url",
-	12: "news_discussion_url",
-	13: "news_key_points",
-	14: "news_summary",
-	15: "platform",
-	16: "preview_bullets",
-	17: "primary_topic",
-	18: "processed_at",
-	19: "publication_date",
-	20: "reason_to_read",
-	21: "saved_source",
-	22: "short_summary",
-	23: "source",
-	24: "source_url",
-	25: "status",
-	26: "thumbnail_url",
-	27: "title",
-	28: "top_comment",
-	29: "url",
-	30: "user_status",
+	11: "key_takeaway",
+	12: "news_article_url",
+	13: "news_discussion_url",
+	14: "news_key_points",
+	15: "news_summary",
+	16: "platform",
+	17: "preview_bullets",
+	18: "primary_topic",
+	19: "processed_at",
+	20: "publication_date",
+	21: "reason_to_read",
+	22: "saved_source",
+	23: "short_summary",
+	24: "source",
+	25: "source_url",
+	26: "status",
+	27: "thumbnail_url",
+	28: "title",
+	29: "top_comment",
+	30: "url",
+	31: "user_status",
 }
 
 // Decode decodes ContentSummaryResponse from json.
@@ -4501,6 +4507,16 @@ func (s *ContentSummaryResponse) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"is_saved_to_knowledge\"")
+			}
+		case "key_takeaway":
+			if err := func() error {
+				s.KeyTakeaway.Reset()
+				if err := s.KeyTakeaway.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"key_takeaway\"")
 			}
 		case "news_article_url":
 			if err := func() error {
@@ -4643,7 +4659,7 @@ func (s *ContentSummaryResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"source_url\"")
 			}
 		case "status":
-			requiredBitSet[3] |= 1 << 1
+			requiredBitSet[3] |= 1 << 2
 			if err := func() error {
 				if err := s.Status.Decode(d); err != nil {
 					return err
@@ -4683,7 +4699,7 @@ func (s *ContentSummaryResponse) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"top_comment\"")
 			}
 		case "url":
-			requiredBitSet[3] |= 1 << 5
+			requiredBitSet[3] |= 1 << 6
 			if err := func() error {
 				v, err := d.Str()
 				s.URL = string(v)
@@ -4717,7 +4733,7 @@ func (s *ContentSummaryResponse) Decode(d *jx.Decoder) error {
 		0b10011000,
 		0b00000000,
 		0b00000000,
-		0b00100010,
+		0b01000100,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -5404,7 +5420,7 @@ func (s *JobStatusResponse) encodeFields(e *jx.Encoder) {
 	{
 		if s.CompletedAt.Set {
 			e.FieldStart("completed_at")
-			s.CompletedAt.Encode(e, json.EncodeDateTime)
+			s.CompletedAt.Encode(e)
 		}
 	}
 	{
@@ -5416,7 +5432,7 @@ func (s *JobStatusResponse) encodeFields(e *jx.Encoder) {
 	{
 		if s.CreatedAt.Set {
 			e.FieldStart("created_at")
-			s.CreatedAt.Encode(e, json.EncodeDateTime)
+			s.CreatedAt.Encode(e)
 		}
 	}
 	{
@@ -5448,7 +5464,7 @@ func (s *JobStatusResponse) encodeFields(e *jx.Encoder) {
 	{
 		if s.StartedAt.Set {
 			e.FieldStart("started_at")
-			s.StartedAt.Encode(e, json.EncodeDateTime)
+			s.StartedAt.Encode(e)
 		}
 	}
 	{
@@ -5488,7 +5504,7 @@ func (s *JobStatusResponse) Decode(d *jx.Decoder) error {
 		case "completed_at":
 			if err := func() error {
 				s.CompletedAt.Reset()
-				if err := s.CompletedAt.Decode(d, decodeFlexibleDateTime); err != nil {
+				if err := s.CompletedAt.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -5508,7 +5524,7 @@ func (s *JobStatusResponse) Decode(d *jx.Decoder) error {
 		case "created_at":
 			if err := func() error {
 				s.CreatedAt.Reset()
-				if err := s.CreatedAt.Decode(d, decodeFlexibleDateTime); err != nil {
+				if err := s.CreatedAt.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -5572,7 +5588,7 @@ func (s *JobStatusResponse) Decode(d *jx.Decoder) error {
 		case "started_at":
 			if err := func() error {
 				s.StartedAt.Reset()
-				if err := s.StartedAt.Decode(d, decodeFlexibleDateTime); err != nil {
+				if err := s.StartedAt.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -7384,57 +7400,6 @@ func (s *OptNilContentSummaryResponseTopComment) UnmarshalJSON(data []byte) erro
 	return s.Decode(d)
 }
 
-// Encode encodes time.Time as json.
-func (o OptNilDateTime) Encode(e *jx.Encoder, format func(*jx.Encoder, time.Time)) {
-	if !o.Set {
-		return
-	}
-	if o.Null {
-		e.Null()
-		return
-	}
-	format(e, o.Value)
-}
-
-// Decode decodes time.Time from json.
-func (o *OptNilDateTime) Decode(d *jx.Decoder, format func(*jx.Decoder) (time.Time, error)) error {
-	if o == nil {
-		return errors.New("invalid: unable to decode OptNilDateTime to nil")
-	}
-	if d.Next() == jx.Null {
-		if err := d.Null(); err != nil {
-			return err
-		}
-
-		var v time.Time
-		o.Value = v
-		o.Set = true
-		o.Null = true
-		return nil
-	}
-	o.Set = true
-	o.Null = false
-	v, err := format(d)
-	if err != nil {
-		return err
-	}
-	o.Value = v
-	return nil
-}
-
-// MarshalJSON implements stdjson.Marshaler.
-func (s OptNilDateTime) MarshalJSON() ([]byte, error) {
-	e := jx.Encoder{}
-	s.Encode(&e, json.EncodeDateTime)
-	return e.Bytes(), nil
-}
-
-// UnmarshalJSON implements stdjson.Unmarshaler.
-func (s *OptNilDateTime) UnmarshalJSON(data []byte) error {
-	d := jx.DecodeBytes(data)
-	return s.Decode(d, decodeFlexibleDateTime)
-}
-
 // Encode encodes float64 as json.
 func (o OptNilFloat64) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -8134,7 +8099,7 @@ func (s *ScraperConfigResponse) encodeFields(e *jx.Encoder) {
 	}
 	{
 		e.FieldStart("created_at")
-		json.EncodeDateTime(e, s.CreatedAt)
+		e.Str(s.CreatedAt)
 	}
 	{
 		if s.DisplayName.Set {
@@ -8208,8 +8173,8 @@ func (s *ScraperConfigResponse) Decode(d *jx.Decoder) error {
 		case "created_at":
 			requiredBitSet[0] |= 1 << 1
 			if err := func() error {
-				v, err := decodeFlexibleDateTime(d)
-				s.CreatedAt = v
+				v, err := d.Str()
+				s.CreatedAt = string(v)
 				if err != nil {
 					return err
 				}
@@ -8436,19 +8401,19 @@ func (s *ScraperConfigStatsResponse) encodeFields(e *jx.Encoder) {
 	{
 		if s.LatestProcessedAt.Set {
 			e.FieldStart("latest_processed_at")
-			s.LatestProcessedAt.Encode(e, json.EncodeDateTime)
+			s.LatestProcessedAt.Encode(e)
 		}
 	}
 	{
 		if s.LatestPublicationAt.Set {
 			e.FieldStart("latest_publication_at")
-			s.LatestPublicationAt.Encode(e, json.EncodeDateTime)
+			s.LatestPublicationAt.Encode(e)
 		}
 	}
 	{
 		if s.NextExpectedAt.Set {
 			e.FieldStart("next_expected_at")
-			s.NextExpectedAt.Encode(e, json.EncodeDateTime)
+			s.NextExpectedAt.Encode(e)
 		}
 	}
 	{
@@ -8522,7 +8487,7 @@ func (s *ScraperConfigStatsResponse) Decode(d *jx.Decoder) error {
 		case "latest_processed_at":
 			if err := func() error {
 				s.LatestProcessedAt.Reset()
-				if err := s.LatestProcessedAt.Decode(d, decodeFlexibleDateTime); err != nil {
+				if err := s.LatestProcessedAt.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -8532,7 +8497,7 @@ func (s *ScraperConfigStatsResponse) Decode(d *jx.Decoder) error {
 		case "latest_publication_at":
 			if err := func() error {
 				s.LatestPublicationAt.Reset()
-				if err := s.LatestPublicationAt.Decode(d, decodeFlexibleDateTime); err != nil {
+				if err := s.LatestPublicationAt.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -8542,7 +8507,7 @@ func (s *ScraperConfigStatsResponse) Decode(d *jx.Decoder) error {
 		case "next_expected_at":
 			if err := func() error {
 				s.NextExpectedAt.Reset()
-				if err := s.NextExpectedAt.Decode(d, decodeFlexibleDateTime); err != nil {
+				if err := s.NextExpectedAt.Decode(d); err != nil {
 					return err
 				}
 				return nil

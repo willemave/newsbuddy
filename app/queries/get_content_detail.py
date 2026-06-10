@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.models.domain.content_display import can_subscribe_for_feed
 from app.models.domain.content_mapper import content_to_domain
-from app.repositories.content_detail_repository import get_content_detail
-from app.routers.api.content_responses import (
+from app.presenters.content_responses import (
     build_content_detail_response,
 )
+from app.repositories.content_detail_repository import get_content_detail
 from app.services.feed_subscription import can_subscribe_to_feed
 from app.services.news_feed import get_visible_news_item_detail
 
