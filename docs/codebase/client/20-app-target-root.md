@@ -24,4 +24,4 @@ Main SwiftUI app target root: app entrypoint, root content shell, target metadat
 
 ## Notes
 - `Info.plist.backup` is checked in but should not be treated as an active runtime source without verifying target membership.
-- Generated contracts live under `Models/Generated` and `client/newsly/OpenAPI/Generated`.
+- Generated contracts live under `Models/Generated`.

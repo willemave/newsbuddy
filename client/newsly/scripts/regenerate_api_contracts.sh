@@ -6,6 +6,5 @@ cd "$REPO_ROOT"
 
 PYTHONPATH="$REPO_ROOT" uv run python scripts/export_openapi_schema.py
 PYTHONPATH="$REPO_ROOT" uv run python scripts/generate_ios_contracts.py
-"$REPO_ROOT/scripts/generate_ios_openapi_artifacts.sh"
 
-echo "Regenerated OpenAPI + Swift API contracts."
+echo "Regenerated OpenAPI schema + Swift enum API contracts."

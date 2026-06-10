@@ -9,11 +9,11 @@ Folder-by-folder reference for the SwiftUI app, share extension, generated contr
 ## Documents
 | Doc | Source folder | Focus |
 |---|---|---|
-| `10-workspace.md` | `client/newsly` | Workspace root, xcconfig files, secret sync template, OpenAPI generator config, client scripts, and top-level project layout. |
+| `10-workspace.md` | `client/newsly` | Workspace root, xcconfig files, secret sync template, client scripts, and top-level project layout. |
 | `20-app-target-root.md` | `client/newsly/newsly` | SwiftUI app entrypoint, root tab/container, app dependencies, Info.plist, entitlements, route restoration, and shared app setup. |
 | `25-assets-fonts.md` | `client/newsly/newsly/Assets.xcassets`, `client/newsly/newsly/Fonts` | App icons, accent/mascot/provider assets, and bundled Inter/Newsreader fonts. |
 | `30-models.md` | `client/newsly/newsly/Models` | Typed client-side models for content, news, chat, search, Knowledge, Learning Decks, narration, onboarding, routes, source metadata, and API payloads. |
-| `31-models-generated.md` | `client/newsly/newsly/Models/Generated`, `client/newsly/OpenAPI/Generated` | Generated Swift API contracts and Swift OpenAPI client/types. |
+| `31-models-generated.md` | `client/newsly/newsly/Models/Generated` | Generated Swift API enum contracts. |
 | `40-repositories.md` | `client/newsly/newsly/Repositories` | Repository layer for content and read-state operations. |
 | `50-services.md` | `client/newsly/newsly/Services` | App services for auth, API transport, content/news APIs, chat, discovery, audio episodes, Learning Decks, CLI link, feedback, dictation/transcription, settings, notifications, images, and integrations. |
 | `60-shared.md` | `client/newsly/newsly/Shared` | Shared app state, dependency factory, reader palette, app chrome, and app-group container helpers. |
