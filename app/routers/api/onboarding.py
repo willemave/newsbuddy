@@ -153,7 +153,7 @@ async def start_audio_discovery_flow(
     response_model=OnboardingDiscoveryStatusResponse,
     summary="Get onboarding audio discovery status",
 )
-async def onboarding_discovery_status(
+def onboarding_discovery_status(
     run_id: int,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -170,7 +170,7 @@ async def onboarding_discovery_status(
     response_model=OnboardingCompleteResponse,
     summary="Complete onboarding",
 )
-async def complete_onboarding_flow(
+def complete_onboarding_flow(
     payload: OnboardingCompleteRequest,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -187,7 +187,7 @@ async def complete_onboarding_flow(
     response_model=OnboardingTutorialResponse,
     summary="Mark onboarding tutorial complete",
 )
-async def tutorial_complete(
+def tutorial_complete(
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> OnboardingTutorialResponse:

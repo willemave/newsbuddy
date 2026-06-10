@@ -29,7 +29,7 @@ router = APIRouter()
         401: {"description": "Authentication required"},
     },
 )
-async def mark_content_read(
+def mark_content_read(
     content_id: Annotated[int, Path(..., description="Content ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -54,7 +54,7 @@ async def mark_content_read(
         401: {"description": "Authentication required"},
     },
 )
-async def mark_content_unread(
+def mark_content_unread(
     content_id: Annotated[int, Path(..., description="Content ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -79,7 +79,7 @@ async def mark_content_unread(
         401: {"description": "Authentication required"},
     },
 )
-async def bulk_mark_read(
+def bulk_mark_read(
     request: BulkMarkReadRequest,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -111,9 +111,25 @@ async def bulk_mark_read(
         401: {"description": "Authentication required"},
     },
 )
-async def get_recently_read(
+def get_recently_read(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
+    content_type: Annotated[
+        list[str] | None,
+        Query(
+            description=(
+                "Filter by content type(s). Can be specified multiple times "
+                "for multiple types (article/podcast/news)"
+            ),
+        ),
+    ] = None,
+    date: Annotated[
+        str | None,
+        Query(
+            description="Filter by read date (YYYY-MM-DD format)",
+            pattern="^\\d{4}-\\d{2}-\\d{2}$",
+        ),
+    ] = None,
     cursor: str | None = Query(None, description="Pagination cursor for next page"),
     limit: int = Query(
         25,
@@ -125,14 +141,21 @@ async def get_recently_read(
     """Get all recently read content with cursor-based pagination, sorted by read time."""
     user_id = require_user_id(current_user)
     logger.info(
-        "[API] GET /recently-read/list called | user_id=%s cursor=%s limit=%s",
+        (
+            "[API] GET /recently-read/list called | "
+            "user_id=%s content_type=%s date=%s cursor=%s limit=%s"
+        ),
         user_id,
+        content_type,
+        date,
         cursor[:20] + "..." if cursor else None,
         limit,
     )
     return get_recently_read_query.execute(
         db,
         user_id=user_id,
+        content_type=content_type,
+        date=date,
         cursor=cursor,
         limit=limit,
     )

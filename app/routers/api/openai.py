@@ -25,7 +25,7 @@ def _duration_ms(started_at: float) -> float:
     response_model=AudioTranscriptionHealthResponse,
     summary="Check uploaded-audio transcription availability",
 )
-async def transcription_health(
+def transcription_health(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AudioTranscriptionHealthResponse:
     """Return whether backend-managed audio transcription is configured."""

@@ -41,7 +41,7 @@ router = APIRouter()
         404: {"description": "Content not found"},
     },
 )
-async def convert_news_to_article(
+def convert_news_to_article(
     content_id: Annotated[int, Path(..., description="News content ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],

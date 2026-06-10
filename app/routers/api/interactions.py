@@ -32,7 +32,7 @@ router = APIRouter()
         401: {"description": "Authentication required"},
     },
 )
-async def post_content_interaction(
+def post_content_interaction(
     request: RecordContentInteractionRequest,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
