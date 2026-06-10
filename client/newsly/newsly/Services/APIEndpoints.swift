@@ -78,6 +78,7 @@ enum APIEndpoints {
     }
     static let unreadCounts = "/api/content/stats/unread-counts"
     static let processingCount = "/api/content/stats/processing-count"
+    static let badgeStats = "/api/content/stats/badge"
     static func convertNewsToArticle(id: Int) -> String {
         return "/api/content/\(id)/convert-to-article"
     }

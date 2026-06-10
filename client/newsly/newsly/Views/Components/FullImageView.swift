@@ -75,6 +75,7 @@ struct FullImageView: View {
             }
         }
         .onTapGesture {
+            guard scale == 1.0 else { return }
             dismiss()
         }
     }

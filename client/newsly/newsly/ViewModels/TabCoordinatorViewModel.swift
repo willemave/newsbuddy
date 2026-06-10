@@ -87,6 +87,10 @@ final class TabCoordinatorViewModel: ObservableObject {
                 rootTabFlowLogger.info("tab content load requested | tab=long_form")
                 longContentVM.refreshTrigger.send(())
             } else {
+                // Intentional asymmetry vs Fast News: long-form is not time-sensitive,
+                // so re-entering the tab keeps the loaded list (and the reader's
+                // scroll position) rather than background-refreshing. Enforced by
+                // TabCoordinatorViewModelTests.testHandleTabChangeKeepsIncomingLongFormStableWhenAlreadyLoaded.
                 rootTabFlowLogger.info("tab content already available | tab=long_form")
             }
         case .knowledge, .more:

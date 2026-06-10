@@ -230,10 +230,6 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(savedSource, forKey: .savedSource)
     }
 
-    var contentTypeEnum: ContentType? {
-        ContentType(rawValue: contentType)
-    }
-
     var primaryTimestamp: String {
         publicationDate ?? processedAt ?? createdAt
     }
@@ -257,7 +253,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     }
 
     var summaryDisplayText: String? {
-        guard contentTypeEnum != .news else { return nil }
+        guard apiContentType != .news else { return nil }
         return Self.normalizedText(shortSummary)
     }
 
@@ -266,7 +262,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     }
 
     var keyTakeawayDisplayText: String? {
-        guard contentTypeEnum != .news else { return nil }
+        guard apiContentType != .news else { return nil }
         return Self.normalizedText(keyTakeaway)
     }
 

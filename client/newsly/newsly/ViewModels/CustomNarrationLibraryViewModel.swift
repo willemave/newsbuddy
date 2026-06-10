@@ -133,7 +133,7 @@ final class CustomNarrationLibraryViewModel: ObservableObject {
         await UnreadCountService.shared.refreshCounts()
     }
 
-    private func postReadNotification(contentId: Int, contentType: ContentType) {
+    private func postReadNotification(contentId: Int, contentType: APIContentType) {
         NotificationCenter.default.post(
             name: .contentMarkedAsRead,
             object: nil,

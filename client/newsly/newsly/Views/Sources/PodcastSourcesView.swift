@@ -183,6 +183,11 @@ struct PodcastSourcesView: View {
                         let trimmedLimit = newLimit.trimmingCharacters(in: .whitespacesAndNewlines)
                         let limitValue = Int(trimmedLimit)
 
+                        if !trimmedLimit.isEmpty && limitValue == nil {
+                            localError = "Limit must be a number between 1 and 100"
+                            return
+                        }
+
                         if let limitValue, !(1...100).contains(limitValue) {
                             localError = "Limit must be between 1 and 100"
                             return
@@ -196,8 +201,10 @@ struct PodcastSourcesView: View {
                                 feedURL: newFeedURL,
                                 limit: limitValue
                             )
-                            resetAddForm()
-                            showAddSheet = false
+                            if viewModel.errorMessage == nil {
+                                resetAddForm()
+                                showAddSheet = false
+                            }
                         }
                     }
                     .fontWeight(.semibold)

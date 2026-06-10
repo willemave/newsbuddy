@@ -49,14 +49,14 @@ struct ArticleMetadata: Codable {
         
         // Handle date parsing for publicationDate
         if let dateString = try container.decodeIfPresent(String.self, forKey: .publicationDate) {
-            publicationDate = DateParser.parse(dateString)
+            publicationDate = ServerDate.parse(dateString)
         } else {
             publicationDate = nil
         }
         
         // Handle date parsing for summarizationDate
         if let dateString = try container.decodeIfPresent(String.self, forKey: .summarizationDate) {
-            summarizationDate = DateParser.parse(dateString)
+            summarizationDate = ServerDate.parse(dateString)
         } else {
             summarizationDate = nil
         }
@@ -82,40 +82,5 @@ struct ArticleMetadata: Codable {
         if let date = summarizationDate {
             try container.encode(ISO8601DateFormatter().string(from: date), forKey: .summarizationDate)
         }
-    }
-}
-
-// Helper for parsing dates from various formats
-struct DateParser {
-    static func parse(_ dateString: String) -> Date? {
-        // Try ISO8601 with fractional seconds
-        let iso8601WithFractional = ISO8601DateFormatter()
-        iso8601WithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso8601WithFractional.date(from: dateString) {
-            return date
-        }
-        
-        // Try ISO8601 without fractional seconds
-        let iso8601 = ISO8601DateFormatter()
-        iso8601.formatOptions = [.withInternetDateTime]
-        if let date = iso8601.date(from: dateString) {
-            return date
-        }
-        
-        // Try basic ISO format with microseconds
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-        formatter.timeZone = TimeZone(abbreviation: "UTC")
-        if let date = formatter.date(from: dateString) {
-            return date
-        }
-        
-        // Try without microseconds
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        if let date = formatter.date(from: dateString) {
-            return date
-        }
-        
-        return nil
     }
 }

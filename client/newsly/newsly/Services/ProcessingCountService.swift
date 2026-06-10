@@ -7,6 +7,9 @@
 
 import Combine
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.newsly", category: "ProcessingCountService")
 
 struct ProcessingCountResponse: Codable {
     let processingCount: Int
@@ -31,34 +34,50 @@ final class ProcessingCountService: ObservableObject {
     @Published var newsProcessingCount: Int = 0
     @Published var newsCrawlCount: Int = 0
 
-    private let client = APIClient.shared
-    private var refreshTimer: Timer?
+    private let badgeStatsCoordinator = BadgeStatsRefreshCoordinator.shared
 
     private init() {
-        startPeriodicRefresh()
-    }
-
-    deinit {
-        refreshTimer?.invalidate()
+        badgeStatsCoordinator.attachProcessingService(self)
     }
 
     func refreshCount() async {
-        do {
-            let response: ProcessingCountResponse = try await client.request(APIEndpoints.processingCount)
-            processingCount = response.processingCount
-            longFormProcessingCount = response.longFormCount
-            newsProcessingCount = response.newsCount
-            newsCrawlCount = response.newsCrawlCount
-        } catch {
-            print("Failed to fetch processing count: \(error)")
-        }
+        logger.debug("Refreshing processing count through combined badge stats endpoint")
+        await badgeStatsCoordinator.refreshStats()
     }
 
-    private func startPeriodicRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
-            Task {
-                await self.refreshCount()
-            }
+    @discardableResult
+    func applyCount(_ response: ProcessingCountResponse) -> Bool {
+        var didChange = false
+        if processingCount != response.processingCount {
+            processingCount = response.processingCount
+            didChange = true
+        }
+        if longFormProcessingCount != response.longFormCount {
+            longFormProcessingCount = response.longFormCount
+            didChange = true
+        }
+        if newsProcessingCount != response.newsCount {
+            newsProcessingCount = response.newsCount
+            didChange = true
+        }
+        if newsCrawlCount != response.newsCrawlCount {
+            newsCrawlCount = response.newsCrawlCount
+            didChange = true
+        }
+        return didChange
+    }
+
+    func stopPeriodicRefresh(resetCounts: Bool = false) {
+        badgeStatsCoordinator.stop(resetCounts: resetCounts)
+        if resetCounts {
+            applyCount(
+                ProcessingCountResponse(
+                    processingCount: 0,
+                    longFormCount: 0,
+                    newsCount: 0,
+                    newsCrawlCount: 0
+                )
+            )
         }
     }
 }

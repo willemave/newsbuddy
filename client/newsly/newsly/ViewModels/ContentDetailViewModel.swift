@@ -50,11 +50,11 @@ class ContentDetailViewModel: ObservableObject {
     private let scraperConfigService = ScraperConfigService.shared
     private let submitLinkToLongFormHandler: (URL, String?) async throws -> SubmitContentResponse
     private var contentId: Int = 0
-    private var contentType: ContentType?
+    private var contentType: APIContentType?
     
     init(
         contentId: Int = 0,
-        contentType: ContentType? = nil,
+        contentType: APIContentType? = nil,
         submitLinkToLongFormHandler: @escaping (URL, String?) async throws -> SubmitContentResponse = {
             url,
             title in
@@ -66,7 +66,7 @@ class ContentDetailViewModel: ObservableObject {
         self.submitLinkToLongFormHandler = submitLinkToLongFormHandler
     }
     
-    func updateContentId(_ newId: Int, contentType newContentType: ContentType? = nil) {
+    func updateContentId(_ newId: Int, contentType newContentType: APIContentType? = nil) {
         self.contentId = newId
         if let newContentType {
             self.contentType = newContentType
@@ -121,7 +121,7 @@ class ContentDetailViewModel: ObservableObject {
                 await self.trackOpenedInteraction(for: fetched)
             }
 
-            if fetched.bodyAvailable && fetched.contentTypeEnum != .news {
+            if fetched.bodyAvailable && fetched.apiContentType != .news {
                 Task {
                     await self.loadContentBody(for: fetched)
                 }
@@ -146,7 +146,7 @@ class ContentDetailViewModel: ObservableObject {
 
     func canShowReader(for content: ContentDetail) -> Bool {
         guard content.bodyAvailable else { return false }
-        return content.contentTypeEnum == .article || content.contentTypeEnum == .news
+        return content.apiContentType == .article || content.apiContentType == .news
     }
 
     func loadReaderBody(for content: ContentDetail, force: Bool = false) async {
@@ -162,7 +162,7 @@ class ContentDetailViewModel: ObservableObject {
             let body = try await fetchReaderBody(for: content)
             guard self.contentId == content.id,
                   self.content?.id == content.id,
-                  self.content?.contentTypeEnum == content.contentTypeEnum else {
+                  self.content?.apiContentType == content.apiContentType else {
                 logger.debug("[ContentDetail] Ignoring stale reader body | requestedId=\(content.id) currentId=\(self.contentId)")
                 return
             }
@@ -180,7 +180,7 @@ class ContentDetailViewModel: ObservableObject {
         do {
             let body = try await contentService.fetchContentBody(
                 id: fetched.id,
-                contentType: fetched.contentTypeEnum
+                contentType: fetched.apiContentType
             )
             guard self.contentId == fetched.id else {
                 logger.debug("[ContentDetail] Ignoring stale content body | requestedId=\(fetched.id) currentId=\(self.contentId)")
@@ -199,7 +199,7 @@ class ContentDetailViewModel: ObservableObject {
             let renderedBody = try await contentService.fetchContentBody(
                 id: content.id,
                 variant: "rendered",
-                contentType: content.contentTypeEnum
+                contentType: content.apiContentType
             )
             if !renderedBody.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return renderedBody
@@ -213,7 +213,7 @@ class ContentDetailViewModel: ObservableObject {
         return try await contentService.fetchContentBody(
             id: content.id,
             variant: "source",
-            contentType: content.contentTypeEnum
+            contentType: content.apiContentType
         )
     }
 
@@ -223,9 +223,19 @@ class ContentDetailViewModel: ObservableObject {
             return
         }
 
+        // Only issue the server-side mark-as-read for the item that is still
+        // current. During fast cascade navigation this task can run after the
+        // user has already moved on, and the network call fires before the
+        // post-await guard below — without this check, transited (unread) items
+        // get marked read server-side and their counts decremented.
+        guard self.contentId == fetched.id else {
+            logger.debug("[ContentDetail] Skipping mark-as-read for transited item | requestedId=\(fetched.id) currentId=\(self.contentId)")
+            return
+        }
+
         do {
             logger.info("[ContentDetail] Content not read, marking as read | contentId=\(fetched.id) type=\(fetched.contentType, privacy: .public)")
-            try await contentService.markContentAsRead(id: fetched.id, contentType: fetched.contentTypeEnum)
+            try await contentService.markContentAsRead(id: fetched.id, contentType: fetched.apiContentType)
             logger.info("[ContentDetail] Successfully marked as read | contentId=\(fetched.id)")
 
             guard self.contentId == fetched.id else {
@@ -288,6 +298,17 @@ class ContentDetailViewModel: ObservableObject {
 
         let activityVC = UIActivityViewController(activityItems: items, applicationActivities: nil)
         presentActivityViewControllerWhenReady(activityVC)
+    }
+
+    func markdownForShare(option: ShareContentOption) -> String? {
+        switch option {
+        case .light:
+            return nil
+        case .medium:
+            return buildMediumMarkdown()
+        case .full:
+            return buildFullMarkdown() ?? buildMediumMarkdown()
+        }
     }
     
     func toggleKnowledgeSave() async {
@@ -563,6 +584,73 @@ class ContentDetailViewModel: ObservableObject {
         return uniqueNonEmpty(quotes)
     }
 
+    private func markdownHeading(_ title: String, level: Int) -> String {
+        let clampedLevel = min(max(level, 1), 6)
+        return String(repeating: "#", count: clampedLevel) + " " + title
+    }
+
+    private func buildLongformArtifactSummaryMarkdown(
+        _ artifact: LongformArtifactEnvelope,
+        headingLevel: Int
+    ) -> String? {
+        let payload = artifact.artifact.payload
+        var sections: [String] = []
+
+        if let summaryText = normalizedText(payload.overview) ?? normalizedText(artifact.oneLine) {
+            sections.append("\(markdownHeading("Summary", level: headingLevel))\n\(summaryText)")
+        }
+
+        if let takeaway = normalizedText(payload.takeaway) {
+            sections.append("\(markdownHeading("Takeaway", level: headingLevel))\n\(takeaway)")
+        }
+
+        let keyPointLines = payload.keyPoints.compactMap { point -> String? in
+            guard let heading = normalizedText(point.heading),
+                  let content = normalizedText(point.content) else {
+                return nil
+            }
+            return "- \(heading): \(content)"
+        }
+        if !keyPointLines.isEmpty {
+            sections.append(
+                "\(markdownHeading("Key Points", level: headingLevel))\n"
+                + keyPointLines.joined(separator: "\n")
+            )
+        }
+
+        let quoteBlocks = payload.quotes.compactMap { quote -> String? in
+            guard let text = normalizedText(quote.text) else { return nil }
+            var block = "> \(text)"
+            if let attribution = normalizedText(quote.attribution) {
+                block += "\n> - \(attribution)"
+            }
+            return block
+        }
+        if !quoteBlocks.isEmpty {
+            sections.append(
+                "\(markdownHeading("Source Quotes", level: headingLevel))\n"
+                + quoteBlocks.joined(separator: "\n\n")
+            )
+        }
+
+        let extraSections = LongformExtrasSection.orderedSections(from: payload.extrasRaw)
+        let extraHeadingLevel = min(headingLevel + 1, 6)
+        let extraBlocks = extraSections.compactMap { section -> String? in
+            let items = uniqueNonEmpty(section.items)
+            guard !items.isEmpty else { return nil }
+            let bullets = items.map { "- \($0)" }.joined(separator: "\n")
+            return "\(markdownHeading(section.title, level: extraHeadingLevel))\n\(bullets)"
+        }
+        if !extraBlocks.isEmpty {
+            sections.append(
+                "\(markdownHeading("Extra", level: headingLevel))\n\n"
+                + extraBlocks.joined(separator: "\n\n")
+            )
+        }
+
+        return sections.isEmpty ? nil : sections.joined(separator: "\n\n")
+    }
+
     private func buildFullMarkdown() -> String? {
         guard let content = content else { return nil }
 
@@ -588,7 +676,15 @@ class ContentDetailViewModel: ObservableObject {
             || content.interleavedSummaryV2 != nil
             || content.editorialSummary != nil
 
-        if hasTemplateSummaryData {
+        let longformArtifactSummaryMarkdown = content.longformArtifact.flatMap {
+            buildLongformArtifactSummaryMarkdown($0, headingLevel: 3)
+        }
+
+        if let longformArtifactSummaryMarkdown {
+            fullText += "## Summary\n\n"
+            fullText += longformArtifactSummaryMarkdown
+            fullText += "\n\n---\n\n"
+        } else if hasTemplateSummaryData {
             fullText += "## Summary\n\n"
 
             if let overview {
@@ -688,20 +784,29 @@ class ContentDetailViewModel: ObservableObject {
 
         var sections: [String] = []
         sections.append("# \(content.displayTitle)")
-        if let overview = resolvedOverviewText(for: content) {
-            sections.append("## Summary\n\(overview)")
+
+        let longformArtifactSummaryMarkdown = content.longformArtifact.flatMap {
+            buildLongformArtifactSummaryMarkdown($0, headingLevel: 2)
         }
 
-        let keyPoints = resolvedKeyPointTexts(for: content)
-        if !keyPoints.isEmpty {
-            let bullets = keyPoints.map { "- \($0)" }.joined(separator: "\n")
-            sections.append("## Key Points\n\(bullets)")
-        }
+        if let longformArtifactSummaryMarkdown {
+            sections.append(longformArtifactSummaryMarkdown)
+        } else {
+            if let overview = resolvedOverviewText(for: content) {
+                sections.append("## Summary\n\(overview)")
+            }
 
-        let quotes = resolvedQuoteTexts(for: content)
-        if !quotes.isEmpty {
-            let quoteText = quotes.map { "> \($0)" }.joined(separator: "\n")
-            sections.append("## Quotes\n\(quoteText)")
+            let keyPoints = resolvedKeyPointTexts(for: content)
+            if !keyPoints.isEmpty {
+                let bullets = keyPoints.map { "- \($0)" }.joined(separator: "\n")
+                sections.append("## Key Points\n\(bullets)")
+            }
+
+            let quotes = resolvedQuoteTexts(for: content)
+            if !quotes.isEmpty {
+                let quoteText = quotes.map { "> \($0)" }.joined(separator: "\n")
+                sections.append("## Quotes\n\(quoteText)")
+            }
         }
 
         if let shareURL = resolvedShareURLString(for: content) {
@@ -727,12 +832,12 @@ class ContentDetailViewModel: ObservableObject {
             }
             return items
         case .medium:
-            if let mediumText = buildMediumMarkdown() {
+            if let mediumText = markdownForShare(option: .medium) {
                 return [MarkdownItemProvider(markdown: mediumText, subject: content.displayTitle)]
             }
             return buildShareItems(option: .light)
         case .full:
-            if let fullText = buildFullMarkdown() {
+            if let fullText = markdownForShare(option: .full) {
                 return [MarkdownItemProvider(markdown: fullText, subject: content.displayTitle)]
             }
             return buildShareItems(option: .medium)

@@ -107,11 +107,9 @@ struct RecentlyReadView: View {
                     selectedDate: $viewModel.selectedDate,
                     selectedReadFilter: $viewModel.selectedReadFilter,
                     contentTypes: viewModel.contentTypes,
-                    availableDates: viewModel.availableDates
+                    availableDates: viewModel.availableDates,
+                    showsReadStatus: false
                 )
-                .onDisappear {
-                    Task { await viewModel.loadRecentlyRead() }
-                }
             }
         }
         .navigationTitle("Recently Read")

@@ -300,33 +300,7 @@ struct SubmissionStatusItem: Codable, Identifiable {
     }
 
     private func parseDate(from dateString: String) -> Date? {
-        let iso8601WithFractional = ISO8601DateFormatter()
-        iso8601WithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso8601WithFractional.date(from: dateString) {
-            return date
-        }
-
-        let iso8601 = ISO8601DateFormatter()
-        iso8601.formatOptions = [.withInternetDateTime]
-        if let date = iso8601.date(from: dateString) {
-            return date
-        }
-
-        let formatterWithMicroseconds = DateFormatter()
-        formatterWithMicroseconds.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-        formatterWithMicroseconds.timeZone = TimeZone(abbreviation: "UTC")
-        if let date = formatterWithMicroseconds.date(from: dateString) {
-            return date
-        }
-
-        let formatterWithoutMicroseconds = DateFormatter()
-        formatterWithoutMicroseconds.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        formatterWithoutMicroseconds.timeZone = TimeZone(abbreviation: "UTC")
-        if let date = formatterWithoutMicroseconds.date(from: dateString) {
-            return date
-        }
-
-        return nil
+        ServerDate.parse(dateString)
     }
 }
 

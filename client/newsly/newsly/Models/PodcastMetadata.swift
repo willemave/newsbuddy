@@ -62,7 +62,7 @@ struct PodcastMetadata: Codable {
         
         // Handle date parsing for summarizationDate
         if let dateString = try container.decodeIfPresent(String.self, forKey: .summarizationDate) {
-            summarizationDate = DateParser.parse(dateString)
+            summarizationDate = ServerDate.parse(dateString)
         } else {
             summarizationDate = nil
         }

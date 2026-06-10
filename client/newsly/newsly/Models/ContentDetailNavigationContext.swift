@@ -19,13 +19,13 @@ enum ContentDetailNavigationSurface: String, Codable, Hashable {
 
 struct ContentDetailNavigationContext {
     let initialContentId: Int
-    let initialContentType: ContentType?
+    let initialContentType: APIContentType?
     let contentIds: [Int]
     let surface: ContentDetailNavigationSurface
 
     init(
         initialContentId: Int,
-        initialContentType: ContentType?,
+        initialContentType: APIContentType?,
         contentIds: [Int],
         surface: ContentDetailNavigationSurface
     ) {

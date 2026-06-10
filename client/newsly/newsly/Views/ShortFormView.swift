@@ -26,6 +26,8 @@ struct ShortFormView: View {
     @State private var fastNewsAudioEpisode: AudioEpisode?
     @State private var isPreparingFastNewsAudio = false
     @State private var fastNewsAudioErrorMessage: String?
+    @State private var fastNewsAudioTask: Task<Void, Never>?
+    @State private var quickActionTask: Task<Void, Never>?
 
     private let bottomActionScrollPadding: CGFloat = 96
 
@@ -79,7 +81,7 @@ struct ShortFormView: View {
                                 TapGesture().onEnded {
                                     let route = ContentDetailRoute(
                                         contentId: item.id,
-                                        contentType: item.contentTypeEnum ?? .news,
+                                        contentType: item.apiContentType ?? .news,
                                         allContentIds: items.map(\.id),
                                         navigationSurface: .fastNews
                                     )
@@ -158,6 +160,12 @@ struct ShortFormView: View {
                 await processingCountService.refreshCount()
             }
         }
+        .onDisappear {
+            fastNewsAudioTask?.cancel()
+            fastNewsAudioTask = nil
+            quickActionTask?.cancel()
+            quickActionTask = nil
+        }
         .alert(
             "Mark all news items as read?",
             isPresented: $showMarkAllConfirmation
@@ -203,7 +211,8 @@ struct ShortFormView: View {
         isPreparingFastNewsAudio = true
         fastNewsAudioErrorMessage = nil
 
-        Task { @MainActor in
+        fastNewsAudioTask?.cancel()
+        fastNewsAudioTask = Task { @MainActor in
             let startedAt = Date()
             logger.info("[FastNewsAudio] flow started")
             defer { isPreparingFastNewsAudio = false }
@@ -380,7 +389,8 @@ struct ShortFormView: View {
         activeQuickActionId = action.id
         quickActionErrorMessage = nil
 
-        Task { @MainActor in
+        quickActionTask?.cancel()
+        quickActionTask = Task { @MainActor in
             defer { activeQuickActionId = nil }
 
             do {
@@ -503,7 +513,7 @@ private struct ShortNewsRow: View, Equatable {
     }
 
     private var titleFont: Font {
-        .terracottaHeadlineCompact
+        .appSerif(size: 22, weight: .medium)
     }
 
     private var metadataColor: Color {

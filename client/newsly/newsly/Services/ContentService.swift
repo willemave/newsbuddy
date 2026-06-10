@@ -246,7 +246,7 @@ class ContentService {
     func fetchContentBody(
         id: Int,
         variant: String = "source",
-        contentType: ContentType? = nil
+        contentType: APIContentType? = nil
     ) async throws -> ContentBody {
         let path = if contentType == .news {
             APIEndpoints.newsItemBody(id: id)
@@ -260,7 +260,7 @@ class ContentService {
         return try await client.request(endpoint)
     }
 
-    func refreshContentDiscussion(id: Int, contentType: ContentType? = nil) async throws -> ContentDiscussion {
+    func refreshContentDiscussion(id: Int, contentType: APIContentType? = nil) async throws -> ContentDiscussion {
         let path = if contentType == .news {
             APIEndpoints.newsItemDiscussionRefresh(id: id)
         } else {
@@ -273,7 +273,7 @@ class ContentService {
         return try await client.request(endpoint)
     }
 
-    func fetchContentDiscussion(id: Int, contentType: ContentType? = nil) async throws -> ContentDiscussion {
+    func fetchContentDiscussion(id: Int, contentType: APIContentType? = nil) async throws -> ContentDiscussion {
         let path = if contentType == .news {
             APIEndpoints.newsItemDiscussion(id: id)
         } else {
@@ -369,7 +369,7 @@ class ContentService {
         )
     }
     
-    func markContentAsRead(id: Int, contentType: ContentType? = nil) async throws {
+    func markContentAsRead(id: Int, contentType: APIContentType? = nil) async throws {
         logger.info(
             "[ContentService] markContentAsRead called | id=\(id) contentType=\(contentType?.rawValue ?? "nil", privacy: .public)"
         )
@@ -519,10 +519,23 @@ class ContentService {
         return try await client.request(APIEndpoints.knowledgeLibraryList, queryItems: queryItems)
     }
 
-    func fetchRecentlyReadList(cursor: String? = nil, limit: Int = 25) async throws -> ContentListResponse {
+    func fetchRecentlyReadList(
+        contentType: String? = nil,
+        date: String? = nil,
+        cursor: String? = nil,
+        limit: Int = 25
+    ) async throws -> ContentListResponse {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: String(limit))
         ]
+
+        if let contentType, contentType != "all" {
+            queryItems.append(URLQueryItem(name: "content_type", value: contentType))
+        }
+
+        if let date, !date.isEmpty {
+            queryItems.append(URLQueryItem(name: "date", value: date))
+        }
 
         if let cursor = cursor {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))

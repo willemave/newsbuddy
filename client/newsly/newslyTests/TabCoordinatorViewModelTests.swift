@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class TabCoordinatorViewModelTests: XCTestCase {
-    func testHandleTabChangeDoesNotResetOutgoingShortNewsState() {
+    func testHandleTabChangeKeepsIncomingLongFormStableWhenAlreadyLoaded() {
         let shortRepository = FakeContentRepository()
         let longRepository = FakeContentRepository()
         let shortViewModel = ShortNewsListViewModel(
@@ -30,6 +30,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
 
         XCTAssertEqual(shortViewModel.currentItems().map(\.id), [1])
         XCTAssertEqual(shortViewModel.state, .idle)
+        XCTAssertEqual(longViewModel.currentItems().map(\.id), [2])
+        XCTAssertEqual(longViewModel.state, .idle)
         XCTAssertEqual(longRepository.loadPageCallCount, 0)
     }
 
@@ -344,7 +346,7 @@ private final class PendingContentRepository: ContentRepositoryType {
     private(set) var loadPageCallCount = 0
 
     func loadPage(
-        contentTypes: [ContentType],
+        contentTypes: [APIContentType],
         readFilter: ReadFilter,
         cursor: String?,
         limit: Int?
@@ -368,7 +370,7 @@ private final class FailingContentRepository: ContentRepositoryType {
     }
 
     func loadPage(
-        contentTypes: [ContentType],
+        contentTypes: [APIContentType],
         readFilter: ReadFilter,
         cursor: String?,
         limit: Int?
@@ -384,7 +386,7 @@ private final class FailingContentRepository: ContentRepositoryType {
 
 private final class FakeContentRepository: ContentRepositoryType {
     struct LoadPageRequest {
-        let contentTypes: [ContentType]
+        let contentTypes: [APIContentType]
         let readFilter: ReadFilter
         let cursor: String?
         let limit: Int?
@@ -399,7 +401,7 @@ private final class FakeContentRepository: ContentRepositoryType {
     }
 
     func loadPage(
-        contentTypes: [ContentType],
+        contentTypes: [APIContentType],
         readFilter: ReadFilter,
         cursor: String?,
         limit: Int?

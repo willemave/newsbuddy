@@ -301,8 +301,8 @@ struct ContentView: View {
         guard let contentId = E2ETestLaunch.openContentId else { return }
 
         hasAppliedE2EOpenContentRoute = true
-        let rawType = E2ETestLaunch.openContentType ?? ContentType.news.rawValue
-        let contentType = ContentType(rawValue: rawType) ?? .news
+        let rawType = E2ETestLaunch.openContentType ?? APIContentType.news.rawValue
+        let contentType = APIContentType(rawValue: rawType) ?? .news
         let route = ContentDetailRoute(
             contentId: contentId,
             contentType: contentType,
@@ -317,7 +317,7 @@ struct ContentView: View {
                 tabCoordinator.selectedTab = .shortNews
                 shortFormPath = NavigationPath()
                 shortFormPath.append(route)
-            case .article, .podcast:
+            case .article, .podcast, .insight_report, .unknown:
                 tabCoordinator.selectedTab = .longContent
                 longFormPath = NavigationPath()
                 longFormPath.append(route)

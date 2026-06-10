@@ -7,6 +7,9 @@
 
 import Combine
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.newsly", category: "UnreadCountService")
 
 struct UnreadCountsResponse: Codable {
     let article: Int
@@ -37,34 +40,39 @@ class UnreadCountService: ObservableObject {
         newsCount
     }
 
-    private let client = APIClient.shared
-    private var refreshTimer: Timer?
+    private let badgeStatsCoordinator = BadgeStatsRefreshCoordinator.shared
 
     private init() {
-        // Start periodic refresh
-        startPeriodicRefresh()
-    }
-
-    deinit {
-        refreshTimer?.invalidate()
+        badgeStatsCoordinator.attachUnreadService(self)
     }
 
     func refreshCounts() async {
-        do {
-            let response: UnreadCountsResponse = try await client.request(APIEndpoints.unreadCounts)
+        logger.debug("Refreshing unread counts through combined badge stats endpoint")
+        await badgeStatsCoordinator.refreshStats()
+    }
+
+    @discardableResult
+    func applyCounts(_ response: UnreadCountsResponse) -> Bool {
+        var didChange = false
+        if articleCount != response.article {
             articleCount = response.article
-            podcastCount = response.podcast
-            newsCount = response.news
-        } catch {
-            print("Failed to fetch unread counts: \(error)")
+            didChange = true
         }
+        if podcastCount != response.podcast {
+            podcastCount = response.podcast
+            didChange = true
+        }
+        if newsCount != response.news {
+            newsCount = response.news
+            didChange = true
+        }
+        return didChange
     }
     
-    private func startPeriodicRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
-            Task {
-                await self.refreshCounts()
-            }
+    func stopPeriodicRefresh(resetCounts: Bool = false) {
+        badgeStatsCoordinator.stop(resetCounts: resetCounts)
+        if resetCounts {
+            applyCounts(UnreadCountsResponse(article: 0, podcast: 0, news: 0))
         }
     }
     

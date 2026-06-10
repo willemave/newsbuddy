@@ -141,8 +141,11 @@ final class LearningDecksViewModel: ObservableObject {
     }
 
     private func upsert(_ deck: LearningDeck) {
-        decks.removeAll { $0.id == deck.id }
-        decks.insert(deck, at: 0)
+        if let index = decks.firstIndex(where: { $0.id == deck.id }) {
+            decks[index] = deck
+        } else {
+            decks.insert(deck, at: 0)
+        }
         startPollingIfNeeded(deck)
     }
 

@@ -48,8 +48,7 @@ struct SuggestionDetailSheet: View {
             // Rationale / description
             if let rationale = suggestion.rationale, !rationale.isEmpty {
                 Text(rationale)
-                    .font(.editorialBody)
-                    .italic()
+                    .font(.appSansItalic(size: 16, relativeTo: .body))
                     .foregroundColor(.editorialSub)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -57,8 +56,7 @@ struct SuggestionDetailSheet: View {
                     .padding(.top, 14)
             } else if let desc = suggestion.description, !desc.isEmpty {
                 Text(desc)
-                    .font(.editorialBody)
-                    .italic()
+                    .font(.appSansItalic(size: 16, relativeTo: .body))
                     .foregroundColor(.editorialSub)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)

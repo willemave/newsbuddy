@@ -53,7 +53,7 @@ struct BulletedSummaryView: View {
 
                 if !point.quotes.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(point.quotes, id: \.text) { quote in
+                        ForEach(Array(point.quotes.enumerated()), id: \.offset) { _, quote in
                             quoteCard(quote)
                         }
                     }
@@ -68,8 +68,7 @@ struct BulletedSummaryView: View {
     private func quoteCard(_ quote: Quote) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(quote.text)
-                .font(.appSubheadline)
-                .italic()
+                .font(.appSansItalic(size: 15, relativeTo: .subheadline))
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 

@@ -8,6 +8,11 @@ import XCTest
 @testable import newsly
 
 final class ContentTimestampFormatterTests: XCTestCase {
+    func testServerDateSupportsUtcDesignatorAndLegacyNaiveUtc() {
+        XCTAssertNotNil(ServerDate.parse("2026-04-02T21:47:46Z"))
+        XCTAssertNotNil(ServerDate.parse("2026-04-02T21:47:46.871157"))
+    }
+
     func testParseSupportsMicrosecondTimestampWithoutTimezone() {
         XCTAssertNotNil(
             ContentTimestampFormatter.parse("2026-04-02T21:47:46.871157")

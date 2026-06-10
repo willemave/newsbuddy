@@ -118,7 +118,7 @@ struct SourceMetadata: Codable, Hashable {
 
     var publishedDateDisplay: String? {
         guard let publishedAt = normalized(publishedAt) else { return nil }
-        guard let date = DateParser.parse(publishedAt) else {
+        guard let date = ServerDate.parse(publishedAt) else {
             return String(publishedAt.prefix(10))
         }
         return Self.displayDateFormatter.string(from: date)

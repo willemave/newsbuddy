@@ -8,6 +8,17 @@
 import UIKit
 import UniformTypeIdentifiers
 
+fileprivate extension UIColor {
+    // The Share Extension is a separate target with no access to the app's SwiftUI design tokens,
+    // so the one-accent terracotta brand color is defined locally to match the app's default-palette
+    // brandPrimary (light #864f4f, dark #b87979).
+    static let brandAccent = UIColor { traitCollection in
+        traitCollection.userInterfaceStyle == .dark
+            ? UIColor(red: 0.722, green: 0.475, blue: 0.475, alpha: 1.0)
+            : UIColor(red: 0.525, green: 0.310, blue: 0.310, alpha: 1.0)
+    }
+}
+
 fileprivate enum ShareExtensionTypography {
     // The Share Extension is a separate target, so it cannot depend on the app's SwiftUI design tokens.
     static let bodyFamily = "Roboto-Regular"
@@ -235,6 +246,8 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         var configuration = UIButton.Configuration.filled()
         configuration.title = "Submit"
         configuration.cornerStyle = .medium
+        configuration.baseBackgroundColor = .brandAccent
+        configuration.baseForegroundColor = .white
         submitButton.configuration = configuration
         submitButton.addTarget(self, action: #selector(handleSubmitTapped), for: .touchUpInside)
     }
@@ -552,7 +565,7 @@ private final class OptionRowView: UIControl {
         descriptionLabel.textColor = .secondaryLabel
         descriptionLabel.numberOfLines = 0
 
-        indicatorView.tintColor = .systemBlue
+        indicatorView.tintColor = .brandAccent
         indicatorView.setContentHuggingPriority(.required, for: .horizontal)
         indicatorView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
@@ -600,7 +613,7 @@ private final class OptionRowView: UIControl {
     private func updateSelectionState() {
         if isSelected {
             indicatorView.image = UIImage(systemName: "checkmark.circle.fill")
-            layer.borderColor = UIColor.systemBlue.cgColor
+            layer.borderColor = UIColor.brandAccent.cgColor
         } else {
             indicatorView.image = UIImage(systemName: "circle")
             layer.borderColor = UIColor.separator.cgColor

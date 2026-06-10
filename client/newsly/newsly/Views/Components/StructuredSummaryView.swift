@@ -40,7 +40,7 @@ struct StructuredSummaryView: View {
                     isExpanded: $isQuotesExpanded
                 ) {
                     VStack(alignment: .leading, spacing: 16) {
-                        ForEach(summary.quotes, id: \.text) { quote in
+                        ForEach(Array(summary.quotes.enumerated()), id: \.offset) { _, quote in
                             modernQuoteCard(quote: quote)
                         }
                     }
@@ -56,7 +56,7 @@ struct StructuredSummaryView: View {
                     isExpanded: $isKeyPointsExpanded
                 ) {
                     VStack(alignment: .leading, spacing: SummaryDesign.itemSpacing) {
-                        ForEach(summary.bulletPoints, id: \.text) { point in
+                        ForEach(Array(summary.bulletPoints.enumerated()), id: \.offset) { _, point in
                             ModernKeyPointRow(
                                 point: point,
                                 contentId: contentId,
@@ -177,8 +177,7 @@ struct StructuredSummaryView: View {
     private func modernQuoteCard(quote: Quote) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(quote.text)
-                .font(.appCallout)
-                .italic()
+                .font(.appSansItalic(size: 16, relativeTo: .callout))
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 

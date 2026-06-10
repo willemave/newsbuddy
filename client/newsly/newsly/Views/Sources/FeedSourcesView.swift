@@ -185,8 +185,10 @@ struct FeedSourcesView: View {
                                 displayName: newFeedName.isEmpty ? nil : newFeedName,
                                 feedURL: newFeedURL
                             )
-                            resetAddForm()
-                            showAddSheet = false
+                            if viewModel.errorMessage == nil {
+                                resetAddForm()
+                                showAddSheet = false
+                            }
                         }
                     }
                     .fontWeight(.semibold)

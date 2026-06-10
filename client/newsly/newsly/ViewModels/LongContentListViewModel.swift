@@ -163,7 +163,7 @@ final class LongContentListViewModel: BaseContentListViewModel {
         }
 
         let reductions = markedItems.reduce(into: (articles: 0, podcasts: 0)) { partial, item in
-            switch item.contentTypeEnum {
+            switch item.apiContentType {
             case .article:
                 partial.articles += 1
             case .podcast:
@@ -242,7 +242,7 @@ final class LongContentListViewModel: BaseContentListViewModel {
     }
 
     private func decrementCount(for item: ContentSummary) {
-        switch item.contentTypeEnum {
+        switch item.apiContentType {
         case .article:
             unreadCountService.decrementArticleCount()
         case .podcast:

@@ -27,7 +27,7 @@ struct InterleavedSummaryV2View: View {
             if !summary.keyPoints.isEmpty {
                 sectionHeader("Key Points", icon: "list.bullet.rectangle", tint: .terracottaPrimary)
                 VStack(alignment: .leading, spacing: InterleavedV2Design.itemSpacing) {
-                    ForEach(summary.keyPoints, id: \.text) { point in
+                    ForEach(Array(summary.keyPoints.enumerated()), id: \.offset) { _, point in
                         bulletRow(text: point.text)
                     }
                 }
@@ -36,7 +36,7 @@ struct InterleavedSummaryV2View: View {
             if !summary.quotes.isEmpty {
                 sectionHeader("Notable Quotes", icon: "quote.opening", tint: .brandPrimary)
                 VStack(alignment: .leading, spacing: 16) {
-                    ForEach(summary.quotes, id: \.text) { quote in
+                    ForEach(Array(summary.quotes.enumerated()), id: \.offset) { _, quote in
                         quoteCard(quote)
                     }
                 }
@@ -52,7 +52,7 @@ struct InterleavedSummaryV2View: View {
                                 .foregroundColor(Color.onSurface)
 
                             VStack(alignment: .leading, spacing: InterleavedV2Design.itemSpacing) {
-                                ForEach(topic.bullets, id: \.text) { bullet in
+                                ForEach(Array(topic.bullets.enumerated()), id: \.offset) { _, bullet in
                                     bulletRow(text: bullet.text)
                                 }
                             }
@@ -107,8 +107,7 @@ struct InterleavedSummaryV2View: View {
     private func quoteCard(_ quote: Quote) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(quote.text)
-                .font(.appCallout)
-                .italic()
+                .font(.appSansItalic(size: 16, relativeTo: .callout))
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 

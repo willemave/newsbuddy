@@ -38,6 +38,12 @@ appId: "${APP_ID}"
     text: Latent Space
 - tapOn:
     text: Continue
+- assertVisible:
+    text: Add news aggregators
+- tapOn:
+    text: Continue
+- assertVisible:
+    text: Add subreddit feeds
 - tapOn:
     text: Start with .* sources
 - assertVisible:

@@ -75,7 +75,8 @@ struct ArticleCardView: View {
                 let thumbnailUrl = content.thumbnailUrl.flatMap { buildImageURL(from: $0) }
                 CachedAsyncImage(
                     url: imageUrl,
-                    thumbnailUrl: thumbnailUrl
+                    thumbnailUrl: thumbnailUrl,
+                    targetSize: CGSize(width: UIScreen.main.bounds.width, height: heroImageHeight)
                 ) { image in
                     image
                         .resizable()

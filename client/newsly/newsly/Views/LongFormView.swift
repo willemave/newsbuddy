@@ -256,7 +256,7 @@ struct LongFormView: View {
     }
 
     private func supportsAudioDiscussion(for content: ContentSummary) -> Bool {
-        guard let type = content.contentTypeEnum else { return false }
+        guard let type = content.apiContentType else { return false }
         return type == .article || type == .podcast
     }
 

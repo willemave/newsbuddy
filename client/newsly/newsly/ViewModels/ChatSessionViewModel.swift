@@ -27,7 +27,7 @@ final class ChatSessionViewModel {
     var isSending = false
     var errorMessage: String?
     var inputText: String = ""
-    var thinkingElapsedSeconds = 0
+    var thinkingStartedAt: Date?
     var isStartingCouncil = false
     var selectingCouncilChildSessionId: Int?
     var retryingCouncilChildSessionId: Int?
@@ -43,8 +43,6 @@ final class ChatSessionViewModel {
     private let transcriptionService: any SpeechTranscribing
     private let activeSessionManager: ActiveChatSessionManager
     private let timelineReconciler = ChatTimelineReconciler()
-    @ObservationIgnored
-    private var thinkingTimer: Timer?
     let sessionId: Int
     private let initialPendingMessageId: Int?
     @ObservationIgnored
@@ -97,7 +95,6 @@ final class ChatSessionViewModel {
     }
 
     deinit {
-        thinkingTimer?.invalidate()
         sendTask?.cancel()
         startCouncilTask?.cancel()
         retryCouncilTask?.cancel()
@@ -727,26 +724,11 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     // MARK: - Thinking Indicator
 
     private func startThinkingTimer() {
-        thinkingTimer?.invalidate()
-        thinkingElapsedSeconds = 0
-
-        let timer = Timer(
-            timeInterval: 1.0,
-            repeats: true
-        ) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                self.thinkingElapsedSeconds += 1
-            }
-        }
-        thinkingTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
+        thinkingStartedAt = Date()
     }
 
     private func stopThinkingTimer() {
-        thinkingTimer?.invalidate()
-        thinkingTimer = nil
-        thinkingElapsedSeconds = 0
+        thinkingStartedAt = nil
     }
 
     private func isCancelledOperation(_ error: Error) -> Bool {

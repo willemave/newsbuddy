@@ -346,19 +346,6 @@ class KnowledgeHubViewModel: ObservableObject {
             self?.isVoiceTranscribing = false
             self?.isVoiceActionInFlight = false
         }
-        transcriptionService.onStateChange = { [weak self] state in
-            guard let self else { return }
-            switch state {
-            case .idle:
-                self.isVoiceRecording = false
-                self.isVoiceTranscribing = false
-            case .recording:
-                self.isVoiceRecording = true
-                self.isVoiceTranscribing = false
-            case .transcribing:
-                self.isVoiceRecording = false
-                self.isVoiceTranscribing = true
-            }
-        }
+        transcriptionService.onStateChange = nil
     }
 }

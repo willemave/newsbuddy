@@ -16,7 +16,7 @@ struct ShareContent: Identifiable {
         var text = messageContent
 
         if let title = articleTitle {
-            text = "**\(title)**\n\n\(text)"
+            text = "\(title)\n\n\(text)"
         }
 
         if let url = articleUrl {

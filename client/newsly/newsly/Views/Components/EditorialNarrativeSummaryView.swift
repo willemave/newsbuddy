@@ -66,7 +66,7 @@ struct EditorialNarrativeSummaryView: View {
             if !summary.quotes.isEmpty {
                 sectionHeader("Notable Quotes", icon: "quote.opening", tint: .brandPrimary)
                 VStack(alignment: .leading, spacing: 16) {
-                    ForEach(summary.quotes, id: \.text) { quote in
+                    ForEach(Array(summary.quotes.enumerated()), id: \.offset) { _, quote in
                         quoteCard(quote)
                     }
                 }
@@ -110,8 +110,7 @@ struct EditorialNarrativeSummaryView: View {
     private func quoteCard(_ quote: Quote) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(quote.text)
-                .font(.appCallout)
-                .italic()
+                .font(.appSansItalic(size: 16, relativeTo: .callout))
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 

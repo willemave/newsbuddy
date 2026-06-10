@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct ContentTypeBadge: View {
-    let contentType: ContentType
+    let contentType: APIContentType
 
     var body: some View {
         Text(contentType.displayName)

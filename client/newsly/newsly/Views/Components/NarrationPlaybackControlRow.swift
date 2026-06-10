@@ -8,6 +8,7 @@ import SwiftUI
 
 struct NarrationPlaybackControlRow: View {
     @ObservedObject private var playbackService: NarrationPlaybackService
+    @ObservedObject private var progressState: NarrationPlaybackProgress
 
     let target: NarrationTarget?
     let isPreparing: Bool
@@ -20,6 +21,7 @@ struct NarrationPlaybackControlRow: View {
         onTogglePlayback: @escaping () -> Void
     ) {
         self._playbackService = ObservedObject(wrappedValue: playbackService)
+        self._progressState = ObservedObject(wrappedValue: playbackService.progress)
         self.target = target
         self.isPreparing = isPreparing
         self.onTogglePlayback = onTogglePlayback
@@ -116,8 +118,8 @@ struct NarrationPlaybackControlRow: View {
     private var progressScrubber: some View {
         PlaybackProgressScrubber(
             progress: progress,
-            currentTimeText: formatTime(playbackService.currentTime),
-            durationText: formatTime(playbackService.duration),
+            currentTimeText: formatTime(progressState.currentTime),
+            durationText: formatTime(progressState.duration),
             isEnabled: canSeek,
             onSeek: { nextProgress in
                 guard let target else { return }
@@ -125,7 +127,7 @@ struct NarrationPlaybackControlRow: View {
             }
         )
         .accessibilityLabel("Playback progress")
-        .accessibilityValue("\(formatTime(playbackService.currentTime)) of \(formatTime(playbackService.duration))")
+        .accessibilityValue("\(formatTime(progressState.currentTime)) of \(formatTime(progressState.duration))")
     }
 
     private var isCurrentTarget: Bool {
@@ -134,12 +136,12 @@ struct NarrationPlaybackControlRow: View {
     }
 
     private var canSeek: Bool {
-        isCurrentTarget && playbackService.duration > 0
+        isCurrentTarget && progressState.duration > 0
     }
 
     private var progress: Double {
         guard canSeek else { return 0 }
-        return min(max(playbackService.currentTime / playbackService.duration, 0), 1)
+        return min(max(progressState.currentTime / progressState.duration, 0), 1)
     }
 
     private var playbackIconName: String {

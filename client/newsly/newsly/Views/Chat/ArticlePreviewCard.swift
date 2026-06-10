@@ -18,7 +18,7 @@ struct ArticlePreviewCard: View {
                     .font(.appHeadline)
                     .lineLimit(3)
 
-                if let source {
+                if let source, !source.isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "doc.text")
                             .font(.appCaption)

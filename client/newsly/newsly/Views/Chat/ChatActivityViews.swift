@@ -6,15 +6,27 @@
 import SwiftUI
 
 struct ThinkingBubbleView: View {
-    let elapsedSeconds: Int
+    let startDate: Date?
     let statusText: String?
     @State private var isAnimating = false
 
-    private var formattedDuration: String {
+    private func elapsedSeconds(at date: Date) -> Int {
+        guard let startDate else { return 0 }
+        return max(Int(date.timeIntervalSince(startDate)), 0)
+    }
+
+    private func formattedDuration(elapsedSeconds: Int) -> String {
         String(format: "%02d:%02d", elapsedSeconds / 60, elapsedSeconds % 60)
     }
 
     var body: some View {
+        TimelineView(.periodic(from: startDate ?? Date(), by: 1.0)) { timeline in
+            let elapsedSeconds = elapsedSeconds(at: timeline.date)
+            content(elapsedSeconds: elapsedSeconds)
+        }
+    }
+
+    private func content(elapsedSeconds: Int) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 ForEach(0..<3) { index in
@@ -43,7 +55,7 @@ struct ThinkingBubbleView: View {
                     .padding(.horizontal, 4)
             }
 
-            Text(formattedDuration)
+            Text(formattedDuration(elapsedSeconds: elapsedSeconds))
                 .font(.appCaption2)
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .monospacedDigit()

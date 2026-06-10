@@ -36,7 +36,11 @@ struct ChatTimelineReconciler {
         localIdentityAliases: inout [ChatTimelineID: UUID]
     ) -> [ChatTimelineItem] {
         var byId = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
-        let incoming = detail.messages.filter { !$0.content.isEmpty || $0.hasCouncilCandidates }
+        let incoming = detail.messages.filter {
+            !$0.content.isEmpty
+                || $0.hasCouncilCandidates
+                || ($0.isProcessSummary && !$0.processSummaryText.isEmpty)
+        }
 
         for message in incoming {
             let serverId = ChatTimelineID.server(for: message)

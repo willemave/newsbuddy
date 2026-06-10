@@ -141,25 +141,6 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         cachedLastActivityDate = Self.parseDate(lastMessageAt ?? createdAt)
     }
 
-    private static let iso8601WithFractionalFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static let iso8601Formatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-
-    private static let utcMicrosecondsFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-        formatter.timeZone = TimeZone(abbreviation: "UTC")
-        return formatter
-    }()
-
     private static let displayDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
@@ -339,13 +320,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     }
 
     private static func parseDate(_ dateString: String) -> Date? {
-        if let date = Self.iso8601WithFractionalFormatter.date(from: dateString) {
-            return date
-        }
-        if let date = Self.iso8601Formatter.date(from: dateString) {
-            return date
-        }
-        return Self.utcMicrosecondsFormatter.date(from: dateString)
+        ServerDate.parse(dateString)
     }
 }
 

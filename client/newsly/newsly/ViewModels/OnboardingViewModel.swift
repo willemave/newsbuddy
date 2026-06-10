@@ -269,6 +269,7 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     func stopAudioCaptureAndDiscover() async {
+        guard audioState == .recording else { return }
         let startedAt = Date()
         audioState = .transcribing
         stopAudioTimer()

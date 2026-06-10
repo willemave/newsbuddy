@@ -17,6 +17,8 @@ struct SelectableMarkdownView: UIViewRepresentable {
     let adjustsFontForContentSizeCategory: Bool
     var onDigDeeper: ((String) -> Void)?
 
+    @Environment(\.colorScheme) private var colorScheme
+
     init(
         markdown: String,
         textColor: UIColor = .appReaderBodyText,
@@ -65,7 +67,8 @@ struct SelectableMarkdownView: UIViewRepresentable {
             baseFontName: scaledBaseFont.fontDescriptor.postscriptName,
             baseFontSize: scaledBaseFont.pointSize,
             textColorSignature: context.coordinator.colorSignature(for: resolvedTextColor),
-            linkColorSignature: linkAppearanceSignature
+            linkColorSignature: linkAppearanceSignature,
+            colorSchemeSignature: String(describing: colorScheme)
         )
 
         if context.coordinator.lastLinkAppearanceSignature != linkAppearanceSignature {
@@ -74,16 +77,30 @@ struct SelectableMarkdownView: UIViewRepresentable {
             uiView.linkTextAttributes = [.underlineStyle: NSUnderlineStyle.single.rawValue]
         }
 
-        guard context.coordinator.lastRenderKey != renderKey else { return }
+        guard context.coordinator.lastRenderKey != renderKey,
+              context.coordinator.pendingRenderKey != renderKey else { return }
 
-        let rendered = MarkdownNSRenderer(
+        let renderer = MarkdownNSRenderer(
             baseFont: scaledBaseFont,
             textColor: resolvedTextColor,
             traitCollection: uiView.traitCollection
-        ).render(markdown)
-        uiView.attributedText = rendered
-        context.coordinator.lastRenderKey = renderKey
-        uiView.invalidateIntrinsicContentSize()
+        )
+        if uiView.attributedText.length == 0 || context.coordinator.lastRenderKey?.markdown != markdown {
+            uiView.attributedText = NSAttributedString(
+                string: "\u{00a0}",
+                attributes: [
+                    .font: scaledBaseFont,
+                    .foregroundColor: resolvedTextColor
+                ]
+            )
+            uiView.invalidateIntrinsicContentSize()
+        }
+        context.coordinator.render(
+            markdown,
+            key: renderKey,
+            renderer: renderer,
+            into: uiView
+        )
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: DigDeeperTextView, context: Context) -> CGSize? {
@@ -97,7 +114,8 @@ struct SelectableMarkdownView: UIViewRepresentable {
             baseFontName: scaledBaseFont.fontDescriptor.postscriptName,
             baseFontSize: scaledBaseFont.pointSize,
             textColorSignature: context.coordinator.colorSignature(for: resolvedTextColor),
-            linkColorSignature: context.coordinator.colorSignature(for: resolvedLinkColor)
+            linkColorSignature: context.coordinator.colorSignature(for: resolvedLinkColor),
+            colorSchemeSignature: String(describing: colorScheme)
         )
 
         if let cache = context.coordinator.cachedSize,
@@ -122,6 +140,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
         let baseFontSize: CGFloat
         let textColorSignature: String
         let linkColorSignature: String
+        let colorSchemeSignature: String
     }
 
     struct SizeCacheEntry {
@@ -132,8 +151,31 @@ struct SelectableMarkdownView: UIViewRepresentable {
 
     class Coordinator {
         var lastRenderKey: RenderKey?
+        var pendingRenderKey: RenderKey?
         var lastLinkAppearanceSignature: String?
         var cachedSize: SizeCacheEntry?
+
+        func render(
+            _ markdown: String,
+            key renderKey: RenderKey,
+            renderer: MarkdownNSRenderer,
+            into textView: DigDeeperTextView
+        ) {
+            pendingRenderKey = renderKey
+            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak textView] in
+                let rendered = renderer.render(markdown)
+                DispatchQueue.main.async {
+                    guard let self,
+                          self.pendingRenderKey == renderKey,
+                          let textView else { return }
+                    textView.attributedText = rendered
+                    self.lastRenderKey = renderKey
+                    self.pendingRenderKey = nil
+                    self.cachedSize = nil
+                    textView.invalidateIntrinsicContentSize()
+                }
+            }
+        }
 
         func colorSignature(for color: UIColor) -> String {
             var red: CGFloat = 0
@@ -448,9 +490,11 @@ struct MarkdownNSRenderer {
     }
 
     private func appendTable(_ table: ParsedTable, to result: NSMutableAttributedString) {
-        let rows = [table.headers] + table.rows
+        let rows = ([table.headers] + table.rows).map { row in
+            row.map(sanitizeTableCell)
+        }
         let widths = (0..<table.headers.count).map { index in
-            rows.map { plainTextWidth(of: $0[index]) }.max() ?? 0
+            rows.map { $0[index].count }.max() ?? 0
         }
 
         if result.length > 0, !result.string.hasSuffix("\n") {
@@ -484,8 +528,8 @@ struct MarkdownNSRenderer {
         zip(zip(row, widths), alignments)
             .map { item in
                 let ((cell, width), alignment) = item
-                let text = sanitizeTableCell(cell)
-                let padding = max(width - plainTextWidth(of: text), 0)
+                let text = cell
+                let padding = max(width - text.count, 0)
                 switch alignment {
                 case .leading:
                     return " " + text + String(repeating: " ", count: padding) + " "
@@ -524,10 +568,6 @@ struct MarkdownNSRenderer {
         return rendered.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func plainTextWidth(of text: String) -> Int {
-        sanitizeTableCell(text).count
-    }
-
     // MARK: - Block Styling
 
     private func applyHeadingStyle(to attrStr: NSMutableAttributedString, level: Int) {
@@ -545,7 +585,24 @@ struct MarkdownNSRenderer {
         paragraph.paragraphSpacingBefore = level <= 2 ? 8 : 4
         paragraph.paragraphSpacing = level <= 2 ? 7 : 5
 
-        attrStr.addAttribute(.font, value: styledHeadingFont, range: range)
+        // Rebuild the heading font per run so inline emphasis (bold/italic) survives,
+        // rather than blanket-overwriting the per-run fonts from renderInline.
+        attrStr.enumerateAttribute(.font, in: range) { value, subRange, _ in
+            guard let runFont = value as? UIFont else {
+                attrStr.addAttribute(.font, value: styledHeadingFont, range: subRange)
+                return
+            }
+            let runTraits = runFont.fontDescriptor.symbolicTraits.intersection([.traitItalic, .traitBold])
+            guard !runTraits.isEmpty,
+                  let mergedDescriptor = styledHeadingFont.fontDescriptor.withSymbolicTraits(
+                      styledHeadingFont.fontDescriptor.symbolicTraits.union(runTraits)
+                  ) else {
+                attrStr.addAttribute(.font, value: styledHeadingFont, range: subRange)
+                return
+            }
+            let mergedFont = UIFont(descriptor: mergedDescriptor, size: styledHeadingFont.pointSize)
+            attrStr.addAttribute(.font, value: mergedFont, range: subRange)
+        }
         attrStr.addAttribute(.paragraphStyle, value: paragraph, range: range)
         if level == 6 {
             let captionColor = UIColor.appOnSurfaceSecondary.resolvedColor(with: traitCollection)

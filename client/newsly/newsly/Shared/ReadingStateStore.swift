@@ -12,7 +12,7 @@ private let logger = Logger(subsystem: "com.newsly", category: "ReadingState")
 
 struct ReadingState: Codable, Equatable {
     let contentId: Int
-    let contentType: ContentType
+    let contentType: APIContentType
     let lastUpdated: Date
 }
 
@@ -39,14 +39,14 @@ final class ReadingStateStore: ObservableObject {
         logger.info("[ReadingState] Store initialized")
     }
 
-    func setCurrent(contentId: Int, type: ContentType) {
+    func setCurrent(contentId: Int, type: APIContentType) {
         logger.info("[ReadingState] setCurrent | contentId=\(contentId) type=\(type.rawValue, privacy: .public)")
         let state = ReadingState(contentId: contentId, contentType: type, lastUpdated: Date())
         current = state
         persist()
     }
 
-    func markAsRead(contentId: Int, contentType: ContentType) {
+    func markAsRead(contentId: Int, contentType: APIContentType) {
         logger.info("[ReadingState] markAsRead called | contentId=\(contentId) type=\(contentType.rawValue, privacy: .public)")
         // Post notification so list views can update their local state
         NotificationCenter.default.post(

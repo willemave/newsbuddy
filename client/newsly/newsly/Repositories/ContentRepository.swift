@@ -10,7 +10,7 @@ import Foundation
 
 protocol ContentRepositoryType {
     func loadPage(
-        contentTypes: [ContentType],
+        contentTypes: [APIContentType],
         readFilter: ReadFilter,
         cursor: String?,
         limit: Int?
@@ -35,7 +35,7 @@ final class ContentRepository: ContentRepositoryType {
     }
 
     func loadPage(
-        contentTypes: [ContentType],
+        contentTypes: [APIContentType],
         readFilter: ReadFilter,
         cursor: String?,
         limit: Int? = nil

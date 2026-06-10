@@ -31,6 +31,23 @@ struct StructuredSummary: Codable {
     }
 }
 
+// Custom decoding keeps optional-array fields tolerant: a single missing backend
+// key falls back to an empty array instead of voiding the whole summary.
+extension StructuredSummary {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        overview = try container.decodeIfPresent(String.self, forKey: .overview)
+        bulletPoints = try container.decodeIfPresent([BulletPoint].self, forKey: .bulletPoints) ?? []
+        quotes = try container.decodeIfPresent([Quote].self, forKey: .quotes) ?? []
+        topics = try container.decodeIfPresent([String].self, forKey: .topics) ?? []
+        questions = try container.decodeIfPresent([String].self, forKey: .questions)
+        counterArguments = try container.decodeIfPresent([String].self, forKey: .counterArguments)
+        summarizationDate = try container.decodeIfPresent(String.self, forKey: .summarizationDate)
+        classification = try container.decodeIfPresent(String.self, forKey: .classification)
+    }
+}
+
 struct BulletPoint: Codable {
     let text: String
     let category: String?
@@ -117,6 +134,21 @@ struct InterleavedSummaryV2: Codable {
     }
 }
 
+// Tolerant decoding: missing array keys fall back to empty arrays.
+extension InterleavedSummaryV2 {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        hook = try container.decode(String.self, forKey: .hook)
+        keyPoints = try container.decodeIfPresent([BulletPoint].self, forKey: .keyPoints) ?? []
+        topics = try container.decodeIfPresent([InterleavedTopic].self, forKey: .topics) ?? []
+        quotes = try container.decodeIfPresent([Quote].self, forKey: .quotes) ?? []
+        takeaway = try container.decode(String.self, forKey: .takeaway)
+        classification = try container.decodeIfPresent(String.self, forKey: .classification)
+        summarizationDate = try container.decodeIfPresent(String.self, forKey: .summarizationDate)
+    }
+}
+
 // MARK: - Bulleted Summary v1
 
 struct BulletSummaryPoint: Codable, Identifiable {
@@ -138,6 +170,17 @@ struct BulletedSummary: Codable {
         case points
         case classification
         case summarizationDate = "summarization_date"
+    }
+}
+
+// Tolerant decoding: a missing points key falls back to an empty array.
+extension BulletedSummary {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        points = try container.decodeIfPresent([BulletSummaryPoint].self, forKey: .points) ?? []
+        classification = try container.decodeIfPresent(String.self, forKey: .classification)
+        summarizationDate = try container.decodeIfPresent(String.self, forKey: .summarizationDate)
     }
 }
 
@@ -285,5 +328,26 @@ struct EditorialNarrativeSummary: Codable {
             guard !items.isEmpty else { return nil }
             return EditorialDetailSection(title: title, items: items)
         }
+    }
+}
+
+// Tolerant decoding: missing array keys fall back to empty arrays.
+extension EditorialNarrativeSummary {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        editorialNarrative = try container.decode(String.self, forKey: .editorialNarrative)
+        quotes = try container.decodeIfPresent([Quote].self, forKey: .quotes) ?? []
+        archetypeReactions = try container.decodeIfPresent(
+            [EditorialArchetypeReaction].self,
+            forKey: .archetypeReactions
+        )
+        keyPoints = try container.decodeIfPresent([EditorialKeyPoint].self, forKey: .keyPoints) ?? []
+        sourceDetailsRaw = try container.decodeIfPresent(
+            [String: AnyCodable].self,
+            forKey: .sourceDetailsRaw
+        )
+        classification = try container.decodeIfPresent(String.self, forKey: .classification)
+        summarizationDate = try container.decodeIfPresent(String.self, forKey: .summarizationDate)
     }
 }

@@ -15,6 +15,7 @@ struct FilterSheet: View {
     
     let contentTypes: [String]
     let availableDates: [String]
+    var showsReadStatus: Bool = true
     private let readStatusOptions = [
         FormChoiceOption(title: "Unread", value: "unread"),
         FormChoiceOption(title: "All", value: "all"),
@@ -65,14 +66,15 @@ struct FilterSheet: View {
                         .accessibilityValue(selectedDateTitle)
                     }
                     
-                    // Read Status Section
-                    Section(header: Text("Read Status")) {
-                        FormChoicePillGroup(
-                            options: readStatusOptions,
-                            selection: $selectedReadFilter,
-                            unselectedBackground: .surfaceContainer
-                        )
-                        .padding(.vertical, 4)
+                    if showsReadStatus {
+                        Section(header: Text("Read Status")) {
+                            FormChoicePillGroup(
+                                options: readStatusOptions,
+                                selection: $selectedReadFilter,
+                                unselectedBackground: .surfaceContainer
+                            )
+                            .padding(.vertical, 4)
+                        }
                     }
                     
                     // Settings Section

@@ -71,8 +71,7 @@ struct InterleavedSummaryView: View {
             if let quote = insight.supportingQuote, !quote.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(quote)
-                        .font(.appCallout)
-                        .italic()
+                        .font(.appSansItalic(size: 16, relativeTo: .callout))
                         .foregroundColor(Color.readerBodyText)
                         .fixedSize(horizontal: false, vertical: true)
 

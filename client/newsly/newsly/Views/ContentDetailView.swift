@@ -63,8 +63,10 @@ private enum DetailDesign {
     static let parallaxRate: CGFloat = 0.25
     static let floatingBackButtonSize: CGFloat = 44
     static let textOnlyBackButtonTopPadding: CGFloat = 8
-    static let textOnlyNewsHeaderTopSpacer: CGFloat = 48
-    static let textOnlyStandardHeaderTopSpacer: CGFloat = 58
+    static let textOnlyTitleTopPadding: CGFloat = 18
+    static let textOnlyNewsHeaderTopSpacer: CGFloat = 42
+    static let textOnlyStandardHeaderTopSpacer: CGFloat = 48
+    static let actionIconOpticalInset: CGFloat = 12
     static let edgeNavigationSwipeWidth: CGFloat = 44
 }
 
@@ -73,18 +75,16 @@ private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDet
 struct ContentDetailView: View {
     private let navigationContext: ContentDetailNavigationContext
     private var initialContentId: Int { navigationContext.initialContentId }
-    private var initialContentType: ContentType? { navigationContext.initialContentType }
+    private var initialContentType: APIContentType? { navigationContext.initialContentType }
     private var allContentIds: [Int] { navigationContext.contentIds }
     @StateObject private var viewModel = ContentDetailViewModel()
     @StateObject private var chatSessionManager = ActiveChatSessionManager.shared
     @EnvironmentObject var readingStateStore: ReadingStateStore
     @Environment(\.dismiss) private var dismiss
-    @State private var dragAmount: CGFloat = 0
     @State private var currentIndex: Int
     // Navigation skipping state
     @State private var didTriggerNavigation: Bool = false
     @State private var navigationDirection: Int = 0 // +1 next, -1 previous
-    @State private var isLeadingEdgeSwipeActive: Bool = false
     // Convert button state
     @State private var isConverting: Bool = false
     // Modal presentation state
@@ -116,7 +116,7 @@ struct ContentDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     init(
         contentId: Int,
-        contentType: ContentType? = nil,
+        contentType: APIContentType? = nil,
         allContentIds: [Int] = [],
         navigationSurface: ContentDetailNavigationSurface = .direct
     ) {
@@ -131,289 +131,272 @@ struct ContentDetailView: View {
     }
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                if viewModel.isLoading {
-                    LoadingView()
+        ContentDetailSwipeContainer(
+            currentIndex: currentIndex,
+            contentIds: allContentIds,
+            surfaceName: navigationSurfaceName,
+            edgeWidth: DetailDesign.edgeNavigationSwipeWidth,
+            onDismiss: { dismiss() },
+            onNext: navigateToNext,
+            onPrevious: navigateToPrevious
+        ) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    if viewModel.isLoading {
+                        LoadingView()
+                            .frame(minHeight: 400)
+                    } else if let error = viewModel.errorMessage {
+                        ErrorView(message: error) {
+                            Task { await viewModel.loadContent() }
+                        }
                         .frame(minHeight: 400)
-                } else if let error = viewModel.errorMessage {
-                    ErrorView(message: error) {
-                        Task { await viewModel.loadContent() }
-                    }
-                    .frame(minHeight: 400)
-                } else if let content = viewModel.content {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Parallax hero header (image + title + action bar)
-                        heroHeader(content: content)
+                    } else if let content = viewModel.content {
+                        VStack(alignment: .leading, spacing: 0) {
+                            // Parallax hero header (image + title + action bar)
+                            heroHeader(content: content)
 
-                        Divider()
-                            .padding(.horizontal, DetailDesign.horizontalPadding)
+                            Divider()
+                                .padding(.horizontal, DetailDesign.horizontalPadding)
 
-                        // Chat status banner (inline, under header)
-                        if let activeSession = activeChatSession(for: content) {
-                            ChatStatusBanner(
-                                session: activeSession,
-                                onTap: {
-                                    openChatSession(
-                                        sessionId: activeSession.id,
-                                        content: content
-                                    )
-                                },
-                                onDismiss: {
-                                    chatSessionManager.markAsViewed(sessionId: activeSession.id)
-                                },
-                                style: .inline
-                            )
-                            .padding(.horizontal, DetailDesign.horizontalPadding)
-                            .padding(.top, 12)
-                        }
+                            // Chat status banner (inline, under header)
+                            if let activeSession = activeChatSession(for: content) {
+                                ChatStatusBanner(
+                                    session: activeSession,
+                                    onTap: {
+                                        openChatSession(
+                                            sessionId: activeSession.id,
+                                            content: content
+                                        )
+                                    },
+                                    onDismiss: {
+                                        chatSessionManager.markAsViewed(sessionId: activeSession.id)
+                                    },
+                                    style: .inline
+                                )
+                                .padding(.horizontal, DetailDesign.horizontalPadding)
+                                .padding(.top, 12)
+                            }
 
-                        // Detected feed subscription card (news/self-submission when available)
-                        if (content.canSubscribe ?? false), let feed = content.detectedFeed {
-                            DetectedFeedCard(
-                                feed: feed,
-                                isSubscribing: viewModel.isSubscribingToFeed,
-                                hasSubscribed: viewModel.feedSubscriptionSuccess,
-                                subscriptionError: viewModel.feedSubscriptionError,
-                                onSubscribe: {
-                                    Task { await viewModel.subscribeToDetectedFeed() }
-                                }
-                            )
-                            .padding(.horizontal, DetailDesign.horizontalPadding)
-                            .padding(.top, 12)
-                        }
+                            // Detected feed subscription card (news/self-submission when available)
+                            if (content.canSubscribe ?? false), let feed = content.detectedFeed {
+                                DetectedFeedCard(
+                                    feed: feed,
+                                    isSubscribing: viewModel.isSubscribingToFeed,
+                                    hasSubscribed: viewModel.feedSubscriptionSuccess,
+                                    subscriptionError: viewModel.feedSubscriptionError,
+                                    onSubscribe: {
+                                        Task { await viewModel.subscribeToDetectedFeed() }
+                                    }
+                                )
+                                .padding(.horizontal, DetailDesign.horizontalPadding)
+                                .padding(.top, 12)
+                            }
 
-                        // Summary Section (artifact, editorial v1, bulleted v1, interleaved v2, interleaved v1, or structured)
-                        if let longformArtifact = content.longformArtifact {
-                            LongformArtifactView(artifact: longformArtifact, contentId: content.id)
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.summaryTopPadding)
-                                .onAppear {
-                                    logSummarySection(
-                                        content: content,
-                                        section: "longform_artifact",
-                                        bulletPointCount: longformArtifact.artifact.payload.keyPoints.count,
-                                        insightCount: 0
-                                    )
-                                }
-                        } else if let editorialSummary = content.editorialSummary {
-                            EditorialNarrativeSummaryView(summary: editorialSummary, contentId: content.id)
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.summaryTopPadding)
-                                .onAppear {
-                                    logSummarySection(
-                                        content: content,
-                                        section: "editorial_v1",
-                                        bulletPointCount: editorialSummary.keyPoints.count,
-                                        insightCount: 0
-                                    )
-                                }
-                        } else if let bulletedSummary = content.bulletedSummary {
-                            BulletedSummaryView(summary: bulletedSummary, contentId: content.id)
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.summaryTopPadding)
-                                .onAppear {
-                                    logSummarySection(
-                                        content: content,
-                                        section: "bulleted_v1",
-                                        bulletPointCount: bulletedSummary.points.count,
-                                        insightCount: 0
-                                    )
-                                }
-                        } else if let interleavedSummary = content.interleavedSummaryV2 {
-                            InterleavedSummaryV2View(summary: interleavedSummary, contentId: content.id)
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.summaryTopPadding)
-                                .onAppear {
-                                    logSummarySection(
-                                        content: content,
-                                        section: "interleaved_v2",
-                                        bulletPointCount: interleavedSummary.keyPoints.count,
-                                        insightCount: 0
-                                    )
-                                }
-                        } else if let interleavedSummary = content.interleavedSummary {
-                            InterleavedSummaryView(summary: interleavedSummary, contentId: content.id)
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.summaryTopPadding)
-                                .onAppear {
-                                    logSummarySection(
-                                        content: content,
-                                        section: "interleaved_v1",
-                                        bulletPointCount: 0,
-                                        insightCount: interleavedSummary.insights.count
-                                    )
-                                }
-                        } else if let structuredSummary = content.structuredSummary {
-                            StructuredSummaryView(
-                                summary: structuredSummary,
-                                contentId: content.id,
-                                startTopicSession: { topic in
-                                    if content.contentTypeEnum == .news {
-                                        return try await ChatService.shared.startNewsTopicChat(
-                                            newsItemId: content.id,
+                            // Summary Section (artifact, editorial v1, bulleted v1, interleaved v2, interleaved v1, or structured)
+                            if let longformArtifact = content.longformArtifact {
+                                LongformArtifactView(artifact: longformArtifact, contentId: content.id)
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.summaryTopPadding)
+                                    .onAppear {
+                                        logSummarySection(
+                                            content: content,
+                                            section: "longform_artifact",
+                                            bulletPointCount: longformArtifact.artifact.payload.keyPoints.count,
+                                            insightCount: 0
+                                        )
+                                    }
+                            } else if let editorialSummary = content.editorialSummary {
+                                EditorialNarrativeSummaryView(summary: editorialSummary, contentId: content.id)
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.summaryTopPadding)
+                                    .onAppear {
+                                        logSummarySection(
+                                            content: content,
+                                            section: "editorial_v1",
+                                            bulletPointCount: editorialSummary.keyPoints.count,
+                                            insightCount: 0
+                                        )
+                                    }
+                            } else if let bulletedSummary = content.bulletedSummary {
+                                BulletedSummaryView(summary: bulletedSummary, contentId: content.id)
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.summaryTopPadding)
+                                    .onAppear {
+                                        logSummarySection(
+                                            content: content,
+                                            section: "bulleted_v1",
+                                            bulletPointCount: bulletedSummary.points.count,
+                                            insightCount: 0
+                                        )
+                                    }
+                            } else if let interleavedSummary = content.interleavedSummaryV2 {
+                                InterleavedSummaryV2View(summary: interleavedSummary, contentId: content.id)
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.summaryTopPadding)
+                                    .onAppear {
+                                        logSummarySection(
+                                            content: content,
+                                            section: "interleaved_v2",
+                                            bulletPointCount: interleavedSummary.keyPoints.count,
+                                            insightCount: 0
+                                        )
+                                    }
+                            } else if let interleavedSummary = content.interleavedSummary {
+                                InterleavedSummaryView(summary: interleavedSummary, contentId: content.id)
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.summaryTopPadding)
+                                    .onAppear {
+                                        logSummarySection(
+                                            content: content,
+                                            section: "interleaved_v1",
+                                            bulletPointCount: 0,
+                                            insightCount: interleavedSummary.insights.count
+                                        )
+                                    }
+                            } else if let structuredSummary = content.structuredSummary {
+                                StructuredSummaryView(
+                                    summary: structuredSummary,
+                                    contentId: content.id,
+                                    startTopicSession: { topic in
+                                        if content.apiContentType == .news {
+                                            return try await ChatService.shared.startNewsTopicChat(
+                                                newsItemId: content.id,
+                                                topic: topic
+                                            )
+                                        }
+                                        return try await ChatService.shared.startTopicChat(
+                                            contentId: content.id,
                                             topic: topic
                                         )
                                     }
-                                    return try await ChatService.shared.startTopicChat(
-                                        contentId: content.id,
-                                        topic: topic
-                                    )
-                                }
-                            )
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.summaryTopPadding)
-                                .onAppear {
-                                    logSummarySection(
-                                        content: content,
-                                        section: "structured",
-                                        bulletPointCount: structuredSummary.bulletPoints.count,
-                                        insightCount: 0
-                                    )
-                                }
-                        }
-
-                        if let sourceMetadata = content.sourceMetadata {
-                            SourceMetadataSection(
-                                metadata: sourceMetadata,
-                                openURL: openInAppBrowser
-                            )
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.sectionSpacing)
-                        }
-
-                        let relevantLinks = content.relevantLinks
-                        if content.contentTypeEnum != .news, !relevantLinks.isEmpty {
-                            relevantLinksSection(links: relevantLinks)
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.sectionSpacing)
-                        }
-
-                        if content.contentTypeEnum == .news {
-                            if let newsMetadata = content.newsMetadata {
-                                modernSectionPlain(isPadded: false) {
-                                    NewsItemDetailView(
-                                        content: content,
-                                        metadata: newsMetadata,
-                                        onDiscussionTap: { url in
-                                            handleDiscussionTap(content: content, fallbackURL: url)
-                                        }
-                                    )
-                                }
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.sectionSpacing)
-                            } else {
-                                modernSectionPlain(isPadded: false) {
-                                    VStack(alignment: .leading, spacing: 16) {
-                                        sectionHeader("News Updates", icon: "newspaper")
-                                        Text("No news metadata available.")
-                                            .font(.appSubheadline)
-                                            .foregroundColor(Color.onSurfaceSecondary)
+                                )
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.summaryTopPadding)
+                                    .onAppear {
+                                        logSummarySection(
+                                            content: content,
+                                            section: "structured",
+                                            bulletPointCount: structuredSummary.bulletPoints.count,
+                                            insightCount: 0
+                                        )
                                     }
+                            }
+
+                            if let sourceMetadata = content.sourceMetadata {
+                                SourceMetadataSection(
+                                    metadata: sourceMetadata,
+                                    openURL: openInAppBrowser
+                                )
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.sectionSpacing)
+                            }
+
+                            let relevantLinks = content.relevantLinks
+                            if content.apiContentType != .news, !relevantLinks.isEmpty {
+                                relevantLinksSection(links: relevantLinks)
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.sectionSpacing)
+                            }
+
+                            if content.apiContentType == .news {
+                                if let newsMetadata = content.newsMetadata {
+                                    modernSectionPlain(isPadded: false) {
+                                        NewsItemDetailView(
+                                            content: content,
+                                            metadata: newsMetadata,
+                                            onDiscussionTap: { url in
+                                                handleDiscussionTap(content: content, fallbackURL: url)
+                                            }
+                                        )
+                                    }
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.sectionSpacing)
+                                } else {
+                                    modernSectionPlain(isPadded: false) {
+                                        VStack(alignment: .leading, spacing: 16) {
+                                            sectionHeader("News Updates", icon: "newspaper")
+                                            Text("No news metadata available.")
+                                                .font(.appSubheadline)
+                                                .foregroundColor(Color.onSurfaceSecondary)
+                                        }
+                                    }
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.sectionSpacing)
+                                }
+                            }
+
+                            if let discussion = inlineDiscussionSummaryPayload(for: content) {
+                                communityDiscussionSummarySection(discussion: discussion)
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, 16)
+                            }
+
+                            if content.apiContentType == .news, !relevantLinks.isEmpty {
+                                relevantLinksSection(links: relevantLinks)
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, DetailDesign.sectionSpacing)
+                            }
+
+                            // Full Content Section (collapsible, modern style)
+                            if content.apiContentType != .news, let bodyText = viewModel.contentBody?.text {
+                                modernExpandableSection(
+                                    title: content.apiContentType == .podcast ? "Transcript" : "Full Article",
+                                    icon: content.apiContentType == .podcast ? "text.alignleft" : "doc.text",
+                                    isExpanded: $isTranscriptExpanded
+                                ) {
+                                    detailMarkdownBody(bodyText, content: content)
+                                }
+                                .padding(.horizontal, DetailDesign.horizontalPadding)
+                                .padding(.top, DetailDesign.sectionSpacing)
+                            } else if content.apiContentType == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
+                                modernExpandableSection(
+                                    title: "Transcript",
+                                    icon: "text.alignleft",
+                                    isExpanded: $isTranscriptExpanded
+                                ) {
+                                    detailMarkdownBody(transcript, content: content)
+                                }
+                                .padding(.horizontal, DetailDesign.horizontalPadding)
+                                .padding(.top, DetailDesign.sectionSpacing)
+                            } else if let fullMarkdown = content.fullMarkdown {
+                                modernExpandableSection(
+                                    title: content.apiContentType == .podcast ? "Transcript" : "Full Article",
+                                    icon: "doc.text",
+                                    isExpanded: $isTranscriptExpanded
+                                ) {
+                                    detailMarkdownBody(fullMarkdown, content: content)
                                 }
                                 .padding(.horizontal, DetailDesign.horizontalPadding)
                                 .padding(.top, DetailDesign.sectionSpacing)
                             }
-                        }
 
-                        if let discussion = inlineDiscussionSummaryPayload(for: content) {
-                            communityDiscussionSummarySection(discussion: discussion)
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, 16)
+                            // Bottom spacing
+                            Spacer()
+                                .frame(height: 40)
                         }
-
-                        if content.contentTypeEnum == .news, !relevantLinks.isEmpty {
-                            relevantLinksSection(links: relevantLinks)
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, DetailDesign.sectionSpacing)
-                        }
-
-                        // Full Content Section (collapsible, modern style)
-                        if content.contentTypeEnum != .news, let bodyText = viewModel.contentBody?.text {
-                            modernExpandableSection(
-                                title: content.contentTypeEnum == .podcast ? "Transcript" : "Full Article",
-                                icon: content.contentTypeEnum == .podcast ? "text.alignleft" : "doc.text",
-                                isExpanded: $isTranscriptExpanded
-                            ) {
-                                detailMarkdownBody(bodyText, content: content)
-                            }
-                            .padding(.horizontal, DetailDesign.horizontalPadding)
-                            .padding(.top, DetailDesign.sectionSpacing)
-                        } else if content.contentTypeEnum == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
-                            modernExpandableSection(
-                                title: "Transcript",
-                                icon: "text.alignleft",
-                                isExpanded: $isTranscriptExpanded
-                            ) {
-                                detailMarkdownBody(transcript, content: content)
-                            }
-                            .padding(.horizontal, DetailDesign.horizontalPadding)
-                            .padding(.top, DetailDesign.sectionSpacing)
-                        } else if let fullMarkdown = content.fullMarkdown {
-                            modernExpandableSection(
-                                title: content.contentTypeEnum == .podcast ? "Transcript" : "Full Article",
-                                icon: "doc.text",
-                                isExpanded: $isTranscriptExpanded
-                            ) {
-                                detailMarkdownBody(fullMarkdown, content: content)
-                            }
-                            .padding(.horizontal, DetailDesign.horizontalPadding)
-                            .padding(.top, DetailDesign.sectionSpacing)
-                        }
-
-                        // Bottom spacing
-                        Spacer()
-                            .frame(height: 40)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        LoadingView()
+                            .frame(minHeight: 400)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    LoadingView()
-                        .frame(minHeight: 400)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .coordinateSpace(name: "detailScroll")
-        .scrollClipDisabled()
-        .textSelection(.enabled)
-        .accessibilityIdentifier("content.detail.screen")
-        .overlay(alignment: .leading) {
-            // Left indicator for previous article or edge-back dismissal.
-            if dragAmount > 30 && (currentIndex > 0 || isLeadingEdgeSwipeActive) {
-                swipeIndicator(direction: .previous, progress: min(1.0, dragAmount / 100))
-            }
-        }
-        .overlay(alignment: .trailing) {
-            // Right edge indicator (next)
-            if dragAmount < -30 && currentIndex < allContentIds.count - 1 {
-                swipeIndicator(direction: .next, progress: min(1.0, abs(dragAmount) / 100))
-            }
-        }
-        .overlay {
-            ContentDetailSwipeOverlay(
-                currentIndex: currentIndex,
-                contentIds: allContentIds,
-                surfaceName: navigationSurfaceName,
-                edgeWidth: DetailDesign.edgeNavigationSwipeWidth,
-                dragAmount: $dragAmount,
-                isLeadingEdgeSwipeActive: $isLeadingEdgeSwipeActive,
-                onDismiss: { dismiss() },
-                onNext: navigateToNext,
-                onPrevious: navigateToPrevious
-            )
-        }
-        .overlay(alignment: .topLeading) {
-            GeometryReader { proxy in
-                VStack(alignment: .leading, spacing: 0) {
-                    floatingBackButton
-                        .padding(.leading, 16)
-                        .padding(.top, floatingBackTopPadding(for: proxy))
-                    Spacer(minLength: 0)
+            .coordinateSpace(name: "detailScroll")
+            .scrollClipDisabled()
+            .textSelection(.enabled)
+            .accessibilityIdentifier("content.detail.screen")
+            .overlay(alignment: .topLeading) {
+                GeometryReader { proxy in
+                    VStack(alignment: .leading, spacing: 0) {
+                        floatingBackButton
+                            .padding(.leading, 16)
+                            .padding(.top, floatingBackTopPadding(for: proxy))
+                        Spacer(minLength: 0)
+                    }
                 }
             }
         }
-        .offset(x: dragAmount)
-        .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragAmount)
         .ignoresSafeArea(edges: hasHeroImage ? .top : [])
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
@@ -443,18 +426,22 @@ struct ContentDetailView: View {
                 return
             }
             resetDiscussionState(fallbackURL: discussionURL(for: content))
-            if let type = content.contentTypeEnum {
+            if let type = content.apiContentType {
                 readingStateStore.setCurrent(contentId: id, type: type)
             }
             logSummarySnapshot(content: content, context: "content_change")
-            if content.contentTypeEnum == .news {
+            if content.apiContentType == .news {
                 Task { await prefetchStoredDiscussion(for: content) }
             }
         }
-        // If user is navigating (chevrons or swipe), skip items that were already read
-        .onChange(of: viewModel.wasAlreadyReadWhenLoaded) { _, wasRead in
-            guard didTriggerNavigation, viewModel.content?.contentTypeEnum == .podcast else { return }
-            if wasRead {
+        // If user is navigating (chevrons or swipe), skip items that were already read.
+        // Keyed on the loaded content id rather than `wasAlreadyReadWhenLoaded`: two
+        // consecutive already-read podcasts leave the read flag true->true, which emits
+        // no onChange, so the cascade would otherwise stall on the first read item.
+        .onChange(of: viewModel.content?.id) { _, newId in
+            guard newId != nil else { return }
+            guard didTriggerNavigation, viewModel.content?.apiContentType == .podcast else { return }
+            if viewModel.wasAlreadyReadWhenLoaded {
                 let nextIndex = currentIndex + navigationDirection
                 guard nextIndex >= 0 && nextIndex < allContentIds.count else {
                     // Reached the end; stop skipping further
@@ -463,7 +450,7 @@ struct ContentDetailView: View {
                     return
                 }
                 currentIndex = nextIndex
-                // Keep didTriggerNavigation/naviationDirection to allow cascading skips
+                // Keep didTriggerNavigation/navigationDirection to allow cascading skips
             } else {
                 // Landed on an unread item; reset navigation flags
                 didTriggerNavigation = false
@@ -583,7 +570,7 @@ struct ContentDetailView: View {
         chatError = nil
 
         do {
-            if content.contentTypeEnum == .news {
+            if content.apiContentType == .news {
                 if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     let response = try await ChatService.shared.createAssistantTurn(
                         message: prompt,
@@ -645,7 +632,7 @@ struct ContentDetailView: View {
 
         do {
             let session: ChatSessionSummary
-            if content.contentTypeEnum == .news {
+            if content.apiContentType == .news {
                 if let existingSession = try await ChatService.shared.getSessionForNewsItem(
                     newsItemId: content.id
                 ) {
@@ -693,7 +680,7 @@ struct ContentDetailView: View {
 
         Task { @MainActor in
             do {
-                let isNews = content.contentTypeEnum == .news
+                let isNews = content.apiContentType == .news
                 let response = try await ChatService.shared.createAssistantTurn(
                     message: "Dig deeper into this selected text from \(content.displayTitle): \"\(trimmed)\"",
                     screenContext: AssistantScreenContext(
@@ -732,7 +719,7 @@ struct ContentDetailView: View {
         chatError = nil
 
         do {
-            let isNews = content.contentTypeEnum == .news
+            let isNews = content.apiContentType == .news
             let session = try await ChatService.shared.startDeepResearch(
                 contentId: isNews ? nil : content.id,
                 newsItemId: isNews ? content.id : nil
@@ -770,7 +757,7 @@ struct ContentDetailView: View {
     }
 
     private func activeChatSession(for content: ContentDetail) -> ActiveChatSession? {
-        if content.contentTypeEnum == .news {
+        if content.apiContentType == .news {
             return chatSessionManager.getSession(forNewsItemId: content.id)
         }
         return chatSessionManager.getSession(forContentId: content.id)
@@ -785,7 +772,7 @@ struct ContentDetailView: View {
         pendingCouncilPrompt: String? = nil,
         focusComposerOnAppear: Bool = false
     ) {
-        let isNews = content.contentTypeEnum == .news
+        let isNews = content.apiContentType == .news
         openChatSession(
             sessionId: sessionId,
             contentId: isNews ? nil : content.id,
@@ -880,7 +867,7 @@ struct ContentDetailView: View {
     }
 
     private func supportsPodcastAudio(for content: ContentDetail) -> Bool {
-        guard let type = content.contentTypeEnum else { return false }
+        guard let type = content.apiContentType else { return false }
         return type == .article || type == .news || type == .podcast
     }
 
@@ -1017,8 +1004,8 @@ struct ContentDetailView: View {
     }
 
     private func createPodcastAudioEpisode(for content: ContentDetail) async throws -> AudioEpisode {
-        switch content.contentTypeEnum {
-        case .article, .podcast:
+        switch content.apiContentType {
+        case .article, .podcast, .insight_report, .unknown:
             return try await AudioEpisodeService.shared.createContentCouncilEpisode(
                 contentId: content.id,
                 delivery: .inline
@@ -1057,7 +1044,7 @@ struct ContentDetailView: View {
         guard let content = viewModel.content,
               let imageUrlString = content.imageUrl,
               !imageUrlString.isEmpty,
-              content.contentTypeEnum != .news,
+              content.apiContentType != .news,
               buildImageURL(from: imageUrlString) != nil else {
             return false
         }
@@ -1068,7 +1055,7 @@ struct ContentDetailView: View {
     private func heroHeader(content: ContentDetail) -> some View {
         if let imageUrlString = content.imageUrl,
            !imageUrlString.isEmpty,
-           content.contentTypeEnum != .news,
+           content.apiContentType != .news,
            let imageUrl = buildImageURL(from: imageUrlString) {
             // Parallax hero with overlaid title + action bar
             let thumbnailUrl = content.thumbnailUrl.flatMap { buildImageURL(from: $0) }
@@ -1095,7 +1082,8 @@ struct ContentDetailView: View {
                     } label: {
                         CachedAsyncImage(
                             url: imageUrl,
-                            thumbnailUrl: thumbnailUrl
+                            thumbnailUrl: thumbnailUrl,
+                            targetSize: CGSize(width: geo.size.width, height: imageHeight)
                         ) { image in
                             image
                                 .resizable()
@@ -1236,11 +1224,14 @@ struct ContentDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, DetailDesign.headerHorizontalPadding)
-                .padding(.top, 16)
+                .padding(.top, DetailDesign.textOnlyTitleTopPadding)
                 .padding(.bottom, 6)
 
                 actionBar(content: content, overlaid: false)
-                    .padding(.horizontal, DetailDesign.headerHorizontalPadding)
+                    // Optical inset via reduced positive padding (not negative
+                    // padding on the bar, which pushes the edge icons outside the
+                    // hittable frame and makes them untappable).
+                    .padding(.horizontal, DetailDesign.headerHorizontalPadding - DetailDesign.actionIconOpticalInset)
                     .padding(.top, 2)
 
                 if shouldShowPodcastPlaybackControls(for: content) {
@@ -1253,17 +1244,19 @@ struct ContentDetailView: View {
     }
 
     private func textOnlyHeaderTopSpacer(for content: ContentDetail) -> CGFloat {
-        content.contentTypeEnum == .news
+        content.apiContentType == .news
             ? DetailDesign.textOnlyNewsHeaderTopSpacer
             : DetailDesign.textOnlyStandardHeaderTopSpacer
     }
 
     private func detailTitleFont(for content: ContentDetail) -> Font {
-        content.contentTypeEnum == .news ? .terracottaHeadlineCompact : .appTitle3
+        content.apiContentType == .news ? .terracottaHeadlineCompact : .appTitle3
     }
 
     private func detailTitleWeight(for content: ContentDetail) -> Font.Weight {
-        content.contentTypeEnum == .news ? .semibold : .bold
+        // Match the title token's baked-in weight (.semibold) rather than
+        // overriding it; both serif title tokens are already semibold.
+        .semibold
     }
 
     private func detailMetadataAccessibilityLabel(for content: ContentDetail) -> String {
@@ -1342,41 +1335,45 @@ struct ContentDetailView: View {
     }
 
     private func contentTypeIcon(for content: ContentDetail) -> String {
-        switch content.contentTypeEnum {
+        switch content.apiContentType {
         case .article: return "doc.text"
         case .podcast: return "headphones"
         case .news: return "newspaper"
-        case .none: return "doc.text"
+        case .insight_report, .unknown, .none: return "doc.text"
         }
     }
 
     // MARK: - Modern Action Bar (Minimal, Twitter-inspired)
     @ViewBuilder
     private func actionBar(content: ContentDetail, overlaid: Bool = false) -> some View {
+        // Each action is given an equal, gap-free share of the bar width via
+        // .frame(maxWidth: .infinity) + .contentShape(Rectangle()). This makes the
+        // tap target the full segment (≥44pt, larger than the 20pt glyph and with
+        // no dead space between icons) rather than only the icon's 44pt box.
         HStack(spacing: 0) {
             // Primary action - Open in browser
             if let url = URL(string: content.url) {
                 Button {
                     openInAppBrowser(url)
                 } label: {
-                    minimalActionIcon("safari", color: overlaid ? .white : .brandPrimary, overlaid: overlaid)
+                    minimalActionIcon("safari", overlaid: overlaid)
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("content.action.open_external")
                 .accessibilityLabel("Open article")
             }
-
-            Spacer()
 
             // Share
             Button(action: { activeSheet = .share }) {
                 minimalActionIcon("square.and.arrow.up", overlaid: overlaid)
             }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
             .accessibilityIdentifier("content.action.share")
 
             if viewModel.canShowReader(for: content) {
-                Spacer()
-
                 Button {
                     activeReaderContent = content
                 } label: {
@@ -1388,25 +1385,25 @@ struct ContentDetailView: View {
                         minimalActionIcon("doc.richtext", overlaid: overlaid)
                     }
                 }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("content.action.reader")
                 .accessibilityLabel("Read full article")
             }
 
             // Download more from series (article/podcast only)
-            if content.contentTypeEnum == .article || content.contentTypeEnum == .podcast {
-                Spacer()
-
+            if content.apiContentType == .article || content.apiContentType == .podcast {
                 Button { activeSheet = .download } label: {
                     minimalActionIcon("tray.and.arrow.down", overlaid: overlaid)
                 }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("content.action.download_more")
                 .accessibilityLabel("Download more from this series")
             }
 
             // Save linked article (news only)
-            if content.contentTypeEnum == .news {
-                Spacer()
-
+            if content.apiContentType == .news {
                 Button(action: {
                     Task {
                         isConverting = true
@@ -1423,25 +1420,25 @@ struct ContentDetailView: View {
                     }
                 }
                 .disabled(isConverting)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("content.action.convert")
                 .accessibilityLabel("Save linked article to Knowledge")
             }
 
-            if content.contentTypeEnum != .news {
-                Spacer()
-
+            if content.apiContentType != .news {
                 Button(action: {
                     Task { await viewModel.toggleKnowledgeSave() }
                 }) {
                     knowledgeActionIcon(isSaved: content.isSavedToKnowledge, overlaid: overlaid)
                 }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("content.action.knowledge")
                 .accessibilityLabel(content.isSavedToKnowledge ? "Remove from Knowledge" : "Save to Knowledge")
             }
 
             if supportsPodcastAudio(for: content) {
-                Spacer()
-
                 NarrationPressButton(
                     isDisabled: isPodcastAudioLoading(for: content),
                     accessibilityLabel: podcastAudioAccessibilityLabel(for: content),
@@ -1459,20 +1456,20 @@ struct ContentDetailView: View {
                 ) {
                     podcastAudioActionIcon(for: content, overlaid: overlaid)
                 }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("content.action.podcast_audio")
             }
-
-            Spacer()
 
             Button {
                 showLearningDeckCreateSheet = true
             } label: {
                 minimalActionIcon("rectangle.stack", overlaid: overlaid)
             }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
             .accessibilityIdentifier("content.action.learning_deck")
             .accessibilityLabel("Create Learning Deck")
-
-            Spacer()
 
             // Deep Dive chat
             Button(action: {
@@ -1499,6 +1496,8 @@ struct ContentDetailView: View {
                 }
             }
             .disabled(isCheckingChatSession)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
             .accessibilityIdentifier("content.action.deep_dive")
             .accessibilityLabel("Start deep dive")
         }
@@ -1518,10 +1517,13 @@ struct ContentDetailView: View {
 
     @ViewBuilder
     private func knowledgeActionIcon(isSaved: Bool, overlaid: Bool) -> some View {
+        let iconColor: Color = overlaid ? .white : .onSurfaceSecondary
         KnowledgeSaveIcon(
             isSaved: isSaved,
-            savedColor: .terracottaPrimary,
-            unsavedColor: overlaid ? .white : .onSurfaceSecondary
+            savedColor: iconColor,
+            unsavedColor: iconColor,
+            badgeColor: iconColor,
+            badgeForegroundColor: .surfacePrimary
         )
         .shadow(color: overlaid ? .black.opacity(0.4) : .clear, radius: 3, x: 0, y: 1)
         .frame(width: 44, height: 44)
@@ -1544,7 +1546,6 @@ struct ContentDetailView: View {
                 if let title {
                     Text(title)
                         .font(.appTitle3)
-                        .fontWeight(.bold)
                 }
                 Spacer()
                 Button(action: dismiss) {
@@ -1972,12 +1973,12 @@ struct ContentDetailView: View {
             if refresh {
                 discussion = try await ContentService.shared.refreshContentDiscussion(
                     id: content.id,
-                    contentType: content.contentTypeEnum
+                    contentType: content.apiContentType
                 )
             } else {
                 discussion = try await ContentService.shared.fetchContentDiscussion(
                     id: content.id,
-                    contentType: content.contentTypeEnum
+                    contentType: content.apiContentType
                 )
             }
 
@@ -1997,7 +1998,7 @@ struct ContentDetailView: View {
 
     @MainActor
     private func prefetchStoredDiscussion(for content: ContentDetail) async {
-        guard content.contentTypeEnum == .news,
+        guard content.apiContentType == .news,
               discussionURL(for: content) != nil else {
             return
         }
@@ -2008,7 +2009,7 @@ struct ContentDetailView: View {
         do {
             let discussion = try await ContentService.shared.fetchContentDiscussion(
                 id: content.id,
-                contentType: content.contentTypeEnum
+                contentType: content.apiContentType
             )
             guard discussionRequestToken == requestToken,
                   viewModel.content?.id == content.id,
@@ -3062,36 +3063,6 @@ struct ContentDetailView: View {
         let baseURL = AppSettings.shared.baseURL
         let fullURL = urlString.hasPrefix("/") ? baseURL + urlString : baseURL + "/" + urlString
         return URL(string: fullURL)
-    }
-
-    // MARK: - Swipe Indicator
-    private enum SwipeDirection {
-        case previous, next
-    }
-
-    @ViewBuilder
-    private func swipeIndicator(direction: SwipeDirection, progress: CGFloat) -> some View {
-        let iconName = direction == .previous ? "chevron.left" : "chevron.right"
-
-        VStack {
-            Spacer()
-            HStack {
-                if direction == .next { Spacer() }
-                Image(systemName: iconName)
-                    .font(.appSymbol(size: 24, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        Circle()
-                            .fill(Color.brandPrimary.opacity(0.9))
-                    )
-                    .scaleEffect(0.8 + (progress * 0.4))
-                    .opacity(Double(progress))
-                    .padding(.horizontal, 8)
-                if direction == .previous { Spacer() }
-            }
-            Spacer()
-        }
     }
 
     private var statusIcon: String {

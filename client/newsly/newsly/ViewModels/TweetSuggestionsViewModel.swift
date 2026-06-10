@@ -180,6 +180,7 @@ final class TweetSuggestionsViewModel: ObservableObject {
 
     /// Start voice recording for tweak message.
     func startVoiceRecording() async {
+        guard !isRecording, !isTranscribing else { return }
         let startedAt = Date()
         voiceRecordingStartedAt = startedAt
         logger.info("Tweet suggestion voice recording start requested")

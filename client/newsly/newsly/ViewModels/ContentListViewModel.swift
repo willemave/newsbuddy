@@ -22,25 +22,30 @@ class ContentListViewModel: CursorPaginatedViewModel {
     // Track if we're in recently read mode
     private var isRecentlyReadMode: Bool = false
 
+    // Monotonic token used to ignore the results of superseded loads. Each fresh
+    // load increments it; a load only applies its results / clears its loading
+    // flag while it is still the latest request.
+    private var requestGeneration = 0
+
     @Published var selectedContentType: String = "all" {
         didSet {
-            Task { await loadContent() }
+            Task { await reloadForCurrentFilters() }
         }
     }
 
     @Published var selectedContentTypes: [String] = [] {
         didSet {
-            Task { await loadContent() }
+            Task { await reloadForCurrentFilters() }
         }
     }
     @Published var selectedDate: String = "" {
         didSet {
-            Task { await loadContent() }
+            Task { await reloadForCurrentFilters() }
         }
     }
     @Published var selectedReadFilter: String = "unread" {
         didSet {
-            Task { await loadContent() }
+            Task { await reloadForCurrentFilters() }
         }
     }
 
@@ -52,7 +57,22 @@ class ContentListViewModel: CursorPaginatedViewModel {
         super.init()
     }
     
+    /// Reload using the loader that matches the current mode, so changing a
+    /// filter while in recently-read / knowledge-library mode does not silently
+    /// drop back to the default list (and fire a redundant wrong-mode fetch).
+    private func reloadForCurrentFilters() async {
+        if isRecentlyReadMode {
+            await loadRecentlyRead()
+        } else if isKnowledgeLibraryMode {
+            await loadKnowledgeLibrary()
+        } else {
+            await loadContent()
+        }
+    }
+
     func loadContent() async {
+        requestGeneration += 1
+        let generation = requestGeneration
         isLoading = true
         errorMessage = nil
 
@@ -81,15 +101,19 @@ class ContentListViewModel: CursorPaginatedViewModel {
                 )
             }
 
+            guard generation == requestGeneration else { return }
             contents = response.contents
             availableDates = response.availableDates
             contentTypes = response.contentTypes
             applyPagination(response)
         } catch {
+            guard generation == requestGeneration else { return }
             errorMessage = error.localizedDescription
         }
 
-        isLoading = false
+        if generation == requestGeneration {
+            isLoading = false
+        }
     }
 
     func loadMoreContent() async {
@@ -98,6 +122,9 @@ class ContentListViewModel: CursorPaginatedViewModel {
             return
         }
 
+        // Capture (do not bump) the current generation: paging extends the
+        // active list, so a fresh load started meanwhile should discard our page.
+        let generation = requestGeneration
         isLoadingMore = true
 
         do {
@@ -106,7 +133,11 @@ class ContentListViewModel: CursorPaginatedViewModel {
             if isKnowledgeLibraryMode {
                 response = try await contentService.fetchKnowledgeLibrary(cursor: cursor)
             } else if isRecentlyReadMode {
-                response = try await contentService.fetchRecentlyReadList(cursor: cursor)
+                response = try await contentService.fetchRecentlyReadList(
+                    contentType: selectedContentType,
+                    date: selectedDate.isEmpty ? nil : selectedDate,
+                    cursor: cursor
+                )
             } else {
                 // Use selectedContentTypes if set, otherwise fall back to selectedContentType
                 if !selectedContentTypes.isEmpty {
@@ -126,11 +157,16 @@ class ContentListViewModel: CursorPaginatedViewModel {
                 }
             }
 
-            // Append new contents to existing list
-            contents.append(contentsOf: response.contents)
-            applyPagination(response)
+            // Append new contents to existing list, unless a fresh load
+            // superseded us during the await.
+            if generation == requestGeneration {
+                contents.append(contentsOf: response.contents)
+                applyPagination(response)
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            if generation == requestGeneration {
+                errorMessage = error.localizedDescription
+            }
         }
 
         isLoadingMore = false
@@ -138,11 +174,19 @@ class ContentListViewModel: CursorPaginatedViewModel {
     
     func markAsRead(_ contentId: Int) async {
         do {
-            if let index = contents.firstIndex(where: { $0.id == contentId }) {
-                let current = contents[index]
-                try await contentService.markContentAsRead(id: contentId, contentType: current.contentTypeEnum)
-                contents[index] = current.updating(isRead: true)
+            guard let initialIndex = contents.firstIndex(where: { $0.id == contentId }) else { return }
+            let initialContentType = contents[initialIndex].apiContentType
+            try await contentService.markContentAsRead(id: contentId, contentType: initialContentType)
 
+            // Re-resolve the index by id: `contents` may have been reordered or
+            // shrunk by a concurrent load during the await, so the pre-await
+            // index could now point at a different item (or be out of bounds).
+            guard let index = contents.firstIndex(where: { $0.id == contentId }) else { return }
+            let current = contents[index]
+            let shouldDecrementUnreadCount = !current.isRead
+            contents[index] = current.updating(isRead: true)
+
+            if shouldDecrementUnreadCount {
                 switch current.apiContentType {
                 case .article?:
                     unreadCountService.decrementArticleCount()
@@ -153,11 +197,11 @@ class ContentListViewModel: CursorPaginatedViewModel {
                 default:
                     break
                 }
+            }
 
-                if selectedReadFilter == "unread" {
-                    _ = withAnimation(.easeOut(duration: 0.3)) {
-                        contents.remove(at: index)
-                    }
+            if selectedReadFilter == "unread" {
+                _ = withAnimation(.easeOut(duration: 0.3)) {
+                    contents.remove(at: index)
                 }
             }
         } catch {
@@ -166,30 +210,41 @@ class ContentListViewModel: CursorPaginatedViewModel {
     }
     
     func toggleKnowledgeSave(_ contentId: Int) async {
-        do {
-            guard let index = contents.firstIndex(where: { $0.id == contentId }) else { return }
-            let currentContent = contents[index]
-            let targetSavedState = !currentContent.isSavedToKnowledge
+        guard let index = contents.firstIndex(where: { $0.id == contentId }) else { return }
+        let originalSavedState = contents[index].isSavedToKnowledge
+        let targetSavedState = !originalSavedState
+        contents[index] = contents[index].updating(isSavedToKnowledge: targetSavedState)
 
-            contents[index] = currentContent.updating(isSavedToKnowledge: targetSavedState)
+        do {
             if targetSavedState {
                 let response = try await contentService.saveToKnowledge(id: contentId)
                 if let isSavedToKnowledge = response["is_saved_to_knowledge"] as? Bool {
-                    contents[index] = currentContent.updating(isSavedToKnowledge: isSavedToKnowledge)
+                    if let currentIndex = contents.firstIndex(where: { $0.id == contentId }) {
+                        contents[currentIndex] = contents[currentIndex].updating(
+                            isSavedToKnowledge: isSavedToKnowledge
+                        )
+                    }
                 }
             } else {
                 try await contentService.removeFromKnowledge(id: contentId)
-                contents[index] = currentContent.updating(isSavedToKnowledge: false)
+                if let currentIndex = contents.firstIndex(where: { $0.id == contentId }) {
+                    contents[currentIndex] = contents[currentIndex].updating(isSavedToKnowledge: false)
+                }
             }
         } catch {
-            if let index = contents.firstIndex(where: { $0.id == contentId }) {
-                contents[index] = contents[index].updating(isSavedToKnowledge: !contents[index].isSavedToKnowledge)
+            if let currentIndex = contents.firstIndex(where: { $0.id == contentId }),
+               contents[currentIndex].isSavedToKnowledge == targetSavedState {
+                contents[currentIndex] = contents[currentIndex].updating(
+                    isSavedToKnowledge: originalSavedState
+                )
             }
             errorMessage = "Failed to update knowledge save"
         }
     }
 
     func loadKnowledgeLibrary() async {
+        requestGeneration += 1
+        let generation = requestGeneration
         isLoading = true
         errorMessage = nil
 
@@ -199,18 +254,24 @@ class ContentListViewModel: CursorPaginatedViewModel {
 
         do {
             let response = try await contentService.fetchKnowledgeLibrary(cursor: nil)
+            guard generation == requestGeneration else { return }
             contents = response.contents
             availableDates = response.availableDates
             contentTypes = response.contentTypes
             applyPagination(response)
         } catch {
+            guard generation == requestGeneration else { return }
             errorMessage = error.localizedDescription
         }
 
-        isLoading = false
+        if generation == requestGeneration {
+            isLoading = false
+        }
     }
 
     func loadRecentlyRead() async {
+        requestGeneration += 1
+        let generation = requestGeneration
         isLoading = true
         errorMessage = nil
 
@@ -219,17 +280,24 @@ class ContentListViewModel: CursorPaginatedViewModel {
         resetPagination()
 
         do {
-            let response = try await contentService.fetchRecentlyReadList(cursor: nil)
-            // Don't apply read filter for recently read - all items are already read by definition
+            let response = try await contentService.fetchRecentlyReadList(
+                contentType: selectedContentType,
+                date: selectedDate.isEmpty ? nil : selectedDate,
+                cursor: nil
+            )
+            guard generation == requestGeneration else { return }
             contents = response.contents
             availableDates = response.availableDates
             contentTypes = response.contentTypes
             applyPagination(response)
         } catch {
+            guard generation == requestGeneration else { return }
             errorMessage = error.localizedDescription
         }
 
-        isLoading = false
+        if generation == requestGeneration {
+            isLoading = false
+        }
     }
 
     func refresh() async {

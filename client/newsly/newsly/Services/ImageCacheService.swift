@@ -8,6 +8,7 @@
 import Foundation
 import UIKit
 import CryptoKit
+import ImageIO
 
 /// Two-tier image caching service with memory (NSCache) and disk (FileManager) caching.
 actor ImageCacheService {
@@ -47,17 +48,18 @@ actor ImageCacheService {
     // MARK: - Public API
     
     /// Get an image from cache (memory first, then disk).
-    func image(for url: URL) async -> UIImage? {
-        let key = cacheKey(for: url)
+    func image(for url: URL, targetPixelSize: Int? = nil) async -> UIImage? {
+        let memoryKey = cacheKey(for: url, targetPixelSize: targetPixelSize)
+        let diskKey = diskCacheKey(for: url)
         
         // Check memory cache first
-        if let cachedImage = memoryCache.object(forKey: key as NSString) {
+        if let cachedImage = memoryCache.object(forKey: memoryKey as NSString) {
             return cachedImage
         }
         
         // Check disk cache
-        if let diskImage = await loadFromDisk(key: key) {
-            storeInMemory(diskImage, forKey: key)
+        if let diskImage = await loadFromDisk(key: diskKey, targetPixelSize: targetPixelSize) {
+            storeInMemory(diskImage, forKey: memoryKey)
             return diskImage
         }
         
@@ -65,8 +67,8 @@ actor ImageCacheService {
     }
 
     /// Return an image from cache, optionally downloading it once for all concurrent callers.
-    func image(for url: URL, downloadIfMissing: Bool) async -> UIImage? {
-        if let cached = await image(for: url) {
+    func image(for url: URL, downloadIfMissing: Bool, targetPixelSize: Int? = nil) async -> UIImage? {
+        if let cached = await image(for: url, targetPixelSize: targetPixelSize) {
             return cached
         }
 
@@ -74,12 +76,12 @@ actor ImageCacheService {
             return nil
         }
 
-        let key = cacheKey(for: url)
+        let key = cacheKey(for: url, targetPixelSize: targetPixelSize)
         if let task = inFlightDownloads[key] {
             return await task.value
         }
 
-        let task = Task { await self.downloadAndCache(url: url) }
+        let task = Task { await self.downloadAndCache(url: url, targetPixelSize: targetPixelSize) }
         inFlightDownloads[key] = task
         let image = await task.value
         inFlightDownloads[key] = nil
@@ -87,22 +89,21 @@ actor ImageCacheService {
     }
     
     /// Cache an image in both memory and disk.
-    func cache(_ image: UIImage, for url: URL) async {
-        let key = cacheKey(for: url)
+    func cache(_ image: UIImage, for url: URL, targetPixelSize: Int? = nil) async {
+        let key = cacheKey(for: url, targetPixelSize: targetPixelSize)
 
         storeInMemory(image, forKey: key)
-        await saveToDisk(image: image, key: key)
+        await saveToDisk(image: image, key: diskCacheKey(for: url))
     }
 
     /// Decode downloaded image data off the view task and cache the original bytes.
-    func cacheImageData(_ data: Data, for url: URL) async -> UIImage? {
-        guard let image = UIImage(data: data) else {
+    func cacheImageData(_ data: Data, for url: URL, targetPixelSize: Int? = nil) async -> UIImage? {
+        guard let image = await preparedImage(from: data, targetPixelSize: targetPixelSize) else {
             return nil
         }
 
-        let key = cacheKey(for: url)
-        storeInMemory(image, forKey: key)
-        await saveDataToDisk(data, key: key)
+        storeInMemory(image, forKey: cacheKey(for: url, targetPixelSize: targetPixelSize))
+        await saveDataToDisk(data, key: diskCacheKey(for: url))
         return image
     }
     
@@ -112,7 +113,7 @@ actor ImageCacheService {
         await withTaskGroup(of: Void.self) { group in
             for url in urls {
                 group.addTask {
-                    _ = await self.image(for: url, downloadIfMissing: true)
+                    await self.downloadToDiskIfMissing(url: url)
                 }
             }
         }
@@ -136,8 +137,15 @@ actor ImageCacheService {
     
     // MARK: - Private Methods
     
-    private func cacheKey(for url: URL) -> String {
+    private func cacheKey(for url: URL, targetPixelSize: Int?) -> String {
         // Use SHA256 hash of URL as cache key
+        let sizeKey = targetPixelSize.map { "px:\($0)" } ?? "original"
+        let data = Data("\(url.absoluteString)|\(sizeKey)".utf8)
+        let hash = SHA256.hash(data: data)
+        return hash.compactMap { String(format: "%02x", $0) }.joined()
+    }
+
+    private func diskCacheKey(for url: URL) -> String {
         let data = Data(url.absoluteString.utf8)
         let hash = SHA256.hash(data: data)
         return hash.compactMap { String(format: "%02x", $0) }.joined()
@@ -149,10 +157,17 @@ actor ImageCacheService {
     }
     
     private func diskCacheURL(for key: String) -> URL {
-        cacheDirectory.appendingPathComponent("\(key).png")
+        cacheDirectory.appendingPathComponent("\(key).image")
     }
     
-    private func loadFromDisk(key: String) async -> UIImage? {
+    private func loadFromDisk(key: String, targetPixelSize: Int?) async -> UIImage? {
+        guard let data = await loadDataFromDisk(key: key) else {
+            return nil
+        }
+        return await preparedImage(from: data, targetPixelSize: targetPixelSize)
+    }
+
+    private func loadDataFromDisk(key: String) async -> Data? {
         let fileURL = diskCacheURL(for: key)
         
         guard fileManager.fileExists(atPath: fileURL.path) else {
@@ -168,12 +183,7 @@ actor ImageCacheService {
             return nil
         }
         
-        guard let data = try? Data(contentsOf: fileURL),
-              let image = UIImage(data: data) else {
-            return nil
-        }
-        
-        return image
+        return try? Data(contentsOf: fileURL)
     }
     
     private func saveToDisk(image: UIImage, key: String) async {
@@ -190,13 +200,55 @@ actor ImageCacheService {
         } catch {}
     }
     
-    private func downloadAndCache(url: URL) async -> UIImage? {
+    private func downloadAndCache(url: URL, targetPixelSize: Int?) async -> UIImage? {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            return await cacheImageData(data, for: url)
+            return await cacheImageData(data, for: url, targetPixelSize: targetPixelSize)
         } catch {
             return nil
         }
+    }
+
+    private func downloadToDiskIfMissing(url: URL) async {
+        let key = diskCacheKey(for: url)
+        if await loadDataFromDisk(key: key) != nil {
+            return
+        }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            await saveDataToDisk(data, key: key)
+        } catch {}
+    }
+
+    private func preparedImage(from data: Data, targetPixelSize: Int?) async -> UIImage? {
+        let image: UIImage?
+        if let targetPixelSize, targetPixelSize > 0 {
+            image = downsampledImage(from: data, maxPixelSize: targetPixelSize) ?? UIImage(data: data)
+        } else {
+            image = UIImage(data: data)
+        }
+        guard let image else { return nil }
+        return await image.byPreparingForDisplay() ?? image
+    }
+
+    private func downsampledImage(from data: Data, maxPixelSize: Int) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
+            return nil
+        }
+
+        let downsampleOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ] as CFDictionary
+
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions) else {
+            return nil
+        }
+        return UIImage(cgImage: image)
     }
     
     private func cleanupDiskCache() async {

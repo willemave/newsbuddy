@@ -11,15 +11,23 @@ struct NewsItemDetailView: View {
     let content: ContentDetail
     let metadata: NewsMetadata
     let onDiscussionTap: ((URL) -> Void)?
+    private let keyPoints: [String]
+
+    init(
+        content: ContentDetail,
+        metadata: NewsMetadata,
+        onDiscussionTap: ((URL) -> Void)?
+    ) {
+        self.content = content
+        self.metadata = metadata
+        self.onDiscussionTap = onDiscussionTap
+        self.keyPoints = content.resolvedNewsKeyPoints.map(Self.plainKeyPointText)
+    }
 
     var body: some View {
         if !keyPoints.isEmpty {
             keyPointsSection()
         }
-    }
-
-    private var keyPoints: [String] {
-        content.resolvedNewsKeyPoints
     }
 
     private var discussionURL: URL? {
@@ -59,7 +67,7 @@ struct NewsItemDetailView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(keyPoints.enumerated()), id: \.offset) { _, point in
-                    Text(plainKeyPointText(point))
+                    Text(point)
                         .font(.appCallout)
                         .foregroundColor(Color.readerBodyText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -69,7 +77,7 @@ struct NewsItemDetailView: View {
         }
     }
 
-    private func plainKeyPointText(_ string: String) -> String {
+    private static func plainKeyPointText(_ string: String) -> String {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace
         )
@@ -79,14 +87,14 @@ struct NewsItemDetailView: View {
         return stripLeadingMarkdownBullets(from: string)
     }
 
-    private func stripLeadingMarkdownBullets(from string: String) -> String {
+    private static func stripLeadingMarkdownBullets(from string: String) -> String {
         string
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { stripLeadingMarkdownBullet(from: String($0)) }
             .joined(separator: "\n")
     }
 
-    private func stripLeadingMarkdownBullet(from line: String) -> String {
+    private static func stripLeadingMarkdownBullet(from line: String) -> String {
         let whitespaceEnd = line.firstIndex { character in
             character != " " && character != "\t"
         } ?? line.endIndex

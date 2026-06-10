@@ -9,7 +9,7 @@ import Foundation
 
 struct ContentDetailRoute: Hashable, Codable {
     let contentId: Int
-    let contentType: ContentType
+    let contentType: APIContentType
     let allContentIds: [Int]
     let navigationSurface: ContentDetailNavigationSurface
 
@@ -22,7 +22,7 @@ struct ContentDetailRoute: Hashable, Codable {
 
     init(
         contentId: Int,
-        contentType: ContentType,
+        contentType: APIContentType,
         allContentIds: [Int],
         navigationSurface: ContentDetailNavigationSurface = .direct
     ) {
@@ -38,7 +38,7 @@ struct ContentDetailRoute: Hashable, Codable {
         navigationSurface: ContentDetailNavigationSurface = .direct
     ) {
         self.contentId = summary.id
-        self.contentType = summary.contentTypeEnum ?? .article
+        self.contentType = summary.apiContentType ?? .article
         self.allContentIds = allContentIds
         self.navigationSurface = navigationSurface
     }
@@ -46,7 +46,7 @@ struct ContentDetailRoute: Hashable, Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         contentId = try container.decode(Int.self, forKey: .contentId)
-        contentType = try container.decode(ContentType.self, forKey: .contentType)
+        contentType = try container.decode(APIContentType.self, forKey: .contentType)
         allContentIds = try container.decode([Int].self, forKey: .allContentIds)
         navigationSurface = try container.decodeIfPresent(
             ContentDetailNavigationSurface.self,

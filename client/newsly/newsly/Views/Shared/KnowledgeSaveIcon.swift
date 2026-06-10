@@ -11,6 +11,7 @@ struct KnowledgeSaveIcon: View {
     var savedColor: Color = .brandPrimary
     var unsavedColor: Color = .onSurfaceSecondary
     var badgeColor: Color = .brandPrimary
+    var badgeForegroundColor: Color = .white
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -24,7 +25,7 @@ struct KnowledgeSaveIcon: View {
                         .fill(badgeColor)
                     Image(systemName: "plus")
                         .font(.appSymbol(size: max(size * 0.34, 7), weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(badgeForegroundColor)
                 }
                 .frame(width: max(size * 0.52, 10), height: max(size * 0.52, 10))
                 .offset(x: size * 0.22, y: -size * 0.18)

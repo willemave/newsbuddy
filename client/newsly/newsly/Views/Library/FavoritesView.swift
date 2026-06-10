@@ -112,7 +112,7 @@ struct KnowledgeLibraryView: View {
             ForEach(displayedContents) { content in
                 NavigationLink(destination: ContentDetailView(
                     contentId: content.id,
-                    contentType: content.contentTypeEnum,
+                    contentType: content.apiContentType,
                     allContentIds: displayedContentIds,
                     navigationSurface: .savedLibrary
                 )) {
@@ -390,11 +390,11 @@ private enum LibraryTypeFilter: String, CaseIterable, Identifiable {
         case .bookmarks:
             return content.savedSource == "x_bookmark"
         case .article:
-            return content.contentTypeEnum == .article
+            return content.apiContentType == .article
         case .podcast:
-            return content.contentTypeEnum == .podcast
+            return content.apiContentType == .podcast
         case .news:
-            return content.contentTypeEnum == .news
+            return content.apiContentType == .news
         }
     }
 }

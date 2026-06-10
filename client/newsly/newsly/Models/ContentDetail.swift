@@ -45,6 +45,78 @@ struct RelevantLink: Identifiable, Hashable {
 
 typealias InterestingExternalLink = RelevantLink
 
+/// Decoded API payloads derived from metadata once, when `ContentDetail` is
+/// decoded. Keeping this immutable preserves value-model semantics while avoiding
+/// repeated JSON re-serialization from SwiftUI view bodies.
+private struct ContentDetailDecodedPayloads {
+    let articleMetadata: ArticleMetadata?
+    let podcastMetadata: PodcastMetadata?
+    let newsMetadata: NewsMetadata?
+    let longformArtifact: LongformArtifactEnvelope?
+    let interleavedSummary: InterleavedSummary?
+    let interleavedSummaryV2: InterleavedSummaryV2?
+    let bulletedSummary: BulletedSummary?
+    let editorialSummary: EditorialNarrativeSummary?
+    let structuredSummary: StructuredSummary?
+
+    init(
+        contentType: String,
+        metadata: [String: AnyCodable],
+        summaryKind: String?,
+        summaryVersion: Int?,
+        structuredSummaryRaw: [String: AnyCodable]?,
+        longformArtifactRaw: [String: AnyCodable]?
+    ) {
+        let apiContentType = APIContentType(rawValue: contentType)
+        articleMetadata = apiContentType == .article
+            ? Self.decode(ArticleMetadata.self, from: metadata)
+            : nil
+        podcastMetadata = apiContentType == .podcast
+            ? Self.decode(PodcastMetadata.self, from: metadata)
+            : nil
+        newsMetadata = apiContentType == .news
+            ? Self.decode(NewsMetadata.self, from: metadata)
+            : nil
+
+        let resolvedSummaryKind = summaryKind ?? metadata["summary_kind"]?.value as? String
+        let resolvedSummaryVersion = summaryVersion
+            ?? (metadata["summary_version"]?.value as? Int)
+            ?? (metadata["summary_version"]?.value as? Double).map(Int.init)
+        let rawSummary = structuredSummaryRaw
+        let rawArtifact = longformArtifactRaw ?? structuredSummaryRaw
+
+        longformArtifact = resolvedSummaryKind == "longform_artifact"
+            ? Self.decode(LongformArtifactEnvelope.self, from: rawArtifact)
+            : nil
+        interleavedSummary = resolvedSummaryKind == "long_interleaved" && resolvedSummaryVersion == 1
+            ? Self.decode(InterleavedSummary.self, from: rawSummary)
+            : nil
+        interleavedSummaryV2 = resolvedSummaryKind == "long_interleaved" && resolvedSummaryVersion == 2
+            ? Self.decode(InterleavedSummaryV2.self, from: rawSummary)
+            : nil
+        bulletedSummary = resolvedSummaryKind == "long_bullets" && resolvedSummaryVersion == 1
+            ? Self.decode(BulletedSummary.self, from: rawSummary)
+            : nil
+        editorialSummary = resolvedSummaryKind == "long_editorial_narrative"
+            && (resolvedSummaryVersion == 1 || resolvedSummaryVersion == 2)
+            ? Self.decode(EditorialNarrativeSummary.self, from: rawSummary)
+            : nil
+        structuredSummary = resolvedSummaryKind == "long_structured"
+            ? Self.decode(StructuredSummary.self, from: rawSummary)
+            : nil
+    }
+
+    private static func decode<T: Decodable>(_ type: T.Type, from raw: [String: AnyCodable]?) -> T? {
+        guard let raw else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let data = try? JSONSerialization.data(withJSONObject: raw.mapValues(\.value)) else {
+            return nil
+        }
+        return try? decoder.decode(type, from: data)
+    }
+}
+
 struct ContentDetail: Codable, Identifiable {
     let id: Int
     let contentType: String
@@ -89,6 +161,8 @@ struct ContentDetail: Codable, Identifiable {
     let newsSummary: String?
     let detectedFeed: DetectedFeed?
     let canSubscribe: Bool?
+
+    private let decodedPayloads: ContentDetailDecodedPayloads
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -140,14 +214,18 @@ struct ContentDetail: Codable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
         id = try container.decode(Int.self, forKey: .id)
-        contentType = try container.decode(String.self, forKey: .contentType)
-        url = try container.decode(String.self, forKey: .url)
-        title = try container.decodeIfPresent(String.self, forKey: .title)
+        let decodedContentType = try container.decode(String.self, forKey: .contentType)
+        contentType = decodedContentType
+        let decodedURL = try container.decode(String.self, forKey: .url)
+        url = decodedURL
+        let decodedTitle = try container.decodeIfPresent(String.self, forKey: .title)
+        title = decodedTitle
         source = try container.decodeIfPresent(String.self, forKey: .source)
         status = try container.decode(String.self, forKey: .status)
         errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
         retryCount = try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
-        metadata = try container.decodeIfPresent([String: AnyCodable].self, forKey: .metadata) ?? [:]
+        let decodedMetadata = try container.decodeIfPresent([String: AnyCodable].self, forKey: .metadata) ?? [:]
+        metadata = decodedMetadata
         createdAt = try container.decode(String.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
         processedAt = try container.decodeIfPresent(String.self, forKey: .processedAt)
@@ -158,10 +236,20 @@ struct ContentDetail: Codable, Identifiable {
         isSavedToKnowledge = try container.decodeIfPresent(Bool.self, forKey: .isSavedToKnowledge) ?? false
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
         shortSummary = try container.decodeIfPresent(String.self, forKey: .shortSummary)
-        summaryKind = try container.decodeIfPresent(String.self, forKey: .summaryKind)
-        summaryVersion = try container.decodeIfPresent(Int.self, forKey: .summaryVersion)
-        structuredSummaryRaw = try container.decodeIfPresent([String: AnyCodable].self, forKey: .structuredSummaryRaw)
-        longformArtifactRaw = try container.decodeIfPresent([String: AnyCodable].self, forKey: .longformArtifactRaw)
+        let decodedSummaryKind = try container.decodeIfPresent(String.self, forKey: .summaryKind)
+        summaryKind = decodedSummaryKind
+        let decodedSummaryVersion = try container.decodeIfPresent(Int.self, forKey: .summaryVersion)
+        summaryVersion = decodedSummaryVersion
+        let decodedStructuredSummaryRaw = try container.decodeIfPresent(
+            [String: AnyCodable].self,
+            forKey: .structuredSummaryRaw
+        )
+        structuredSummaryRaw = decodedStructuredSummaryRaw
+        let decodedLongformArtifactRaw = try container.decodeIfPresent(
+            [String: AnyCodable].self,
+            forKey: .longformArtifactRaw
+        )
+        longformArtifactRaw = decodedLongformArtifactRaw
         feedPreview = try container.decodeIfPresent(LongformFeedPreview.self, forKey: .feedPreview)
         artifactType = try container.decodeIfPresent(String.self, forKey: .artifactType)
         previewBullets = try container.decodeIfPresent([String].self, forKey: .previewBullets)
@@ -182,20 +270,25 @@ struct ContentDetail: Codable, Identifiable {
         detectedFeed = try container.decodeIfPresent(DetectedFeed.self, forKey: .detectedFeed)
         canSubscribe = try container.decodeIfPresent(Bool.self, forKey: .canSubscribe)
 
-        if let displayTitle = try container.decodeIfPresent(String.self, forKey: .displayTitle),
-           !displayTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            self.displayTitle = displayTitle
-        } else if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            self.displayTitle = title
+        if let decodedDisplayTitle = try container.decodeIfPresent(String.self, forKey: .displayTitle),
+           !decodedDisplayTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            self.displayTitle = decodedDisplayTitle
+        } else if let decodedTitle, !decodedTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            self.displayTitle = decodedTitle
         } else {
-            self.displayTitle = url
+            self.displayTitle = decodedURL
         }
+
+        decodedPayloads = ContentDetailDecodedPayloads(
+            contentType: decodedContentType,
+            metadata: decodedMetadata,
+            summaryKind: decodedSummaryKind,
+            summaryVersion: decodedSummaryVersion,
+            structuredSummaryRaw: decodedStructuredSummaryRaw,
+            longformArtifactRaw: decodedLongformArtifactRaw
+        )
     }
     
-    var contentTypeEnum: ContentType? {
-        ContentType(rawValue: contentType)
-    }
-
     var apiContentType: APIContentType? {
         APIContentType(rawValue: contentType)
     }
@@ -218,48 +311,24 @@ struct ContentDetail: Codable, Identifiable {
     }
 
     var detailTypeLabel: String {
-        if contentTypeEnum == .news,
+        if apiContentType == .news,
            let name = newsMetadata?.aggregator?.name,
            !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return name
         }
-        return contentTypeEnum?.rawValue.capitalized ?? "Article"
+        return apiContentType?.displayName ?? "Article"
     }
     
     var articleMetadata: ArticleMetadata? {
-        guard apiContentType == .article else { return nil }
-        
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        
-        if let jsonData = try? JSONSerialization.data(withJSONObject: metadata.mapValues { $0.value }) {
-            return try? decoder.decode(ArticleMetadata.self, from: jsonData)
-        }
-        return nil
+        decodedPayloads.articleMetadata
     }
-    
+
     var podcastMetadata: PodcastMetadata? {
-        guard apiContentType == .podcast else { return nil }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-
-        if let jsonData = try? JSONSerialization.data(withJSONObject: metadata.mapValues { $0.value }) {
-            return try? decoder.decode(PodcastMetadata.self, from: jsonData)
-        }
-        return nil
+        decodedPayloads.podcastMetadata
     }
 
     var newsMetadata: NewsMetadata? {
-        guard apiContentType == .news else { return nil }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-
-        if let jsonData = try? JSONSerialization.data(withJSONObject: metadata.mapValues { $0.value }) {
-            return try? decoder.decode(NewsMetadata.self, from: jsonData)
-        }
-        return nil
+        decodedPayloads.newsMetadata
     }
 
     var sourceMetadata: SourceMetadata? {
@@ -328,7 +397,7 @@ struct ContentDetail: Codable, Identifiable {
     }
 
     var newsRelevantLinks: [RelevantLink] {
-        guard contentTypeEnum == .news,
+        guard apiContentType == .news,
               let rawLinks = metadata["relevant_links"]?.value as? [[String: Any]] else {
             return []
         }
@@ -355,7 +424,7 @@ struct ContentDetail: Codable, Identifiable {
     }
 
     var relevantLinks: [RelevantLink] {
-        if contentTypeEnum == .news {
+        if apiContentType == .news {
             return newsRelevantLinks
         }
         return interestingExternalLinks
@@ -385,90 +454,31 @@ struct ContentDetail: Codable, Identifiable {
     }
 
     var longformArtifact: LongformArtifactEnvelope? {
-        let raw = longformArtifactRaw ?? structuredSummaryRaw
-        guard resolvedSummaryKind == "longform_artifact",
-              let raw else {
-            return nil
-        }
-
-        let decoder = JSONDecoder()
-        if let jsonData = try? JSONSerialization.data(withJSONObject: raw.mapValues { $0.value }) {
-            return try? decoder.decode(LongformArtifactEnvelope.self, from: jsonData)
-        }
-        return nil
+        decodedPayloads.longformArtifact
     }
 
     /// Parse the raw summary as InterleavedSummary (returns nil if not interleaved format)
     var interleavedSummary: InterleavedSummary? {
-        guard hasInterleavedSummary,
-              resolvedSummaryVersion == 1,
-              let raw = structuredSummaryRaw else {
-            return nil
-        }
-
-        let decoder = JSONDecoder()
-        if let jsonData = try? JSONSerialization.data(withJSONObject: raw.mapValues { $0.value }) {
-            return try? decoder.decode(InterleavedSummary.self, from: jsonData)
-        }
-        return nil
+        decodedPayloads.interleavedSummary
     }
 
     /// Parse the raw summary as InterleavedSummaryV2 (returns nil if not v2 format)
     var interleavedSummaryV2: InterleavedSummaryV2? {
-        guard hasInterleavedSummary,
-              resolvedSummaryVersion == 2,
-              let raw = structuredSummaryRaw else {
-            return nil
-        }
-
-        let decoder = JSONDecoder()
-        if let jsonData = try? JSONSerialization.data(withJSONObject: raw.mapValues { $0.value }) {
-            return try? decoder.decode(InterleavedSummaryV2.self, from: jsonData)
-        }
-        return nil
+        decodedPayloads.interleavedSummaryV2
     }
 
     /// Parse the raw summary as BulletedSummary (returns nil if not bulleted format)
     var bulletedSummary: BulletedSummary? {
-        guard resolvedSummaryKind == "long_bullets",
-              resolvedSummaryVersion == 1,
-              let raw = structuredSummaryRaw else {
-            return nil
-        }
-
-        let decoder = JSONDecoder()
-        if let jsonData = try? JSONSerialization.data(withJSONObject: raw.mapValues { $0.value }) {
-            return try? decoder.decode(BulletedSummary.self, from: jsonData)
-        }
-        return nil
+        decodedPayloads.bulletedSummary
     }
 
     /// Parse the raw summary as EditorialNarrativeSummary (returns nil if not editorial format)
     var editorialSummary: EditorialNarrativeSummary? {
-        guard resolvedSummaryKind == "long_editorial_narrative",
-              (resolvedSummaryVersion == 1 || resolvedSummaryVersion == 2),
-              let raw = structuredSummaryRaw else {
-            return nil
-        }
-
-        let decoder = JSONDecoder()
-        if let jsonData = try? JSONSerialization.data(withJSONObject: raw.mapValues { $0.value }) {
-            return try? decoder.decode(EditorialNarrativeSummary.self, from: jsonData)
-        }
-        return nil
+        decodedPayloads.editorialSummary
     }
 
     /// Parse the raw summary as StructuredSummary (returns nil if interleaved format)
     var structuredSummary: StructuredSummary? {
-        guard resolvedSummaryKind == "long_structured",
-              let raw = structuredSummaryRaw else {
-            return nil
-        }
-
-        let decoder = JSONDecoder()
-        if let jsonData = try? JSONSerialization.data(withJSONObject: raw.mapValues { $0.value }) {
-            return try? decoder.decode(StructuredSummary.self, from: jsonData)
-        }
-        return nil
+        decodedPayloads.structuredSummary
     }
 }

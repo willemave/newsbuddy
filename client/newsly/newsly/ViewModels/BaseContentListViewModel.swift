@@ -51,7 +51,7 @@ class BaseContentListViewModel: ObservableObject {
     let clearReadTrigger = PassthroughSubject<Void, Never>()
 
     private let repository: ContentRepositoryType
-    private var contentTypes: [ContentType]
+    private var contentTypes: [APIContentType]
     private var readFilter: ReadFilter
 
     private var pagination = Pagination(nextCursor: nil, hasMore: true, isLoading: false)
@@ -62,7 +62,7 @@ class BaseContentListViewModel: ObservableObject {
 
     init(
         repository: ContentRepositoryType,
-        contentTypes: [ContentType],
+        contentTypes: [APIContentType],
         readFilter: ReadFilter = .unread
     ) {
         self.repository = repository

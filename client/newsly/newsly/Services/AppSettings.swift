@@ -131,6 +131,18 @@ class AppSettings: ObservableObject {
         readerPaletteId = palette.rawValue
     }
 
+    func setAppTextSize(_ index: Int) {
+        guard appTextSizeIndex != index else { return }
+        objectWillChange.send()
+        appTextSizeIndex = index
+    }
+
+    func setContentTextSize(_ index: Int) {
+        guard contentTextSizeIndex != index else { return }
+        objectWillChange.send()
+        contentTextSizeIndex = index
+    }
+
     func setBackendTranscriptionAvailable(_ isAvailable: Bool) {
         backendTranscriptionAvailable = isAvailable
     }

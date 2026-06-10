@@ -29,7 +29,6 @@ struct AuthenticationView: View {
 
                 Text("Newsbuddy")
                     .font(.appLargeTitle)
-                    .fontWeight(.bold)
             }
             .contentShape(Rectangle())
             #if DEBUG && targetEnvironment(simulator)

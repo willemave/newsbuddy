@@ -12,7 +12,7 @@ struct ChatMessageList: View {
     let errorMessage: String?
     let isStartingCouncil: Bool
     let isSending: Bool
-    let thinkingElapsedSeconds: Int
+    let thinkingStartedAt: Date?
     let latestProcessSummary: String?
     let session: ChatSessionSummary?
     let scrollToBottomRequest: Int
@@ -71,7 +71,7 @@ struct ChatMessageList: View {
 
                         if isSending {
                             ThinkingBubbleView(
-                                elapsedSeconds: thinkingElapsedSeconds,
+                                startDate: thinkingStartedAt,
                                 statusText: latestProcessSummary
                             )
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -149,7 +149,7 @@ struct ChatMessageList: View {
                 }
 
                 ThinkingBubbleView(
-                    elapsedSeconds: thinkingElapsedSeconds,
+                    startDate: thinkingStartedAt,
                     statusText: "Gathering council perspectives"
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -239,7 +239,7 @@ private struct ChatLoadErrorState: View {
         errorMessage: nil,
         isStartingCouncil: false,
         isSending: true,
-        thinkingElapsedSeconds: 42,
+        thinkingStartedAt: Date(timeIntervalSinceNow: -42),
         latestProcessSummary: "Drafting a grounded response",
         session: ChatPreviewFixtures.session,
         scrollToBottomRequest: 0,

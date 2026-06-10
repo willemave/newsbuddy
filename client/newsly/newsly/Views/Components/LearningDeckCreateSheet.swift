@@ -328,20 +328,7 @@ private final class LearningDeckFocusRecorder: ObservableObject {
             self?.isTranscribing = false
             self?.isVoiceActionInFlight = false
         }
-        transcriptionService.onStateChange = { [weak self] state in
-            guard let self else { return }
-            switch state {
-            case .idle:
-                self.isRecording = false
-                self.isTranscribing = false
-            case .recording:
-                self.isRecording = true
-                self.isTranscribing = false
-            case .transcribing:
-                self.isRecording = false
-                self.isTranscribing = true
-            }
-        }
+        transcriptionService.onStateChange = nil
     }
 
     private func applyTranscript(_ transcript: String) {

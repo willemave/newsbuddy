@@ -85,7 +85,10 @@ struct ContentCard: View {
         let displayUrl = content.thumbnailUrl ?? content.imageUrl
         if let imageUrlString = displayUrl,
            let imageUrl = buildImageURL(from: imageUrlString) {
-            CachedAsyncImage(url: imageUrl) { image in
+            CachedAsyncImage(
+                url: imageUrl,
+                targetSize: CGSize(width: thumbnailSize, height: thumbnailSize)
+            ) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -112,7 +115,7 @@ struct ContentCard: View {
     }
 
     private var contentTypeIcon: String {
-        switch content.contentTypeEnum {
+        switch content.apiContentType {
         case .article:
             return "doc.text"
         case .podcast:

@@ -20,10 +20,21 @@ final class SubmissionStatusViewModel: CursorPaginatedViewModel {
     @Published var isLoading = false
     @Published var isLoadingMore = false
     @Published var errorMessage: String?
+    @Published private var lastViewedSubmissionCreatedAt: Date? {
+        didSet {
+            if let lastViewedSubmissionCreatedAt {
+                defaults.set(lastViewedSubmissionCreatedAt.timeIntervalSince1970, forKey: StorageKey.lastViewedSubmissionCreatedAt)
+            } else {
+                defaults.removeObject(forKey: StorageKey.lastViewedSubmissionCreatedAt)
+            }
+        }
+    }
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = SharedContainer.userDefaults) {
         self.defaults = defaults
+        let timestamp = defaults.double(forKey: StorageKey.lastViewedSubmissionCreatedAt)
+        self.lastViewedSubmissionCreatedAt = timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : nil
         super.init()
     }
 
@@ -77,13 +88,6 @@ final class SubmissionStatusViewModel: CursorPaginatedViewModel {
             return
         }
 
-        defaults.set(viewedAt.timeIntervalSince1970, forKey: StorageKey.lastViewedSubmissionCreatedAt)
-        objectWillChange.send()
-    }
-
-    private var lastViewedSubmissionCreatedAt: Date? {
-        let timestamp = defaults.double(forKey: StorageKey.lastViewedSubmissionCreatedAt)
-        guard timestamp > 0 else { return nil }
-        return Date(timeIntervalSince1970: timestamp)
+        lastViewedSubmissionCreatedAt = viewedAt
     }
 }

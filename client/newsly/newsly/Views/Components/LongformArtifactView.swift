@@ -97,7 +97,7 @@ private struct SourceQuotesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ArtifactSectionHeader("Source Quotes", icon: "quote.opening", tint: tint)
-            ForEach(quotes) { quote in
+            ForEach(Array(quotes.enumerated()), id: \.offset) { _, quote in
                 ArtifactQuoteCard(quote: quote, tint: tint)
             }
         }
@@ -113,7 +113,7 @@ private struct KeyPointList: View {
             ArtifactSectionHeader("Key Points", icon: "list.bullet.rectangle", tint: tint)
 
             VStack(alignment: .leading, spacing: 14) {
-                ForEach(points) { point in
+                ForEach(Array(points.enumerated()), id: \.offset) { _, point in
                     VStack(alignment: .leading, spacing: 5) {
                         ArtifactEyebrowText(point.heading)
 
@@ -151,8 +151,7 @@ private struct ArtifactQuoteCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(quote.text)
-                .font(.appCallout)
-                .italic()
+                .font(.appSansItalic(size: 16, relativeTo: .callout))
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
 

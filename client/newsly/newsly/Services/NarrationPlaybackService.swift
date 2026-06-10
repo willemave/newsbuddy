@@ -14,17 +14,53 @@ private func narrationElapsedMilliseconds(since start: Date) -> Int {
 }
 
 @MainActor
+final class NarrationPlaybackProgress: ObservableObject {
+    @Published private(set) var currentTime: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
+
+    func update(
+        currentTime nextCurrentTime: TimeInterval,
+        duration nextDuration: TimeInterval,
+        force: Bool = false
+    ) {
+        let normalizedCurrentTime = normalizedSeconds(nextCurrentTime)
+        let normalizedDuration = normalizedSeconds(nextDuration)
+        guard force
+            || displaySecond(normalizedCurrentTime) != displaySecond(currentTime)
+            || displaySecond(normalizedDuration) != displaySecond(duration)
+        else {
+            return
+        }
+        currentTime = normalizedCurrentTime
+        duration = normalizedDuration
+    }
+
+    func reset() {
+        update(currentTime: 0, duration: 0, force: true)
+    }
+
+    private func normalizedSeconds(_ seconds: TimeInterval) -> TimeInterval {
+        guard seconds.isFinite, seconds > 0 else { return 0 }
+        return seconds
+    }
+
+    private func displaySecond(_ seconds: TimeInterval) -> Int {
+        Int(seconds.rounded(.down))
+    }
+}
+
+@MainActor
 final class NarrationPlaybackService: ObservableObject {
     static let shared = NarrationPlaybackService()
     nonisolated static let defaultPlaybackRate: Float = 1.0
     nonisolated static let longPressPlaybackRate: Float = 1.5
 
+    let progress = NarrationPlaybackProgress()
+
     @Published private(set) var isSpeaking = false
     @Published private(set) var isPaused = false
     @Published private(set) var playbackRate: Float
     @Published private(set) var speakingTarget: NarrationTarget?
-    @Published private(set) var currentTime: TimeInterval = 0
-    @Published private(set) var duration: TimeInterval = 0
 
     private let preferenceStore: NarrationPlaybackPreferenceStore
     private var streamPlayer: AVPlayer?
@@ -48,6 +84,14 @@ final class NarrationPlaybackService: ObservableObject {
 
     var playbackSpeedTitle: String {
         NarrationPlaybackSpeedOption.title(for: playbackRate)
+    }
+
+    var currentTime: TimeInterval {
+        progress.currentTime
+    }
+
+    var duration: TimeInterval {
+        progress.duration
     }
 
     func setPlaybackRate(_ rate: Float) {
@@ -120,8 +164,7 @@ final class NarrationPlaybackService: ObservableObject {
             speakingTarget = target
             isSpeaking = true
             isPaused = false
-            currentTime = 0
-            duration = 0
+            progress.reset()
             playbackStartedAt = startedAt
             playbackItemReadyLogged = false
             playbackTimeControlPlayingLogged = false
@@ -156,8 +199,11 @@ final class NarrationPlaybackService: ObservableObject {
         if let streamPlayer {
             let currentSeconds = finiteSeconds(streamPlayer.currentTime().seconds) ?? 0
             savedPlaybackPositions[target] = currentSeconds
-            currentTime = currentSeconds
-            duration = streamDuration(streamPlayer) ?? duration
+            progress.update(
+                currentTime: currentSeconds,
+                duration: streamDuration(streamPlayer) ?? duration,
+                force: true
+            )
             streamPlayer.pause()
             isSpeaking = false
             isPaused = true
@@ -352,22 +398,22 @@ final class NarrationPlaybackService: ObservableObject {
 
     private func syncProgressFromPlayer() {
         if let streamPlayer {
-            currentTime = finiteSeconds(streamPlayer.currentTime().seconds) ?? 0
-            if currentTime > 0,
+            let currentSeconds = finiteSeconds(streamPlayer.currentTime().seconds) ?? 0
+            if currentSeconds > 0,
                !playbackFirstProgressLogged,
                let playbackStartedAt {
                 playbackFirstProgressLogged = true
                 narrationPlaybackLogger.info(
-                    "Streaming narration first playback progress | target=\(String(describing: self.speakingTarget), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: playbackStartedAt)) currentSeconds=\(self.currentTime, privacy: .public)"
+                    "Streaming narration first playback progress | target=\(String(describing: self.speakingTarget), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: playbackStartedAt)) currentSeconds=\(currentSeconds, privacy: .public)"
                 )
             }
-            if let resolvedDuration = streamDuration(streamPlayer) {
-                duration = resolvedDuration
-            }
+            progress.update(
+                currentTime: currentSeconds,
+                duration: streamDuration(streamPlayer) ?? duration
+            )
             return
         }
-        currentTime = 0
-        duration = 0
+        progress.reset()
     }
 
     private func resetPlaybackState(clearSavedPositionFor target: NarrationTarget? = nil) {
@@ -380,8 +426,7 @@ final class NarrationPlaybackService: ObservableObject {
         isSpeaking = false
         isPaused = false
         speakingTarget = nil
-        currentTime = 0
-        duration = 0
+        progress.reset()
         playbackStartedAt = nil
         playbackItemReadyLogged = false
         playbackTimeControlPlayingLogged = false

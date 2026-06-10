@@ -286,12 +286,12 @@ struct CustomNarrationPickerSheet: View {
     }
 
     private func supportsLongFormCustomNarration(_ item: ContentSummary) -> Bool {
-        guard let type = item.contentTypeEnum else { return false }
+        guard let type = item.apiContentType else { return false }
         return type == .article || type == .podcast
     }
 
     private func supportsFastReadCustomNarration(_ item: ContentSummary) -> Bool {
-        item.contentTypeEnum == .news
+        item.apiContentType == .news
     }
 
     private func rowMetadata(for item: ContentSummary, kind: NarrationSourceKind) -> [String] {
@@ -319,7 +319,7 @@ struct CustomNarrationPickerSheet: View {
     }
 
     private func customNarrationTypeLabel(for item: ContentSummary) -> String {
-        switch item.contentTypeEnum {
+        switch item.apiContentType {
         case .podcast:
             return "Podcast"
         case .article:

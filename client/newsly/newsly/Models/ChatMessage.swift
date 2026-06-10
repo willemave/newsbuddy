@@ -246,25 +246,6 @@ struct ChatMessage: Codable, Identifiable, Equatable {
 }
 
 private enum ChatMessageTimestampFormatter {
-    private static let iso8601WithFractionalFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static let iso8601Formatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-
-    private static let utcMicrosecondsFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
-        formatter.timeZone = TimeZone(abbreviation: "UTC")
-        return formatter
-    }()
-
     private static let displayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
@@ -273,12 +254,7 @@ private enum ChatMessageTimestampFormatter {
     }()
 
     static func formattedTime(from timestamp: String) -> String {
-        let date =
-            iso8601WithFractionalFormatter.date(from: timestamp)
-            ?? iso8601Formatter.date(from: timestamp)
-            ?? utcMicrosecondsFormatter.date(from: timestamp)
-
-        guard let date else { return "" }
+        guard let date = ServerDate.parse(timestamp) else { return "" }
         return displayFormatter.string(from: date)
     }
 }

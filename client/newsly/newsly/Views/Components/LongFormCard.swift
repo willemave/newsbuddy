@@ -241,8 +241,9 @@ struct LongFormCard: View {
     private var heroImage: some View {
         let imageUrl = content.imageUrl.flatMap { buildImageURL(from: $0) }
         let thumbnailUrl = content.thumbnailUrl.flatMap { buildImageURL(from: $0) }
+        let targetSize = CGSize(width: UIScreen.main.bounds.width, height: LongFormCardDesign.imageHeight)
         if let imageUrl {
-            CachedAsyncImage(url: imageUrl, thumbnailUrl: thumbnailUrl) { image in
+            CachedAsyncImage(url: imageUrl, thumbnailUrl: thumbnailUrl, targetSize: targetSize) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -250,7 +251,7 @@ struct LongFormCard: View {
                 placeholderGradient
             }
         } else if let thumbnailUrl {
-            CachedAsyncImage(url: thumbnailUrl) { image in
+            CachedAsyncImage(url: thumbnailUrl, targetSize: targetSize) { image in
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -276,7 +277,7 @@ struct LongFormCard: View {
     }
 
     private var summaryText: String? {
-        guard content.contentTypeEnum != .news else { return nil }
+        guard content.apiContentType != .news else { return nil }
         return content.keyTakeawayDisplayText
     }
 
@@ -287,14 +288,14 @@ struct LongFormCard: View {
         if let platform = content.platform, !platform.isEmpty {
             return platform.uppercased()
         }
-        if let typeName = content.contentTypeEnum?.displayName {
+        if let typeName = content.apiContentType?.displayName {
             return typeName.uppercased()
         }
         return "NEWSLY"
     }
 
     private var contentTypeIcon: String {
-        switch content.contentTypeEnum {
+        switch content.apiContentType {
         case .article:
             return "doc.text"
         case .podcast:
@@ -305,7 +306,7 @@ struct LongFormCard: View {
     }
 
     private var contentTypeLabel: String {
-        switch content.contentTypeEnum {
+        switch content.apiContentType {
         case .article:
             return "Article"
         case .podcast:

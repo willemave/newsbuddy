@@ -383,6 +383,11 @@ struct SettingsView: View {
         let name = newExpertName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, councilPersonasDraft.count < CouncilPersona.maxExperts else { return }
         let persona = CouncilPersona(name: name, sortOrder: councilPersonasDraft.count)
+        guard !councilPersonasDraft.contains(where: { $0.id == persona.id }) else {
+            alertMessage = "\(name) is already in your council."
+            showingAlert = true
+            return
+        }
         councilPersonasDraft.append(persona)
         newExpertName = ""
         hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
@@ -405,7 +410,7 @@ struct SettingsView: View {
                 title: "App Text Size",
                 value: Binding(
                     get: { Double(settings.appTextSizeIndex) },
-                    set: { settings.appTextSizeIndex = Int($0.rounded()) }
+                    set: { settings.setAppTextSize(Int($0.rounded())) }
                 ),
                 range: 0...3
             )
@@ -418,7 +423,7 @@ struct SettingsView: View {
                 title: "Content Text Size",
                 value: Binding(
                     get: { Double(settings.contentTextSizeIndex) },
-                    set: { settings.contentTextSizeIndex = Int($0.rounded()) }
+                    set: { settings.setContentTextSize(Int($0.rounded())) }
                 ),
                 range: 0...4
             )

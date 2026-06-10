@@ -242,4 +242,97 @@ struct ContentDetailSwipeOverlay: View {
     }
 }
 
+struct ContentDetailSwipeContainer<Content: View>: View {
+    let currentIndex: Int
+    let contentIds: [Int]
+    let surfaceName: String
+    let edgeWidth: CGFloat
+    let onDismiss: () -> Void
+    let onNext: () -> Void
+    let onPrevious: () -> Void
+    let content: Content
+
+    @State private var dragAmount: CGFloat = 0
+    @State private var isLeadingEdgeSwipeActive = false
+
+    init(
+        currentIndex: Int,
+        contentIds: [Int],
+        surfaceName: String,
+        edgeWidth: CGFloat,
+        onDismiss: @escaping () -> Void,
+        onNext: @escaping () -> Void,
+        onPrevious: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.currentIndex = currentIndex
+        self.contentIds = contentIds
+        self.surfaceName = surfaceName
+        self.edgeWidth = edgeWidth
+        self.onDismiss = onDismiss
+        self.onNext = onNext
+        self.onPrevious = onPrevious
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .overlay(alignment: .leading) {
+                if dragAmount > 30 && (currentIndex > 0 || isLeadingEdgeSwipeActive) {
+                    swipeIndicator(direction: .previous, progress: min(1.0, dragAmount / 100))
+                }
+            }
+            .overlay(alignment: .trailing) {
+                if dragAmount < -30 && currentIndex < contentIds.count - 1 {
+                    swipeIndicator(direction: .next, progress: min(1.0, abs(dragAmount) / 100))
+                }
+            }
+            .overlay {
+                ContentDetailSwipeOverlay(
+                    currentIndex: currentIndex,
+                    contentIds: contentIds,
+                    surfaceName: surfaceName,
+                    edgeWidth: edgeWidth,
+                    dragAmount: $dragAmount,
+                    isLeadingEdgeSwipeActive: $isLeadingEdgeSwipeActive,
+                    onDismiss: onDismiss,
+                    onNext: onNext,
+                    onPrevious: onPrevious
+                )
+            }
+            .offset(x: dragAmount)
+            .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragAmount)
+    }
+
+    @ViewBuilder
+    private func swipeIndicator(direction: SwipeIndicatorDirection, progress: CGFloat) -> some View {
+        let iconName = direction == .previous ? "chevron.left" : "chevron.right"
+
+        VStack {
+            Spacer()
+            HStack {
+                if direction == .next { Spacer() }
+                Image(systemName: iconName)
+                    .font(.appSymbol(size: 24, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .fill(Color.brandPrimary.opacity(0.9))
+                    )
+                    .scaleEffect(0.8 + (progress * 0.4))
+                    .opacity(Double(progress))
+                    .padding(.horizontal, 8)
+                if direction == .previous { Spacer() }
+            }
+            Spacer()
+        }
+    }
+}
+
+private enum SwipeIndicatorDirection {
+    case previous
+    case next
+}
+
 private let detailSwipeLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")

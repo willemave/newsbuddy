@@ -88,16 +88,6 @@ struct ScraperConfigStats: Codable {
         totalCount > 0 || processingCount > 0 || latestProcessedAt != nil || nextExpectedAt != nil
     }
 
-    private static let iso8601WithFractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static let iso8601: ISO8601DateFormatter = {
-        ISO8601DateFormatter()
-    }()
-
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
@@ -105,11 +95,7 @@ struct ScraperConfigStats: Codable {
     }()
 
     private static func parseISODate(_ value: String?) -> Date? {
-        guard let value else { return nil }
-        if let date = iso8601WithFractional.date(from: value) {
-            return date
-        }
-        return iso8601.date(from: value)
+        ServerDate.parse(value)
     }
 }
 

@@ -118,6 +118,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
     }
 
     func stopAudioCaptureAndDiscover() async {
+        guard audioState == .recording else { return }
         let startedAt = Date()
         audioState = .transcribing
         stopAudioTimer()

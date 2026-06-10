@@ -101,7 +101,7 @@ struct ChatSessionView: View {
             errorMessage: viewModel.errorMessage,
             isStartingCouncil: viewModel.isStartingCouncil,
             isSending: viewModel.isSending,
-            thinkingElapsedSeconds: viewModel.thinkingElapsedSeconds,
+            thinkingStartedAt: viewModel.thinkingStartedAt,
             latestProcessSummary: viewModel.latestProcessSummary,
             session: viewModel.session,
             scrollToBottomRequest: scrollToBottomRequest,
@@ -140,7 +140,7 @@ struct ChatSessionView: View {
         Color.clear
             .frame(width: ChatSessionDesign.edgeBackSwipeWidth)
             .contentShape(Rectangle())
-            .gesture(edgeBackSwipeGesture)
+            .highPriorityGesture(edgeBackSwipeGesture)
             .accessibilityHidden(true)
     }
 
@@ -157,10 +157,10 @@ struct ChatSessionView: View {
                 }
 
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                let dismissWidth = activeScreenWidth
                 withAnimation(.easeOut(duration: 0.18)) {
-                    edgeBackDragOffset = UIScreen.main.bounds.width
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    edgeBackDragOffset = dismissWidth
+                } completion: {
                     dismiss()
                     edgeBackDragOffset = 0
                 }
@@ -287,5 +287,15 @@ private extension ChatSessionView {
         withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82)) {
             edgeBackDragOffset = 0
         }
+    }
+
+    var activeScreenWidth: CGFloat {
+        let windowScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first
+        return windowScene?.screen.bounds.width ?? 0
     }
 }
