@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
+from app.commands import ingest_content as ingest_content_command
 from app.commands.convert_news_to_article import (
     convert_article_url_to_content,
     ensure_article_saved_to_knowledge,
@@ -16,7 +17,6 @@ from app.models.contracts import ContentStatus, LearningDeckSourceKind
 from app.models.db import Content, LearningDeck, LearningDeckRun, User
 from app.repositories.content_detail_repository import get_visible_content
 from app.services.content_bodies import get_content_body_resolver
-from app.services.content_submission import submit_user_content
 from app.services.learning_deck_common import (
     LearningDeckError,
     LearningDeckSource,
@@ -72,17 +72,17 @@ def resolve_learning_deck_create_source(
         github_source = normalize_github_repository_source(normalized_url)
         if github_source is not None:
             return github_source
-        submission = submit_user_content(
+        submission = ingest_content_command.execute(
             db,
-            SubmitContentRequest.model_validate(
+            payload=SubmitContentRequest.model_validate(
                 {
                     "url": normalized_url,
                     "save_to_knowledge_and_mark_read": True,
                 }
             ),
-            current_user,
+            current_user=current_user,
             submitted_via="learning_deck",
-        )
+        ).response
         content = db.query(Content).filter(Content.id == submission.content_id).first()
         if content is None:
             raise LearningDeckError("Submitted content could not be found", status_code=500)

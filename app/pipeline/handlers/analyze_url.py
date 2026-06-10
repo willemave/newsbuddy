@@ -19,7 +19,7 @@ from app.models.metadata.state import normalize_metadata_shape, update_processin
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.workflows.analyze_url_workflow import AnalyzeUrlWorkflow
-from app.repositories import knowledge_repository
+from app.services import knowledge as knowledge_service
 from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.content_analyzer import AnalysisError
 from app.services.content_metadata_merge import refresh_merge_content_metadata
@@ -395,7 +395,7 @@ class TweetResolutionFlow:
         content_id = content.id
         if content_id is None:
             return
-        knowledge_repository.save_to_knowledge(db, content_id, submitter_id)
+        knowledge_service.save_to_knowledge(db, content_id, submitter_id)
 
     def _normalize_candidate_urls(self, urls: list[str], *, content_id: int) -> list[str]:
         normalized_urls: list[str] = []

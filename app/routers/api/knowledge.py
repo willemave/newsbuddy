@@ -26,7 +26,7 @@ router = APIRouter()
         401: {"description": "Authentication required"},
     },
 )
-async def save_to_knowledge(
+def save_to_knowledge(
     content_id: Annotated[int, Path(..., description="Content ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -49,7 +49,7 @@ async def save_to_knowledge(
         401: {"description": "Authentication required"},
     },
 )
-async def remove_from_knowledge(
+def remove_from_knowledge(
     content_id: Annotated[int, Path(..., description="Content ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -69,7 +69,7 @@ async def remove_from_knowledge(
     description="Retrieve content saved to the user's knowledge library with pagination.",
     responses={401: {"description": "Authentication required"}},
 )
-async def get_knowledge_library(
+def get_knowledge_library(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     cursor: str | None = Query(None, description="Pagination cursor for next page"),

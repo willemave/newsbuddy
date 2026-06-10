@@ -101,9 +101,9 @@ class TestCursorEncoding:
 
         # Decode cursor
         cursor_data = PaginationCursor.decode_cursor(cursor)
-        assert cursor_data["last_id"] == last_id
-        assert cursor_data["last_created_at"] == last_created_at
-        assert "filters_hash" in cursor_data
+        assert cursor_data.last_id == last_id
+        assert cursor_data.last_created_at == last_created_at
+        assert cursor_data.filters_hash is not None
 
     def test_decode_invalid_cursor(self):
         """Test decoding an invalid cursor raises error."""
@@ -357,7 +357,7 @@ class TestKnowledgeLibraryPagination:
 
         # Save first 30 items to knowledge
         for content in sample_contents[:30]:
-            knowledge.toggle_knowledge_save(db_session, content.id, test_user.id)
+            knowledge.save_to_knowledge(db_session, content.id, test_user.id)
 
         # First page
         response1 = client.get("/api/content/knowledge/list", params={"limit": 10})

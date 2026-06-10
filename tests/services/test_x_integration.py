@@ -526,7 +526,7 @@ def test_sync_x_sources_reuses_existing_ledger_entry_without_resubmitting_conten
         raise AssertionError("existing ledger entry should skip content submission")
 
     monkeypatch.setattr(
-        "app.services.x_integration.submit_user_content",
+        "app.services.x_integration.ingest_content_command.execute",
         fail_submit,
     )
 

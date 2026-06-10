@@ -13,9 +13,10 @@ from fastapi import (
     Response,
     status,
 )
-from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
+from app.commands import create_chat_session as create_chat_session_command
+from app.commands import send_chat_message as send_chat_message_command
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.core.logging import get_logger
@@ -23,7 +24,6 @@ from app.core.observability import build_log_extra
 from app.models.api.chat import (
     AssistantTurnRequest,
     AssistantTurnResponse,
-    ChatMessageDisplayType,
     ChatMessageDto,
     ChatMessageRole,
     ChatSessionDetailDto,
@@ -42,21 +42,51 @@ from app.models.api.chat import (
 from app.models.api.chat import (
     MessageProcessingStatus as MessageProcessingStatusDto,
 )
-from app.models.api.pagination import PaginationMetadata
-from app.models.contracts import MessageProcessingStatus
 from app.models.db import (
-    ChatMessage,
     ChatSession,
     Content,
-    ContentKnowledgeSave,
     NewsItem,
 )
 from app.models.db.users import User
-from app.models.domain.chat_render import ChatMessageRenderMetadata
 from app.models.internal.assistant import AssistantScreenContext
+from app.queries import chat_read_models as _chat_read_models
+from app.queries import get_chat_message_status as get_chat_message_status_query
+from app.queries import get_chat_session as get_chat_session_query
+from app.queries import list_chat_sessions as list_chat_sessions_query
+from app.queries.chat_read_models import (
+    build_processing_user_message as _build_processing_user_message,
+)
+from app.queries.chat_read_models import (
+    build_session_summaries as _build_session_summaries,
+)
+from app.queries.chat_read_models import (
+    extract_messages_for_display as _extract_messages_for_display,
+)
+from app.queries.chat_read_models import (
+    extract_short_summary as _extract_short_summary,
+)
+from app.queries.chat_read_models import (
+    news_item_article_metadata as _news_item_article_metadata,
+)
+from app.queries.chat_read_models import (
+    require_message_id as _require_message_id,
+)
+from app.queries.chat_read_models import (
+    require_session_id as _require_session_id,
+)
+from app.queries.chat_read_models import (
+    require_timestamp as _require_timestamp,
+)
+from app.queries.chat_read_models import (
+    resolve_article_title as _resolve_article_title,
+)
+from app.queries.chat_read_models import (
+    resolve_news_item_title as _resolve_news_item_title,
+)
+from app.queries.chat_read_models import (
+    session_to_summary as _session_to_summary,
+)
 from app.services.assistant_router import (
-    ASSISTANT_SESSION_TYPES,
-    KNOWLEDGE_SESSION_TYPE,
     build_screen_context_snapshot,
     create_assistant_session,
     process_assistant_turn_async,
@@ -72,238 +102,17 @@ from app.services.council_chat import (
     start_council_chat,
 )
 from app.services.llm_models import (
-    DEFAULT_MODEL,
-    DEFAULT_PROVIDER,
     is_deep_research_provider,
     resolve_model,
 )
 from app.services.news_feed import get_visible_news_item
-from app.services.personal_markdown_library import sync_personal_markdown_for_content
-from app.utils.news_titles import resolve_news_display_title
-from app.utils.pagination import PaginationCursor
-from app.utils.title_utils import resolve_content_display_title
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-_SEARCH_TOOL_NAMES = {
-    "exa_web_search",
-    "search_personal_library",
-}
-
-_INTERNAL_USER_PROMPT_SENTINELS = (
-    "Use the provided session context below",
-    "Provided reference context is available below",
-    "You are starting a new conversation about the article described in your context",
-    "Turn instructions:",
-)
-
-
-def _require_session_id(session: ChatSession) -> int:
-    session_id = session.id
-    if session_id is None:
-        raise HTTPException(status_code=500, detail="Chat session missing id")
-    return session_id
-
-
-def _require_message_id(db_message: ChatMessage) -> int:
-    message_id = db_message.id
-    if message_id is None:
-        raise HTTPException(status_code=500, detail="Chat message missing id")
-    return message_id
-
-
-def _require_timestamp(value: datetime | None, *, detail: str) -> datetime:
-    if value is None:
-        raise HTTPException(status_code=500, detail=detail)
-    return value
-
-
-def _resolve_message_status(db_message: ChatMessage) -> MessageProcessingStatusDto:
-    raw_status = db_message.status or MessageProcessingStatus.PROCESSING.value
-    return MessageProcessingStatusDto(raw_status)
-
-
-def _count_process_summary_tools(tool_names: list[str]) -> dict[str, int]:
-    tool_counts: dict[str, int] = {}
-    for raw_name in tool_names:
-        name = raw_name.strip() if raw_name else ""
-        if name:
-            tool_counts[name] = tool_counts.get(name, 0) + 1
-    return tool_counts
-
-
-def _format_process_summary_label(
-    tool_counts: dict[str, int],
-    *,
-    has_intermediate_assistant_text: bool,
-) -> str | None:
-    """Build a compact transcript label for intermediate tool/thinking activity."""
-    normalized_tool_names = {name.lower() for name in tool_counts}
-    tool_call_count = sum(tool_counts.values())
-
-    if tool_call_count:
-        tool_label = "tool" if tool_call_count == 1 else "tools"
-
-        if normalized_tool_names & _SEARCH_TOOL_NAMES:
-            return f"Thinking • Executed {tool_call_count} {tool_label} and reviewed sources"
-
-        return f"Thinking • Executed {tool_call_count} {tool_label} and reviewed results"
-
-    if has_intermediate_assistant_text:
-        return "Thinking • Considered the request"
-
-    return None
-
-
-def _format_process_summary_detail(
-    tool_counts: dict[str, int],
-    *,
-    has_intermediate_assistant_text: bool,
-) -> str | None:
-    """Build expanded transcript detail for intermediate tool/thinking activity."""
-    if tool_counts:
-        total_count = sum(tool_counts.values())
-        tool_label = "tool call" if total_count == 1 else "tool calls"
-        lines = [f"Executed {total_count} {tool_label}:"]
-        for name, count in tool_counts.items():
-            count_suffix = f" x{count}" if count > 1 else ""
-            lines.append(f"• {name}{count_suffix}")
-        return "\n".join(lines)
-
-    if has_intermediate_assistant_text:
-        return "Prepared intermediate context before writing the final answer."
-
-    return None
-
-
-def _extract_visible_user_prompt(raw_content: object) -> str | None:
-    """Return client-visible user text from a stored model prompt."""
-    text = str(raw_content).strip()
-    if not text:
-        return None
-
-    marker = "User request:\n"
-    if marker in text:
-        request_text = text.split(marker, 1)[1]
-        for suffix in ("\n\nCurrent context:", "\n\nSession Context:", "\n\nArticle Context:"):
-            if suffix in request_text:
-                request_text = request_text.split(suffix, 1)[0]
-                break
-        request_text = request_text.strip()
-        return request_text or None
-
-    if any(sentinel in text for sentinel in _INTERNAL_USER_PROMPT_SENTINELS):
-        return None
-
-    return text
-
-
-def _load_render_metadata(db_message: ChatMessage) -> ChatMessageRenderMetadata | None:
-    """Load validated render metadata from a stored chat message."""
-
-    if not isinstance(db_message.render_metadata, dict):
-        return None
-    try:
-        return ChatMessageRenderMetadata.model_validate(db_message.render_metadata)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Failed to parse render metadata for chat message %s: %s",
-            db_message.id,
-            exc,
-        )
-        return None
-
-
-def _session_to_summary(
-    session: ChatSession,
-    article_title: str | None = None,
-    article_url: str | None = None,
-    article_summary: str | None = None,
-    article_source: str | None = None,
-    has_pending_message: bool = False,
-    is_saved_to_knowledge: bool = False,
-    has_messages: bool = True,
-    last_message_preview: str | None = None,
-    last_message_role: str | None = None,
-) -> ChatSessionSummaryDto:
-    """Convert database ChatSession to API response."""
-    session_id = _require_session_id(session)
-    created_at = _require_timestamp(session.created_at, detail="Chat session missing created_at")
-    return ChatSessionSummaryDto(
-        id=session_id,
-        content_id=session.content_id,
-        news_item_id=session.news_item_id,
-        title=session.title,
-        session_type=session.session_type,
-        topic=session.topic,
-        llm_provider=session.llm_provider or DEFAULT_PROVIDER,
-        llm_model=session.llm_model or DEFAULT_MODEL,
-        created_at=created_at,
-        updated_at=session.updated_at,
-        last_message_at=session.last_message_at,
-        article_title=article_title,
-        article_url=article_url,
-        article_summary=article_summary,
-        article_source=article_source,
-        is_archived=bool(session.is_archived),
-        has_pending_message=has_pending_message,
-        is_saved_to_knowledge=is_saved_to_knowledge,
-        has_messages=has_messages,
-        last_message_preview=last_message_preview,
-        last_message_role=last_message_role,
-        council_mode=bool(session.council_mode),
-        active_child_session_id=session.active_child_session_id,
-    )
-
-
-def _build_processing_user_message(
-    *,
-    db_message: ChatMessage,
-    session_id: int,
-    content: str,
-) -> ChatMessageDto:
-    message_id = _require_message_id(db_message)
-    return ChatMessageDto(
-        id=message_id,
-        source_message_id=message_id,
-        session_id=session_id,
-        role=ChatMessageRole.USER,
-        content=content,
-        timestamp=_require_timestamp(
-            db_message.created_at,
-            detail="Chat message missing created_at",
-        ),
-        status=MessageProcessingStatusDto.PROCESSING,
-    )
-
-
-def _resolve_active_child_session(db: Session, session: ChatSession) -> ChatSession | None:
-    """Return the active council child session for a parent session."""
-
-    if not session.council_mode or not session.active_child_session_id:
-        return None
-    return (
-        db.query(ChatSession)
-        .filter(
-            ChatSession.id == session.active_child_session_id,
-            ChatSession.parent_session_id == session.id,
-            ChatSession.is_hidden_from_history == True,  # noqa: E712
-        )
-        .first()
-    )
-
-
-def _build_async_assistant_display_id(message_id: int) -> int:
-    """Build a stable display ID for an async assistant reply.
-
-    The pending user message and the completed assistant reply share the same
-    backing `chat_messages` row. UI surfaces render them as distinct rows, so
-    they need distinct display IDs to avoid SwiftUI identity collisions.
-    """
-
-    return 1_000_000_000 + message_id
+_extract_last_message_preview = _chat_read_models.extract_last_message_preview
+_format_process_summary_label = _chat_read_models.format_process_summary_label
 
 
 def _refresh_assistant_session_context(
@@ -345,456 +154,13 @@ def _refresh_assistant_session_context(
     db.refresh(session)
 
 
-def _resolve_article_title(content: Content) -> str | None:
-    """Resolve a chat-friendly title from content, falling back to display_title."""
-    try:
-        return resolve_content_display_title(
-            title=content.title,
-            metadata=content.content_metadata,
-            fallback="Untitled",
-        )
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        logger.warning("Failed to resolve display title for content %s: %s", content.id, exc)
-        return None
-
-
-def _resolve_news_item_title(item: NewsItem) -> str:
-    """Resolve a chat-friendly title from a news item."""
-    return resolve_news_display_title(
-        item.raw_metadata,
-        summary_text=item.summary_text,
-        fallback="Untitled News Item",
-    )
-
-
-def _resolve_news_item_source(item: NewsItem) -> str | None:
-    candidates = [item.source_label, item.article_domain, item.platform, item.source_type]
-    for candidate in candidates:
-        if candidate and candidate.strip():
-            return candidate.strip()
-    return None
-
-
-def _news_item_article_metadata(
-    item: NewsItem,
-) -> tuple[str, str | None, str | None, str | None]:
-    return (
-        _resolve_news_item_title(item),
-        item.article_url or item.canonical_story_url,
-        item.summary_text,
-        _resolve_news_item_source(item),
-    )
-
-
-def _extract_short_summary(content: Content) -> str | None:
-    """Extract short summary from content metadata."""
-    return content.short_summary
-
-
-def _extract_last_message_preview(
-    db_message: ChatMessage,
-    max_length: int = 200,
-) -> tuple[str | None, str | None]:
-    """Extract the last user/assistant text and role from a ChatMessage record.
-
-    Returns (preview_text, role) where role is 'user' or 'assistant'.
-    """
-    from pydantic_ai.messages import (
-        ModelMessagesTypeAdapter,
-        ModelRequest,
-        ModelResponse,
-        TextPart,
-        UserPromptPart,
-    )
-
-    try:
-        message_list_json = db_message.message_list
-        if not isinstance(message_list_json, str):
-            return None, None
-        msg_list = ModelMessagesTypeAdapter.validate_json(message_list_json)
-    except Exception:
-        return None, None
-
-    # Walk backwards to find the last text content
-    for model_msg in reversed(msg_list):
-        if isinstance(model_msg, ModelResponse):
-            for response_part in reversed(model_msg.parts):
-                if isinstance(response_part, TextPart) and response_part.content:
-                    text = response_part.content[:max_length]
-                    return text, "assistant"
-        elif isinstance(model_msg, ModelRequest):
-            for request_part in reversed(model_msg.parts):
-                if isinstance(request_part, UserPromptPart) and request_part.content:
-                    visible_text = _extract_visible_user_prompt(request_part.content)
-                    if visible_text:
-                        return visible_text[:max_length], "user"
-
-    return None, None
-
-
-def _chat_session_activity_expr():
-    return func.coalesce(ChatSession.last_message_at, ChatSession.created_at)
-
-
-def _list_visible_chat_sessions(
-    db: Session,
-    *,
-    user_id: int,
-    content_id: int | None,
-    news_item_id: int | None,
-    limit: int,
-    cursor: str | None = None,
-    overfetch: bool = False,
-) -> list[ChatSession]:
-    activity_expr = _chat_session_activity_expr()
-    query = db.query(ChatSession).filter(
-        ChatSession.user_id == user_id,
-        ChatSession.is_archived == False,  # noqa: E712
-        ChatSession.is_hidden_from_history == False,  # noqa: E712
-    )
-    if content_id is not None:
-        query = query.filter(ChatSession.content_id == content_id)
-    if news_item_id is not None:
-        query = query.filter(ChatSession.news_item_id == news_item_id)
-
-    if cursor:
-        try:
-            cursor_data = PaginationCursor.decode_cursor(cursor)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        if not PaginationCursor.validate_cursor(
-            cursor_data,
-            {"content_id": content_id, "news_item_id": news_item_id},
-        ):
-            raise HTTPException(status_code=400, detail="Invalid pagination cursor for filters")
-
-        last_id = cursor_data["last_id"]
-        last_activity_at = cursor_data["last_created_at"]
-        query = query.filter(
-            or_(
-                activity_expr < last_activity_at,
-                and_(activity_expr == last_activity_at, ChatSession.id < last_id),
-            )
-        )
-
-    fetch_limit = limit + 1 if overfetch else limit
-    return (
-        query.order_by(
-            activity_expr.desc(),
-            ChatSession.id.desc(),
-        )
-        .limit(fetch_limit)
-        .all()
-    )
-
-
-def _build_session_summaries(
-    db: Session,
-    *,
-    user_id: int,
-    sessions: list[ChatSession],
-) -> list[ChatSessionSummaryDto]:
-    active_child_ids = {
-        session.active_child_session_id
-        for session in sessions
-        if session.active_child_session_id is not None
-    }
-    active_child_sessions: dict[int, ChatSession] = {}
-    if active_child_ids:
-        active_child_rows = (
-            db.query(ChatSession)
-            .filter(ChatSession.id.in_(active_child_ids))
-            .filter(ChatSession.is_hidden_from_history == True)  # noqa: E712
-            .all()
-        )
-        active_child_sessions = {
-            child.id: child for child in active_child_rows if child.id is not None
-        }
-
-    content_ids = {session.content_id for session in sessions if session.content_id is not None}
-    contents_by_id: dict[int, Content] = {}
-    if content_ids:
-        content_rows = db.query(Content).filter(Content.id.in_(content_ids)).all()
-        contents_by_id = {content.id: content for content in content_rows if content.id is not None}
-
-    news_item_ids = {
-        session.news_item_id for session in sessions if session.news_item_id is not None
-    }
-    news_items_by_id: dict[int, NewsItem] = {}
-    if news_item_ids:
-        news_item_rows = db.query(NewsItem).filter(NewsItem.id.in_(news_item_ids)).all()
-        news_items_by_id = {item.id: item for item in news_item_rows if item.id is not None}
-
-    session_ids = {s.id for s in sessions if s.id is not None}
-    preview_session_ids = session_ids | active_child_ids
-    pending_session_ids: set[int] = set()
-    sessions_with_messages: set[int] = set()
-
-    if preview_session_ids:
-        pending_messages = (
-            db.query(ChatMessage.session_id)
-            .filter(
-                ChatMessage.session_id.in_(preview_session_ids),
-                ChatMessage.status == MessageProcessingStatus.PROCESSING.value,
-            )
-            .distinct()
-            .all()
-        )
-        pending_session_ids = {m.session_id for m in pending_messages if m.session_id is not None}
-
-        sessions_with_any_messages = (
-            db.query(ChatMessage.session_id)
-            .filter(ChatMessage.session_id.in_(preview_session_ids))
-            .distinct()
-            .all()
-        )
-        sessions_with_messages = {
-            m.session_id for m in sessions_with_any_messages if m.session_id is not None
-        }
-
-    last_message_map: dict[int, ChatMessage] = {}
-    if preview_session_ids:
-        latest_msg_subq = (
-            db.query(
-                ChatMessage.session_id,
-                func.max(ChatMessage.id).label("max_id"),
-            )
-            .filter(ChatMessage.session_id.in_(preview_session_ids))
-            .group_by(ChatMessage.session_id)
-            .subquery()
-        )
-        latest_messages = (
-            db.query(ChatMessage)
-            .join(latest_msg_subq, ChatMessage.id == latest_msg_subq.c.max_id)
-            .all()
-        )
-        last_message_map = {m.session_id: m for m in latest_messages if m.session_id is not None}
-
-    knowledge_saved_content_ids: set[int] = set()
-    if content_ids:
-        knowledge_saves = (
-            db.query(ContentKnowledgeSave.content_id)
-            .filter(
-                ContentKnowledgeSave.user_id == user_id,
-                ContentKnowledgeSave.content_id.in_(content_ids),
-            )
-            .all()
-        )
-        knowledge_saved_content_ids = {
-            row.content_id for row in knowledge_saves if row.content_id is not None
-        }
-
-    result: list[ChatSessionSummaryDto] = []
-    for session in sessions:
-        article_title = None
-        article_url = None
-        article_summary = None
-        article_source = None
-
-        if session.content_id:
-            content = contents_by_id.get(session.content_id)
-            if content:
-                article_title = _resolve_article_title(content)
-                article_url = content.url
-                article_summary = _extract_short_summary(content)
-                article_source = content.source
-        elif session.news_item_id:
-            news_item = news_items_by_id.get(session.news_item_id)
-            if news_item:
-                article_title, article_url, article_summary, article_source = (
-                    _news_item_article_metadata(news_item)
-                )
-
-        preview_session = session
-        if session.council_mode and session.active_child_session_id is not None:
-            candidate_child = active_child_sessions.get(session.active_child_session_id)
-            if candidate_child and candidate_child.parent_session_id == session.id:
-                preview_session = candidate_child
-
-        preview_session_id = _require_session_id(preview_session)
-        session_row_id = _require_session_id(session)
-        has_pending = preview_session_id in pending_session_ids
-        is_saved_to_knowledge = (
-            session.content_id in knowledge_saved_content_ids if session.content_id else False
-        )
-        has_messages = session_row_id in sessions_with_messages
-
-        last_preview: str | None = None
-        last_role: str | None = None
-        last_msg = last_message_map.get(preview_session_id)
-        if last_msg:
-            last_preview, last_role = _extract_last_message_preview(last_msg)
-
-        result.append(
-            _session_to_summary(
-                session,
-                article_title=article_title,
-                article_url=article_url,
-                article_summary=article_summary,
-                article_source=article_source,
-                has_pending_message=has_pending,
-                is_saved_to_knowledge=is_saved_to_knowledge,
-                has_messages=has_messages,
-                last_message_preview=last_preview,
-                last_message_role=last_role,
-            )
-        )
-
-    return result
-
-
-def _extract_messages_for_display(
-    db: Session,
-    session_id: int,
-    *,
-    session_id_override: int | None = None,
-    min_message_id_exclusive: int | None = None,
-) -> list[ChatMessageDto]:
-    """Load messages from DB and convert to display format.
-
-    Extracts user and assistant text messages from the ModelMessage format
-    stored in the database. Includes status for async message processing.
-    """
-    from pydantic_ai.messages import (
-        ModelMessagesTypeAdapter,
-        ModelRequest,
-        ModelResponse,
-        TextPart,
-        ToolCallPart,
-        UserPromptPart,
-    )
-
-    messages: list[ChatMessageDto] = []
-    display_id = 0  # Unique ID for each display message (user/assistant parts)
-
-    # Query chat_messages ordered by created_at
-    query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
-    if min_message_id_exclusive is not None:
-        query = query.filter(ChatMessage.id > min_message_id_exclusive)
-    db_messages = query.order_by(ChatMessage.created_at).all()
-
-    for db_msg in db_messages:
-        try:
-            # Deserialize JSON to list of ModelMessage
-            message_list_json = db_msg.message_list
-            if not isinstance(message_list_json, str):
-                continue
-            msg_list = ModelMessagesTypeAdapter.validate_json(message_list_json)
-            status = _resolve_message_status(db_msg)
-            render_metadata = _load_render_metadata(db_msg)
-            assistant_responses: list[str] = []
-            tool_names: list[str] = []
-            user_text_emitted = False
-            message_id = _require_message_id(db_msg)
-            message_timestamp = _require_timestamp(
-                db_msg.created_at,
-                detail="Chat message missing created_at",
-            )
-
-            for model_msg in msg_list:
-                if isinstance(model_msg, ModelRequest):
-                    # Only show the first user-authored prompt for this stored turn.
-                    # Hide tool-return/system parts and any later internal requests.
-                    for request_part in model_msg.parts:
-                        if user_text_emitted:
-                            break
-                        if isinstance(request_part, UserPromptPart) and request_part.content:
-                            user_text = _extract_visible_user_prompt(request_part.content)
-                            if not user_text:
-                                continue
-                            user_text_emitted = True
-                            display_id += 1
-                            messages.append(
-                                ChatMessageDto(
-                                    id=display_id,  # Unique display ID
-                                    source_message_id=message_id,
-                                    session_id=session_id_override or session_id,
-                                    role=ChatMessageRole.USER,
-                                    timestamp=message_timestamp,
-                                    content=user_text,
-                                    status=status,
-                                    error=db_msg.error,
-                                )
-                            )
-                elif isinstance(model_msg, ModelResponse):
-                    response_text_parts: list[str] = []
-                    for response_part in model_msg.parts:
-                        if isinstance(response_part, TextPart) and response_part.content:
-                            response_text_parts.append(response_part.content)
-                        elif isinstance(response_part, ToolCallPart):
-                            tool_names.append(response_part.tool_name)
-
-                    if response_text_parts:
-                        assistant_responses.append("\n\n".join(response_text_parts))
-
-            latest_assistant_text = assistant_responses[-1] if assistant_responses else None
-            has_intermediate_assistant_text = len(assistant_responses) > 1
-            tool_counts = _count_process_summary_tools(tool_names)
-            process_summary_label = _format_process_summary_label(
-                tool_counts,
-                has_intermediate_assistant_text=has_intermediate_assistant_text,
-            )
-            process_summary_detail = _format_process_summary_detail(
-                tool_counts,
-                has_intermediate_assistant_text=has_intermediate_assistant_text,
-            )
-
-            if process_summary_label:
-                display_id += 1
-                messages.append(
-                    ChatMessageDto(
-                        id=display_id,
-                        source_message_id=message_id,
-                        session_id=session_id_override or session_id,
-                        role=ChatMessageRole.TOOL,
-                        timestamp=message_timestamp,
-                        content=process_summary_detail or process_summary_label,
-                        display_type=ChatMessageDisplayType.PROCESS_SUMMARY,
-                        process_label=process_summary_label,
-                        status=status,
-                        error=db_msg.error,
-                    )
-                )
-
-            if latest_assistant_text:
-                display_id += 1
-                messages.append(
-                    ChatMessageDto(
-                        id=display_id,  # Unique display ID
-                        source_message_id=message_id,
-                        session_id=session_id_override or session_id,
-                        role=ChatMessageRole.ASSISTANT,
-                        timestamp=message_timestamp,
-                        content=latest_assistant_text,
-                        display_type=ChatMessageDisplayType.MESSAGE,
-                        status=status,
-                        error=db_msg.error,
-                        feed_options=render_metadata.feed_options if render_metadata else [],
-                        council_candidates=(
-                            render_metadata.council_candidates if render_metadata else []
-                        ),
-                        active_council_child_session_id=(
-                            render_metadata.active_council_child_session_id
-                            if render_metadata
-                            else None
-                        ),
-                    )
-                )
-        except Exception as e:
-            logger.warning(f"Failed to deserialize message {db_msg.id}: {e}")
-            continue
-
-    return messages
-
-
 @router.get(
     "/sessions",
     response_model=list[ChatSessionSummaryDto],
     summary="List chat sessions",
     description="List all chat sessions for the current user, ordered by most recent activity.",
 )
-async def list_sessions(
+def list_sessions(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     content_id: Annotated[int | None, Query(description="Filter by content ID")] = None,
@@ -809,14 +175,13 @@ async def list_sessions(
     if content_id is not None and news_item_id is not None:
         raise HTTPException(status_code=400, detail="Use either content_id or news_item_id")
     user_id = require_user_id(current_user)
-    sessions = _list_visible_chat_sessions(
+    return list_chat_sessions_query.execute(
         db,
         user_id=user_id,
         content_id=content_id,
         news_item_id=news_item_id,
         limit=limit,
     )
-    return _build_session_summaries(db, user_id=user_id, sessions=sessions)
 
 
 @router.get(
@@ -825,7 +190,7 @@ async def list_sessions(
     summary="List chat sessions page",
     description="List a page of chat sessions for the current user.",
 )
-async def list_sessions_page(
+def list_sessions_page(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     content_id: Annotated[int | None, Query(description="Filter by content ID")] = None,
@@ -837,36 +202,13 @@ async def list_sessions_page(
     if content_id is not None and news_item_id is not None:
         raise HTTPException(status_code=400, detail="Use either content_id or news_item_id")
     user_id = require_user_id(current_user)
-    rows = _list_visible_chat_sessions(
+    return list_chat_sessions_query.execute_page(
         db,
         user_id=user_id,
         content_id=content_id,
         news_item_id=news_item_id,
-        limit=limit,
         cursor=cursor,
-        overfetch=True,
-    )
-    has_more = len(rows) > limit
-    sessions = rows[:limit] if has_more else rows
-    next_cursor = None
-    if has_more and sessions:
-        last_session = sessions[-1]
-        next_cursor = PaginationCursor.encode_cursor(
-            last_id=_require_session_id(last_session),
-            last_created_at=_require_timestamp(
-                last_session.last_message_at or last_session.created_at,
-                detail="Chat session missing activity timestamp",
-            ),
-            filters={"content_id": content_id, "news_item_id": news_item_id},
-        )
-    return ChatSessionListResponse(
-        sessions=_build_session_summaries(db, user_id=user_id, sessions=sessions),
-        meta=PaginationMetadata(
-            next_cursor=next_cursor,
-            has_more=has_more,
-            page_size=len(sessions),
-            total=len(sessions),
-        ),
+        limit=limit,
     )
 
 
@@ -876,7 +218,7 @@ async def list_sessions_page(
     summary="Create chat session",
     description="Create a new chat session, optionally associated with an article.",
 )
-async def create_session(
+def create_session(
     request: CreateChatSessionRequest,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -887,151 +229,7 @@ async def create_session(
     and the article's context will be available to the chat agent.
     """
     user_id = require_user_id(current_user)
-    if request.content_id is not None and request.news_item_id is not None:
-        raise HTTPException(status_code=400, detail="Use either content_id or news_item_id")
-
-    # Resolve model
-    provider, model_spec = resolve_model(request.llm_provider, request.llm_model_hint)
-
-    # Determine session type
-    if is_deep_research_provider(request.llm_provider):
-        session_type = "deep_research"
-    else:
-        session_type = KNOWLEDGE_SESSION_TYPE
-
-    # Get article title and URL if content_id provided
-    article_title = None
-    article_url = None
-    article_summary = None
-    article_source = None
-    context_snapshot: str | None = None
-    if request.content_id:
-        content = db.query(Content).filter(Content.id == request.content_id).first()
-        if not content:
-            raise HTTPException(status_code=404, detail="Content not found")
-        article_title = _resolve_article_title(content)
-        article_url = content.url
-        article_summary = _extract_short_summary(content)
-        article_source = content.source
-        context_snapshot = build_screen_context_snapshot(
-            db,
-            user_id=user_id,
-            screen_context=AssistantScreenContext(
-                screen_type=KNOWLEDGE_SESSION_TYPE,
-                screen_title="Knowledge",
-                content_id=request.content_id,
-                selected_topic=request.topic,
-                note=request.initial_message[:500] if request.initial_message else None,
-            ),
-        )
-    elif request.news_item_id:
-        news_item = get_visible_news_item(
-            db,
-            user_id=user_id,
-            news_item_id=request.news_item_id,
-        )
-        if not news_item:
-            raise HTTPException(status_code=404, detail="News item not found")
-        article_title, article_url, article_summary, article_source = _news_item_article_metadata(
-            news_item
-        )
-        context_snapshot = build_screen_context_snapshot(
-            db,
-            user_id=user_id,
-            screen_context=AssistantScreenContext(
-                screen_type=KNOWLEDGE_SESSION_TYPE,
-                screen_title="Knowledge",
-                news_item_id=request.news_item_id,
-                selected_topic=request.topic,
-                note=request.initial_message[:500] if request.initial_message else None,
-            ),
-        )
-    elif session_type == KNOWLEDGE_SESSION_TYPE:
-        context_snapshot = build_screen_context_snapshot(
-            db,
-            user_id=user_id,
-            screen_context=AssistantScreenContext(
-                screen_type=KNOWLEDGE_SESSION_TYPE,
-                screen_title="Knowledge",
-                selected_topic=request.topic,
-                note=request.initial_message[:500] if request.initial_message else None,
-            ),
-        )
-
-    # Build session title
-    if request.topic and article_title:
-        title = f"{article_title} - {request.topic}"
-    elif article_title:
-        title = article_title
-    elif request.topic:
-        title = request.topic
-    elif request.initial_message:
-        title = request.initial_message[:80]
-    else:
-        title = "New Chat"
-
-    # Create session
-    session = ChatSession(
-        user_id=user_id,
-        content_id=request.content_id,
-        news_item_id=request.news_item_id,
-        title=title,
-        session_type=session_type,
-        topic=request.topic,
-        context_snapshot=context_snapshot,
-        llm_model=model_spec,
-        llm_provider=provider,
-        created_at=datetime.now(UTC),
-    )
-
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-    session_row_id = _require_session_id(session)
-
-    if request.content_id:
-        try:
-            sync_personal_markdown_for_content(
-                db,
-                user_id=user_id,
-                content_id=request.content_id,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to sync personal markdown after chat session creation",
-                extra=build_log_extra(
-                    component="chat",
-                    operation="create_session",
-                    event_name="chat.session.personal_markdown",
-                    status="degraded",
-                    user_id=user_id,
-                    session_id=session_row_id,
-                    content_id=request.content_id,
-                ),
-            )
-
-    logger.info(
-        "Chat session created",
-        extra=build_log_extra(
-            component="chat",
-            operation="create_session",
-            event_name="chat.session",
-            status="completed",
-            user_id=user_id,
-            session_id=session_row_id,
-            content_id=request.content_id,
-            context_data={"model": model_spec, "session_type": session_type},
-        ),
-    )
-
-    session_summary = _session_to_summary(
-        session,
-        article_title,
-        article_url,
-        article_summary,
-        article_source,
-    )
-    return CreateChatSessionResponse(session=session_summary)
+    return create_chat_session_command.execute(db, user_id=user_id, request=request)
 
 
 @router.patch(
@@ -1040,7 +238,7 @@ async def create_session(
     summary="Update chat session",
     description="Update a chat session's settings, such as the LLM provider.",
 )
-async def update_session(
+def update_session(
     session_id: Annotated[int, Path(..., description="Chat session ID", gt=0)],
     request: UpdateChatSessionRequest,
     db: Annotated[Session, Depends(get_db_session)],
@@ -1121,61 +319,14 @@ async def update_session(
     summary="Get chat session details",
     description="Get a chat session with its message history.",
 )
-async def get_session(
+def get_session(
     session_id: Annotated[int, Path(..., description="Chat session ID", gt=0)],
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ChatSessionDetailDto:
     """Get chat session details with message history."""
     user_id = require_user_id(current_user)
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if session.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this session")
-
-    # Get article title and URL
-    article_title = None
-    article_url = None
-    article_summary = None
-    article_source = None
-    if session.content_id:
-        content = db.query(Content).filter(Content.id == session.content_id).first()
-        if content:
-            article_title = _resolve_article_title(content)
-            article_url = content.url
-            article_summary = _extract_short_summary(content)
-            article_source = content.source
-    elif session.news_item_id:
-        news_item = db.query(NewsItem).filter(NewsItem.id == session.news_item_id).first()
-        if news_item:
-            article_title, article_url, article_summary, article_source = (
-                _news_item_article_metadata(news_item)
-            )
-
-    # Load messages
-    messages = _extract_messages_for_display(db, session_id)
-    if session.council_mode:
-        active_child_session = _resolve_active_child_session(db, session)
-        if active_child_session is not None:
-            branch_messages = _extract_messages_for_display(
-                db,
-                _require_session_id(active_child_session),
-                session_id_override=_require_session_id(session),
-                min_message_id_exclusive=active_child_session.branch_start_message_id,
-            )
-            messages.extend(branch_messages)
-
-    session_summary = _session_to_summary(
-        session,
-        article_title,
-        article_url,
-        article_summary,
-        article_source,
-    )
-    return ChatSessionDetailDto(session=session_summary, messages=messages)
+    return get_chat_session_query.execute(db, user_id=user_id, session_id=session_id)
 
 
 @router.delete(
@@ -1184,7 +335,7 @@ async def get_session(
     summary="Delete chat session",
     description="Soft-delete a chat session for the current user by archiving it.",
 )
-async def delete_session(
+def delete_session(
     session_id: Annotated[int, Path(..., description="Chat session ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -1240,7 +391,7 @@ async def delete_session(
         "to poll for completion. The assistant response is processed in the background."
     ),
 )
-async def send_message(
+def send_message(
     session_id: Annotated[int, Path(..., description="Chat session ID", gt=0)],
     request: SendChatMessageRequest,
     background_tasks: BackgroundTasks,
@@ -1253,101 +404,14 @@ async def send_message(
     Poll GET /messages/{message_id}/status for completion.
     """
     user_id = require_user_id(current_user)
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if session.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this session")
-
-    effective_session = session
-    if session.council_mode:
-        active_child_session = _resolve_active_child_session(db, session)
-        if active_child_session is None:
-            raise HTTPException(status_code=400, detail="No active council branch selected")
-        effective_session = active_child_session
-    effective_session_id = _require_session_id(effective_session)
-    parent_session_id = _require_session_id(session)
-
-    logger.info(
-        "Chat message accepted",
-        extra=build_log_extra(
-            component="chat",
-            operation="send_message",
-            event_name="chat.turn",
-            status="started",
-            user_id=user_id,
-            session_id=effective_session_id,
-            context_data={"model": effective_session.llm_model},
-        ),
-    )
-
-    # Create the processing message record immediately
-    db_message = create_processing_message(db, effective_session_id, request.message)
-    message_id = _require_message_id(db_message)
-    effective_session.last_message_at = datetime.now(UTC)
-    effective_session.updated_at = datetime.now(UTC)
-    if session.council_mode:
-        session.last_message_at = effective_session.last_message_at
-        session.updated_at = effective_session.updated_at
-    db.commit()
-
-    trimmed_msg = request.message.replace("\n", " ")[:100]
-    if len(request.message) > 100:
-        trimmed_msg = f"{trimmed_msg}..."
-    logger.info(
-        "[Chat:SEND] sid=%s mid=%s user=%s prompt='%s'",
-        session_id,
-        message_id,
-        user_id,
-        trimmed_msg,
-    )
-
-    # Start async processing using BackgroundTasks (not asyncio.create_task which can be GC'd)
-    if session.council_mode:
-        background_tasks.add_task(
-            process_message_async,
-            effective_session_id,
-            message_id,
-            request.message,
-            source="council",
-        )
-    elif effective_session.session_type == "deep_research":
-        from app.services.deep_research import process_deep_research_message
-
-        background_tasks.add_task(
-            process_deep_research_message, effective_session_id, message_id, request.message
-        )
-    elif effective_session.session_type in ASSISTANT_SESSION_TYPES:
-        background_tasks.add_task(
-            process_assistant_turn_async,
-            effective_session_id,
-            message_id,
-            request.message,
-            screen_context=AssistantScreenContext(
-                screen_type=effective_session.session_type,
-                screen_title=effective_session.title,
-                content_id=effective_session.content_id,
-                news_item_id=effective_session.news_item_id,
-            ),
-        )
-    else:
-        background_tasks.add_task(
-            process_message_async, effective_session_id, message_id, request.message
-        )
-
-    user_message = _build_processing_user_message(
-        db_message=db_message,
-        session_id=parent_session_id,
-        content=request.message,
-    )
-
-    return SendMessageResponse(
-        session_id=parent_session_id,
-        user_message=user_message,
-        message_id=message_id,
-        status=MessageProcessingStatusDto.PROCESSING,
+    return send_chat_message_command.execute(
+        db,
+        user_id=user_id,
+        session_id=session_id,
+        request=request,
+        background_tasks=background_tasks,
+        process_message=process_message_async,
+        process_assistant_turn=process_assistant_turn_async,
     )
 
 
@@ -1356,7 +420,7 @@ async def send_message(
     response_model=AssistantTurnResponse,
     summary="Create or continue a contextual assistant turn",
 )
-async def create_assistant_turn(
+def create_assistant_turn(
     request: AssistantTurnRequest,
     background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db_session)],
@@ -1459,7 +523,7 @@ async def create_assistant_turn(
         "Poll for the status of an async message. Returns the assistant response when completed."
     ),
 )
-async def get_message_status(
+def get_message_status(
     message_id: Annotated[int, Path(..., description="Message ID to poll", gt=0)],
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -1470,95 +534,7 @@ async def get_message_status(
     Poll every 500ms-1s until status is 'completed' or 'failed'.
     """
     user_id = require_user_id(current_user)
-    from pydantic_ai.messages import (
-        ModelMessagesTypeAdapter,
-        ModelResponse,
-        TextPart,
-    )
-
-    db_message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
-
-    if not db_message:
-        raise HTTPException(status_code=404, detail="Message not found")
-
-    # Verify ownership via session
-    session = db.query(ChatSession).filter(ChatSession.id == db_message.session_id).first()
-
-    if not session or session.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this message")
-
-    status = _resolve_message_status(db_message)
-
-    # If still processing, return status only
-    if status == MessageProcessingStatusDto.PROCESSING:
-        return MessageStatusResponse(
-            message_id=message_id,
-            status=status,
-            assistant_message=None,
-            error=None,
-        )
-
-    # If failed, return status with error
-    if status == MessageProcessingStatusDto.FAILED:
-        return MessageStatusResponse(
-            message_id=message_id,
-            status=status,
-            assistant_message=None,
-            error=db_message.error,
-        )
-
-    # If completed, extract assistant message
-    try:
-        message_list_json = db_message.message_list
-        if not isinstance(message_list_json, str):
-            raise HTTPException(status_code=500, detail="Message payload missing")
-        msg_list = ModelMessagesTypeAdapter.validate_json(message_list_json)
-        render_metadata = _load_render_metadata(db_message)
-
-        # Find the last assistant text response
-        assistant_content = None
-        for model_msg in reversed(msg_list):
-            if isinstance(model_msg, ModelResponse):
-                for part in model_msg.parts:
-                    if isinstance(part, TextPart) and part.content:
-                        assistant_content = part.content
-                        break
-                if assistant_content:
-                    break
-
-        if not assistant_content:
-            raise HTTPException(status_code=500, detail="Assistant response missing")
-
-        assistant_message = ChatMessageDto(
-            id=_build_async_assistant_display_id(message_id),
-            source_message_id=message_id,
-            session_id=session.parent_session_id or _require_session_id(session),
-            role=ChatMessageRole.ASSISTANT,
-            content=assistant_content,
-            timestamp=_require_timestamp(
-                db_message.created_at,
-                detail="Chat message missing created_at",
-            ),
-            status=MessageProcessingStatusDto.COMPLETED,
-            feed_options=render_metadata.feed_options if render_metadata else [],
-            council_candidates=render_metadata.council_candidates if render_metadata else [],
-            active_council_child_session_id=(
-                render_metadata.active_council_child_session_id if render_metadata else None
-            ),
-        )
-
-        return MessageStatusResponse(
-            message_id=message_id,
-            status=status,
-            assistant_message=assistant_message,
-            error=None,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to extract assistant message: {e}")
-        raise HTTPException(status_code=500, detail="Failed to parse message") from None
+    return get_chat_message_status_query.execute(db, user_id=user_id, message_id=message_id)
 
 
 @router.post(
@@ -1591,7 +567,7 @@ async def start_council_mode(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return await get_session(session_id=session_id, db=db, current_user=current_user)
+    return get_session(session_id=session_id, db=db, current_user=current_user)
 
 
 @router.post(
@@ -1625,7 +601,7 @@ async def select_council_mode_branch(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return await get_session(session_id=session_id, db=db, current_user=current_user)
+    return get_session(session_id=session_id, db=db, current_user=current_user)
 
 
 @router.post(
@@ -1659,7 +635,7 @@ async def retry_council_mode_branch(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return await get_session(session_id=session_id, db=db, current_user=current_user)
+    return get_session(session_id=session_id, db=db, current_user=current_user)
 
 
 @router.post(

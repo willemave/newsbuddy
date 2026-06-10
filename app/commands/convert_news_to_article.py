@@ -11,6 +11,7 @@ from app.models.api.content_actions import ConvertNewsResponse
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content
 from app.repositories import knowledge_repository
+from app.services import knowledge as knowledge_service
 from app.services.queue import TaskType, get_queue_service
 from app.utils.url_utils import is_http_url, normalize_http_url
 
@@ -91,9 +92,13 @@ def ensure_article_saved_to_knowledge(
     Raises:
         HTTPException: When the knowledge save could not be persisted.
     """
-    saved = knowledge_repository.save_to_knowledge(db, content_id, user_id)
-    if saved is not None:
+    save_error: Exception | None = None
+    try:
+        knowledge_service.save_to_knowledge(db, content_id, user_id)
         return
+    except Exception as exc:
+        db.rollback()
+        save_error = exc
 
     if knowledge_repository.is_saved_to_knowledge(db, content_id, user_id):
         return
@@ -101,7 +106,7 @@ def ensure_article_saved_to_knowledge(
     raise HTTPException(
         status_code=500,
         detail="Article was created, but could not be saved to knowledge",
-    )
+    ) from save_error
 
 
 def execute(db: Session, *, content_id: int, user_id: int) -> ConvertNewsResponse:

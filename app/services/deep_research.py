@@ -46,6 +46,16 @@ class DeepResearchResult:
     error: str | None
 
 
+@dataclass(frozen=True)
+class DeepResearchTurnState:
+    """Detached state needed for one deep research turn."""
+
+    session_id: int
+    user_id: int
+    content_id: int | None
+    context: str | None
+
+
 class DeepResearchClient:
     """Client for OpenAI's deep research Responses API using official SDK."""
 
@@ -414,6 +424,92 @@ def get_deep_research_client() -> DeepResearchClient:
     return _client
 
 
+def _load_deep_research_turn_state(
+    db: Session,
+    *,
+    session_id: int,
+    message_id: int,
+    source: str,
+) -> DeepResearchTurnState | None:
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if not session:
+        logger.error("[DeepResearch:ERROR] Session %s not found", session_id)
+        return None
+
+    context = None
+    if session.content_id:
+        content = db.query(Content).filter(Content.id == session.content_id).first()
+        if content:
+            context = _build_research_context(content)
+            logger.info(
+                "Deep research context built",
+                extra=build_log_extra(
+                    component="deep_research",
+                    operation="build_context",
+                    event_name="chat.turn.context_built",
+                    status="completed",
+                    session_id=session_id,
+                    message_id=message_id,
+                    user_id=session.user_id,
+                    content_id=session.content_id,
+                    source=source,
+                    context_data={"context_chars": len(context) if context else 0},
+                ),
+            )
+        else:
+            logger.warning(
+                "[DeepResearch:CONTEXT] Content not found content_id=%s",
+                session.content_id,
+            )
+    elif session.context_snapshot:
+        context = session.context_snapshot
+
+    if session.user_id is None:
+        raise ValueError("Deep research session is missing a user_id")
+
+    return DeepResearchTurnState(
+        session_id=session_id,
+        user_id=int(session.user_id),
+        content_id=session.content_id,
+        context=context,
+    )
+
+
+def _persist_deep_research_success(
+    db: Session,
+    *,
+    state: DeepResearchTurnState,
+    message_id: int,
+    user_prompt: str,
+    output_text: str,
+) -> bool:
+    from pydantic_ai.messages import (
+        ModelMessagesTypeAdapter,
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        UserPromptPart,
+    )
+
+    messages: list[ModelRequest | ModelResponse] = [
+        ModelRequest(parts=[UserPromptPart(content=user_prompt)]),
+        ModelResponse(parts=[TextPart(content=output_text)]),
+    ]
+
+    message_json = ModelMessagesTypeAdapter.dump_json(messages).decode("utf-8")
+    db_message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+    session = db.query(ChatSession).filter(ChatSession.id == state.session_id).first()
+    if db_message is None or session is None:
+        return False
+
+    db_message.message_list = message_json
+    db_message.status = MessageProcessingStatus.COMPLETED.value
+    session.last_message_at = datetime.now(UTC)
+    session.updated_at = datetime.now(UTC)
+    db.commit()
+    return True
+
+
 async def process_deep_research_message(
     session_id: int,
     message_id: int,
@@ -435,8 +531,6 @@ async def process_deep_research_message(
         source: Request source label (`realtime` or `queue`).
         task_id: Optional queue task identifier.
     """
-    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
-
     from app.core.db import get_session_factory
 
     total_start = perf_counter()
@@ -455,42 +549,18 @@ async def process_deep_research_message(
     )
 
     SessionLocal = get_session_factory()
-    db = SessionLocal()
-
+    state: DeepResearchTurnState | None = None
+    response_id: str | None = None
     try:
-        session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-        if not session:
-            logger.error("[DeepResearch:ERROR] Session %s not found", session_id)
+        with SessionLocal() as db:
+            state = _load_deep_research_turn_state(
+                db,
+                session_id=session_id,
+                message_id=message_id,
+                source=source,
+            )
+        if state is None:
             return
-
-        # Build context from article if available
-        context = None
-        if session.content_id:
-            content = db.query(Content).filter(Content.id == session.content_id).first()
-            if content:
-                context = _build_research_context(content)
-                logger.info(
-                    "Deep research context built",
-                    extra=build_log_extra(
-                        component="deep_research",
-                        operation="build_context",
-                        event_name="chat.turn.context_built",
-                        status="completed",
-                        session_id=session_id,
-                        message_id=message_id,
-                        user_id=session.user_id,
-                        content_id=session.content_id,
-                        source=source,
-                        context_data={"context_chars": len(context) if context else 0},
-                    ),
-                )
-            else:
-                logger.warning(
-                    "[DeepResearch:CONTEXT] Content not found content_id=%s",
-                    session.content_id,
-                )
-        elif session.context_snapshot:
-            context = session.context_snapshot
 
         logger.info(
             "Deep research LLM call started",
@@ -501,8 +571,8 @@ async def process_deep_research_message(
                 status="started",
                 session_id=session_id,
                 message_id=message_id,
-                user_id=session.user_id,
-                content_id=session.content_id,
+                user_id=state.user_id,
+                content_id=state.content_id,
                 source=source,
                 task_id=task_id,
                 context_data={"model": DEEP_RESEARCH_MODEL},
@@ -512,58 +582,40 @@ async def process_deep_research_message(
         client = get_deep_research_client()
         with langfuse_trace_context(
             trace_name="chat.deep_research",
-            user_id=session.user_id,
-            session_id=session.id,
+            user_id=state.user_id,
+            session_id=state.session_id,
             metadata={
                 "source": source,
                 "model_spec": DEEP_RESEARCH_MODEL,
-                "content_id": session.content_id,
+                "content_id": state.content_id,
                 "message_id": message_id,
                 "task_id": task_id,
             },
             tags=["chat", "deep_research", source],
         ):
-            response_id = await client.start_research(user_prompt, context)
+            response_id = await client.start_research(user_prompt, state.context)
 
             logger.info(
                 "[DeepResearch:SUBMITTED] sid=%s mid=%s response_id=%s user_id=%s",
                 session_id,
                 message_id,
                 response_id,
-                session.user_id,
+                state.user_id,
             )
 
             # Wait for completion
             result = await client.wait_for_completion(response_id)
 
         if result.status in ("succeeded", "completed") and result.output_text:
-            # Build the message list with user request and assistant response
-            from pydantic_ai.messages import (
-                ModelMessagesTypeAdapter,
-                ModelRequest,
-                ModelResponse,
-                TextPart,
-                UserPromptPart,
-            )
-
-            messages: list[ModelRequest | ModelResponse] = [
-                ModelRequest(parts=[UserPromptPart(content=user_prompt)]),
-                ModelResponse(parts=[TextPart(content=result.output_text)]),
-            ]
-
-            message_json = ModelMessagesTypeAdapter.dump_json(messages).decode("utf-8")
-
-            # Update the message with the result
-            db_message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
-            if db_message:
-                db_message.message_list = message_json
-                db_message.status = MessageProcessingStatus.COMPLETED.value
-
-                # Update session timestamps
-                session.last_message_at = datetime.now(UTC)
-                session.updated_at = datetime.now(UTC)
-                db.commit()
-
+            with SessionLocal() as db:
+                persisted = _persist_deep_research_success(
+                    db,
+                    state=state,
+                    message_id=message_id,
+                    user_prompt=user_prompt,
+                    output_text=result.output_text,
+                )
+            if persisted:
                 total_ms = (perf_counter() - total_start) * 1000
                 logger.info(
                     "Deep research turn completed",
@@ -575,8 +627,8 @@ async def process_deep_research_message(
                         duration_ms=total_ms,
                         session_id=session_id,
                         message_id=message_id,
-                        user_id=session.user_id,
-                        content_id=session.content_id,
+                        user_id=state.user_id,
+                        content_id=state.content_id,
                         source=source,
                         task_id=task_id,
                         context_data={
@@ -585,25 +637,25 @@ async def process_deep_research_message(
                         },
                     ),
                 )
-                if result.usage:
-                    record_vendor_usage_out_of_band(
-                        provider="deep_research",
-                        model=DEEP_RESEARCH_MODEL,
-                        feature="chat",
-                        operation="chat.deep_research",
-                        source=source,
-                        usage=result.usage,
-                        task_id=task_id,
-                        content_id=session.content_id,
-                        session_id=session_id,
-                        message_id=message_id,
-                        user_id=session.user_id,
-                        metadata={"response_id": response_id},
-                    )
+            if result.usage:
+                record_vendor_usage_out_of_band(
+                    provider="deep_research",
+                    model=DEEP_RESEARCH_MODEL,
+                    feature="chat",
+                    operation="chat.deep_research",
+                    source=source,
+                    usage=result.usage,
+                    task_id=task_id,
+                    content_id=state.content_id,
+                    session_id=session_id,
+                    message_id=message_id,
+                    user_id=state.user_id,
+                    metadata={"response_id": response_id},
+                )
         else:
-            # Research failed or timed out
             error_msg = result.error or f"Research failed with status: {result.status}"
-            _update_message_failed(db, message_id, error_msg)
+            with SessionLocal() as db:
+                _update_message_failed(db, message_id, error_msg)
 
             total_ms = (perf_counter() - total_start) * 1000
             logger.error(
@@ -616,11 +668,14 @@ async def process_deep_research_message(
                     duration_ms=total_ms,
                     session_id=session_id,
                     message_id=message_id,
-                    user_id=session.user_id,
-                    content_id=session.content_id,
+                    user_id=state.user_id,
+                    content_id=state.content_id,
                     source=source,
                     task_id=task_id,
-                    context_data={"failure_class": result.status, "response_id": response_id},
+                    context_data={
+                        "failure_class": result.status,
+                        "response_id": response_id,
+                    },
                 ),
             )
 
@@ -642,15 +697,14 @@ async def process_deep_research_message(
             ),
         )
         try:
-            _update_message_failed(db, message_id, str(exc))
+            with SessionLocal() as db:
+                _update_message_failed(db, message_id, str(exc))
         except Exception as update_exc:
             logger.error(
                 "[DeepResearch:UPDATE_FAILED] mid=%s error=%s",
                 message_id,
                 update_exc,
             )
-    finally:
-        db.close()
 
 
 def _build_research_context(content: Content) -> str | None:

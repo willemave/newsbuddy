@@ -1,6 +1,7 @@
 """Tests for chat session API endpoints."""
 
 import asyncio
+import base64
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -429,6 +430,15 @@ def test_list_chat_sessions_page_filters_hidden_archived_and_content(
 
 def test_list_chat_sessions_page_rejects_bad_cursor(client: TestClient) -> None:
     response = client.get("/api/content/chat/sessions/list?cursor=not-a-cursor")
+
+    assert response.status_code == 400
+
+
+def test_list_chat_sessions_page_rejects_cursor_missing_last_id(client: TestClient) -> None:
+    cursor_payload = {"last_created_at": datetime.now(UTC).isoformat()}
+    cursor = base64.urlsafe_b64encode(json.dumps(cursor_payload).encode()).decode()
+
+    response = client.get(f"/api/content/chat/sessions/list?cursor={cursor}")
 
     assert response.status_code == 400
     assert "Invalid pagination cursor" in response.json()["detail"]

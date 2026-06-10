@@ -2,9 +2,9 @@
 id: onboarding/audio_plan
 description: Sectioned prompts for onboarding audio lane planning.
 used_by:
-  system: app/services/onboarding.py:_run_audio_plan_with_fallback
+  system: app/services/onboarding/__init__.py:_run_audio_plan_with_fallback
   system_description: "System prompt for designing onboarding discovery lanes from spoken interests."
-  user: app/services/onboarding.py:_format_audio_plan_prompt
+  user: app/services/onboarding/__init__.py:_format_audio_plan_prompt
   user_description: "User prompt template that injects locale and transcript for onboarding audio lane planning."
 prompt_type: sectioned_prompt
 ---

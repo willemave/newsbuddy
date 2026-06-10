@@ -14,6 +14,7 @@ from pydantic import HttpUrl, TypeAdapter
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.commands import ingest_content as ingest_content_command
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.api.submissions import SubmitContentRequest
@@ -24,7 +25,6 @@ from app.models.db import (
     UserIntegrationSyncState,
 )
 from app.models.db.users import User
-from app.services.content_submission import submit_user_content
 from app.services.token_crypto import decrypt_token, encrypt_token
 from app.services.twitter_share import canonical_tweet_url
 from app.services.x_api import (
@@ -566,9 +566,9 @@ def _sync_bookmark_channel(
             reused += 1
             continue
 
-        result = submit_user_content(
+        ingest_result = ingest_content_command.execute(
             db,
-            SubmitContentRequest(
+            payload=SubmitContentRequest(
                 url=URL_ADAPTER.validate_python(tweet_url),
                 content_type=None,
                 title=None,
@@ -580,9 +580,10 @@ def _sync_bookmark_channel(
                 chat_initial_message=None,
                 save_to_knowledge_and_mark_read=False,
             ),
-            user,
+            current_user=user,
             submitted_via="x_bookmarks",
         )
+        result = ingest_result.response
         _persist_bookmark_tweet_snapshot(
             db,
             content_id=result.content_id,

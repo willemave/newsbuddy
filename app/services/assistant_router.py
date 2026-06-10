@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.models.openai import ReasoningEffort
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.commands import ingest_content as ingest_content_command
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.model_defaults import DEEP_RESEARCH_MODEL_SPEC
@@ -31,21 +31,39 @@ from app.models.domain.chat_render import (
     ChatMessageRenderMetadata,
 )
 from app.models.internal.assistant import AssistantScreenContext
-from app.repositories import knowledge_repository, read_status_repository
+from app.repositories import read_status_repository
 from app.repositories.search_repository import (
     search_content,
     search_news,
     search_subscription_feeds,
 )
+from app.services import knowledge as knowledge_service
 from app.services.assistant_feed_finder import find_feed_options as find_feed_options_service
 from app.services.chat_agent import (
-    _log_chat_usage,
     load_message_history,
     save_messages,
     update_message_completed,
     update_message_failed,
 )
-from app.services.content_submission import submit_user_content
+from app.services.chat_turn_runtime import (
+    close_sandbox_session as _close_sandbox_session,
+)
+from app.services.chat_turn_runtime import get_or_create_cached_agent as _get_or_create_cached_agent
+from app.services.chat_turn_runtime import (
+    log_chat_usage as _log_chat_usage,
+)
+from app.services.chat_turn_runtime import (
+    personal_library_unavailable_message as _personal_library_unavailable_message,
+)
+from app.services.chat_turn_runtime import (
+    require_session_id as _require_session_id,
+)
+from app.services.chat_turn_runtime import (
+    require_session_user_id as _require_session_user_id,
+)
+from app.services.chat_turn_runtime import (
+    resolve_session_model as _resolve_session_model,
+)
 from app.services.exa_client import exa_search
 from app.services.knowledge_search import search_knowledge as search_knowledge_hits
 from app.services.langfuse_tracing import langfuse_trace_context
@@ -79,7 +97,6 @@ ASSISTANT_SESSION_TYPES = {
     *LEGACY_KNOWLEDGE_SESSION_TYPES,
     "weekly_discovery",
 }
-_agents: dict[tuple[str, str], Agent[AssistantDeps, str]] = {}
 URL_ADAPTER = TypeAdapter(HttpUrl)
 ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS = "pick_interesting_unread_news"
 
@@ -204,27 +221,6 @@ def _build_submit_content_request(
     )
 
 
-def _require_session_user_id(session: ChatSession) -> int:
-    user_id = session.user_id
-    if user_id is None:
-        raise ValueError("Chat session is missing a user_id")
-    return int(user_id)
-
-
-def _require_session_id(session: ChatSession) -> int:
-    session_id = session.id
-    if session_id is None:
-        raise ValueError("Chat session is missing an id")
-    return int(session_id)
-
-
-def _resolve_session_model(session: ChatSession) -> str:
-    model_spec = session.llm_model
-    if isinstance(model_spec, str) and model_spec:
-        return model_spec
-    return DEFAULT_MODEL
-
-
 def _normalize_turn_text(user_text: str) -> str:
     """Normalize turn text for routing heuristics."""
 
@@ -341,13 +337,6 @@ def _build_turn_instructions(
         return load_prompt("chat/contextual_assistant#turn_web_search")
 
     return load_prompt("chat/contextual_assistant#turn_default_tool_preference")
-
-
-def _personal_library_unavailable_message(error: str | None) -> str:
-    """Render a consistent unavailability message for assistant markdown tools."""
-    if error:
-        return f"Personal markdown library is unavailable: {error}"
-    return "Personal markdown library is unavailable for this chat."
 
 
 def _should_route_to_content_search(user_text: str) -> bool:
@@ -567,21 +556,22 @@ def _build_unread_news_items_payload(
     }
 
 
-def _build_agent_cache_key(model_spec: str, api_key_override: str | None) -> tuple[str, str]:
-    if not api_key_override:
-        return model_spec, ""
-    return model_spec, hashlib.sha256(api_key_override.encode("utf-8")).hexdigest()
-
-
 def _get_or_create_agent(
     model_spec: str,
     api_key_override: str | None = None,
 ) -> Agent[AssistantDeps, str]:
-    cache_key = _build_agent_cache_key(model_spec, api_key_override)
-    existing = _agents.get(cache_key)
-    if existing is not None:
-        return existing
+    return _get_or_create_cached_agent(
+        "contextual_assistant",
+        model_spec,
+        api_key_override,
+        lambda: _create_assistant_agent(model_spec, api_key_override=api_key_override),
+    )
 
+
+def _create_assistant_agent(
+    model_spec: str,
+    api_key_override: str | None = None,
+) -> Agent[AssistantDeps, str]:
     model, model_settings = build_pydantic_model(
         model_spec,
         api_key_override=api_key_override,
@@ -797,12 +787,12 @@ def _get_or_create_agent(
             user = db.query(User).filter(User.id == ctx.deps.user_id).first()
             if user is None:
                 return "Unable to add to feed: user not found."
-            response = submit_user_content(
+            response = ingest_content_command.execute(
                 db,
-                _build_submit_content_request(url=url, title=title),
-                user,
+                payload=_build_submit_content_request(url=url, title=title),
+                current_user=user,
                 submitted_via="assistant",
-            )
+            ).response
         if response.already_exists:
             return f"That item is already in the feed (content_id={response.content_id})."
         return f"Added the item to the feed (content_id={response.content_id})."
@@ -818,12 +808,12 @@ def _get_or_create_agent(
             user = db.query(User).filter(User.id == ctx.deps.user_id).first()
             if user is None:
                 return "Unable to subscribe: user not found."
-            response = submit_user_content(
+            response = ingest_content_command.execute(
                 db,
-                _build_submit_content_request(url=url, title=title, subscribe_to_feed=True),
-                user,
+                payload=_build_submit_content_request(url=url, title=title, subscribe_to_feed=True),
+                current_user=user,
                 submitted_via="assistant",
-            )
+            ).response
         return response.message
 
     @agent.tool
@@ -833,9 +823,19 @@ def _get_or_create_agent(
     ) -> str:
         """Save a content item to the user's knowledge library."""
         with ctx.deps.session_factory() as db:
-            saved = knowledge_repository.save_to_knowledge(db, content_id, ctx.deps.user_id)
-        if saved is None:
-            return f"Could not save content {content_id} to knowledge."
+            try:
+                knowledge_service.save_to_knowledge(db, content_id, ctx.deps.user_id)
+            except Exception:
+                db.rollback()
+                logger.exception(
+                    "Assistant tool failed to save content to knowledge",
+                    extra={
+                        "component": "assistant_router",
+                        "operation": "save_to_knowledge",
+                        "item_id": str(content_id),
+                    },
+                )
+                return f"Could not save content {content_id} to knowledge."
         return f"Saved content {content_id} to knowledge."
 
     @agent.tool
@@ -845,11 +845,23 @@ def _get_or_create_agent(
     ) -> str:
         """Remove a content item from the user's knowledge library."""
         with ctx.deps.session_factory() as db:
-            removed = knowledge_repository.remove_from_knowledge(
-                db,
-                content_id,
-                ctx.deps.user_id,
-            )
+            try:
+                removed = knowledge_service.remove_from_knowledge(
+                    db,
+                    content_id,
+                    ctx.deps.user_id,
+                )
+            except Exception:
+                db.rollback()
+                logger.exception(
+                    "Assistant tool failed to remove content from knowledge",
+                    extra={
+                        "component": "assistant_router",
+                        "operation": "remove_from_knowledge",
+                        "item_id": str(content_id),
+                    },
+                )
+                return f"Could not remove content {content_id} from knowledge."
         if not removed:
             return f"Content {content_id} was not saved to knowledge."
         return f"Removed content {content_id} from knowledge."
@@ -901,9 +913,9 @@ def _get_or_create_agent(
             user = db.query(User).filter(User.id == ctx.deps.user_id).first()
             if user is None:
                 return "Unable to convert article: user not found."
-            response = submit_user_content(
+            response = ingest_content_command.execute(
                 db,
-                _build_submit_content_request(
+                payload=_build_submit_content_request(
                     url=article_url,
                     title=(
                         article_meta.get("title")
@@ -911,9 +923,9 @@ def _get_or_create_agent(
                         else None
                     ),
                 ),
-                user,
+                current_user=user,
                 submitted_via="assistant",
-            )
+            ).response
         if response.already_exists:
             return f"Article already exists in the feed (content_id={response.content_id})."
         return f"Queued article extraction (content_id={response.content_id})."
@@ -944,7 +956,6 @@ def _get_or_create_agent(
             "Open the full chat thread to continue there."
         )
 
-    _agents[cache_key] = agent
     return agent
 
 
@@ -1245,16 +1256,6 @@ def _build_assistant_personal_library_runtime(
         return None, str(exc)
 
 
-def _close_sandbox_session(sandbox_session: PersonalLibrarySandboxSession | None) -> None:
-    """Release one assistant sandbox session."""
-    if sandbox_session is None:
-        return
-    try:
-        sandbox_session.close()
-    except Exception:
-        logger.debug("Ignoring assistant sandbox close failure", exc_info=True)
-
-
 async def process_assistant_turn_async(
     session_id: int,
     message_id: int,
@@ -1266,7 +1267,7 @@ async def process_assistant_turn_async(
     """Process an assistant turn asynchronously."""
     total_start = perf_counter()
     SessionLocal = get_session_factory()
-    db = SessionLocal()
+    db: Session | None = SessionLocal()
     logger.info(
         "Assistant turn started",
         extra=build_log_extra(
@@ -1285,6 +1286,8 @@ async def process_assistant_turn_async(
     )
     deps: AssistantDeps | None = None
     try:
+        if db is None:
+            raise RuntimeError("Database session was not initialized")
         session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
         if session is None:
             logger.error("Assistant session %s not found", session_id)
@@ -1358,6 +1361,8 @@ async def process_assistant_turn_async(
             user_id=session_user_id,
             model_spec=model_spec,
         )
+        db.close()
+        db = None
         logger.info(
             "Assistant LLM call started",
             extra=build_log_extra(
@@ -1388,16 +1393,22 @@ async def process_assistant_turn_async(
         agent_ms = (perf_counter() - agent_start) * 1000
         render_metadata = _extract_render_metadata(result.new_messages())
         _log_chat_usage(result, session, session_id, message_id, source)
-        update_message_completed(
-            db,
-            message_id,
-            result.new_messages(),
-            display_user_prompt=user_prompt,
-            render_metadata=render_metadata,
-        )
-        session.last_message_at = datetime.now(UTC)
-        session.updated_at = datetime.now(UTC)
-        db.commit()
+        with SessionLocal() as persist_db:
+            update_message_completed(
+                persist_db,
+                message_id,
+                result.new_messages(),
+                display_user_prompt=user_prompt,
+                render_metadata=render_metadata,
+            )
+            session_to_update = (
+                persist_db.query(ChatSession).filter(ChatSession.id == session_id).first()
+            )
+            if session_to_update is None:
+                raise ValueError(f"Assistant session {session_id} not found")
+            session_to_update.last_message_at = datetime.now(UTC)
+            session_to_update.updated_at = datetime.now(UTC)
+            persist_db.commit()
         tool_calls = getattr(result, "tool_calls", []) or []
         tool_names = [
             getattr(call, "name", None)
@@ -1441,11 +1452,16 @@ async def process_assistant_turn_async(
                 context_data={"failure_class": type(exc).__name__},
             ),
         )
-        db.rollback()
-        update_message_failed(db, message_id, str(exc))
+        if db is not None:
+            db.rollback()
+            update_message_failed(db, message_id, str(exc))
+        else:
+            with SessionLocal() as fail_db:
+                update_message_failed(fail_db, message_id, str(exc))
     finally:
         _close_sandbox_session(deps.sandbox_session if deps is not None else None)
-        db.close()
+        if db is not None:
+            db.close()
 
 
 def seed_assistant_message(

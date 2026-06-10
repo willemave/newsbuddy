@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.db import Content
-from app.repositories import knowledge_repository
+from app.services import knowledge as knowledge_service
 
 
 def execute(db: Session, *, user_id: int, content_id: int) -> dict[str, object]:
@@ -15,9 +15,14 @@ def execute(db: Session, *, user_id: int, content_id: int) -> dict[str, object]:
     if not content:
         raise HTTPException(status_code=404, detail="Content not found")
 
-    saved = knowledge_repository.save_to_knowledge(db, content_id, user_id)
-    if saved is None and not knowledge_repository.is_saved_to_knowledge(db, content_id, user_id):
-        raise HTTPException(status_code=500, detail="Could not save content to knowledge")
+    try:
+        knowledge_service.save_to_knowledge(db, content_id, user_id)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save content to knowledge",
+        ) from exc
 
     return {
         "status": "success",

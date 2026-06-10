@@ -1,6 +1,5 @@
 """Chat agent service using pydantic-ai for deep-dive conversations."""
 
-import hashlib
 import json
 import math
 from dataclasses import dataclass
@@ -19,16 +18,34 @@ from app.core.settings import get_settings
 from app.models.contracts import MessageProcessingStatus
 from app.models.db import ChatMessage, ChatSession, Content
 from app.models.domain.chat_render import ChatMessageRenderMetadata
+from app.services.chat_turn_runtime import (
+    close_sandbox_session as _close_sandbox_session,
+)
+from app.services.chat_turn_runtime import get_or_create_cached_agent as _get_or_create_cached_agent
+from app.services.chat_turn_runtime import (
+    log_chat_usage as _log_chat_usage,
+)
+from app.services.chat_turn_runtime import (
+    personal_library_unavailable_message as _personal_library_unavailable_message,
+)
+from app.services.chat_turn_runtime import (
+    require_session_id as _require_session_id,
+)
+from app.services.chat_turn_runtime import (
+    require_session_user_id as _require_session_user_id,
+)
+from app.services.chat_turn_runtime import (
+    resolve_session_model as _resolve_session_model,
+)
 from app.services.exa_client import exa_search, get_exa_client
 from app.services.langfuse_tracing import langfuse_trace_context
+from app.services.llm_models import (  # noqa: F401 (re-export for API schemas)
+    LLMProvider as ChatModelProvider,
+)
 from app.services.llm_models import (
-    DEFAULT_MODEL,
     build_pydantic_model,
     resolve_effective_api_key,
     resolve_model_provider,
-)
-from app.services.llm_models import (  # noqa: F401 (re-export for API schemas)
-    LLMProvider as ChatModelProvider,
 )
 from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
 from app.services.prompt_library import load_prompt, render_prompt
@@ -37,7 +54,6 @@ from app.services.sandbox_runtime import (
     SandboxRuntimeUnavailableError,
     create_personal_library_sandbox_session,
 )
-from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 
 logger = get_logger(__name__)
 
@@ -47,30 +63,6 @@ SYSTEM_AND_ARTICLE_BUDGET_RATIO = 0.75
 TOKEN_CHARS_PER_TOKEN = 4
 
 SYSTEM_PROMPT_TEXT = load_prompt("chat/article#system")
-
-
-def _require_session_id(session: ChatSession) -> int:
-    """Return a persisted session ID or raise."""
-    session_id = session.id
-    if session_id is None:
-        raise ValueError("Chat session must be persisted before use")
-    return session_id
-
-
-def _require_session_user_id(session: ChatSession) -> int:
-    """Return the owning user ID for a session or raise."""
-    user_id = session.user_id
-    if user_id is None:
-        raise ValueError("Chat session must have a user_id")
-    return user_id
-
-
-def _resolve_session_model(session: ChatSession) -> str:
-    """Resolve the effective model spec for a session."""
-    model_spec = session.llm_model
-    if isinstance(model_spec, str) and model_spec.strip():
-        return model_spec
-    return DEFAULT_MODEL
 
 
 def _estimate_tokens(text: str | None) -> int:
@@ -223,24 +215,6 @@ class ChatDeps:
     personal_library_error: str | None = None
 
 
-def _personal_library_unavailable_message(error: str | None) -> str:
-    """Render a consistent unavailability message for personal library tools."""
-    if error:
-        return f"Personal markdown library is unavailable: {error}"
-    return "Personal markdown library is unavailable for this chat."
-
-
-# Agent cache keyed by model spec and effective credential identity.
-_agents: dict[tuple[str, str], Agent[ChatDeps, str]] = {}
-
-
-def _build_agent_cache_key(model_spec: str, api_key_override: str | None) -> tuple[str, str]:
-    """Build a stable cache key without persisting raw secrets in memory."""
-    if not api_key_override:
-        return model_spec, ""
-    return model_spec, hashlib.sha256(api_key_override.encode("utf-8")).hexdigest()
-
-
 def _build_article_header(content: Content | None, session: ChatSession) -> list[str]:
     parts: list[str] = []
     if content:
@@ -285,6 +259,20 @@ def get_chat_agent(
     *,
     api_key_override: str | None = None,
 ) -> Agent[ChatDeps, str]:
+    """Get or create a chat agent for the given model spec."""
+    return _get_or_create_cached_agent(
+        "article_chat",
+        model_spec,
+        api_key_override,
+        lambda: _create_chat_agent(model_spec, api_key_override=api_key_override),
+    )
+
+
+def _create_chat_agent(
+    model_spec: str,
+    *,
+    api_key_override: str | None = None,
+) -> Agent[ChatDeps, str]:
     """Get or create a chat agent for the given model spec.
 
     Args:
@@ -293,10 +281,6 @@ def get_chat_agent(
     Returns:
         Configured Agent instance.
     """
-    cache_key = _build_agent_cache_key(model_spec, api_key_override)
-    if cache_key in _agents:
-        return _agents[cache_key]
-
     # Build model with explicit API key if needed
     model, model_settings = build_pydantic_model(
         model_spec,
@@ -482,7 +466,6 @@ def get_chat_agent(
 
         return "".join(output_parts)
 
-    _agents[cache_key] = agent
     logger.info(f"Created chat agent for model: {model_spec}")
     return agent
 
@@ -891,69 +874,6 @@ def _build_personal_library_runtime(
         return None, str(exc)
 
 
-def _close_sandbox_session(sandbox_session: PersonalLibrarySandboxSession | None) -> None:
-    """Release the per-turn sandbox session."""
-    if sandbox_session is None:
-        return
-    try:
-        sandbox_session.close()
-    except Exception:
-        logger.debug("Ignoring sandbox close failure", exc_info=True)
-
-
-def _log_chat_usage(
-    result: object,
-    session: ChatSession,
-    session_id: int,
-    message_id: int | None,
-    context: str,
-) -> None:
-    """Persist and log token usage for a chat request when available."""
-    usage_details = extract_usage_from_result(result)
-    if usage_details is None:
-        return
-    user_id = _require_session_user_id(session)
-    model_spec = _resolve_session_model(session)
-    provider = resolve_model_provider(model_spec)
-
-    try:
-        usage = record_vendor_usage_out_of_band(
-            provider=provider,
-            model=model_spec,
-            feature="chat",
-            operation=f"chat.{context}",
-            source=context,
-            usage=usage_details,
-            session_id=session_id,
-            message_id=message_id,
-            user_id=user_id,
-            content_id=session.content_id,
-            metadata={"session_type": session.session_type},
-        )
-    except Exception:  # noqa: BLE001
-        return
-
-    logger.info(
-        "Chat usage recorded",
-        extra=build_log_extra(
-            component="chat",
-            operation="usage",
-            event_name="chat.turn.usage",
-            status="completed",
-            session_id=session_id,
-            message_id=message_id,
-            user_id=user_id,
-            content_id=session.content_id,
-            source=context,
-            context_data={
-                "model": model_spec,
-                "provider": provider,
-                "usage_recorded": usage is not None,
-            },
-        ),
-    )
-
-
 def _sync_parent_session_activity(db: Session, session: ChatSession) -> None:
     """Mirror child-session activity onto a visible parent council session."""
 
@@ -1231,9 +1151,11 @@ async def process_message_async(
     )
 
     SessionLocal = get_session_factory()
-    db = SessionLocal()
+    db: Session | None = SessionLocal()
     deps: ChatDeps | None = None
     try:
+        if db is None:
+            raise RuntimeError("Database session was not initialized")
         session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
         if not session:
             logger.error("[AsyncChat:ERROR] Session %s not found", session_id)
@@ -1297,6 +1219,8 @@ async def process_message_async(
             user_id=session_user_id,
             model_spec=model_spec,
         )
+        db.close()
+        db = None
 
         # Run the agent
         logger.info(
@@ -1364,19 +1288,23 @@ async def process_message_async(
         # Update the message with the complete result
         save_start = perf_counter()
         new_messages = result.new_messages()
-        update_message_completed(
-            db,
-            message_id,
-            new_messages,
-            display_user_prompt=user_prompt,
-        )
+        with SessionLocal() as persist_db:
+            update_message_completed(
+                persist_db,
+                message_id,
+                new_messages,
+                display_user_prompt=user_prompt,
+            )
+            session_to_update = (
+                persist_db.query(ChatSession).filter(ChatSession.id == session_id).first()
+            )
+            if session_to_update is None:
+                raise ValueError(f"Session {session_id} not found")
+            session_to_update.last_message_at = datetime.now(UTC)
+            session_to_update.updated_at = datetime.now(UTC)
+            _sync_parent_session_activity(persist_db, session_to_update)
+            persist_db.commit()
         save_ms = (perf_counter() - save_start) * 1000
-
-        # Update session timestamps
-        session.last_message_at = datetime.now(UTC)
-        session.updated_at = datetime.now(UTC)
-        _sync_parent_session_activity(db, session)
-        db.commit()
 
         total_ms = (perf_counter() - total_start) * 1000
         logger.info(
@@ -1419,12 +1347,17 @@ async def process_message_async(
             ),
         )
         try:
-            update_message_failed(db, message_id, str(exc))
+            if db is not None:
+                update_message_failed(db, message_id, str(exc))
+            else:
+                with SessionLocal() as fail_db:
+                    update_message_failed(fail_db, message_id, str(exc))
         except Exception as update_exc:
             logger.error("[AsyncChat:UPDATE_FAILED] mid=%s error=%s", message_id, update_exc)
     finally:
         _close_sandbox_session(deps.sandbox_session if deps is not None else None)
-        db.close()
+        if db is not None:
+            db.close()
 
 
 INITIAL_QUESTIONS_PROMPT = load_prompt("chat/article#initial_questions_user")

@@ -2,9 +2,9 @@
 id: onboarding/profile
 description: Sectioned prompts for onboarding profile extraction.
 used_by:
-  system: app/services/onboarding.py:build_onboarding_profile
+  system: app/services/onboarding/__init__.py:build_onboarding_profile
   system_description: "System prompt for building a concise onboarding profile from user interests and web snippets."
-  user: app/services/onboarding.py:_format_profile_prompt
+  user: app/services/onboarding/__init__.py:_format_profile_prompt
   user_description: "User prompt template that injects onboarding form fields and web results for profile generation."
 prompt_type: sectioned_prompt
 ---

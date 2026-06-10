@@ -2,9 +2,9 @@
 id: onboarding/fast_discover
 description: Sectioned prompts for onboarding fast-discovery feed selection.
 used_by:
-  system: app/services/onboarding.py:_run_discover_output_with_fallback
+  system: app/services/onboarding/__init__.py:_run_discover_output_with_fallback
   system_description: "System prompt for selecting personalized onboarding sources from searched web results."
-  user: app/services/onboarding.py:_format_discovery_prompt
+  user: app/services/onboarding/__init__.py:_format_discovery_prompt
   user_description: "User prompt template that injects profile summary, inferred topics, and web results for onboarding source selection."
 prompt_type: sectioned_prompt
 ---

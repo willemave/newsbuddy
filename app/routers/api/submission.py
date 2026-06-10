@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.commands import submit_content as submit_content_command
+from app.commands import ingest_content as ingest_content_command
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.models.api.content import SubmissionStatusListResponse
@@ -30,14 +30,14 @@ router = APIRouter()
     summary="Submit a one-off URL for processing",
     description="Submit article or podcast URLs for processing. Only http/https URLs are accepted.",
 )
-async def submit_content(
+def submit_content(
     payload: SubmitContentRequest,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ContentSubmissionResponse | JSONResponse:
     """Create or reuse content for a user-submitted URL and enqueue processing."""
     try:
-        result = submit_content_command.execute(
+        result = ingest_content_command.execute(
             db,
             payload=payload,
             current_user=current_user,
@@ -45,8 +45,9 @@ async def submit_content(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    status_code = status.HTTP_200_OK if result.already_exists else status.HTTP_201_CREATED
-    return JSONResponse(status_code=status_code, content=result.model_dump(mode="json"))
+    response = result.response
+    status_code = status.HTTP_200_OK if response.already_exists else status.HTTP_201_CREATED
+    return JSONResponse(status_code=status_code, content=response.model_dump(mode="json"))
 
 
 @router.get(
@@ -58,7 +59,7 @@ async def submit_content(
         "processing, failed, and skipped statuses."
     ),
 )
-async def list_submission_statuses(
+def list_submission_statuses(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     cursor: str | None = Query(None, description="Pagination cursor for next page"),

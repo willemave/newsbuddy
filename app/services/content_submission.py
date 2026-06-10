@@ -18,7 +18,7 @@ from app.models.metadata.state import (
     normalize_metadata_shape,
     update_processing_state,
 )
-from app.repositories import knowledge_repository
+from app.services import knowledge as knowledge_service
 from app.services import read_status
 from app.services.dig_deeper import enqueue_dig_deeper_task
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
@@ -163,7 +163,7 @@ def _apply_submission_user_state(
         read_status.mark_content_as_read(db, content_id, user_id)
     if save_to_knowledge_and_mark_read:
         # This flag now means "save to knowledge and mark read".
-        knowledge_repository.save_to_knowledge(db, content_id, user_id)
+        knowledge_service.save_to_knowledge(db, content_id, user_id)
     if share_and_chat and enqueue_dig_deeper:
         enqueue_dig_deeper_task(
             db,

@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal, cast
 from urllib.parse import urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import HttpUrl, TypeAdapter
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.constants import DEFAULT_NEW_FEED_LIMIT
+from app.commands import add_discovery_items as add_discovery_items_command
+from app.commands import (
+    subscribe_discovery_suggestions as subscribe_discovery_suggestions_command,
+)
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
-from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.api.content import PodcastEpisodeSearchResponse, PodcastEpisodeSearchResultResponse
 from app.models.api.discovery import (
@@ -30,7 +30,6 @@ from app.models.api.discovery import (
     DiscoverySuggestionResponse,
     DiscoverySuggestionsResponse,
 )
-from app.models.api.submissions import SubmitContentRequest
 from app.models.db import (
     ContentKnowledgeSave,
     FeedDiscoveryRun,
@@ -38,22 +37,12 @@ from app.models.db import (
     UserScraperConfig,
 )
 from app.models.db.users import User
-from app.models.internal.scraper_configs import CreateUserScraperConfig
-from app.services.content_submission import submit_user_content
+from app.repositories.discovery_repository import list_user_suggestions_by_ids
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.podcast_search import search_podcast_episodes
 from app.services.queue import TaskType
-from app.services.scraper_configs import (
-    ScraperConfigAlreadyExistsError,
-    create_user_scraper_config,
-)
-
-logger = get_logger(__name__)
 
 router = APIRouter()
-
-ScraperTypeLiteral = Literal["substack", "atom", "podcast_rss", "youtube", "reddit"]
-_HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
 
 
 def _require_run_id(run_id: int | None) -> int:
@@ -72,13 +61,6 @@ def _serialize_dt(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
-
-
-def _is_youtube_watch_url(url: str | None) -> bool:
-    if not url:
-        return False
-    lowered = url.lower()
-    return "youtube.com/watch" in lowered or "youtu.be/" in lowered
 
 
 def _normalize_feed_url_for_match(feed_url: str | None) -> str | None:
@@ -130,7 +112,7 @@ def _suggestion_to_response(suggestion: FeedDiscoverySuggestion) -> DiscoverySug
     response_model=DiscoverySuggestionsResponse,
     summary="Get discovery suggestions",
 )
-async def get_discovery_suggestions(
+def get_discovery_suggestions(
     db: Session = Depends(get_readonly_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoverySuggestionsResponse:
@@ -187,7 +169,7 @@ async def get_discovery_suggestions(
     response_model=DiscoveryHistoryResponse,
     summary="Get discovery suggestions across recent runs",
 )
-async def get_discovery_history(
+def get_discovery_history(
     limit: int = Query(6, ge=1, le=12),
     db: Session = Depends(get_readonly_db_session),
     current_user: User = Depends(get_current_user),
@@ -268,7 +250,7 @@ async def get_discovery_history(
     response_model=PodcastEpisodeSearchResponse,
     summary="Search podcast episodes online",
 )
-async def search_discovery_podcast_episodes(
+def search_discovery_podcast_episodes(
     q: str = Query(
         ...,
         min_length=2,
@@ -330,7 +312,7 @@ async def search_discovery_podcast_episodes(
     response_model=DiscoveryRefreshResponse,
     summary="Trigger discovery refresh",
 )
-async def refresh_discovery(
+def refresh_discovery(
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryRefreshResponse:
@@ -360,79 +342,16 @@ async def refresh_discovery(
     response_model=DiscoverySubscribeResponse,
     summary="Subscribe to discovery suggestions",
 )
-async def subscribe_discovery_suggestions(
+def subscribe_discovery_suggestions(
     payload: DiscoverySubscribeRequest,
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoverySubscribeResponse:
-    user_id = require_user_id(current_user)
-    suggestions = (
-        db.query(FeedDiscoverySuggestion)
-        .filter(
-            FeedDiscoverySuggestion.user_id == user_id,
-            FeedDiscoverySuggestion.id.in_(payload.suggestion_ids),
-        )
-        .all()
+    return subscribe_discovery_suggestions_command.execute(
+        db,
+        user_id=require_user_id(current_user),
+        payload=payload,
     )
-
-    subscribed: list[int] = []
-    skipped: list[int] = []
-    errors: list[dict[str, str]] = []
-
-    for suggestion in suggestions:
-        suggestion_id = suggestion.id
-        if suggestion_id is None:
-            continue
-        if suggestion.status == "subscribed":
-            skipped.append(suggestion_id)
-            continue
-        if suggestion.suggestion_type == "youtube" and _is_youtube_watch_url(suggestion.feed_url):
-            skipped.append(suggestion_id)
-            errors.append(
-                {"id": str(suggestion_id), "error": "youtube_watch_url_requires_add_item"}
-            )
-            continue
-
-        try:
-            scraper_type = suggestion.suggestion_type
-            if scraper_type not in {"substack", "atom", "podcast_rss", "youtube", "reddit"}:
-                errors.append({"id": str(suggestion_id), "error": "invalid_suggestion_type"})
-                continue
-            config_payload = {**(suggestion.config or {})}
-            if suggestion.feed_url and not config_payload.get("feed_url"):
-                config_payload["feed_url"] = suggestion.feed_url
-            if "limit" not in config_payload:
-                config_payload["limit"] = DEFAULT_NEW_FEED_LIMIT
-            create_user_scraper_config(
-                db,
-                user_id=user_id,
-                data=CreateUserScraperConfig(
-                    scraper_type=cast(ScraperTypeLiteral, scraper_type),
-                    display_name=suggestion.title,
-                    config=config_payload,
-                ),
-            )
-            suggestion.status = "subscribed"
-            subscribed.append(suggestion_id)
-        except ScraperConfigAlreadyExistsError:
-            suggestion.status = "subscribed"
-            subscribed.append(suggestion_id)
-        except ValueError as exc:
-            errors.append({"id": str(suggestion_id), "error": str(exc)})
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Failed to subscribe discovery suggestion",
-                extra={
-                    "component": "feed_discovery",
-                    "operation": "subscribe",
-                    "item_id": str(suggestion_id),
-                    "context_data": {"error": str(exc)},
-                },
-            )
-            errors.append({"id": str(suggestion_id), "error": str(exc)})
-
-    db.commit()
-    return DiscoverySubscribeResponse(subscribed=subscribed, skipped=skipped, errors=errors)
 
 
 @router.post(
@@ -440,70 +359,13 @@ async def subscribe_discovery_suggestions(
     response_model=DiscoveryAddItemResponse,
     summary="Add single items from discovery suggestions",
 )
-async def add_discovery_items(
+def add_discovery_items(
     payload: DiscoveryAddItemRequest,
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryAddItemResponse:
-    user_id = require_user_id(current_user)
-    suggestions = (
-        db.query(FeedDiscoverySuggestion)
-        .filter(
-            FeedDiscoverySuggestion.user_id == user_id,
-            FeedDiscoverySuggestion.id.in_(payload.suggestion_ids),
-        )
-        .all()
-    )
-
-    created: list[int] = []
-    skipped: list[int] = []
-    errors: list[dict[str, str]] = []
-
-    for suggestion in suggestions:
-        suggestion_id = suggestion.id
-        item_url = suggestion.item_url
-        if suggestion_id is None:
-            continue
-        if not item_url:
-            skipped.append(suggestion_id)
-            continue
-
-        try:
-            validated_item_url = _HTTP_URL_ADAPTER.validate_python(item_url)
-            response = submit_user_content(
-                db,
-                SubmitContentRequest(
-                    url=validated_item_url,
-                    content_type=None,
-                    title=suggestion.title,
-                    platform=None,
-                    instruction=None,
-                    crawl_links=False,
-                    subscribe_to_feed=False,
-                    share_and_chat=False,
-                    chat_initial_message=None,
-                    save_to_knowledge_and_mark_read=False,
-                ),
-                current_user,
-            )
-            if response.already_exists:
-                skipped.append(suggestion_id)
-            else:
-                created.append(response.content_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Failed to add discovery item",
-                extra={
-                    "component": "feed_discovery",
-                    "operation": "add_item",
-                    "item_id": str(suggestion_id),
-                    "context_data": {"error": str(exc)},
-                },
-            )
-            errors.append({"id": str(suggestion_id), "error": str(exc)})
-
-    db.commit()
-    return DiscoveryAddItemResponse(created=created, skipped=skipped, errors=errors)
+    require_user_id(current_user)
+    return add_discovery_items_command.execute(db, current_user=current_user, payload=payload)
 
 
 @router.post(
@@ -511,19 +373,16 @@ async def add_discovery_items(
     response_model=DiscoveryDismissResponse,
     summary="Dismiss discovery suggestions",
 )
-async def dismiss_discovery_suggestions(
+def dismiss_discovery_suggestions(
     payload: DiscoveryDismissRequest,
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryDismissResponse:
     user_id = require_user_id(current_user)
-    suggestions = (
-        db.query(FeedDiscoverySuggestion)
-        .filter(
-            FeedDiscoverySuggestion.user_id == user_id,
-            FeedDiscoverySuggestion.id.in_(payload.suggestion_ids),
-        )
-        .all()
+    suggestions = list_user_suggestions_by_ids(
+        db,
+        user_id=user_id,
+        suggestion_ids=payload.suggestion_ids,
     )
 
     dismissed: list[int] = []
@@ -541,7 +400,7 @@ async def dismiss_discovery_suggestions(
     response_model=DiscoveryDismissResponse,
     summary="Clear all discovery suggestions",
 )
-async def clear_discovery_suggestions(
+def clear_discovery_suggestions(
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryDismissResponse:

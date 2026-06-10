@@ -11,7 +11,7 @@ from app.repositories.search_repository import (
     search_news,
     search_subscription_feeds,
 )
-from app.services import assistant_router
+from app.services import assistant_router, chat_turn_runtime
 
 
 def test_build_turn_instructions_prefers_knowledge_for_saved_content_prompts() -> None:
@@ -113,7 +113,7 @@ def test_build_screen_context_snapshot_omits_user_id(db_session, test_user) -> N
 def test_get_or_create_agent_uses_shared_model_builder(monkeypatch) -> None:
     """Assistant agent construction should use the shared model factory."""
 
-    assistant_router._agents.clear()
+    chat_turn_runtime.clear_agent_cache_for_tests()
     calls: list[tuple[str, str | None, str | None]] = []
     sentinel_model = TestModel(custom_output_text="ok")
 
@@ -136,7 +136,7 @@ def test_get_or_create_agent_uses_shared_model_builder(monkeypatch) -> None:
     assert calls == [("openai:gpt-5.5", "user-key", "low")]
     assert agent.model is sentinel_model
 
-    assistant_router._agents.clear()
+    chat_turn_runtime.clear_agent_cache_for_tests()
 
 
 def test_find_subscription_content_matches_uses_active_feed_names(

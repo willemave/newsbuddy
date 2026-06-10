@@ -1,8 +1,12 @@
 """Tests for knowledge-library service helpers."""
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.commands import save_to_knowledge as save_to_knowledge_command
 from app.models.db import ChatSession, Content, User
+from app.repositories import knowledge_repository
 from app.services import knowledge
 
 
@@ -11,56 +15,50 @@ def _require_id(value: int | None) -> int:
     return value
 
 
-class TestToggleKnowledgeSave:
-    """Tests for toggling knowledge saves."""
+class TestKnowledgeSaveMutations:
+    """Tests for save/remove knowledge mutations."""
 
-    def test_toggle_knowledge_save_adds_new(
+    def test_save_to_knowledge_adds_new(
         self,
         db_session: Session,
         test_user: User,
         test_content: Content,
     ) -> None:
-        """Toggling should create a new knowledge save."""
+        """Saving should create a new knowledge save."""
         content_id = _require_id(test_content.id)
         user_id = _require_id(test_user.id)
-        is_saved_to_knowledge, knowledge_save = knowledge.toggle_knowledge_save(
+        knowledge_save = knowledge.save_to_knowledge(
             db_session,
             content_id,
             user_id,
         )
 
-        # Assert
-        assert is_saved_to_knowledge is True
         assert knowledge_save is not None
         assert knowledge_save.content_id == content_id
         assert knowledge_save.user_id == user_id
         assert db_session.query(ChatSession).count() == 0
 
-    def test_toggle_knowledge_save_removes_existing(
+    def test_remove_from_knowledge_removes_existing(
         self,
         db_session: Session,
         test_user: User,
         test_content: Content,
     ) -> None:
-        """Toggling should remove an existing knowledge save."""
+        """Removing should delete an existing knowledge save."""
         content_id = _require_id(test_content.id)
         user_id = _require_id(test_user.id)
         knowledge.save_to_knowledge(db_session, content_id, user_id)
 
-        is_saved_to_knowledge, knowledge_save = knowledge.toggle_knowledge_save(
+        removed = knowledge.remove_from_knowledge(
             db_session,
             content_id,
             user_id,
         )
 
-        # Assert
-        assert is_saved_to_knowledge is False
-        assert knowledge_save is None
-
-        # Verify it's actually gone
+        assert removed is True
         assert not knowledge.is_saved_to_knowledge(db_session, content_id, user_id)
 
-    def test_toggle_knowledge_save_does_not_delete_existing_chat_sessions(
+    def test_remove_from_knowledge_does_not_delete_existing_chat_sessions(
         self,
         db_session: Session,
         test_user: User,
@@ -81,20 +79,19 @@ class TestToggleKnowledgeSave:
         db_session.add(session)
         db_session.commit()
 
-        is_saved_to_knowledge, knowledge_save = knowledge.toggle_knowledge_save(
+        removed = knowledge.remove_from_knowledge(
             db_session,
             content_id,
             user_id,
         )
 
-        assert is_saved_to_knowledge is False
-        assert knowledge_save is None
+        assert removed is True
         assert (
             db_session.query(ChatSession).filter(ChatSession.id == session.id).one_or_none()
             is not None
         )
 
-    def test_toggle_knowledge_save_user_isolation(
+    def test_save_to_knowledge_user_isolation(
         self,
         db_session: Session,
         test_content: Content,
@@ -107,10 +104,8 @@ class TestToggleKnowledgeSave:
         user1_id = _require_id(user1.id)
         user2_id = _require_id(user2.id)
 
-        # Act - user1 saves content
-        knowledge.toggle_knowledge_save(db_session, content_id, user1_id)
+        knowledge.save_to_knowledge(db_session, content_id, user1_id)
 
-        # Assert - user1 has saved it, user2 has not
         assert knowledge.is_saved_to_knowledge(db_session, content_id, user1_id)
         assert not knowledge.is_saved_to_knowledge(db_session, content_id, user2_id)
 
@@ -153,6 +148,49 @@ class TestSaveToKnowledge:
         assert first is not None
         assert second is not None
         assert first.id == second.id
+
+    def test_repository_save_to_knowledge_raises_database_errors(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+        monkeypatch,
+    ) -> None:
+        """Repository failures should raise instead of collapsing into None."""
+        content_id = _require_id(test_content.id)
+        user_id = _require_id(test_user.id)
+
+        def fail_flush(*args, **kwargs) -> None:
+            raise RuntimeError("flush failed")
+
+        monkeypatch.setattr(db_session, "flush", fail_flush)
+        with pytest.raises(RuntimeError, match="flush failed"):
+            knowledge_repository.save_to_knowledge(db_session, content_id, user_id)
+        db_session.rollback()
+
+    def test_save_command_maps_database_failure_to_http_error(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+        monkeypatch,
+    ) -> None:
+        """HTTP command callers should get a failure response for save errors."""
+        content_id = _require_id(test_content.id)
+        user_id = _require_id(test_user.id)
+
+        def fail_save(*args, **kwargs) -> None:
+            raise RuntimeError("save failed")
+
+        monkeypatch.setattr(
+            save_to_knowledge_command.knowledge_service,
+            "save_to_knowledge",
+            fail_save,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            save_to_knowledge_command.execute(db_session, user_id=user_id, content_id=content_id)
+
+        assert exc_info.value.status_code == 500
 
 
 class TestRemoveFromKnowledge:
