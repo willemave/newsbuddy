@@ -106,7 +106,7 @@ struct DiscoveryPersonalizeSheet: View {
                     .padding(.bottom, 8)
             }
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .task {
             await viewModel.startAudioCaptureIfNeeded()
         }
@@ -175,7 +175,7 @@ struct DiscoveryPersonalizeSheet: View {
             }
             .padding(.bottom, 16)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
     }
 
     // MARK: - Suggestions Step
@@ -234,7 +234,7 @@ struct DiscoveryPersonalizeSheet: View {
                         )
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 24)
                 .padding(.bottom, 100)
             }
@@ -268,7 +268,7 @@ struct DiscoveryPersonalizeSheet: View {
                         .foregroundColor(.statusDestructive)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 16)
             .glassCard(cornerRadius: 0)
         }

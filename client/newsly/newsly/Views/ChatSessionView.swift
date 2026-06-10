@@ -179,7 +179,7 @@ struct ChatSessionView: View {
         VStack(alignment: .leading, spacing: 10) {
             if !viewModel.councilCandidates.isEmpty {
                 councilBranchSwitcher
-                    .padding(.horizontal, Spacing.chatHorizontal)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
             }
 
             composerDock

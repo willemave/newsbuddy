@@ -23,7 +23,7 @@ struct OnboardingFlowView: View {
 
             VStack(spacing: 0) {
                 progressHeader
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
                     .padding(.top, 14)
                     .padding(.bottom, 4)
 
@@ -225,7 +225,7 @@ struct OnboardingFlowView: View {
                     .padding(.bottom, 8)
             }
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .task {
             await viewModel.startAudioCaptureIfNeeded()
         }
@@ -411,7 +411,7 @@ struct OnboardingFlowView: View {
                 value: viewModel.shouldOfferRetryFromLoading
             )
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .accessibilityIdentifier("onboarding.loading.screen")
     }
 
@@ -457,7 +457,7 @@ struct OnboardingFlowView: View {
                         )
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 16)
                 .padding(.bottom, 128)
             }
@@ -506,7 +506,7 @@ struct OnboardingFlowView: View {
                         .foregroundColor(.statusDestructive)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.top, 14)
             .padding(.bottom, 16)
             .background(footerBackground)
@@ -529,7 +529,7 @@ struct OnboardingFlowView: View {
 
                     aggregatorSection
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 16)
                 .padding(.bottom, 128)
             }
@@ -564,7 +564,7 @@ struct OnboardingFlowView: View {
                         .foregroundColor(.statusDestructive)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.top, 14)
             .padding(.bottom, 16)
             .background(footerBackground)
@@ -598,7 +598,7 @@ struct OnboardingFlowView: View {
                         )
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 16)
                 .padding(.bottom, 128)
             }
@@ -631,7 +631,7 @@ struct OnboardingFlowView: View {
                         .foregroundColor(.statusDestructive)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.top, 14)
             .padding(.bottom, 16)
             .background(footerBackground)

@@ -115,7 +115,7 @@ struct LandingView: View {
         }
         .padding(24)
         .glassCard(cornerRadius: 40)
-        .padding(.horizontal, 20)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.bottom, 16)
     }
 

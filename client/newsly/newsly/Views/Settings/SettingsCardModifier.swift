@@ -12,6 +12,6 @@ extension View {
         self
             .background(Color.surfaceSecondary)
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal, Spacing.screenHorizontal)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
     }
 }

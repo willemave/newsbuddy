@@ -133,7 +133,7 @@ struct AncientScrollRevealView: View {
                 .lineSpacing(3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 16)
         .opacity(headingVisible ? 1 : 0)
         .offset(y: headingVisible ? 0 : 8)

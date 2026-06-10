@@ -422,14 +422,16 @@ enum ContentTextSize: Int, CaseIterable {
 // MARK: - Spacing
 
 enum Spacing {
-    /// Default horizontal padding for rows and screen content.
-    static let screenHorizontal: CGFloat = 12
-    /// Wider Fast Read gutter for dense headline rows and controls.
-    static let fastReadHorizontal: CGFloat = 16
-    /// Reader content gutter for long-form/detail reading surfaces.
-    static let readerHorizontal: CGFloat = 28
-    /// Chat transcript and composer gutter; chat is a reading surface, not masthead chrome.
-    static let chatHorizontal: CGFloat = readerHorizontal
+    /// Single horizontal content margin used for screen-level gutters.
+    static let appHorizontalMargin: CGFloat = 20
+    /// Backward-compatible screen gutter alias. Prefer `appHorizontalMargin` in new code.
+    static let screenHorizontal: CGFloat = appHorizontalMargin
+    /// Backward-compatible Fast Read gutter alias. Prefer `appHorizontalMargin` in new code.
+    static let fastReadHorizontal: CGFloat = appHorizontalMargin
+    /// Backward-compatible reader gutter alias. Prefer `appHorizontalMargin` in new code.
+    static let readerHorizontal: CGFloat = appHorizontalMargin
+    /// Backward-compatible chat gutter alias. Prefer `appHorizontalMargin` in new code.
+    static let chatHorizontal: CGFloat = appHorizontalMargin
     static let rowHorizontal: CGFloat = 12
     static let rowVertical: CGFloat = 12
     static let sectionTop: CGFloat = 24

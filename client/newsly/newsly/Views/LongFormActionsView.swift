@@ -50,7 +50,7 @@ struct LongFormActionsView: View {
                     .disabled(isStartingSummaryChat)
                     .accessibilityIdentifier("long.quick_action.summarize_recent")
                 }
-                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
             }
 
             if let customNarrationError {
@@ -69,7 +69,7 @@ struct LongFormActionsView: View {
             .font(.terracottaBodySmall)
             .foregroundStyle(Color.statusDestructive)
             .lineLimit(2)
-            .padding(.horizontal, Spacing.screenHorizontal)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
     }
 }
 

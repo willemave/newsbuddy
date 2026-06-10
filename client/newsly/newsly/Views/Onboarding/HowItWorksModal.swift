@@ -93,7 +93,7 @@ struct HowItWorksModal: View {
                             )
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
 
                 Spacer()
 
@@ -106,7 +106,7 @@ struct HowItWorksModal: View {
                         .background(primaryButtonBackground)
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.bottom, 16)
                 .opacity(appeared ? 1 : 0)
                 .animation(.easeOut(duration: 0.4).delay(0.6), value: appeared)

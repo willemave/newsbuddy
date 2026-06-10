@@ -64,14 +64,14 @@ struct KnowledgeDiscoveryView: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 editorialSearchBar
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
                     .padding(.top, 8)
                     .padding(.bottom, 4)
 
                 // Podcast search results (inline)
                 if isPodcastSearchActive {
                     podcastSearchResults
-                        .padding(.horizontal, Spacing.screenHorizontal)
+                        .padding(.horizontal, Spacing.appHorizontalMargin)
                         .padding(.bottom, 8)
                 }
 
@@ -201,13 +201,13 @@ struct KnowledgeDiscoveryView: View {
             if !viewModel.isJobRunning {
                 generateMoreCard
                     .padding(.top, 32)
-                    .padding(.horizontal, Spacing.screenHorizontal)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
 
                 if currentUserId != nil {
                     personalizeCard
                         .padding(.top, 12)
                         .padding(.bottom, 40)
-                        .padding(.horizontal, Spacing.screenHorizontal)
+                        .padding(.horizontal, Spacing.appHorizontalMargin)
                 }
             }
         }
@@ -279,7 +279,7 @@ struct KnowledgeDiscoveryView: View {
                 .font(.listCaption)
                 .foregroundColor(Color.onSurfaceSecondary)
         }
-        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.vertical, 12)
     }
 
@@ -295,7 +295,7 @@ struct KnowledgeDiscoveryView: View {
 
             Spacer()
         }
-        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.vertical, 12)
     }
 

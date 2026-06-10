@@ -188,7 +188,7 @@ struct KnowledgeView: View {
         .padding(.horizontal, 16)
         .background(Color.surfaceContainer)
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.bottom, 24)
     }
 
@@ -203,7 +203,7 @@ struct KnowledgeView: View {
                     .padding(.vertical, 12)
                     .background(Color.statusDestructive.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .padding(.horizontal, Spacing.screenHorizontal)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
                     .padding(.bottom, 24)
             }
         }
@@ -216,7 +216,7 @@ struct KnowledgeView: View {
             Text("Library")
                 .font(.terracottaHeadlineSmall)
                 .foregroundStyle(Color.onSurface)
-                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
 
             LazyVGrid(columns: twoColumnGrid, spacing: 8) {
                 libraryButton(
@@ -247,7 +247,7 @@ struct KnowledgeView: View {
                     }
                 )
             }
-            .padding(.horizontal, Spacing.screenHorizontal)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
         }
         .padding(.bottom, 16)
     }
@@ -325,7 +325,7 @@ struct KnowledgeView: View {
             Text("Actions")
                 .font(.terracottaHeadlineSmall)
                 .foregroundStyle(Color.onSurface)
-                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
 
             LazyVGrid(columns: twoColumnGrid, spacing: 8) {
                 compactActionButton(primaryAction)
@@ -333,7 +333,7 @@ struct KnowledgeView: View {
                     compactActionButton(action)
                 }
             }
-            .padding(.horizontal, Spacing.screenHorizontal)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
         }
         .padding(.bottom, 16)
     }
@@ -425,7 +425,7 @@ struct KnowledgeView: View {
             Text("Recent Chats")
                 .font(.terracottaHeadlineSmall)
                 .foregroundStyle(Color.onSurface)
-                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
 
             if viewModel.isLoading && viewModel.sessions.isEmpty {
                 chatHistoryLoadingRow
@@ -440,7 +440,7 @@ struct KnowledgeView: View {
                             ChatSessionCard(session: session)
                         }
                         .buttonStyle(.plain)
-                        .padding(.horizontal, Spacing.screenHorizontal)
+                        .padding(.horizontal, Spacing.appHorizontalMargin)
                     }
                 }
 
@@ -459,7 +459,7 @@ struct KnowledgeView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 18)
-        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
     }
 
     private var chatHistoryEmptyRow: some View {
@@ -467,7 +467,7 @@ struct KnowledgeView: View {
             .font(.terracottaBodyMedium)
             .foregroundStyle(Color.onSurfaceSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Spacing.screenHorizontal)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 8)
     }
 
@@ -488,7 +488,7 @@ struct KnowledgeView: View {
                         .padding(.vertical, 12)
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
             } else if viewModel.hasMoreSessions {
                 Button {
                     Task { await viewModel.loadMoreSessions() }
@@ -500,7 +500,7 @@ struct KnowledgeView: View {
                         .padding(.vertical, 12)
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
             }
         }
     }

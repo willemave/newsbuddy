@@ -211,7 +211,7 @@ struct LearningDeckRow: View {
                 .accessibilityAddTraits(.isButton)
             }
         }
-        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.surfacePrimary)
@@ -219,8 +219,8 @@ struct LearningDeckRow: View {
             Rectangle()
                 .fill(Color.outlineVariant.opacity(0.28))
                 .frame(height: 0.5)
-                .padding(.leading, Spacing.screenHorizontal + 44)
-                .padding(.trailing, Spacing.screenHorizontal)
+                .padding(.leading, Spacing.appHorizontalMargin + 44)
+                .padding(.trailing, Spacing.appHorizontalMargin)
         }
     }
 }

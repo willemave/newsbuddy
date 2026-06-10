@@ -106,6 +106,7 @@ struct SubmissionDetailView: View {
                 }
             }
         }
+        .contentMargins(.horizontal, Spacing.appHorizontalMargin, for: .scrollContent)
         .navigationTitle(submission.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
     }

@@ -112,7 +112,7 @@ struct ShortFormView: View {
                                 }
                         }
                         .buttonStyle(.plain)
-                        .padding(.horizontal, Spacing.fastReadHorizontal)
+                        .padding(.horizontal, Spacing.appHorizontalMargin)
                         .padding(.vertical, 8)
                     }
 
@@ -297,7 +297,7 @@ struct ShortFormView: View {
                         .accessibilityIdentifier("short.quick_action.\(action.id)")
                     }
                 }
-                .padding(.horizontal, Spacing.fastReadHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
             }
 
             if shouldShowFastNewsAudioControls {
@@ -307,21 +307,21 @@ struct ShortFormView: View {
                     isPreparing: isPreparingFastNewsAudio,
                     onTogglePlayback: handleFastNewsAudioEpisode
                 )
-                .padding(.horizontal, Spacing.fastReadHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
             }
 
             if let fastNewsAudioErrorMessage {
                 Text(fastNewsAudioErrorMessage)
                     .font(.terracottaBodySmall)
                     .foregroundStyle(Color.statusDestructive)
-                    .padding(.horizontal, Spacing.fastReadHorizontal)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
             }
 
             if let quickActionErrorMessage {
                 Text(quickActionErrorMessage)
                     .font(.terracottaBodySmall)
                     .foregroundStyle(Color.statusDestructive)
-                    .padding(.horizontal, Spacing.fastReadHorizontal)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -548,14 +548,14 @@ private struct ShortNewsRow: View, Equatable {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Spacing.fastReadHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.vertical, 14)
         .background(Color.surfacePrimary)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.borderSubtle.opacity(0.48))
                 .frame(height: 1)
-                .padding(.horizontal, Spacing.fastReadHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("short.row.\(item.id)")
@@ -633,7 +633,7 @@ private struct DayDelimiter: View, Equatable {
                 .fill(Color.outlineVariant)
                 .frame(height: 1)
         }
-        .padding(.horizontal, Spacing.fastReadHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, isFirst ? 12 : 20)
         .padding(.bottom, 7)
         .background(Color.surfacePrimary)

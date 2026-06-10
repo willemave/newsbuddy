@@ -40,6 +40,7 @@ struct SearchView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .contentMargins(.horizontal, Spacing.appHorizontalMargin, for: .scrollContent)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
         .navigationTitle("Search")

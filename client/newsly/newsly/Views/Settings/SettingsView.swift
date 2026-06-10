@@ -756,7 +756,7 @@ private struct FeedbackSheet: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, Spacing.screenHorizontal)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.top, 20)
             .background(Color.surfacePrimary.ignoresSafeArea())
             .navigationTitle("Give Feedback")

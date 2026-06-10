@@ -36,17 +36,17 @@ struct LearningDeckListSheet: View {
                             .font(.terracottaBodySmall)
                             .foregroundStyle(Color.statusDestructive)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, Spacing.screenHorizontal)
+                            .padding(.horizontal, Spacing.appHorizontalMargin)
                             .padding(.vertical, 14)
                     }
 
                     if viewModel.isLoading && viewModel.decks.isEmpty {
                         LearningDeckLoadingRow()
-                            .padding(.horizontal, Spacing.screenHorizontal)
+                            .padding(.horizontal, Spacing.appHorizontalMargin)
                             .padding(.vertical, 14)
                     } else if viewModel.decks.isEmpty {
                         LearningDeckEmptyRow()
-                            .padding(.horizontal, Spacing.screenHorizontal)
+                            .padding(.horizontal, Spacing.appHorizontalMargin)
                             .padding(.vertical, 18)
                     } else {
                         ForEach(viewModel.decks) { deck in

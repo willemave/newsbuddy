@@ -228,7 +228,7 @@ struct KnowledgeLibraryView: View {
                         }
                     }
                 }
-                .padding(.trailing, Spacing.screenHorizontal)
+                .padding(.trailing, Spacing.appHorizontalMargin)
             }
             .scrollClipDisabled()
 
@@ -245,7 +245,7 @@ struct KnowledgeLibraryView: View {
                 .contentShape(Rectangle())
             }
         }
-        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 10)
         .padding(.bottom, 10)
         .appListRow()

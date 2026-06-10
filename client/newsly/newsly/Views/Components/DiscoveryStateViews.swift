@@ -16,7 +16,7 @@ struct DiscoveryLoadingStateView: View {
                 skeletonCard
             }
         }
-        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 32)
         .padding(.bottom, 200)
         .onAppear {

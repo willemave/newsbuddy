@@ -81,11 +81,11 @@ struct LongFormView: View {
                                         )
                                     }
                                 }
-                                .padding(.horizontal, Spacing.screenHorizontal)
+                                .padding(.horizontal, Spacing.appHorizontalMargin)
 
                                 if items.contains(where: { !$0.isRead }) {
                                     markAllLongFormButton
-                                        .padding(.horizontal, Spacing.screenHorizontal)
+                                        .padding(.horizontal, Spacing.appHorizontalMargin)
                                         .padding(.vertical, 8)
                                 }
 
@@ -545,7 +545,7 @@ struct LongFormView: View {
                         .padding(.top, 4)
                     }
                 }
-                .padding(.horizontal, Spacing.readerHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
             }
             .padding(.bottom, 32)
         }

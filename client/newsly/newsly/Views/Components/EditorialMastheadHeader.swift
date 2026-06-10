@@ -50,7 +50,7 @@ struct EditorialMastheadHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 16)
         .padding(.bottom, 24)
     }

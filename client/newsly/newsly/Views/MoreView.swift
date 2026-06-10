@@ -69,6 +69,7 @@ struct MoreView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .contentMargins(.top, 0, for: .scrollContent)
+            .contentMargins(.horizontal, Spacing.appHorizontalMargin, for: .scrollContent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.surfacePrimary.ignoresSafeArea())

@@ -51,7 +51,7 @@ struct ArticleReaderView: View {
                     }
                 }
                 .frame(maxWidth: 720, alignment: .leading)
-                .padding(.horizontal, Spacing.readerHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 30)
                 .padding(.bottom, 56)
                 .frame(maxWidth: .infinity)
@@ -138,7 +138,7 @@ struct ArticleReaderView: View {
             }
         }
         .foregroundStyle(Color.onSurface)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 12)
         .padding(.bottom, 10)
         .background(.ultraThinMaterial)

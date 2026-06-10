@@ -60,7 +60,7 @@ struct ChatComposerDock: View {
                 )
                 .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
         )
-        .padding(.horizontal, Spacing.chatHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
     }
 
     private var moreActionsMenu: some View {

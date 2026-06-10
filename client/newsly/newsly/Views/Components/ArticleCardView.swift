@@ -319,7 +319,7 @@ struct ArticleCardView: View {
                         .frame(width: 44, height: 44)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.top, 14)
             .padding(.bottom, 10)
 
@@ -329,7 +329,7 @@ struct ArticleCardView: View {
                 downloadSheetRow(count: 10, subtitle: "Deep dive session")
                 downloadSheetRow(count: 20, subtitle: "Full backlog")
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
         }
         .presentationDetents([.height(320)])
         .presentationCornerRadius(20)

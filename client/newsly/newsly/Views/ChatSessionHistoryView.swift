@@ -57,7 +57,7 @@ struct ChatSessionHistoryView: View {
                             placeholder: "Search history...",
                             text: $searchText
                         )
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, Spacing.appHorizontalMargin)
 
                         ForEach(filteredSessions) { session in
                             Button {
@@ -66,7 +66,7 @@ struct ChatSessionHistoryView: View {
                                 ChatSessionCard(session: session)
                             }
                             .buttonStyle(.plain)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, Spacing.appHorizontalMargin)
                             .contextMenu {
                                 Button(role: .destructive) {
                                     Task { await viewModel.deleteSessions(ids: [session.id]) }

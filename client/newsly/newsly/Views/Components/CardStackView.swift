@@ -59,7 +59,7 @@ struct CardStackView: View {
                 }
             }
             .frame(maxHeight: geometry.size.height - 40)  // Leave space for tab bar
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.top, 8)
         }
         .animation(.easeInOut(duration: 0.2), value: visibleGroups.count)

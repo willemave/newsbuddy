@@ -46,7 +46,7 @@ struct DiscoveryRunSection: View {
                     )
                 }
             }
-            .padding(.horizontal, Spacing.screenHorizontal)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
         }
     }
 
@@ -59,7 +59,7 @@ struct DiscoveryRunSection: View {
                 .font(.feedMeta)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .tracking(0.8)
-                .padding(.horizontal, Spacing.screenHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, Spacing.sectionTop)
 
             // Summary headline
@@ -71,7 +71,7 @@ struct DiscoveryRunSection: View {
                     .foregroundColor(Color.onSurface)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, Spacing.screenHorizontal)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
                     .padding(.top, 10)
 
                 if let body = parts.body {
@@ -80,7 +80,7 @@ struct DiscoveryRunSection: View {
                         .foregroundColor(Color.onSurfaceSecondary)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, Spacing.screenHorizontal)
+                        .padding(.horizontal, Spacing.appHorizontalMargin)
                         .padding(.top, 8)
                 }
             }
@@ -108,7 +108,7 @@ struct DiscoveryRunSection: View {
                 .fill(Color.editorialBorder)
                 .frame(height: 1)
         }
-        .padding(.horizontal, Spacing.screenHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 28)
         .padding(.bottom, 16)
     }

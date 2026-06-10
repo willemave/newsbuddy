@@ -35,14 +35,14 @@ struct SuggestionDetailSheet: View {
                     .foregroundColor(.editorialText)
                     .lineLimit(2)
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
 
             // URL
             Text(formattedURL(suggestion.primaryURL))
                 .font(.editorialSubMeta)
                 .foregroundColor(.editorialSub)
                 .lineLimit(1)
-                .padding(.horizontal, 20)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 6)
 
             // Rationale / description
@@ -52,7 +52,7 @@ struct SuggestionDetailSheet: View {
                     .foregroundColor(.editorialSub)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
                     .padding(.top, 14)
             } else if let desc = suggestion.description, !desc.isEmpty {
                 Text(desc)
@@ -60,7 +60,7 @@ struct SuggestionDetailSheet: View {
                     .foregroundColor(.editorialSub)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
                     .padding(.top, 14)
             }
 
@@ -108,7 +108,7 @@ struct SuggestionDetailSheet: View {
                     .tint(Color.onSurfaceSecondary)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
 
             // Dismiss link
             Button(action: {

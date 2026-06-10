@@ -51,7 +51,7 @@ struct AuthenticationView: View {
             )
             .signInWithAppleButtonStyle(.black)
             .frame(height: 50)
-            .padding(.horizontal, 40)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .onTapGesture {
                 authViewModel.signInWithApple()
             }
@@ -61,7 +61,7 @@ struct AuthenticationView: View {
                 Text(errorMessage)
                     .foregroundColor(.statusDestructive)
                     .font(.appCaption)
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
             }
 
             Spacer()

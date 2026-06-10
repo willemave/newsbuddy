@@ -80,7 +80,7 @@ struct ChatMessageList: View {
                         }
                     }
                 }
-                .padding(.horizontal, Spacing.chatHorizontal)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.vertical, 10)
             }
             .contentMargins(.bottom, 12, for: .scrollContent)

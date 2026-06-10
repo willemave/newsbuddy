@@ -46,7 +46,7 @@ private struct ViewAlert: Identifiable {
 // MARK: - Design Tokens
 private enum DetailDesign {
     // Spacing
-    static let horizontalPadding: CGFloat = Spacing.readerHorizontal
+    static let horizontalPadding: CGFloat = Spacing.appHorizontalMargin
     static let headerHorizontalPadding: CGFloat = horizontalPadding
     static let sectionSpacing: CGFloat = 20
     static let actionBarTopPadding: CGFloat = 0
@@ -1561,7 +1561,7 @@ struct ContentDetailView: View {
                 .accessibilityLabel("Close sheet")
                 .accessibilityIdentifier("content.sheet.close")
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.top, hasTitle ? 14 : 10)
             .padding(.bottom, hasTitle ? 16 : 10)
         }
@@ -1722,10 +1722,10 @@ struct ContentDetailView: View {
                     }
                 )
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
 
             Divider()
-                .padding(.horizontal, 20)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.vertical, 12)
 
             sheetOptionRow(
@@ -1739,7 +1739,7 @@ struct ContentDetailView: View {
                     }
                 }
             )
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.surfacePrimary)
@@ -1809,7 +1809,7 @@ struct ContentDetailView: View {
                     }
                 )
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.surfacePrimary)
@@ -1899,7 +1899,7 @@ struct ContentDetailView: View {
                         audioPromptCard(for: content)
                     }
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
 
                 Color.clear.frame(height: 16)
             }
@@ -2127,7 +2127,7 @@ struct ContentDetailView: View {
                                     }
                                 }
                             }
-                            .padding(.horizontal, 20)
+                            .padding(.horizontal, Spacing.appHorizontalMargin)
                             .padding(.vertical, 16)
                         }
                     } else {
@@ -2158,7 +2158,7 @@ struct ContentDetailView: View {
                                         }
                                     }
                                     .pickerStyle(.segmented)
-                                    .padding(.horizontal, 20)
+                                    .padding(.horizontal, Spacing.appHorizontalMargin)
                                     .padding(.vertical, 10)
                                 }
 
@@ -2594,7 +2594,7 @@ struct ContentDetailView: View {
                     }
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 16)
         }
     }
@@ -2667,7 +2667,7 @@ struct ContentDetailView: View {
                 }
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.vertical, 16)
     }
 
@@ -2757,7 +2757,7 @@ struct ContentDetailView: View {
                 }
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.vertical, 16)
     }
 
