@@ -140,10 +140,12 @@
     <key>UIAppFonts</key>
     <array>
         <string>Inter.ttf</string>
-        <string>Inter-Italic.ttf</string>
-        <string>Roboto.ttf</string>
-        <string>Roboto-Italic.ttf</string>
-        <string>Lora.ttf</string>
+		<string>Inter-Italic.ttf</string>
+		<string>Lato.ttf</string>
+		<string>Lato-Italic.ttf</string>
+		<string>Roboto.ttf</string>
+		<string>Roboto-Italic.ttf</string>
+		<string>Lora.ttf</string>
         <string>Lora-Italic.ttf</string>
     </array>
 </dict>

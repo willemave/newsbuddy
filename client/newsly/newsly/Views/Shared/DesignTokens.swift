@@ -183,8 +183,8 @@ extension Color {
 // MARK: - Typography
 
 enum AppFontFamily {
-    static let sans = "Roboto-Regular"
-    static let sansItalic = "Roboto-Italic"
+    static let sans = "Lato-Regular"
+    static let sansItalic = "Lato-Italic"
     static let serif = "Lora-Regular"
     static let serifItalic = "Lora-Italic"
 }

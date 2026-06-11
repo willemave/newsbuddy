@@ -21,7 +21,7 @@ fileprivate extension UIColor {
 
 fileprivate enum ShareExtensionTypography {
     // The Share Extension is a separate target, so it cannot depend on the app's SwiftUI design tokens.
-    static let bodyFamily = "Roboto-Regular"
+    static let bodyFamily = "Lato-Regular"
     static let titleFamily = "Lora-Regular"
 
     static func font(textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
