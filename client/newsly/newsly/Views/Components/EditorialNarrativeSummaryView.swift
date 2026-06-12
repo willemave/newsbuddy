@@ -50,8 +50,8 @@ struct EditorialNarrativeSummaryView: View {
                     ForEach(summary.sourceDetailSections) { section in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(section.title.uppercased())
-                                .font(.readerBody)
-                                .foregroundColor(Color.onSurfaceSecondary)
+                                .font(.readerBody.weight(.bold))
+                                .foregroundColor(Color.readerBodyText)
                                 .tracking(0.4)
 
                             VStack(alignment: .leading, spacing: EditorialNarrativeDesign.itemSpacing) {
@@ -83,12 +83,12 @@ struct EditorialNarrativeSummaryView: View {
     ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.readerBody)
-                .foregroundColor(tint)
+                .font(.readerBody.weight(.bold))
+                .foregroundColor(Color.readerBodyText)
                 .accessibilityHidden(true)
             Text(title.uppercased())
-                .font(.readerBody)
-                .foregroundColor(Color.onSurfaceSecondary)
+                .font(.readerBody.weight(.bold))
+                .foregroundColor(Color.readerBodyText)
                 .tracking(0.4)
         }
     }

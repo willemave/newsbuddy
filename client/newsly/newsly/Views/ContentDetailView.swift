@@ -830,7 +830,7 @@ struct ContentDetailView: View {
                     isPodcastAudioActive(for: content)
                         ? "pause.fill"
                         : "person.3.sequence.fill",
-                    color: .terracottaPrimary
+                    color: .readerBodyText
                 )
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -886,9 +886,9 @@ struct ContentDetailView: View {
                 .scaleEffect(0.8)
                 .frame(width: 44, height: 44)
         } else if isPodcastAudioActive(for: content) {
-            minimalActionIcon("speaker.wave.3.fill", color: overlaid ? .white : .terracottaPrimary, overlaid: overlaid)
+            minimalActionIcon("speaker.wave.3.fill", color: .readerBodyText, overlaid: overlaid)
         } else {
-            minimalActionIcon("speaker.wave.2", color: .onSurfaceSecondary, overlaid: overlaid)
+            minimalActionIcon("speaker.wave.2", overlaid: overlaid)
         }
     }
 
@@ -1249,7 +1249,7 @@ struct ContentDetailView: View {
     }
 
     private var detailTitleFont: Font {
-        .appSerif(size: 18, relativeTo: .headline, weight: .medium)
+        .appSerif(size: 20, relativeTo: .title3, weight: .medium)
     }
 
     private var detailTitleWeight: Font.Weight {
@@ -1472,7 +1472,7 @@ struct ContentDetailView: View {
                 if isStartingChat {
                     Image(systemName: "brain.head.profile")
                         .font(.appSymbol(size: 20, weight: .regular))
-                        .foregroundColor(overlaid ? .white : .brandPrimary)
+                        .foregroundColor(overlaid ? .white : .readerBodyText)
                         .shadow(color: overlaid ? .black.opacity(0.4) : .clear, radius: 3, x: 0, y: 1)
                         .frame(width: 44, height: 44)
                         .symbolEffect(.pulse, options: .repeating)
@@ -1491,10 +1491,10 @@ struct ContentDetailView: View {
     }
 
     @ViewBuilder
-    private func minimalActionIcon(_ icon: String, color: Color = .onSurfaceSecondary, overlaid: Bool = false) -> some View {
+    private func minimalActionIcon(_ icon: String, color: Color = .readerBodyText, overlaid: Bool = false) -> some View {
         Image(systemName: icon)
             .font(.appSymbol(size: 20, weight: .regular))
-            .foregroundColor(overlaid ? (color == .onSurfaceSecondary ? .white : color) : color)
+            .foregroundColor(overlaid ? .white : color)
             .shadow(color: overlaid ? .black.opacity(0.4) : .clear, radius: 3, x: 0, y: 1)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
@@ -1502,7 +1502,7 @@ struct ContentDetailView: View {
 
     @ViewBuilder
     private func knowledgeActionIcon(isSaved: Bool, overlaid: Bool) -> some View {
-        let iconColor: Color = overlaid ? .white : .onSurfaceSecondary
+        let iconColor: Color = overlaid ? .white : .readerBodyText
         KnowledgeSaveIcon(
             isSaved: isSaved,
             savedColor: iconColor,
@@ -1555,7 +1555,7 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func sheetOptionRow(
         icon: String,
-        iconColor: Color = .brandPrimary,
+        iconColor: Color = .readerBodyText,
         title: String,
         subtitle: String,
         badge: String? = nil,
@@ -1630,7 +1630,7 @@ struct ContentDetailView: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 8) {
-                    chatSheetIcon(icon, color: .brandPrimary)
+                    chatSheetIcon(icon, color: .readerBodyText)
 
                     Spacer(minLength: 0)
 
@@ -1755,7 +1755,7 @@ struct ContentDetailView: View {
             VStack(spacing: 8) {
                 sheetOptionRow(
                     icon: "square.stack",
-                    iconColor: .onSurfaceSecondary,
+                    iconColor: .readerBodyText,
                     title: "3 episodes",
                     subtitle: "Quick catch-up",
                     action: {
@@ -1765,7 +1765,7 @@ struct ContentDetailView: View {
                 )
                 sheetOptionRow(
                     icon: "square.stack",
-                    iconColor: .onSurfaceSecondary,
+                    iconColor: .readerBodyText,
                     title: "5 episodes",
                     subtitle: "Recent backlog",
                     action: {
@@ -1775,7 +1775,7 @@ struct ContentDetailView: View {
                 )
                 sheetOptionRow(
                     icon: "square.stack.3d.up",
-                    iconColor: .onSurfaceSecondary,
+                    iconColor: .readerBodyText,
                     title: "10 episodes",
                     subtitle: "Deep dive into the series",
                     action: {
@@ -1785,7 +1785,7 @@ struct ContentDetailView: View {
                 )
                 sheetOptionRow(
                     icon: "square.stack.3d.up.fill",
-                    iconColor: .onSurfaceSecondary,
+                    iconColor: .readerBodyText,
                     title: "20 episodes",
                     subtitle: "Full archive pull",
                     action: {
@@ -2486,8 +2486,8 @@ struct ContentDetailView: View {
                         ForEach(summary.topics) { topic in
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(topic.title.uppercased())
-                                    .font(.appCallout)
-                                    .fontWeight(.semibold)
+                                    .font(.appCallout.weight(.bold))
+                                    .foregroundColor(Color.readerBodyText)
                                     .tracking(0.4)
                                 Text(topic.summary)
                                     .font(.appSubheadline)
@@ -2973,9 +2973,9 @@ struct ContentDetailView: View {
                 HStack {
                     HStack(spacing: 8) {
                         Image(systemName: icon)
-                            .font(.readerBody)
-                            .foregroundColor(Color.onSurfaceSecondary)
-                        detailSectionHeaderText(title, color: Color.onSurface)
+                            .font(.readerBody.weight(.bold))
+                            .foregroundColor(Color.readerBodyText)
+                        detailSectionHeaderText(title)
                     }
 
                     Spacer()
@@ -3021,8 +3021,8 @@ struct ContentDetailView: View {
     private func sectionHeader(_ title: String, icon: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.readerBody)
-                .foregroundColor(Color.onSurfaceSecondary)
+                .font(.readerBody.weight(.bold))
+                .foregroundColor(Color.readerBodyText)
                 .accessibilityHidden(true)
             detailSectionHeaderText(title)
         }
@@ -3030,10 +3030,10 @@ struct ContentDetailView: View {
 
     private func detailSectionHeaderText(
         _ title: String,
-        color: Color = Color.onSurfaceSecondary
+        color: Color = Color.readerBodyText
     ) -> some View {
         Text(title.uppercased())
-            .font(.readerBody)
+            .font(.readerBody.weight(.bold))
             .foregroundColor(color)
             .tracking(0.4)
     }

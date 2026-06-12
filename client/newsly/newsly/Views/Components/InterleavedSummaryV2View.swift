@@ -48,8 +48,8 @@ struct InterleavedSummaryV2View: View {
                     ForEach(summary.topics) { topic in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(topic.topic.uppercased())
-                                .font(.readerBody)
-                                .foregroundColor(Color.onSurface)
+                                .font(.readerBody.weight(.bold))
+                                .foregroundColor(Color.readerBodyText)
                                 .tracking(0.4)
 
                             VStack(alignment: .leading, spacing: InterleavedV2Design.itemSpacing) {
@@ -80,12 +80,12 @@ struct InterleavedSummaryV2View: View {
     ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.readerBody)
-                .foregroundColor(tint)
+                .font(.readerBody.weight(.bold))
+                .foregroundColor(Color.readerBodyText)
                 .accessibilityHidden(true)
             Text(title.uppercased())
-                .font(.readerBody)
-                .foregroundColor(Color.onSurfaceSecondary)
+                .font(.readerBody.weight(.bold))
+                .foregroundColor(Color.readerBodyText)
                 .tracking(0.4)
         }
     }

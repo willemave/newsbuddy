@@ -574,7 +574,7 @@ struct MarkdownNSRenderer {
         let range = NSRange(location: 0, length: attrStr.length)
         let scales: [CGFloat] = [1.36, 1.22, 1.12, 1.02, 0.94, 0.88]
         let scale = scales[min(level - 1, 5)]
-        let weight: UIFont.Weight = level <= 1 ? .bold : .semibold
+        let weight: UIFont.Weight = .bold
         let headingFont = UIFont.appSans(size: baseFont.pointSize * scale, weight: weight)
         let descriptor = headingFont.fontDescriptor.addingAttributes([
             .traits: [UIFontDescriptor.TraitKey.weight: weight.rawValue]
@@ -604,10 +604,7 @@ struct MarkdownNSRenderer {
             attrStr.addAttribute(.font, value: mergedFont, range: subRange)
         }
         attrStr.addAttribute(.paragraphStyle, value: paragraph, range: range)
-        if level == 6 {
-            let captionColor = UIColor.appOnSurfaceSecondary.resolvedColor(with: traitCollection)
-            attrStr.addAttribute(.foregroundColor, value: captionColor, range: range)
-        }
+        attrStr.addAttribute(.foregroundColor, value: textColor, range: range)
     }
 
     private func applyBlockquoteStyle(to attrStr: NSMutableAttributedString) {

@@ -28,7 +28,8 @@ struct NewsItemDetailView: View {
     private func keyPointsSection() -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("KEY POINTS")
-                .font(.readerBody)
+                .font(.readerBody.weight(.bold))
+                .foregroundColor(Color.readerBodyText)
                 .tracking(0.4)
 
             VStack(alignment: .leading, spacing: 10) {

@@ -182,8 +182,8 @@ private struct ArtifactEyebrowText: View {
 
     var body: some View {
         Text(title.uppercased())
-            .font(.readerBody)
-            .foregroundColor(Color.onSurfaceSecondary)
+            .font(.readerBody.weight(.bold))
+            .foregroundColor(Color.readerBodyText)
             .tracking(0.4)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -203,12 +203,12 @@ private struct ArtifactSectionHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.readerBody)
-                .foregroundColor(tint)
+                .font(.readerBody.weight(.bold))
+                .foregroundColor(Color.readerBodyText)
                 .accessibilityHidden(true)
             Text(title.uppercased())
-                .font(.readerBody)
-                .foregroundColor(Color.onSurfaceSecondary)
+                .font(.readerBody.weight(.bold))
+                .foregroundColor(Color.readerBodyText)
                 .tracking(0.4)
         }
     }
