@@ -189,6 +189,8 @@ def build_discussion_response(
     )
     raw_stats = data.get("stats")
     stats: dict[str, Any] = raw_stats if isinstance(raw_stats, dict) else {}
+    raw_summary = data.get("summary")
+    summary: dict[str, Any] | None = raw_summary if isinstance(raw_summary, dict) else None
     return ContentDiscussionResponse(
         content_id=content_id,
         status=resolved_status,
@@ -201,6 +203,7 @@ def build_discussion_response(
         comments=comments,
         discussion_groups=groups,
         links=links,
+        summary=summary,
         stats=stats,
     )
 

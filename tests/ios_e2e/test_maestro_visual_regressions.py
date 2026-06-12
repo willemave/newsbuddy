@@ -236,6 +236,24 @@ def test_discussion_modal_matches_visual_baseline(
             ],
             "discussion_groups": [],
             "links": [],
+            "summary": {
+                "overview": (
+                    "Commenters focus on the practical tradeoffs of small NAS builds, "
+                    "including thermals, networking, and drive layout."
+                ),
+                "topics": [
+                    {
+                        "title": "Build tradeoffs",
+                        "summary": (
+                            "The thread weighs compact hardware convenience against "
+                            "cooling, networking, and expandability."
+                        ),
+                    }
+                ],
+                "notable_links": [],
+                "representative_comments": [],
+                "external_discussion_url": "https://news.ycombinator.com/item?id=424242",
+            },
             "stats": {"fetched_count": 1},
         },
     )

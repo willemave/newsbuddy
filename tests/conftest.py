@@ -301,6 +301,7 @@ def discussion_payload_factory():
         comments: list[dict[str, Any]] | None = None,
         discussion_groups: list[dict[str, Any]] | None = None,
         links: list[dict[str, Any]] | None = None,
+        summary: dict[str, Any] | None = None,
         stats: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         resolved_comments = comments
@@ -367,6 +368,7 @@ def discussion_payload_factory():
             ],
             "discussion_groups": resolved_groups,
             "links": resolved_links,
+            "summary": summary,
             "stats": resolved_stats,
         }
 

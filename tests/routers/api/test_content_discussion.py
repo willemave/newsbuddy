@@ -217,6 +217,20 @@ def test_get_news_item_discussion_returns_embedded_payload_without_legacy_conten
                     }
                 ],
                 links=[{"url": "https://example.com/comment-link", "source": "comment"}],
+                summary={
+                    "overview": (
+                        "Commenters discuss whether the story changes deployment tradeoffs."
+                    ),
+                    "topics": [
+                        {
+                            "title": "Deployment tradeoffs",
+                            "summary": "The thread weighs practical rollout costs.",
+                        }
+                    ],
+                    "notable_links": [],
+                    "representative_comments": [],
+                    "external_discussion_url": "https://news.ycombinator.com/item?id=789",
+                },
                 stats={"fetched_count": 1},
             ),
         },
@@ -237,6 +251,7 @@ def test_get_news_item_discussion_returns_embedded_payload_without_legacy_conten
     assert payload["comments"][0]["author"] == "alice"
     assert payload["comments"][0]["text"] == "Embedded comment"
     assert payload["links"][0]["url"] == "https://example.com/comment-link"
+    assert payload["summary"]["topics"][0]["title"] == "Deployment tradeoffs"
 
 
 def test_refresh_content_discussion_returns_refreshed_payload(
