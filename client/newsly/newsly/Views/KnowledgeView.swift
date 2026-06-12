@@ -101,11 +101,7 @@ struct KnowledgeView: View {
                 scrollToFocusRequest(request, proxy: scrollProxy)
             }
         }
-        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-            newChatMicButton
-                .padding(.trailing, 20)
-                .padding(.bottom, 12)
-        }
+        .topScreenEdgeFade()
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
@@ -147,11 +143,24 @@ struct KnowledgeView: View {
         EditorialMastheadHeader(title: "Knowledge")
     }
 
+    // MARK: - Section Headers
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .kicker()
+            .accessibilityLabel(title)
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+    }
+
     // MARK: - Search Field
+
+    private var trimmedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     private var searchFieldSection: some View {
         HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
+            Image(systemName: "text.bubble")
                 .font(.appSymbol(size: 16, weight: .medium))
                 .foregroundColor(.onSurfaceSecondary)
                 .accessibilityHidden(true)
@@ -165,12 +174,12 @@ struct KnowledgeView: View {
                 }
                 .padding(.vertical, 11)
                 .padding(.horizontal, 4)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 .background(Color.surfaceContainer.opacity(0.001))
                 .accessibilityLabel("Ask Knowledge")
                 .accessibilityIdentifier("knowledge.search.input")
 
-            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !trimmedSearchText.isEmpty && !viewModel.isVoiceRecording {
                 Button {
                     sendSearchQuery()
                 } label: {
@@ -183,13 +192,39 @@ struct KnowledgeView: View {
                 .contentShape(Circle())
                 .accessibilityLabel("Send question")
                 .accessibilityIdentifier("knowledge.search.send")
+            } else {
+                composerMicButton
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
         .background(Color.surfaceContainer)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.bottom, 24)
+    }
+
+    private var composerMicButton: some View {
+        TapToTalkMicButton(
+            isEnabled: viewModel.isVoiceRecording ||
+                (!viewModel.isCreatingSession && !viewModel.isVoiceActionInFlight && !viewModel.isVoiceTranscribing),
+            isRecording: viewModel.isVoiceRecording,
+            isBusy: !viewModel.isVoiceRecording &&
+                (viewModel.isCreatingSession || viewModel.isVoiceActionInFlight || viewModel.isVoiceTranscribing),
+            size: 36,
+            action: {
+                Task {
+                    if let route = await viewModel.toggleVoiceRecording() {
+                        onSelectSession?(route)
+                    }
+                }
+            }
+        )
+        .frame(width: 44, height: 44)
+        .opacity(viewModel.voiceDictationAvailable || viewModel.isVoiceRecording ? 1 : 0.72)
+        .accessibilityIdentifier("knowledge.new_chat_mic")
+        .accessibilityLabel(viewModel.isVoiceRecording ? "Stop voice chat" : "Start voice chat")
+        .accessibilityHint(viewModel.isVoiceRecording ? "Stop recording and start a chat" : "Record a question and start a chat")
     }
 
     private var errorBannerSection: some View {
@@ -202,7 +237,7 @@ struct KnowledgeView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
                     .background(Color.statusDestructive.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
                     .padding(.horizontal, Spacing.appHorizontalMargin)
                     .padding(.bottom, 24)
             }
@@ -213,35 +248,29 @@ struct KnowledgeView: View {
 
     private var savedAndNarrationsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Library")
-                .font(.terracottaHeadlineSmall)
-                .foregroundStyle(Color.onSurface)
-                .padding(.horizontal, Spacing.appHorizontalMargin)
+            sectionHeader("Library")
 
-            LazyVGrid(columns: twoColumnGrid, spacing: 8) {
-                libraryButton(
+            HStack(spacing: 8) {
+                libraryTile(
                     title: "Saved",
                     systemImage: "books.vertical.fill",
-                    accent: .brandPrimary,
                     action: {
                         onShowKnowledgeLibrary?()
                     }
                 )
                 .disabled(onShowKnowledgeLibrary == nil)
 
-                libraryButton(
+                libraryTile(
                     title: "Narration",
                     systemImage: "waveform",
-                    accent: .brandPrimary,
                     action: {
                         showNarrationList = true
                     }
                 )
 
-                libraryButton(
+                libraryTile(
                     title: "Learning Decks",
                     systemImage: "rectangle.stack.fill",
-                    accent: .brandPrimary,
                     action: {
                         showLearningDeckList = true
                     }
@@ -249,52 +278,38 @@ struct KnowledgeView: View {
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
         }
-        .padding(.bottom, 16)
+        .padding(.bottom, 24)
     }
 
-    private var twoColumnGrid: [GridItem] {
-        [
-            GridItem(.flexible(), spacing: 8),
-            GridItem(.flexible(), spacing: 8),
-        ]
-    }
-
-    private func libraryButton(
+    private func libraryTile(
         title: String,
         systemImage: String,
-        accent: Color,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.appSymbol(size: 15, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 30, height: 30)
-                    .background(accent.opacity(0.14))
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-                HStack(alignment: .lastTextBaseline, spacing: 6) {
-                    Text(title)
-                        .font(.terracottaBodyLarge.weight(.semibold))
-                        .foregroundStyle(Color.onSurface)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top) {
+                    actionIcon(systemImage)
 
                     Spacer(minLength: 0)
 
                     Image(systemName: "arrow.right")
-                        .font(.appSymbol(size: 12, weight: .semibold))
+                        .font(.appSymbol(size: 11, weight: .semibold))
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
+
+                Text(title)
+                    .font(.terracottaBodyMedium.weight(.semibold))
+                    .foregroundStyle(Color.onSurface)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 80, alignment: .topLeading)
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
             .background(Color.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
                     .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
             )
         }
@@ -322,88 +337,99 @@ struct KnowledgeView: View {
 
     private var actionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Actions")
-                .font(.terracottaHeadlineSmall)
-                .foregroundStyle(Color.onSurface)
-                .padding(.horizontal, Spacing.appHorizontalMargin)
+            sectionHeader("Actions")
 
-            LazyVGrid(columns: twoColumnGrid, spacing: 8) {
-                compactActionButton(primaryAction)
-                ForEach(secondaryActions) { action in
-                    compactActionButton(action)
+            primaryActionCard
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(secondaryActions) { action in
+                        secondaryActionChip(action)
+                    }
                 }
+                .padding(.horizontal, Spacing.appHorizontalMargin)
             }
-            .padding(.horizontal, Spacing.appHorizontalMargin)
         }
-        .padding(.bottom, 16)
+        .padding(.bottom, 24)
     }
 
-    private func compactActionButton(_ action: HubAction) -> some View {
+    private var primaryActionCard: some View {
+        let isRunning = runningActionID == primaryAction.id
+
+        return Button {
+            startAction(primaryAction)
+        } label: {
+            HStack(spacing: 12) {
+                actionIcon(primaryAction.icon, size: 36, iconSize: 16, isRunning: isRunning)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(primaryAction.title)
+                        .font(.terracottaHeadlineSmall)
+                        .foregroundStyle(Color.onSurface)
+
+                    Text("The last day across your feed")
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "arrow.right")
+                    .font(.appSymbol(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.onSurfaceSecondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.surfaceSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .allowsHitTesting(!viewModel.isCreatingSession && runningActionID == nil)
+        .accessibilityValue(isRunning ? "Starting" : "")
+    }
+
+    private func secondaryActionChip(_ action: HubAction) -> some View {
         let isRunning = runningActionID == action.id
 
         return Button {
             startAction(action)
         } label: {
-            VStack(alignment: .leading, spacing: 7) {
-                actionIcon(
-                    action.icon,
-                    accent: actionColor(for: action.id),
-                    size: 32,
-                    iconSize: 15,
-                    cornerRadius: 9,
-                    isRunning: isRunning
-                )
-
-                Text(action.title)
-                    .font(.terracottaBodyLarge.weight(.semibold))
-                    .foregroundColor(.onSurface)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.84)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Spacer(minLength: 0)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
-            .background(Color.surfaceSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
+            FeedActionChip(
+                title: action.title,
+                systemImage: action.icon,
+                isLoading: isRunning
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(EditorialCardButtonStyle())
         .allowsHitTesting(!viewModel.isCreatingSession && runningActionID == nil)
         .accessibilityValue(isRunning ? "Starting" : "")
     }
 
     private func actionIcon(
         _ systemName: String,
-        accent: Color,
-        size: CGFloat,
-        iconSize: CGFloat,
-        cornerRadius: CGFloat,
+        size: CGFloat = 32,
+        iconSize: CGFloat = 15,
         isRunning: Bool = false
     ) -> some View {
         ZStack {
             if isRunning {
                 ProgressView()
                     .controlSize(.small)
-                    .tint(accent)
+                    .tint(Color.brandPrimary)
             } else {
                 Image(systemName: systemName)
                     .font(.appSymbol(size: iconSize, weight: .semibold))
-                    .foregroundColor(accent)
+                    .foregroundColor(.brandPrimary)
             }
         }
         .frame(width: size, height: size)
-        .background(accent.opacity(0.14))
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-    }
-
-    private func actionColor(for _: HubActionID) -> Color {
-        // Single accent across all hub actions.
-        .brandPrimary
+        .background(Color.brandPrimary.opacity(0.14))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.nestedControl, style: .continuous))
     }
 
     private func startAction(_ action: HubAction) {
@@ -422,32 +448,83 @@ struct KnowledgeView: View {
 
     private var chatHistorySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Chats")
-                .font(.terracottaHeadlineSmall)
-                .foregroundStyle(Color.onSurface)
-                .padding(.horizontal, Spacing.appHorizontalMargin)
+            sectionHeader("Recent Chats")
 
             if viewModel.isLoading && viewModel.sessions.isEmpty {
                 chatHistoryLoadingRow
             } else if viewModel.sessions.isEmpty {
                 chatHistoryEmptyRow
             } else {
-                VStack(spacing: 10) {
-                    ForEach(viewModel.sessions) { session in
-                        Button {
-                            onSelectSession?(ChatSessionRoute(session: session))
-                        } label: {
-                            ChatSessionCard(session: session)
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(chatDayGroups) { group in
+                        chatDayDelimiter(group.label)
+
+                        ForEach(group.sessions) { session in
+                            Button {
+                                onSelectSession?(ChatSessionRoute(session: session))
+                            } label: {
+                                ChatSessionCard(session: session)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, Spacing.appHorizontalMargin)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, Spacing.appHorizontalMargin)
                     }
                 }
 
                 chatHistoryFooter
             }
         }
-        .padding(.bottom, 32)
+    }
+
+    private struct ChatDayGroup: Identifiable {
+        let id: String
+        let label: String
+        var sessions: [ChatSessionSummary]
+    }
+
+    private static let chatDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        formatter.timeZone = TimeZone.current
+        return formatter
+    }()
+
+    private var chatDayGroups: [ChatDayGroup] {
+        var groups: [ChatDayGroup] = []
+        for session in viewModel.sessions {
+            let label = chatDayLabel(for: session.lastActivityDate)
+            if groups.last?.label == label {
+                groups[groups.count - 1].sessions.append(session)
+            } else {
+                groups.append(ChatDayGroup(id: label, label: label, sessions: [session]))
+            }
+        }
+        return groups
+    }
+
+    private func chatDayLabel(for date: Date?) -> String {
+        guard let date else { return "EARLIER" }
+        let calendar = Calendar.current
+
+        if calendar.isDateInToday(date) {
+            return "TODAY"
+        } else if calendar.isDateInYesterday(date) {
+            return "YESTERDAY"
+        }
+        return Self.chatDayFormatter.string(from: date).uppercased()
+    }
+
+    private func chatDayDelimiter(_ label: String) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .kicker(color: .sectionDelimiter)
+
+            Rectangle()
+                .fill(Color.outlineVariant)
+                .frame(height: 1)
+        }
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .padding(.top, 2)
     }
 
     private var chatHistoryLoadingRow: some View {
@@ -505,33 +582,8 @@ struct KnowledgeView: View {
         }
     }
 
-    // MARK: - New Chat
-
-    private var newChatMicButton: some View {
-        TapToTalkMicButton(
-            isEnabled: viewModel.isVoiceRecording ||
-                (!viewModel.isCreatingSession && !viewModel.isVoiceActionInFlight && !viewModel.isVoiceTranscribing),
-            isRecording: viewModel.isVoiceRecording,
-            isBusy: !viewModel.isVoiceRecording &&
-                (viewModel.isCreatingSession || viewModel.isVoiceActionInFlight || viewModel.isVoiceTranscribing),
-            size: 60,
-            action: {
-                Task {
-                    if let route = await viewModel.toggleVoiceRecording() {
-                        onSelectSession?(route)
-                    }
-                }
-            }
-        )
-        .opacity(viewModel.voiceDictationAvailable || viewModel.isVoiceRecording ? 1 : 0.72)
-        .shadow(color: .black.opacity(0.22), radius: 12, y: 8)
-        .accessibilityIdentifier("knowledge.new_chat_mic")
-        .accessibilityLabel(viewModel.isVoiceRecording ? "Stop voice chat" : "Start voice chat")
-        .accessibilityHint(viewModel.isVoiceRecording ? "Stop recording and start a chat" : "Record a question and start a chat")
-    }
-
     private func sendSearchQuery() {
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = trimmedSearchText
         guard !trimmed.isEmpty else { return }
 
         isSearchFocused = false

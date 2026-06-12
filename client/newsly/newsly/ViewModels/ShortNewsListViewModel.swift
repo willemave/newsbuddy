@@ -43,6 +43,10 @@ final class ShortNewsListViewModel: BaseContentListViewModel {
         itemsToMarkRead.send(ids)
     }
 
+    func markRead(ids: [Int]) {
+        markBatchRead(ids: ids)
+    }
+
     func markAllVisibleAsRead() {
         let unreadIds = currentItems().filter { !$0.isRead }.map(\.id)
         guard !unreadIds.isEmpty else {
@@ -101,6 +105,7 @@ final class ShortNewsListViewModel: BaseContentListViewModel {
     private func markBatchRead(ids: [Int]) {
         logger.info("[ShortNewsList] markBatchRead called | ids=\(ids, privacy: .public)")
 
+        let previousItems = currentItems()
         let markedItems = markItemsLocallyRead(
             ids: ids,
             removeReadItems: false
@@ -122,6 +127,11 @@ final class ShortNewsListViewModel: BaseContentListViewModel {
             .sink { completion in
                 if case .failure(let error) = completion {
                     logger.error("[ShortNewsList] markBatchRead API failed | ids=\(markedIds, privacy: .public) error=\(error.localizedDescription)")
+                    self.restoreOptimisticReadRollback(
+                        previousItems: previousItems,
+                        restoredIds: markedIds
+                    )
+                    self.unreadCountService.incrementNewsCount(by: markedIds.count)
                 }
             } receiveValue: { _ in
                 logger.info("[ShortNewsList] markBatchRead API success | ids=\(markedIds, privacy: .public)")

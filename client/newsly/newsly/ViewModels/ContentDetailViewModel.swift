@@ -319,12 +319,10 @@ class ContentDetailViewModel: ObservableObject {
             content?.isSavedToKnowledge = targetSavedState
             if targetSavedState {
                 let response = try await contentService.saveToKnowledge(id: currentContent.id)
-                if let isSavedToKnowledge = response["is_saved_to_knowledge"] as? Bool {
-                    content?.isSavedToKnowledge = isSavedToKnowledge
-                }
+                content?.isSavedToKnowledge = response.isSavedToKnowledge
             } else {
-                try await contentService.removeFromKnowledge(id: currentContent.id)
-                content?.isSavedToKnowledge = false
+                let response = try await contentService.removeFromKnowledge(id: currentContent.id)
+                content?.isSavedToKnowledge = response.isSavedToKnowledge
             }
         } catch {
             content?.isSavedToKnowledge = currentContent.isSavedToKnowledge

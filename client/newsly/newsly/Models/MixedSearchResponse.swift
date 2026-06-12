@@ -31,6 +31,18 @@ struct MixedSearchFeedResult: Codable, Identifiable {
     var previewURLString: String {
         evidenceURL ?? siteURL
     }
+
+    init(api response: APIMixedSearchFeedResultResponse) {
+        id = response.id
+        title = response.title
+        siteURL = response.siteUrl
+        feedURL = response.feedUrl
+        feedType = response.feedType
+        feedFormat = response.feedFormat
+        description = response.description
+        rationale = response.rationale
+        evidenceURL = response.evidenceUrl
+    }
 }
 
 struct PodcastSearchResult: Codable, Identifiable {
@@ -57,6 +69,18 @@ struct PodcastSearchResult: Codable, Identifiable {
         case provider
         case score
     }
+
+    init(api response: APIPodcastEpisodeSearchResultResponse) {
+        title = response.title
+        episodeURL = response.episodeUrl
+        podcastTitle = response.podcastTitle
+        source = response.source
+        snippet = response.snippet
+        feedURL = response.feedUrl
+        publishedAt = response.publishedAt
+        provider = response.provider
+        score = response.score
+    }
 }
 
 struct MixedSearchResponse: Codable {
@@ -64,4 +88,12 @@ struct MixedSearchResponse: Codable {
     let content: [ContentSummary]
     let feeds: [MixedSearchFeedResult]
     let podcasts: [PodcastSearchResult]
+
+    init(from decoder: Decoder) throws {
+        let response = try APIMixedSearchResponse(from: decoder)
+        query = response.query
+        content = response.content.map(ContentSummary.init(api:))
+        feeds = response.feeds.map(MixedSearchFeedResult.init(api:))
+        podcasts = response.podcasts.map(PodcastSearchResult.init(api:))
+    }
 }

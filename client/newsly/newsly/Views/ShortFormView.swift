@@ -44,8 +44,8 @@ struct ShortFormView: View {
                     }
                     .padding(.top, 48)
                 } else if viewModel.state == .initialLoading, isEmpty {
-                    ProgressView("Loading")
-                        .padding(.top, 48)
+                    LoadingView()
+                        .containerRelativeFrame(.vertical)
                 } else if isEmpty {
                     shortFormEmptyState
                 } else {
@@ -55,6 +55,10 @@ struct ShortFormView: View {
 
                     shortNewsQuickActions(items: items)
                         .padding(.bottom, shouldShowFastNewsAudioControls ? 10 : 18)
+                        .animation(
+                            .spring(duration: 0.3, bounce: 0),
+                            value: shouldShowFastNewsAudioControls
+                        )
 
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         // Day delimiter: show when this item starts a new day
@@ -63,57 +67,58 @@ struct ShortFormView: View {
                                 .equatable()
                         }
 
-                        ShortNewsRow(
-                            item: item,
-                            onDigDeeper: { selectedText in
+                        Button {
+                            let route = ContentDetailRoute(
+                                contentId: item.id,
+                                contentType: item.apiContentType ?? .news,
+                                allContentIds: items.map(\.id),
+                                navigationSurface: .fastNews
+                            )
+                            onSelect(route)
+                        } label: {
+                            ShortNewsRow(item: item)
+                                .equatable()
+                        }
+                        .buttonStyle(FeedRowButtonStyle())
+                        // Row-level menu so the whole row (not just the title text)
+                        // responds to long-press.
+                        .contextMenu {
+                            if !item.isRead {
+                                Button {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    viewModel.markRead(ids: [item.id])
+                                } label: {
+                                    Label("Mark as Read", systemImage: "checkmark.circle")
+                                }
+                            }
+
+                            Button {
                                 FeedDigDeeperAction.start(
-                                    selectedText: selectedText,
+                                    selectedText: item.displayTitle,
                                     item: item,
                                     visibleContentIds: items.prefix(15).map(\.id),
                                     surface: .shortNews
                                 )
+                            } label: {
+                                Label("Dig Deeper", systemImage: "magnifyingglass")
                             }
-                        )
-                            .equatable()
-                            .contentShape(Rectangle())
-                            .id(item.id)
-                            .highPriorityGesture(
-                                TapGesture().onEnded {
-                                    let route = ContentDetailRoute(
-                                        contentId: item.id,
-                                        contentType: item.apiContentType ?? .news,
-                                        allContentIds: items.map(\.id),
-                                        navigationSurface: .fastNews
-                                    )
-                                    onSelect(route)
-                                }
-                            )
-                            .onAppear {
-                                if item.id == items.last?.id {
-                                    viewModel.loadMoreTrigger.send(())
-                                }
+                        }
+                        .id(item.id)
+                        .accessibilityIdentifier("short.row.\(item.id)")
+                        .onAppear {
+                            if item.id == items.last?.id {
+                                viewModel.loadMoreTrigger.send(())
                             }
+                        }
                     }
 
                     if hasUnreadItems {
-                        Button {
+                        MarkAllReadButton {
                             showMarkAllConfirmation = true
-                        } label: {
-                            Text("Mark All as Read")
-                                .font(.terracottaBodyMedium.weight(.semibold))
-                                .foregroundStyle(Color.onSurface)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 13)
-                                .background(Color.surfaceSecondary.opacity(0.78))
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .stroke(Color.outlineVariant.opacity(0.42), lineWidth: 1)
-                                }
                         }
-                        .buttonStyle(.plain)
                         .padding(.horizontal, Spacing.appHorizontalMargin)
                         .padding(.vertical, 8)
+                        .transition(.opacity)
                     }
 
                     if viewModel.state == .loadingMore {
@@ -128,11 +133,13 @@ struct ShortFormView: View {
             }
             .scrollTargetLayout()
             .background(Color.surfacePrimary)
+            .animation(.easeOut(duration: 0.2), value: hasUnreadItems)
         }
         .scrollIndicators(.hidden)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .accessibilityIdentifier("short.screen")
         .screenContainer()
+        .topScreenEdgeFade()
         .onScrollTargetVisibilityChange(idType: Int.self) { visibleIds in
             scrollReadTracker.updateTopVisibleItemId(visibleIds.first)
             markItemsAboveAsRead()
@@ -149,8 +156,16 @@ struct ShortFormView: View {
             markItemsAboveAsRead()
         }
         .refreshable {
-            viewModel.refreshTrigger.send(())
+            // Background replace keeps the current rows visible while the fresh
+            // page loads, and awaiting it keeps the spinner up until it lands.
+            await viewModel.refreshInBackgroundAndWait()
             await processingCountService.refreshCount()
+        }
+        .onChange(of: processingCountService.newsProcessingCount) {
+            refreshFeedIfAwaitingFirstItems()
+        }
+        .onChange(of: processingCountService.newsCrawlCount) {
+            refreshFeedIfAwaitingFirstItems()
         }
         .onAppear {
             if viewModel.currentItems().isEmpty {
@@ -174,6 +189,7 @@ struct ShortFormView: View {
                 showMarkAllConfirmation = false
             }
             Button("Mark All as Read", role: .destructive) {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
                 showMarkAllConfirmation = false
                 viewModel.markAllVisibleAsRead()
             }
@@ -201,6 +217,16 @@ struct ShortFormView: View {
         isPreparingFastNewsAudio || isFastNewsAudioCurrent
     }
 
+    private var isHeaderActionInFlight: Bool {
+        isPreparingFastNewsAudio || activeQuickActionId != nil
+    }
+
+    private func refreshFeedIfAwaitingFirstItems() {
+        guard viewModel.currentItems().isEmpty else { return }
+        guard viewModel.state != .initialLoading else { return }
+        viewModel.refreshTrigger.send(())
+    }
+
     private func handleFastNewsAudioEpisode() {
         if isPlayingFastNewsAudio {
             narrationPlaybackService.pause()
@@ -222,14 +248,14 @@ struct ShortFormView: View {
                 if let existingEpisode = fastNewsAudioEpisode {
                     episode = existingEpisode
                     logger.info(
-                        "[FastNewsAudio] reusing episode | episodeId=\(episode.id) status=\(episode.status, privacy: .public)"
+                        "[FastNewsAudio] reusing episode | episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public)"
                     )
                 } else {
                     episode = try await AudioEpisodeService.shared.createFastNewsEpisode(
                         delivery: .inline
                     )
                     logger.info(
-                        "[FastNewsAudio] episode created | episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+                        "[FastNewsAudio] episode created | episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
                     )
                 }
                 fastNewsAudioEpisode = episode
@@ -274,26 +300,28 @@ struct ShortFormView: View {
                     Button {
                         handleFastNewsAudioEpisode()
                     } label: {
-                        ShortNewsAudioActionChip(
-                            isLoading: isPreparingFastNewsAudio,
-                            isPlaying: isPlayingFastNewsAudio
+                        FeedActionChip(
+                            title: "Audio Brief",
+                            systemImage: isPlayingFastNewsAudio ? "pause.fill" : "waveform",
+                            isLoading: isPreparingFastNewsAudio
                         )
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isPreparingFastNewsAudio)
+                    .buttonStyle(EditorialCardButtonStyle())
+                    .disabled(isHeaderActionInFlight)
                     .accessibilityIdentifier("short.audio.fast_reads")
 
                     ForEach(quickActions) { action in
                         Button {
                             startQuickAction(action)
                         } label: {
-                            ShortNewsQuickActionChip(
-                                action: action,
+                            FeedActionChip(
+                                title: action.title,
+                                systemImage: action.systemImage,
                                 isLoading: activeQuickActionId == action.id
                             )
                         }
-                        .buttonStyle(.plain)
-                        .disabled(activeQuickActionId != nil)
+                        .buttonStyle(EditorialCardButtonStyle())
+                        .disabled(isHeaderActionInFlight)
                         .accessibilityIdentifier("short.quick_action.\(action.id)")
                     }
                 }
@@ -305,9 +333,11 @@ struct ShortFormView: View {
                     playbackService: narrationPlaybackService,
                     target: fastNewsAudioTarget,
                     isPreparing: isPreparingFastNewsAudio,
+                    cornerRadius: CornerRadius.control,
                     onTogglePlayback: handleFastNewsAudioEpisode
                 )
                 .padding(.horizontal, Spacing.appHorizontalMargin)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             if let fastNewsAudioErrorMessage {
@@ -315,6 +345,7 @@ struct ShortFormView: View {
                     .font(.terracottaBodySmall)
                     .foregroundStyle(Color.statusDestructive)
                     .padding(.horizontal, Spacing.appHorizontalMargin)
+                    .transition(.opacity)
             }
 
             if let quickActionErrorMessage {
@@ -322,9 +353,12 @@ struct ShortFormView: View {
                     .font(.terracottaBodySmall)
                     .foregroundStyle(Color.statusDestructive)
                     .padding(.horizontal, Spacing.appHorizontalMargin)
+                    .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeOut(duration: 0.2), value: fastNewsAudioErrorMessage)
+        .animation(.easeOut(duration: 0.2), value: quickActionErrorMessage)
     }
 
     private func makeQuickActions(items: [ContentSummary]) -> [ShortNewsQuickAction] {
@@ -500,9 +534,21 @@ private struct ShortFormSetupEmptyState: View {
 
 // MARK: - Short News Row
 
+private struct FeedRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .overlay {
+                Color.onSurface.opacity(configuration.isPressed ? 0.06 : 0)
+                    .allowsHitTesting(false)
+            }
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 private struct ShortNewsRow: View, Equatable {
     let item: ContentSummary
-    var onDigDeeper: ((String) -> Void)?
+
+    @Environment(\.displayScale) private var displayScale
 
     static func == (lhs: ShortNewsRow, rhs: ShortNewsRow) -> Bool {
         lhs.item == rhs.item
@@ -513,11 +559,11 @@ private struct ShortNewsRow: View, Equatable {
     }
 
     private var titleFont: Font {
-        .appSerif(size: 22, weight: .medium)
+        .appSerif(size: 20, relativeTo: .title3, weight: .medium)
     }
 
     private var metadataColor: Color {
-        Color.platformLabel.opacity(0.9)
+        Color.platformLabel
     }
 
     private var metadataParts: [String] {
@@ -539,8 +585,7 @@ private struct ShortNewsRow: View, Equatable {
                 item.displayTitle,
                 textColor: titleColor,
                 font: titleFont,
-                lineLimit: 3,
-                onDigDeeper: onDigDeeper
+                lineLimit: 3
             )
 
             if !metadata.isEmpty || item.commentCountDisplay != nil {
@@ -554,20 +599,17 @@ private struct ShortNewsRow: View, Equatable {
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.borderSubtle.opacity(0.48))
-                .frame(height: 1)
+                .frame(height: 1 / displayScale)
                 .padding(.horizontal, Spacing.appHorizontalMargin)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("short.row.\(item.id)")
     }
 
     private func metadataRow(parts metadataParts: [String]) -> some View {
         HStack(spacing: 6) {
             if !metadataParts.isEmpty {
                 Text(metadataParts.joined(separator: "  •  "))
-                    .font(.terracottaCategoryPill)
-                    .tracking(1.5)
-                    .foregroundStyle(metadataColor)
+                    .kicker(color: metadataColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -575,8 +617,7 @@ private struct ShortNewsRow: View, Equatable {
             if let comments = item.commentCountDisplay {
                 if !metadataParts.isEmpty {
                     Text("•")
-                        .font(.terracottaCategoryPill)
-                        .foregroundStyle(metadataColor)
+                        .kicker(color: metadataColor)
                         .accessibilityHidden(true)
                 }
 
@@ -586,10 +627,8 @@ private struct ShortNewsRow: View, Equatable {
                     .accessibilityHidden(true)
 
                 Text(comments)
-                    .font(.terracottaCategoryPill)
-                    .tracking(1.1)
-                    .foregroundStyle(metadataColor)
                     .monospacedDigit()
+                    .kicker(color: metadataColor)
             }
         }
         .lineLimit(1)
@@ -625,9 +664,7 @@ private struct DayDelimiter: View, Equatable {
     var body: some View {
         HStack(spacing: 10) {
             Text(dayLabel)
-                .font(.terracottaCategoryPill)
-                .tracking(1.9)
-                .foregroundStyle(Color.sectionDelimiter)
+                .kicker(color: .sectionDelimiter)
 
             Rectangle()
                 .fill(Color.outlineVariant)

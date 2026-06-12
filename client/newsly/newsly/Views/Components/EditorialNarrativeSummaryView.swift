@@ -49,9 +49,10 @@ struct EditorialNarrativeSummaryView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(summary.sourceDetailSections) { section in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(section.title)
+                            Text(section.title.uppercased())
                                 .font(.readerBody)
                                 .foregroundColor(Color.onSurfaceSecondary)
+                                .tracking(0.4)
 
                             VStack(alignment: .leading, spacing: EditorialNarrativeDesign.itemSpacing) {
                                 ForEach(section.items, id: \.self) { item in
@@ -85,9 +86,10 @@ struct EditorialNarrativeSummaryView: View {
                 .font(.readerBody)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
-            Text(title)
+            Text(title.uppercased())
                 .font(.readerBody)
                 .foregroundColor(Color.onSurfaceSecondary)
+                .tracking(0.4)
         }
     }
 

@@ -3,22 +3,110 @@
 import Foundation
 
 
-enum APIContentType: String, Codable, CaseIterable {
-    case article = "article"
-    case podcast = "podcast"
-    case news = "news"
-    case insight_report = "insight_report"
-    case unknown = "unknown"
+enum APIContentType: Codable, Equatable, Hashable {
+    case article
+    case podcast
+    case news
+    case insight_report
+    case unknown
+    case unknownRaw(String)
+
+    static let knownCases: [APIContentType] = [
+        .article,
+        .podcast,
+        .news,
+        .insight_report,
+        .unknown,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .article: "article"
+        case .podcast: "podcast"
+        case .news: "news"
+        case .insight_report: "insight_report"
+        case .unknown: "unknown"
+        case .unknownRaw(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "article": self = .article
+        case "podcast": self = .podcast
+        case "news": self = .news
+        case "insight_report": self = .insight_report
+        case "unknown": self = .unknown
+        default: self = .unknownRaw(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
-enum APIContentStatus: String, Codable, CaseIterable {
-    case new = "new"
-    case pending = "pending"
-    case processing = "processing"
-    case awaiting_image = "awaiting_image"
-    case completed = "completed"
-    case failed = "failed"
-    case skipped = "skipped"
+enum APIContentStatus: Codable, Equatable, Hashable {
+    case new
+    case pending
+    case processing
+    case awaiting_image
+    case completed
+    case failed
+    case skipped
+    case unknown(String)
+
+    static let knownCases: [APIContentStatus] = [
+        .new,
+        .pending,
+        .processing,
+        .awaiting_image,
+        .completed,
+        .failed,
+        .skipped,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .new: "new"
+        case .pending: "pending"
+        case .processing: "processing"
+        case .awaiting_image: "awaiting_image"
+        case .completed: "completed"
+        case .failed: "failed"
+        case .skipped: "skipped"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "new": self = .new
+        case "pending": self = .pending
+        case "processing": self = .processing
+        case "awaiting_image": self = .awaiting_image
+        case "completed": self = .completed
+        case "failed": self = .failed
+        case "skipped": self = .skipped
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 enum APIContentClassification: String, Codable, CaseIterable {
@@ -26,49 +114,986 @@ enum APIContentClassification: String, Codable, CaseIterable {
     case skip = "skip"
 }
 
-enum APITaskType: String, Codable, CaseIterable {
-    case scrape = "scrape"
-    case backfill_feeds = "backfill_feeds"
-    case analyze_url = "analyze_url"
-    case process_content = "process_content"
-    case enrich_news_item_article = "enrich_news_item_article"
-    case process_news_item = "process_news_item"
-    case process_podcast_media = "process_podcast_media"
-    case download_audio = "download_audio"
-    case transcribe = "transcribe"
-    case download_tweet_video_audio = "download_tweet_video_audio"
-    case transcribe_tweet_video = "transcribe_tweet_video"
-    case summarize = "summarize"
-    case fetch_discussion = "fetch_discussion"
-    case fetch_news_item_discussion = "fetch_news_item_discussion"
-    case generate_image = "generate_image"
-    case discover_feeds = "discover_feeds"
-    case onboarding_discover = "onboarding_discover"
-    case dig_deeper = "dig_deeper"
-    case sync_integration = "sync_integration"
-    case generate_insight_report = "generate_insight_report"
-    case generate_audio_episode = "generate_audio_episode"
-    case generate_learning_deck = "generate_learning_deck"
+enum APITaskType: Codable, Equatable, Hashable {
+    case scrape
+    case backfill_feeds
+    case analyze_url
+    case process_content
+    case enrich_news_item_article
+    case process_news_item
+    case process_podcast_media
+    case download_audio
+    case transcribe
+    case download_tweet_video_audio
+    case transcribe_tweet_video
+    case summarize
+    case fetch_discussion
+    case fetch_news_item_discussion
+    case generate_image
+    case discover_feeds
+    case onboarding_discover
+    case dig_deeper
+    case sync_integration
+    case generate_insight_report
+    case generate_audio_episode
+    case generate_learning_deck
+    case unknown(String)
+
+    static let knownCases: [APITaskType] = [
+        .scrape,
+        .backfill_feeds,
+        .analyze_url,
+        .process_content,
+        .enrich_news_item_article,
+        .process_news_item,
+        .process_podcast_media,
+        .download_audio,
+        .transcribe,
+        .download_tweet_video_audio,
+        .transcribe_tweet_video,
+        .summarize,
+        .fetch_discussion,
+        .fetch_news_item_discussion,
+        .generate_image,
+        .discover_feeds,
+        .onboarding_discover,
+        .dig_deeper,
+        .sync_integration,
+        .generate_insight_report,
+        .generate_audio_episode,
+        .generate_learning_deck,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .scrape: "scrape"
+        case .backfill_feeds: "backfill_feeds"
+        case .analyze_url: "analyze_url"
+        case .process_content: "process_content"
+        case .enrich_news_item_article: "enrich_news_item_article"
+        case .process_news_item: "process_news_item"
+        case .process_podcast_media: "process_podcast_media"
+        case .download_audio: "download_audio"
+        case .transcribe: "transcribe"
+        case .download_tweet_video_audio: "download_tweet_video_audio"
+        case .transcribe_tweet_video: "transcribe_tweet_video"
+        case .summarize: "summarize"
+        case .fetch_discussion: "fetch_discussion"
+        case .fetch_news_item_discussion: "fetch_news_item_discussion"
+        case .generate_image: "generate_image"
+        case .discover_feeds: "discover_feeds"
+        case .onboarding_discover: "onboarding_discover"
+        case .dig_deeper: "dig_deeper"
+        case .sync_integration: "sync_integration"
+        case .generate_insight_report: "generate_insight_report"
+        case .generate_audio_episode: "generate_audio_episode"
+        case .generate_learning_deck: "generate_learning_deck"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "scrape": self = .scrape
+        case "backfill_feeds": self = .backfill_feeds
+        case "analyze_url": self = .analyze_url
+        case "process_content": self = .process_content
+        case "enrich_news_item_article": self = .enrich_news_item_article
+        case "process_news_item": self = .process_news_item
+        case "process_podcast_media": self = .process_podcast_media
+        case "download_audio": self = .download_audio
+        case "transcribe": self = .transcribe
+        case "download_tweet_video_audio": self = .download_tweet_video_audio
+        case "transcribe_tweet_video": self = .transcribe_tweet_video
+        case "summarize": self = .summarize
+        case "fetch_discussion": self = .fetch_discussion
+        case "fetch_news_item_discussion": self = .fetch_news_item_discussion
+        case "generate_image": self = .generate_image
+        case "discover_feeds": self = .discover_feeds
+        case "onboarding_discover": self = .onboarding_discover
+        case "dig_deeper": self = .dig_deeper
+        case "sync_integration": self = .sync_integration
+        case "generate_insight_report": self = .generate_insight_report
+        case "generate_audio_episode": self = .generate_audio_episode
+        case "generate_learning_deck": self = .generate_learning_deck
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
-enum APITaskStatus: String, Codable, CaseIterable {
-    case pending = "pending"
-    case processing = "processing"
-    case completed = "completed"
-    case failed = "failed"
+enum APITaskStatus: Codable, Equatable, Hashable {
+    case pending
+    case processing
+    case completed
+    case failed
+    case unknown(String)
+
+    static let knownCases: [APITaskStatus] = [
+        .pending,
+        .processing,
+        .completed,
+        .failed,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .pending: "pending"
+        case .processing: "processing"
+        case .completed: "completed"
+        case .failed: "failed"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "pending": self = .pending
+        case "processing": self = .processing
+        case "completed": self = .completed
+        case "failed": self = .failed
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
-enum APISummaryKind: String, Codable, CaseIterable {
-    case long_structured = "long_structured"
-    case long_interleaved = "long_interleaved"
-    case long_bullets = "long_bullets"
-    case long_editorial_narrative = "long_editorial_narrative"
-    case short_news = "short_news"
-    case longform_artifact = "longform_artifact"
-    case insight_report = "insight_report"
+enum APISummaryKind: Codable, Equatable, Hashable {
+    case long_structured
+    case long_interleaved
+    case long_bullets
+    case long_editorial_narrative
+    case short_news
+    case longform_artifact
+    case insight_report
+    case unknown(String)
+
+    static let knownCases: [APISummaryKind] = [
+        .long_structured,
+        .long_interleaved,
+        .long_bullets,
+        .long_editorial_narrative,
+        .short_news,
+        .longform_artifact,
+        .insight_report,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .long_structured: "long_structured"
+        case .long_interleaved: "long_interleaved"
+        case .long_bullets: "long_bullets"
+        case .long_editorial_narrative: "long_editorial_narrative"
+        case .short_news: "short_news"
+        case .longform_artifact: "longform_artifact"
+        case .insight_report: "insight_report"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "long_structured": self = .long_structured
+        case "long_interleaved": self = .long_interleaved
+        case "long_bullets": self = .long_bullets
+        case "long_editorial_narrative": self = .long_editorial_narrative
+        case "short_news": self = .short_news
+        case "longform_artifact": self = .longform_artifact
+        case "insight_report": self = .insight_report
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 enum APISummaryVersion: Int, Codable, CaseIterable {
     case v1 = 1
     case v2 = 2
+}
+
+enum APISavedSource: String, Codable, CaseIterable {
+    case knowledge = "knowledge"
+    case x_bookmark = "x_bookmark"
+}
+
+enum APIOperationStatus: String, Codable, CaseIterable {
+    case success = "success"
+}
+
+enum APIKnowledgeMutationStatus: String, Codable, CaseIterable {
+    case success = "success"
+    case not_found = "not_found"
+}
+
+enum APIContentInteractionType: String, Codable, CaseIterable {
+    case opened = "opened"
+}
+
+enum APINarrationTargetType: String, Codable, CaseIterable {
+    case content = "content"
+}
+
+enum APISubmissionKind: String, Codable, CaseIterable {
+    case content = "content"
+    case feed_subscription = "feed_subscription"
+}
+
+enum APISubmissionOutcome: Codable, Equatable, Hashable {
+    case queued
+    case processing
+    case completed
+    case failed
+    case skipped
+    case subscribed
+    case already_subscribed
+    case feed_not_found
+    case feed_fetch_failed
+    case feed_subscription_failed
+    case unknown(String)
+
+    static let knownCases: [APISubmissionOutcome] = [
+        .queued,
+        .processing,
+        .completed,
+        .failed,
+        .skipped,
+        .subscribed,
+        .already_subscribed,
+        .feed_not_found,
+        .feed_fetch_failed,
+        .feed_subscription_failed,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .queued: "queued"
+        case .processing: "processing"
+        case .completed: "completed"
+        case .failed: "failed"
+        case .skipped: "skipped"
+        case .subscribed: "subscribed"
+        case .already_subscribed: "already_subscribed"
+        case .feed_not_found: "feed_not_found"
+        case .feed_fetch_failed: "feed_fetch_failed"
+        case .feed_subscription_failed: "feed_subscription_failed"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "queued": self = .queued
+        case "processing": self = .processing
+        case "completed": self = .completed
+        case "failed": self = .failed
+        case "skipped": self = .skipped
+        case "subscribed": self = .subscribed
+        case "already_subscribed": self = .already_subscribed
+        case "feed_not_found": self = .feed_not_found
+        case "feed_fetch_failed": self = .feed_fetch_failed
+        case "feed_subscription_failed": self = .feed_subscription_failed
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIDiscussionMode: String, Codable, CaseIterable {
+    case none = "none"
+    case comments = "comments"
+    case discussion_list = "discussion_list"
+}
+
+enum APIFeedType: Codable, Equatable, Hashable {
+    case atom
+    case substack
+    case podcast_rss
+    case unknown(String)
+
+    static let knownCases: [APIFeedType] = [
+        .atom,
+        .substack,
+        .podcast_rss,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .atom: "atom"
+        case .substack: "substack"
+        case .podcast_rss: "podcast_rss"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "atom": self = .atom
+        case "substack": self = .substack
+        case "podcast_rss": self = .podcast_rss
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIFeedFormat: Codable, Equatable, Hashable {
+    case rss
+    case atom
+    case unknown(String)
+
+    static let knownCases: [APIFeedFormat] = [
+        .rss,
+        .atom,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .rss: "rss"
+        case .atom: "atom"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "rss": self = .rss
+        case "atom": self = .atom
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIAudioEpisodeKind: Codable, Equatable, Hashable {
+    case fast_news_digest
+    case content_council_discussion
+    case news_item_discussion
+    case custom_narration
+    case unknown(String)
+
+    static let knownCases: [APIAudioEpisodeKind] = [
+        .fast_news_digest,
+        .content_council_discussion,
+        .news_item_discussion,
+        .custom_narration,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .fast_news_digest: "fast_news_digest"
+        case .content_council_discussion: "content_council_discussion"
+        case .news_item_discussion: "news_item_discussion"
+        case .custom_narration: "custom_narration"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "fast_news_digest": self = .fast_news_digest
+        case "content_council_discussion": self = .content_council_discussion
+        case "news_item_discussion": self = .news_item_discussion
+        case "custom_narration": self = .custom_narration
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIAudioEpisodeStatus: Codable, Equatable, Hashable {
+    case pending
+    case processing
+    case completed
+    case failed
+    case unknown(String)
+
+    static let knownCases: [APIAudioEpisodeStatus] = [
+        .pending,
+        .processing,
+        .completed,
+        .failed,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .pending: "pending"
+        case .processing: "processing"
+        case .completed: "completed"
+        case .failed: "failed"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "pending": self = .pending
+        case "processing": self = .processing
+        case "completed": self = .completed
+        case "failed": self = .failed
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APICliLinkStatus: Codable, Equatable, Hashable {
+    case pending
+    case approved
+    case claimed
+    case expired
+    case unknown(String)
+
+    static let knownCases: [APICliLinkStatus] = [
+        .pending,
+        .approved,
+        .claimed,
+        .expired,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .pending: "pending"
+        case .approved: "approved"
+        case .claimed: "claimed"
+        case .expired: "expired"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "pending": self = .pending
+        case "approved": self = .approved
+        case "claimed": self = .claimed
+        case "expired": self = .expired
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIOnboardingSuggestionType: Codable, Equatable, Hashable {
+    case substack
+    case atom
+    case podcast_rss
+    case reddit
+    case unknown(String)
+
+    static let knownCases: [APIOnboardingSuggestionType] = [
+        .substack,
+        .atom,
+        .podcast_rss,
+        .reddit,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .substack: "substack"
+        case .atom: "atom"
+        case .podcast_rss: "podcast_rss"
+        case .reddit: "reddit"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "substack": self = .substack
+        case "atom": self = .atom
+        case "podcast_rss": self = .podcast_rss
+        case "reddit": self = .reddit
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIOnboardingSelectedSourceType: Codable, Equatable, Hashable {
+    case substack
+    case atom
+    case podcast_rss
+    case unknown(String)
+
+    static let knownCases: [APIOnboardingSelectedSourceType] = [
+        .substack,
+        .atom,
+        .podcast_rss,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .substack: "substack"
+        case .atom: "atom"
+        case .podcast_rss: "podcast_rss"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "substack": self = .substack
+        case "atom": self = .atom
+        case "podcast_rss": self = .podcast_rss
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIIntegrationDisconnectStatus: String, Codable, CaseIterable {
+    case disconnected = "disconnected"
+}
+
+enum APIDeleteStatus: String, Codable, CaseIterable {
+    case deleted = "deleted"
+}
+
+enum APIUserLlmProvider: String, Codable, CaseIterable {
+    case anthropic = "anthropic"
+    case openai = "openai"
+    case google = "google"
+}
+
+enum APINewsItemVisibilityScope: Codable, Equatable, Hashable {
+    case global
+    case user
+    case unknown(String)
+
+    static let knownCases: [APINewsItemVisibilityScope] = [
+        .global,
+        .user,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .global: "global"
+        case .user: "user"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "global": self = .global
+        case "user": self = .user
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APINewsItemStatus: Codable, Equatable, Hashable {
+    case new
+    case processing
+    case ready
+    case failed
+    case unknown(String)
+
+    static let knownCases: [APINewsItemStatus] = [
+        .new,
+        .processing,
+        .ready,
+        .failed,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .new: "new"
+        case .processing: "processing"
+        case .ready: "ready"
+        case .failed: "failed"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "new": self = .new
+        case "processing": self = .processing
+        case "ready": self = .ready
+        case "failed": self = .failed
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APILearningDeckSourceKind: Codable, Equatable, Hashable {
+    case content
+    case github_repo
+    case unknown(String)
+
+    static let knownCases: [APILearningDeckSourceKind] = [
+        .content,
+        .github_repo,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .content: "content"
+        case .github_repo: "github_repo"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "content": self = .content
+        case "github_repo": self = .github_repo
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APILearningDeckRunStatus: Codable, Equatable, Hashable {
+    case queued
+    case preparing
+    case generating
+    case validating
+    case publishing
+    case completed
+    case failed
+    case cancelled
+    case unknown(String)
+
+    static let knownCases: [APILearningDeckRunStatus] = [
+        .queued,
+        .preparing,
+        .generating,
+        .validating,
+        .publishing,
+        .completed,
+        .failed,
+        .cancelled,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .queued: "queued"
+        case .preparing: "preparing"
+        case .generating: "generating"
+        case .validating: "validating"
+        case .publishing: "publishing"
+        case .completed: "completed"
+        case .failed: "failed"
+        case .cancelled: "cancelled"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "queued": self = .queued
+        case "preparing": self = .preparing
+        case "generating": self = .generating
+        case "validating": self = .validating
+        case "publishing": self = .publishing
+        case "completed": self = .completed
+        case "failed": self = .failed
+        case "cancelled": self = .cancelled
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APILearningDeckStatus: Codable, Equatable, Hashable {
+    case ready
+    case queued
+    case preparing
+    case generating
+    case validating
+    case publishing
+    case completed
+    case failed
+    case cancelled
+    case unknown(String)
+
+    static let knownCases: [APILearningDeckStatus] = [
+        .ready,
+        .queued,
+        .preparing,
+        .generating,
+        .validating,
+        .publishing,
+        .completed,
+        .failed,
+        .cancelled,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .ready: "ready"
+        case .queued: "queued"
+        case .preparing: "preparing"
+        case .generating: "generating"
+        case .validating: "validating"
+        case .publishing: "publishing"
+        case .completed: "completed"
+        case .failed: "failed"
+        case .cancelled: "cancelled"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "ready": self = .ready
+        case "queued": self = .queued
+        case "preparing": self = .preparing
+        case "generating": self = .generating
+        case "validating": self = .validating
+        case "publishing": self = .publishing
+        case "completed": self = .completed
+        case "failed": self = .failed
+        case "cancelled": self = .cancelled
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIMessageProcessingStatus: Codable, Equatable, Hashable {
+    case processing
+    case completed
+    case failed
+    case unknown(String)
+
+    static let knownCases: [APIMessageProcessingStatus] = [
+        .processing,
+        .completed,
+        .failed,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .processing: "processing"
+        case .completed: "completed"
+        case .failed: "failed"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "processing": self = .processing
+        case "completed": self = .completed
+        case "failed": self = .failed
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIChatMessageRole: String, Codable, CaseIterable {
+    case user = "user"
+    case assistant = "assistant"
+    case system = "system"
+    case tool = "tool"
+}
+
+enum APIChatMessageDisplayType: Codable, Equatable, Hashable {
+    case message
+    case process_summary
+    case unknown(String)
+
+    static let knownCases: [APIChatMessageDisplayType] = [
+        .message,
+        .process_summary,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .message: "message"
+        case .process_summary: "process_summary"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "message": self = .message
+        case "process_summary": self = .process_summary
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APILLMProvider: String, Codable, CaseIterable {
+    case openai = "openai"
+    case anthropic = "anthropic"
+    case google = "google"
+    case cerebras = "cerebras"
+    case openrouter = "openrouter"
+    case deep_research = "deep_research"
+}
+
+enum APITweetLength: String, Codable, CaseIterable {
+    case short = "short"
+    case medium = "medium"
+    case long = "long"
 }

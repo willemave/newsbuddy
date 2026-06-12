@@ -202,7 +202,7 @@ class ActiveChatSessionManager: ObservableObject {
                     await handleFailure(sessionId: sessionId, error: errorMsg)
                     return
 
-                case .processing:
+                case .processing, .unknown(_):
                     attempts += 1
                     try await Task.sleep(nanoseconds: pollingInterval)
                 }

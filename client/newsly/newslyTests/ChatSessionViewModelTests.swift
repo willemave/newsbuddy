@@ -425,9 +425,9 @@ final class ChatSessionViewModelTests: XCTestCase {
 
     private static func message(
         id: Int,
-        role: ChatMessageRole,
+        role: APIChatMessageRole,
         content: String,
-        status: MessageProcessingStatus
+        status: APIMessageProcessingStatus
     ) -> ChatMessage {
         ChatMessage(
             id: id,

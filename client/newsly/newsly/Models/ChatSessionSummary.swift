@@ -114,31 +114,35 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         self.cachedLastActivityDate = Self.parseDate(lastMessageAt ?? createdAt)
     }
 
+    init(api response: APIChatSessionSummary) {
+        self.init(
+            id: response.id,
+            contentId: response.contentId,
+            newsItemId: response.newsItemId,
+            title: response.title,
+            sessionType: response.sessionType,
+            topic: response.topic,
+            llmProvider: response.llmProvider,
+            llmModel: response.llmModel,
+            createdAt: response.createdAt,
+            updatedAt: response.updatedAt,
+            lastMessageAt: response.lastMessageAt,
+            articleTitle: response.articleTitle,
+            articleUrl: response.articleUrl,
+            articleSummary: response.articleSummary,
+            articleSource: response.articleSource,
+            hasPendingMessage: response.hasPendingMessage,
+            isSavedToKnowledge: response.isSavedToKnowledge,
+            hasMessages: response.hasMessages,
+            lastMessagePreview: response.lastMessagePreview,
+            lastMessageRole: response.lastMessageRole,
+            councilMode: response.councilMode,
+            activeChildSessionId: response.activeChildSessionId
+        )
+    }
+
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(Int.self, forKey: .id)
-        contentId = try container.decodeIfPresent(Int.self, forKey: .contentId)
-        newsItemId = try container.decodeIfPresent(Int.self, forKey: .newsItemId)
-        title = try container.decodeIfPresent(String.self, forKey: .title)
-        sessionType = try container.decodeIfPresent(String.self, forKey: .sessionType)
-        topic = try container.decodeIfPresent(String.self, forKey: .topic)
-        llmProvider = try container.decode(String.self, forKey: .llmProvider)
-        llmModel = try container.decode(String.self, forKey: .llmModel)
-        createdAt = try container.decode(String.self, forKey: .createdAt)
-        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
-        lastMessageAt = try container.decodeIfPresent(String.self, forKey: .lastMessageAt)
-        articleTitle = try container.decodeIfPresent(String.self, forKey: .articleTitle)
-        articleUrl = try container.decodeIfPresent(String.self, forKey: .articleUrl)
-        articleSummary = try container.decodeIfPresent(String.self, forKey: .articleSummary)
-        articleSource = try container.decodeIfPresent(String.self, forKey: .articleSource)
-        hasPendingMessage = try container.decodeIfPresent(Bool.self, forKey: .hasPendingMessage)
-        savedToKnowledgeValue = try container.decodeIfPresent(Bool.self, forKey: .savedToKnowledgeValue)
-        hasMessages = try container.decodeIfPresent(Bool.self, forKey: .hasMessages)
-        lastMessagePreview = try container.decodeIfPresent(String.self, forKey: .lastMessagePreview)
-        lastMessageRole = try container.decodeIfPresent(String.self, forKey: .lastMessageRole)
-        councilMode = try container.decodeIfPresent(Bool.self, forKey: .councilMode)
-        activeChildSessionId = try container.decodeIfPresent(Int.self, forKey: .activeChildSessionId)
-        cachedLastActivityDate = Self.parseDate(lastMessageAt ?? createdAt)
+        self.init(api: try APIChatSessionSummary(from: decoder))
     }
 
     private static let displayDateFormatter: DateFormatter = {
@@ -327,4 +331,17 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
 struct ChatSessionListResponse: Codable {
     let sessions: [ChatSessionSummary]
     let meta: PaginationMetadata
+
+    init(sessions: [ChatSessionSummary], meta: PaginationMetadata) {
+        self.sessions = sessions
+        self.meta = meta
+    }
+
+    init(from decoder: Decoder) throws {
+        let response = try APIChatSessionListResponse(from: decoder)
+        self.init(
+            sessions: response.sessions.map(ChatSessionSummary.init(api:)),
+            meta: response.meta
+        )
+    }
 }

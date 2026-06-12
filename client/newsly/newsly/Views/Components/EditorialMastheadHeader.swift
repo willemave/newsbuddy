@@ -27,9 +27,7 @@ struct EditorialMastheadHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(dateLabel)
-                .font(.terracottaCategoryPill)
-                .tracking(1.4)
-                .foregroundStyle(Color.onSurfaceSecondary)
+                .kicker()
 
             HStack(alignment: .firstTextBaseline) {
                 Text(title)

@@ -33,9 +33,10 @@ struct SourceMetadataSection: View {
                 .foregroundColor(Color.onSurfaceSecondary)
                 .accessibilityHidden(true)
 
-            Text("Paper metadata")
+            Text("PAPER METADATA")
                 .font(.readerBody)
                 .foregroundColor(Color.onSurfaceSecondary)
+                .tracking(0.4)
         }
     }
 

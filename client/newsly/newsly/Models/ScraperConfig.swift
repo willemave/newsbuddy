@@ -5,29 +5,10 @@
 
 import Foundation
 
-struct ScraperConfigStats: Codable {
-    let totalCount: Int
-    let completedCount: Int
-    let unreadCount: Int
-    let processingCount: Int
-    let latestProcessedAt: String?
-    let latestPublicationAt: String?
-    let nextExpectedAt: String?
-    let averageIntervalHours: Double?
-    let intervalSampleSize: Int
+typealias ScraperConfigStats = APIScraperConfigStatsResponse
+typealias ScraperConfig = APIScraperConfigResponse
 
-    enum CodingKeys: String, CodingKey {
-        case totalCount = "total_count"
-        case completedCount = "completed_count"
-        case unreadCount = "unread_count"
-        case processingCount = "processing_count"
-        case latestProcessedAt = "latest_processed_at"
-        case latestPublicationAt = "latest_publication_at"
-        case nextExpectedAt = "next_expected_at"
-        case averageIntervalHours = "average_interval_hours"
-        case intervalSampleSize = "interval_sample_size"
-    }
-
+extension APIScraperConfigStatsResponse {
     var latestProcessedDate: Date? {
         Self.parseISODate(latestProcessedAt)
     }
@@ -99,17 +80,13 @@ struct ScraperConfigStats: Codable {
     }
 }
 
-struct ScraperConfig: Identifiable, Codable {
-    let id: Int
-    let scraperType: String
-    let displayName: String?
-    let config: [String: AnyCodable]
-    let limit: Int?
-    let isActive: Bool
-    let createdAt: String
-    let stats: ScraperConfigStats?
+extension APIScraperConfigResponse: Identifiable {}
 
+extension APIScraperConfigResponse {
     var feedURL: String? {
+        if let feedUrl {
+            return feedUrl
+        }
         if let feedValue = config["feed_url"]?.value as? String {
             return feedValue
         }
@@ -117,16 +94,5 @@ struct ScraperConfig: Identifiable, Codable {
             return urlValue
         }
         return nil
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case scraperType = "scraper_type"
-        case displayName = "display_name"
-        case config
-        case limit
-        case isActive = "is_active"
-        case createdAt = "created_at"
-        case stats
     }
 }

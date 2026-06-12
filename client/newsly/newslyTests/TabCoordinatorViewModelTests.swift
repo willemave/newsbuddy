@@ -263,6 +263,71 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.newsGroups.flatMap(\.items).map(\.id), [31])
     }
 
+    func testBackgroundRefreshMergesNewItemsOnTopAndKeepsExistingOrder() async {
+        // Server returns [3, 1, 2]; the user currently sees [2, 1]. Existing items
+        // must keep their on-screen order with the new item surfaced on top.
+        let repository = FakeContentRepository(
+            responseContents: [
+                makeSummary(id: 3, contentType: "news"),
+                makeSummary(id: 1, contentType: "news"),
+                makeSummary(id: 2, contentType: "news"),
+            ]
+        )
+        let viewModel = ShortNewsListViewModel(
+            repository: repository,
+            readRepository: FakeReadStatusRepository(),
+            unreadCountService: .shared
+        )
+        viewModel.replaceItems([
+            makeSummary(id: 2, contentType: "news"),
+            makeSummary(id: 1, contentType: "news"),
+        ])
+
+        await viewModel.refreshInBackgroundAndWait()
+
+        XCTAssertEqual(viewModel.currentItems().map(\.id), [3, 2, 1])
+    }
+
+    func testBackgroundRefreshDropsItemsMissingFromServerPage() async {
+        let repository = FakeContentRepository(
+            responseContents: [makeSummary(id: 1, contentType: "news")]
+        )
+        let viewModel = ShortNewsListViewModel(
+            repository: repository,
+            readRepository: FakeReadStatusRepository(),
+            unreadCountService: .shared
+        )
+        viewModel.replaceItems([
+            makeSummary(id: 1, contentType: "news"),
+            makeSummary(id: 99, contentType: "news"),
+        ])
+
+        await viewModel.refreshInBackgroundAndWait()
+
+        XCTAssertEqual(viewModel.currentItems().map(\.id), [1])
+    }
+
+    func testRefreshInBackgroundAndWaitResumesWhenRequestIsSuperseded() async {
+        let repository = PendingContentRepository()
+        let viewModel = ShortNewsListViewModel(
+            repository: repository,
+            readRepository: FakeReadStatusRepository(),
+            unreadCountService: .shared
+        )
+
+        let resumed = expectation(description: "refresh await resumed")
+        Task { @MainActor in
+            await viewModel.refreshInBackgroundAndWait()
+            resumed.fulfill()
+        }
+
+        // Let the background refresh subscribe before superseding it.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        viewModel.updateReadFilter(.all)
+
+        await fulfillment(of: [resumed], timeout: 2.0)
+    }
+
     private func makeSummary(id: Int, contentType: String) -> ContentSummary {
         ContentSummary(
             id: id,

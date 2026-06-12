@@ -264,7 +264,7 @@ class ChatService {
                 return assistantMessage
             case .failed:
                 throw ChatServiceError.processingFailed(status.error ?? "Unknown error")
-            case .processing:
+            case .processing, .unknown(_):
                 attempts += 1
                 try await Task.sleep(nanoseconds: pollingInterval)
             }

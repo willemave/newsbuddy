@@ -9,10 +9,7 @@ import UIKit
 
 private let badgeStatsLogger = Logger(subsystem: "com.newsly", category: "BadgeStats")
 
-struct BadgeStatsResponse: Codable {
-    let unread: UnreadCountsResponse
-    let processing: ProcessingCountResponse
-}
+typealias BadgeStatsResponse = APIBadgeStatsResponse
 
 @MainActor
 final class BadgeStatsRefreshCoordinator {

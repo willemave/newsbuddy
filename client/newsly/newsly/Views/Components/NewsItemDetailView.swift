@@ -9,18 +9,12 @@ import SwiftUI
 
 struct NewsItemDetailView: View {
     let content: ContentDetail
-    let metadata: NewsMetadata
-    let onDiscussionTap: ((URL) -> Void)?
     private let keyPoints: [String]
 
     init(
-        content: ContentDetail,
-        metadata: NewsMetadata,
-        onDiscussionTap: ((URL) -> Void)?
+        content: ContentDetail
     ) {
         self.content = content
-        self.metadata = metadata
-        self.onDiscussionTap = onDiscussionTap
         self.keyPoints = content.resolvedNewsKeyPoints.map(Self.plainKeyPointText)
     }
 
@@ -30,40 +24,12 @@ struct NewsItemDetailView: View {
         }
     }
 
-    private var discussionURL: URL? {
-        let rawURL = normalizedText(content.newsDiscussionURL) ?? normalizedText(metadata.discussionURL)
-        guard let rawURL else { return nil }
-        return URL(string: rawURL)
-    }
-
     @ViewBuilder
     private func keyPointsSection() -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Key Points")
-                    .font(.readerBody)
-
-                Spacer()
-
-                if let url = discussionURL {
-                    Button(action: {
-                        onDiscussionTap?(url)
-                    }) {
-                        Label("Comments", systemImage: "bubble.left.and.bubble.right")
-                            .font(.appCaption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.onSurfaceSecondary)
-                            .padding(.horizontal, 10)
-                            .frame(minHeight: 44)
-                            .background(Color.surfaceTertiary)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .accessibilityLabel("Comments")
-                    .accessibilityIdentifier("content.discussion.open")
-                }
-            }
+            Text("KEY POINTS")
+                .font(.readerBody)
+                .tracking(0.4)
 
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(keyPoints.enumerated()), id: \.offset) { _, point in
@@ -106,11 +72,4 @@ struct NewsItemDetailView: View {
         }
         return line
     }
-
-    private func normalizedText(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
 }

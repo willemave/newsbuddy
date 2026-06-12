@@ -11,11 +11,33 @@ import Foundation
 struct ChatSessionDetail: Codable {
     let session: ChatSessionSummary
     let messages: [ChatMessage]
+
+    init(session: ChatSessionSummary, messages: [ChatMessage]) {
+        self.session = session
+        self.messages = messages
+    }
+
+    init(from decoder: Decoder) throws {
+        let response = try APIChatSessionDetail(from: decoder)
+        self.init(
+            session: ChatSessionSummary(api: response.session),
+            messages: response.messages.map(ChatMessage.init(api:))
+        )
+    }
 }
 
 /// Response from creating a new chat session
 struct CreateChatSessionResponse: Codable {
     let session: ChatSessionSummary
+
+    init(session: ChatSessionSummary) {
+        self.session = session
+    }
+
+    init(from decoder: Decoder) throws {
+        let response = try APICreateChatSessionResponse(from: decoder)
+        self.init(session: ChatSessionSummary(api: response.session))
+    }
 }
 
 /// Response after sending a message (async)
@@ -24,13 +46,35 @@ struct SendChatMessageResponse: Codable {
     let sessionId: Int
     let userMessage: ChatMessage
     let messageId: Int
-    let status: MessageProcessingStatus
+    let status: APIMessageProcessingStatus
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case userMessage = "user_message"
         case messageId = "message_id"
         case status
+    }
+
+    init(
+        sessionId: Int,
+        userMessage: ChatMessage,
+        messageId: Int,
+        status: APIMessageProcessingStatus
+    ) {
+        self.sessionId = sessionId
+        self.userMessage = userMessage
+        self.messageId = messageId
+        self.status = status
+    }
+
+    init(from decoder: Decoder) throws {
+        let response = try APISendMessageResponse(from: decoder)
+        self.init(
+            sessionId: response.sessionId,
+            userMessage: ChatMessage(api: response.userMessage),
+            messageId: response.messageId,
+            status: response.status
+        )
     }
 }
 
@@ -39,7 +83,7 @@ struct StartDigDeeperChatResponse: Codable {
     let session: ChatSessionSummary
     let userMessage: ChatMessage
     let messageId: Int
-    let status: MessageProcessingStatus
+    let status: APIMessageProcessingStatus
 
     enum CodingKeys: String, CodingKey {
         case session
@@ -47,12 +91,34 @@ struct StartDigDeeperChatResponse: Codable {
         case messageId = "message_id"
         case status
     }
+
+    init(
+        session: ChatSessionSummary,
+        userMessage: ChatMessage,
+        messageId: Int,
+        status: APIMessageProcessingStatus
+    ) {
+        self.session = session
+        self.userMessage = userMessage
+        self.messageId = messageId
+        self.status = status
+    }
+
+    init(from decoder: Decoder) throws {
+        let response = try APIAssistantTurnResponse(from: decoder)
+        self.init(
+            session: ChatSessionSummary(api: response.session),
+            userMessage: ChatMessage(api: response.userMessage),
+            messageId: response.messageId,
+            status: response.status
+        )
+    }
 }
 
 /// Response when polling for message completion status
 struct MessageStatusResponse: Codable {
     let messageId: Int
-    let status: MessageProcessingStatus
+    let status: APIMessageProcessingStatus
     let assistantMessage: ChatMessage?
     let error: String?
 
@@ -61,6 +127,28 @@ struct MessageStatusResponse: Codable {
         case status
         case assistantMessage = "assistant_message"
         case error
+    }
+
+    init(
+        messageId: Int,
+        status: APIMessageProcessingStatus,
+        assistantMessage: ChatMessage? = nil,
+        error: String? = nil
+    ) {
+        self.messageId = messageId
+        self.status = status
+        self.assistantMessage = assistantMessage
+        self.error = error
+    }
+
+    init(from decoder: Decoder) throws {
+        let response = try APIMessageStatusResponse(from: decoder)
+        self.init(
+            messageId: response.messageId,
+            status: response.status,
+            assistantMessage: response.assistantMessage.map(ChatMessage.init(api:)),
+            error: response.error
+        )
     }
 
     var isCompleted: Bool {
@@ -80,7 +168,7 @@ struct MessageStatusResponse: Codable {
 struct InitialSuggestionsResponse: Codable {
     let id: Int
     let sessionId: Int
-    let role: ChatMessageRole
+    let role: APIChatMessageRole
     let content: String
     let timestamp: String
 
@@ -232,12 +320,34 @@ struct AssistantTurnResponse: Codable {
     let session: ChatSessionSummary
     let userMessage: ChatMessage
     let messageId: Int
-    let status: MessageProcessingStatus
+    let status: APIMessageProcessingStatus
 
     enum CodingKeys: String, CodingKey {
         case session
         case userMessage = "user_message"
         case messageId = "message_id"
         case status
+    }
+
+    init(
+        session: ChatSessionSummary,
+        userMessage: ChatMessage,
+        messageId: Int,
+        status: APIMessageProcessingStatus
+    ) {
+        self.session = session
+        self.userMessage = userMessage
+        self.messageId = messageId
+        self.status = status
+    }
+
+    init(from decoder: Decoder) throws {
+        let response = try APIAssistantTurnResponse(from: decoder)
+        self.init(
+            session: ChatSessionSummary(api: response.session),
+            userMessage: ChatMessage(api: response.userMessage),
+            messageId: response.messageId,
+            status: response.status
+        )
     }
 }

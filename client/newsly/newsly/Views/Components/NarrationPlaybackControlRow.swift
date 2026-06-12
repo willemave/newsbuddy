@@ -12,18 +12,21 @@ struct NarrationPlaybackControlRow: View {
 
     let target: NarrationTarget?
     let isPreparing: Bool
+    let cornerRadius: CGFloat
     let onTogglePlayback: () -> Void
 
     init(
         playbackService: NarrationPlaybackService,
         target: NarrationTarget?,
         isPreparing: Bool,
+        cornerRadius: CGFloat = 10,
         onTogglePlayback: @escaping () -> Void
     ) {
         self._playbackService = ObservedObject(wrappedValue: playbackService)
         self._progressState = ObservedObject(wrappedValue: playbackService.progress)
         self.target = target
         self.isPreparing = isPreparing
+        self.cornerRadius = cornerRadius
         self.onTogglePlayback = onTogglePlayback
     }
 
@@ -36,7 +39,7 @@ struct NarrationPlaybackControlRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(Color.surfacePrimary.opacity(0.65))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     private var horizontalControls: some View {
@@ -76,6 +79,7 @@ struct NarrationPlaybackControlRow: View {
                     Image(systemName: playbackIconName)
                         .font(.appSymbol(size: 12, weight: .bold))
                         .foregroundStyle(Color.terracottaPrimary)
+                        .offset(x: playbackIconName == "play.fill" ? 1 : 0)
                 }
             }
             .frame(width: 44, height: 44)
@@ -99,11 +103,14 @@ struct NarrationPlaybackControlRow: View {
                         .foregroundStyle(isSelected(option) ? Color.terracottaPrimary : Color.onSurfaceSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                        .frame(width: 48, height: 44)
+                        // Visible pill matches the 36pt play/pause circle; the
+                        // outer frame keeps the full 44pt hit target.
+                        .frame(width: 48, height: 36)
                         .background(
                             Capsule()
                                 .fill(isSelected(option) ? Color.terracottaPrimary.opacity(0.12) : Color.clear)
                         )
+                        .frame(width: 48, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -201,7 +208,7 @@ private struct PlaybackProgressScrubber: View {
                         .position(x: max(thumbX / 2, 0), y: 19)
 
                     Text(currentTimeText)
-                        .font(.appSans(size: 8, weight: .semibold).monospacedDigit())
+                        .font(.appSans(size: 10, weight: .semibold).monospacedDigit())
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -233,7 +240,7 @@ private struct PlaybackProgressScrubber: View {
                 Spacer(minLength: 6)
                 Text(durationText)
             }
-            .font(.appSans(size: 8, weight: .medium).monospacedDigit())
+            .font(.appSans(size: 10, weight: .medium).monospacedDigit())
             .foregroundStyle(Color.onSurfaceSecondary.opacity(0.75))
         }
         .opacity(isEnabled ? 1 : 0.55)

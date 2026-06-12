@@ -84,7 +84,7 @@ enum ReaderPalette: String, CaseIterable, Identifiable {
         case .graphiteSlate:
             return ReaderPaletteColors(
                 surfacePrimary: Self.adaptive(light: 0xf4f6f7, dark: 0x111213),
-                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x1b1c1e),
+                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x202224),
                 surfaceTertiary: Self.adaptive(light: 0xe8edf1, dark: 0x25272a),
                 surfaceContainer: Self.adaptive(light: 0xdce4ea, dark: 0x2d3034),
                 surfaceContainerHigh: Self.adaptive(light: 0xccd7df, dark: 0x373b3f),
@@ -104,7 +104,7 @@ enum ReaderPalette: String, CaseIterable, Identifiable {
         case .inkEucalyptus:
             return ReaderPaletteColors(
                 surfacePrimary: Self.adaptive(light: 0xf3f7f4, dark: 0x101211),
-                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x1b1e1c),
+                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x202421),
                 surfaceTertiary: Self.adaptive(light: 0xe6eee9, dark: 0x242926),
                 surfaceContainer: Self.adaptive(light: 0xd7e4dc, dark: 0x2d322e),
                 surfaceContainerHigh: Self.adaptive(light: 0xc8d8ce, dark: 0x373e3a),
@@ -124,7 +124,7 @@ enum ReaderPalette: String, CaseIterable, Identifiable {
         case .charcoalDustyRose:
             return ReaderPaletteColors(
                 surfacePrimary: Self.adaptive(light: 0xf8f4f5, dark: 0x111011),
-                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x1c191a),
+                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x211e1f),
                 surfaceTertiary: Self.adaptive(light: 0xefe6e8, dark: 0x252122),
                 surfaceContainer: Self.adaptive(light: 0xe3d5d9, dark: 0x2f2a2c),
                 surfaceContainerHigh: Self.adaptive(light: 0xd7c5cb, dark: 0x3b3437),
@@ -144,7 +144,7 @@ enum ReaderPalette: String, CaseIterable, Identifiable {
         case .aubergineMist:
             return ReaderPaletteColors(
                 surfacePrimary: Self.adaptive(light: 0xf5f4f8, dark: 0x121114),
-                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x1e1d21),
+                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x232228),
                 surfaceTertiary: Self.adaptive(light: 0xe9e6f0, dark: 0x29272f),
                 surfaceContainer: Self.adaptive(light: 0xddd8e8, dark: 0x33313b),
                 surfaceContainerHigh: Self.adaptive(light: 0xd0c9dc, dark: 0x3d3b47),
@@ -164,7 +164,7 @@ enum ReaderPalette: String, CaseIterable, Identifiable {
         case .newspaperOxblood:
             return ReaderPaletteColors(
                 surfacePrimary: Self.adaptive(light: 0xf5f2ea, dark: 0x10100e),
-                surfaceSecondary: Self.adaptive(light: 0xfffdf8, dark: 0x191817),
+                surfaceSecondary: Self.adaptive(light: 0xfffdf8, dark: 0x1e1d1b),
                 surfaceTertiary: Self.adaptive(light: 0xe7e2d4, dark: 0x232220),
                 surfaceContainer: Self.adaptive(light: 0xddd5c2, dark: 0x2c2a27),
                 surfaceContainerHigh: Self.adaptive(light: 0xd1c7b2, dark: 0x353430),
@@ -184,7 +184,7 @@ enum ReaderPalette: String, CaseIterable, Identifiable {
         case .porcelainGreen:
             return ReaderPaletteColors(
                 surfacePrimary: Self.adaptive(light: 0xf3f7f4, dark: 0x101010),
-                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x191a19),
+                surfaceSecondary: Self.adaptive(light: 0xffffff, dark: 0x1f201f),
                 surfaceTertiary: Self.adaptive(light: 0xe5eee9, dark: 0x232623),
                 surfaceContainer: Self.adaptive(light: 0xd7e3dd, dark: 0x2d312f),
                 surfaceContainerHigh: Self.adaptive(light: 0xc8d7d0, dark: 0x383d3a),

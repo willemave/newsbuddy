@@ -11,19 +11,7 @@ import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "ProcessingCountService")
 
-struct ProcessingCountResponse: Codable {
-    let processingCount: Int
-    let longFormCount: Int
-    let newsCount: Int
-    let newsCrawlCount: Int
-
-    enum CodingKeys: String, CodingKey {
-        case processingCount = "processing_count"
-        case longFormCount = "long_form_count"
-        case newsCount = "news_count"
-        case newsCrawlCount = "news_crawl_count"
-    }
-}
+typealias ProcessingCountResponse = APIProcessingCountResponse
 
 @MainActor
 final class ProcessingCountService: ObservableObject {

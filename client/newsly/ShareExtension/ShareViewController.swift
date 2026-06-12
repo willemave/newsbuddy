@@ -445,20 +445,16 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
         let handler = ShareURLRouting.handler(for: url)
         let shouldStartChat = linkHandlingMode == .chat
-        var body: [String: Any] = [
-            "url": url.absoluteString,
-            "crawl_links": linkHandlingMode == .addLinks && !shouldStartChat,
-            "share_and_chat": shouldStartChat,
-            "save_to_knowledge_and_mark_read": shouldStartChat || bookmarkOnlyToggleView.isOn,
-            "subscribe_to_feed": linkHandlingMode == .addFeed && !shouldStartChat,
-        ]
-        if shouldStartChat {
-            body["chat_initial_message"] = chatInitialMessage
-        }
-        if let platform = handler.platform {
-            body["platform"] = platform
-        }
-        let requestBody = try JSONSerialization.data(withJSONObject: body)
+        let payload = APISubmitContentRequest(
+            url: url.absoluteString,
+            platform: handler.platform,
+            crawlLinks: linkHandlingMode == .addLinks && !shouldStartChat,
+            subscribeToFeed: linkHandlingMode == .addFeed && !shouldStartChat,
+            shareAndChat: shouldStartChat,
+            chatInitialMessage: shouldStartChat ? chatInitialMessage : nil,
+            saveToKnowledgeAndMarkRead: shouldStartChat || bookmarkOnlyToggleView.isOn
+        )
+        let requestBody = try JSONEncoder().encode(payload)
 
         do {
             try await APIClient.shared.requestVoid(

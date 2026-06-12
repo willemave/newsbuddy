@@ -26,119 +26,87 @@ struct LongFormCard: View {
     var onOpen: (() -> Void)?
     var onToggleAudio: (() -> Void)?
 
+    @State private var heroWidth: CGFloat = 0
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Color.clear
-                .frame(height: LongFormCardDesign.imageHeight)
-                .overlay {
-                    heroImage
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Button {
+                onOpen?()
+            } label: {
+                heroSection
+            }
+            .buttonStyle(CardRegionButtonStyle())
+            .accessibilityHidden(true)
+            .overlay(alignment: .topTrailing) {
+                if isAudioSupported {
+                    audioActionButton
+                        .padding(12)
                 }
-                .clipped()
-                .overlay(alignment: .bottom) {
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0.0),
-                            .init(color: Color.surfaceSecondary.opacity(0.35), location: 0.62),
-                            .init(color: Color.surfaceSecondary, location: 1.0),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-                .overlay(alignment: .topTrailing) {
-                    if isAudioSupported {
-                        audioActionButton
-                            .padding(12)
-                    }
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onOpen?()
-                }
+            }
 
             VStack(alignment: .leading, spacing: 0) {
-                if let relativeTime = content.relativeTimeDisplay {
-                    HStack(spacing: 8) {
-                        Text(relativeTime)
-                            .font(.terracottaBodySmall)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onOpen?()
-                    }
-                    .padding(.bottom, 8)
-                }
-
-                FeedListText(
-                    content.displayTitle,
-                    textColor: .readerBodyText,
-                    font: .terracottaHeadlineLarge,
-                    lineLimit: 3,
-                    onDigDeeper: onDigDeeper,
-                    onTap: onOpen
-                )
-                .padding(.bottom, 8)
-                .accessibilityLabel(content.displayTitle)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityHint("Opens content")
-                .accessibilityAction {
+                Button {
                     onOpen?()
-                }
+                } label: {
+                    VStack(alignment: .leading, spacing: 0) {
+                        FeedListText(
+                            content.displayTitle,
+                            textColor: .readerBodyText,
+                            font: .terracottaHeadlineLarge,
+                            lineLimit: 3,
+                            onDigDeeper: onDigDeeper
+                        )
+                        .padding(.bottom, 8)
 
-                if let summary = summaryText {
-                    FeedListText(
-                        summary,
-                        textColor: .readerBodyText,
-                        font: .readerSummaryBody,
-                        lineLimit: 3,
-                        onDigDeeper: onDigDeeper,
-                        onTap: onOpen
-                    )
-                    .padding(.bottom, 12)
-                    .accessibilityLabel(summary)
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityHint("Opens content")
-                    .accessibilityAction {
-                        onOpen?()
+                        if let summary = summaryText {
+                            FeedListText(
+                                summary,
+                                textColor: .readerBodyText,
+                                font: .readerSummaryBody,
+                                lineLimit: 3,
+                                onDigDeeper: onDigDeeper
+                            )
+                            .padding(.bottom, 12)
+                        }
                     }
                 }
+                .buttonStyle(CardRegionButtonStyle())
+                .accessibilityLabel(content.displayTitle)
+                .accessibilityHint("Opens content")
 
                 HStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: contentTypeIcon)
-                            .font(.appSymbol(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.onSurfaceSecondary)
-                            .frame(width: 18, height: 18)
-                            .accessibilityHidden(true)
+                    Button {
+                        onOpen?()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: contentTypeIcon)
+                                .font(.appSymbol(size: 13, weight: .medium))
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                                .frame(width: 18, height: 18)
+                                .accessibilityHidden(true)
 
-                        Text(sourceLabel)
-                            .font(.terracottaBodySmall)
-                            .tracking(0.5)
-                            .foregroundStyle(Color.platformLabel)
-                            .lineLimit(1)
+                            Text(footerMetadata)
+                                .kicker(color: .platformLabel)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onOpen?()
-                    }
+                    .buttonStyle(CardRegionButtonStyle())
                     .accessibilityLabel("\(contentTypeLabel), \(sourceLabel)")
-                    .accessibilityAddTraits(.isButton)
                     .accessibilityHint("Opens content")
-                    .accessibilityAction {
-                        onOpen?()
-                    }
 
                     Spacer()
 
                     HStack(spacing: 12) {
                         Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             onMarkRead?()
                         } label: {
                             Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
                                 .font(.appSymbol(size: 20))
                                 .foregroundStyle(Color.onSurfaceSecondary)
+                                .contentTransition(.symbolEffect(.replace))
+                                .animation(.easeOut(duration: 0.2), value: content.isRead)
                                 .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
@@ -147,6 +115,7 @@ struct LongFormCard: View {
                         .accessibilityLabel(content.isRead ? "Marked as read" : "Mark as read")
 
                         Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             onToggleKnowledgeSave?()
                         } label: {
                             KnowledgeSaveIcon(
@@ -169,11 +138,13 @@ struct LongFormCard: View {
                         playbackService: playbackService,
                         target: audioTarget,
                         isPreparing: isAudioPreparing,
+                        cornerRadius: CornerRadius.nestedControl,
                         onTogglePlayback: {
                             onToggleAudio?()
                         }
                     )
                     .padding(.top, 12)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if let audioErrorMessage {
@@ -182,6 +153,7 @@ struct LongFormCard: View {
                         .foregroundStyle(Color.statusDestructive)
                         .lineLimit(2)
                         .padding(.top, 8)
+                        .transition(.opacity)
                 }
             }
             .padding(.horizontal, 16)
@@ -202,10 +174,40 @@ struct LongFormCard: View {
                 .offset(y: CardMetrics.textOverlapOffset)
                 .padding(.bottom, CardMetrics.textOverlapOffset)
             )
+            .animation(.spring(duration: 0.3, bounce: 0), value: isAudioControlVisible)
+            .animation(.easeOut(duration: 0.2), value: audioErrorMessage)
         }
         .background(Color.surfaceSecondary)
         .clipShape(RoundedRectangle(cornerRadius: CardMetrics.cardCornerRadius, style: .continuous))
-        .shadow(color: Color.onSurface.opacity(0.06), radius: 32, x: 0, y: 8)
+        .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
+        .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 8)
+    }
+
+    private var heroSection: some View {
+        Color.clear
+            .frame(height: LongFormCardDesign.imageHeight)
+            .overlay {
+                heroImage
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .clipped()
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                heroWidth = width
+            }
+            .overlay(alignment: .bottom) {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: Color.surfaceSecondary.opacity(0.35), location: 0.62),
+                        .init(color: Color.surfaceSecondary, location: 1.0),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .contentShape(Rectangle())
     }
 
     private var audioActionButton: some View {
@@ -216,7 +218,7 @@ struct LongFormCard: View {
                 Circle()
                     .fill(Color.surfacePrimary.opacity(0.92))
                     .frame(width: 38, height: 38)
-                    .shadow(color: Color.onSurface.opacity(0.16), radius: 10, x: 0, y: 4)
+                    .shadow(color: Color.black.opacity(0.16), radius: 10, x: 0, y: 4)
 
                 if isAudioPreparing {
                     ProgressView()
@@ -226,6 +228,9 @@ struct LongFormCard: View {
                     Image(systemName: isAudioPlaying ? "pause.fill" : "play.fill")
                         .font(.appSymbol(size: 14, weight: .bold))
                         .foregroundStyle(Color.terracottaPrimary)
+                        .contentTransition(.symbolEffect(.replace))
+                        .animation(.easeOut(duration: 0.18), value: isAudioPlaying)
+                        .offset(x: isAudioPlaying ? 0 : 1)
                 }
             }
             .frame(width: 44, height: 44)
@@ -239,9 +244,22 @@ struct LongFormCard: View {
 
     @ViewBuilder
     private var heroImage: some View {
+        // Loading waits for the measured card width so each hero is decoded once
+        // at its final size; a guessed width (e.g. UIScreen bounds) over-decodes
+        // on iPad and would trigger a second decode when the real width differs.
+        if heroWidth <= 0 {
+            placeholderGradient
+        } else {
+            heroImageContent(
+                targetSize: CGSize(width: heroWidth, height: LongFormCardDesign.imageHeight)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func heroImageContent(targetSize: CGSize) -> some View {
         let imageUrl = content.imageUrl.flatMap { buildImageURL(from: $0) }
         let thumbnailUrl = content.thumbnailUrl.flatMap { buildImageURL(from: $0) }
-        let targetSize = CGSize(width: UIScreen.main.bounds.width, height: LongFormCardDesign.imageHeight)
         if let imageUrl {
             CachedAsyncImage(url: imageUrl, thumbnailUrl: thumbnailUrl, targetSize: targetSize) { image in
                 image
@@ -294,6 +312,14 @@ struct LongFormCard: View {
         return "NEWSLY"
     }
 
+    private var footerMetadata: String {
+        var parts = [sourceLabel]
+        if let time = content.relativeTimeDisplay {
+            parts.append(time.uppercased())
+        }
+        return parts.joined(separator: "  •  ")
+    }
+
     private var contentTypeIcon: String {
         switch content.apiContentType {
         case .article:
@@ -323,5 +349,16 @@ struct LongFormCard: View {
         let baseURL = AppSettings.shared.baseURL
         let fullURL = urlString.hasPrefix("/") ? baseURL + urlString : baseURL + "/" + urlString
         return URL(string: fullURL)
+    }
+}
+
+// Press feedback for the card's open regions. Opacity-only: scaling a single
+// region of the card would read as fragmented, and the regions stay separate
+// accessibility elements so feed e2e flows can target the inner actions.
+private struct CardRegionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
     }
 }

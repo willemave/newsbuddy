@@ -178,7 +178,7 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     var shouldOfferRetryFromLoading: Bool {
-        step == .loading && (hasReachedDiscoveryPollingLimit || discoveryRunStatus == "failed")
+        step == .loading && (hasReachedDiscoveryPollingLimit || isDiscoveryFailedStatus(discoveryRunStatus))
     }
 
     var shouldOfferContinueWaiting: Bool {
@@ -479,7 +479,7 @@ final class OnboardingViewModel: ObservableObject {
         discoveryErrorMessage = status.errorMessage
         hasReachedDiscoveryPollingLimit = false
 
-        if status.runStatus == "completed" {
+        if discoveryTaskStatus(status.runStatus) == .completed {
             if let suggestions = status.suggestions {
                 applySuggestions(suggestions)
             } else {
@@ -493,7 +493,7 @@ final class OnboardingViewModel: ObservableObject {
             return
         }
 
-        if status.runStatus == "failed" {
+        if discoveryTaskStatus(status.runStatus) == .failed {
             suggestions = nil
             selectedSourceKeys = []
             selectedSubreddits = []
@@ -679,8 +679,18 @@ final class OnboardingViewModel: ObservableObject {
         substackSuggestions.isEmpty && podcastSuggestions.isEmpty && subredditSuggestions.isEmpty
     }
 
+    private func discoveryTaskStatus(_ status: String?) -> APITaskStatus? {
+        guard let status else { return nil }
+        return APITaskStatus(rawValue: status)
+    }
+
     private func isDiscoveryTerminalStatus(_ status: String?) -> Bool {
-        status == "completed" || status == "failed"
+        let taskStatus = discoveryTaskStatus(status)
+        return taskStatus == .completed || taskStatus == .failed
+    }
+
+    private func isDiscoveryFailedStatus(_ status: String?) -> Bool {
+        discoveryTaskStatus(status) == .failed
     }
 
     private func restoreProgress(_ snapshot: OnboardingProgressSnapshot) {

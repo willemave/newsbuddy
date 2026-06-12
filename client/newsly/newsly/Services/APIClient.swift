@@ -195,33 +195,6 @@ class APIClient {
         )
     }
     
-    func requestRaw(_ endpoint: String,
-                    method: String = "GET",
-                    body: Data? = nil,
-                    queryItems: [URLQueryItem]? = nil,
-                    allowRefresh: Bool = true) async throws -> [String: Any] {
-        let (data, _) = try await executeRequest(
-            endpoint: endpoint,
-            method: method,
-            body: body,
-            queryItems: queryItems,
-            accept: nil,
-            allowRefresh: allowRefresh,
-            authFailureReason: "request_raw_no_refresh_remaining"
-        )
-
-        guard let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-            throw APIError.decodingError(
-                NSError(
-                    domain: "APIClient",
-                    code: 0,
-                    userInfo: [NSLocalizedDescriptionKey: "Invalid JSON response"]
-                )
-            )
-        }
-        return json
-    }
-
     private func buildRequest(
         endpoint: String,
         method: String,

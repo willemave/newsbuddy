@@ -13,6 +13,8 @@ extension APIContentType {
             "Insight Report"
         case .unknown:
             "Unknown"
+        case .unknownRaw:
+            "Unknown"
         }
     }
 }
@@ -34,6 +36,8 @@ extension APIContentStatus {
             "Failed"
         case .skipped:
             "Skipped"
+        case .unknown:
+            "Unknown"
         }
     }
 }

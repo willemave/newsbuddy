@@ -9,84 +9,22 @@ enum NarrationTarget: Hashable {
     case audioEpisode(Int)
 }
 
-struct AudioEpisode: Codable, Identifiable, Hashable {
-    let id: Int
-    let kind: String
-    let status: String
-    let title: String
-    let sourceContentIds: [Int]
-    let sourceItemIds: [Int]
-    let sourceCount: Int
-    let sourceTitles: [String]
-    let readOnPlayContentIds: [Int]
-    let readOnPlayNewsItemIds: [Int]
-    let durationSeconds: Int?
-    let audioUrl: String?
-    let streamUrl: String?
-    let scriptText: String?
-    let errorMessage: String?
+typealias AudioEpisode = APIAudioEpisodeResponse
 
-    enum CodingKeys: String, CodingKey {
-        case id
-        case kind
-        case status
-        case title
-        case sourceContentIds = "source_content_ids"
-        case sourceItemIds = "source_item_ids"
-        case sourceCount = "source_count"
-        case sourceTitles = "source_titles"
-        case readOnPlayContentIds = "read_on_play_content_ids"
-        case readOnPlayNewsItemIds = "read_on_play_news_item_ids"
-        case durationSeconds = "duration_seconds"
-        case audioUrl = "audio_url"
-        case streamUrl = "stream_url"
-        case scriptText = "script_text"
-        case errorMessage = "error_message"
-    }
+typealias AudioEpisodeShareResponse = APIAudioEpisodeShareResponse
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(Int.self, forKey: .id)
-        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "unknown"
-        status = try container.decode(String.self, forKey: .status)
-        title = try container.decode(String.self, forKey: .title)
-        sourceContentIds = try container.decodeIfPresent([Int].self, forKey: .sourceContentIds) ?? []
-        sourceItemIds = try container.decodeIfPresent([Int].self, forKey: .sourceItemIds) ?? []
-        sourceCount = try container.decodeIfPresent(Int.self, forKey: .sourceCount)
-            ?? (sourceContentIds.count + sourceItemIds.count)
-        sourceTitles = try container.decodeIfPresent([String].self, forKey: .sourceTitles) ?? []
-        readOnPlayContentIds = try container.decodeIfPresent([Int].self, forKey: .readOnPlayContentIds) ?? []
-        readOnPlayNewsItemIds = try container.decodeIfPresent([Int].self, forKey: .readOnPlayNewsItemIds) ?? []
-        durationSeconds = try container.decodeIfPresent(Int.self, forKey: .durationSeconds)
-        audioUrl = try container.decodeIfPresent(String.self, forKey: .audioUrl)
-        streamUrl = try container.decodeIfPresent(String.self, forKey: .streamUrl)
-        scriptText = try container.decodeIfPresent(String.self, forKey: .scriptText)
-        errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
-    }
-}
+extension APIAudioEpisodeResponse: Identifiable {}
 
-struct AudioEpisodeShareResponse: Codable, Hashable {
-    let shareEnabled: Bool
-    let sharePageUrl: String?
-    let shareAudioUrl: String?
-
-    enum CodingKeys: String, CodingKey {
-        case shareEnabled = "share_enabled"
-        case sharePageUrl = "share_page_url"
-        case shareAudioUrl = "share_audio_url"
-    }
-}
-
-extension AudioEpisode {
+extension APIAudioEpisodeResponse {
     var isGenerating: Bool {
-        status == "pending" || status == "processing"
+        status == .pending || status == .processing
     }
 
     var isCompleted: Bool {
-        status == "completed"
+        status == .completed
     }
 
     var isFailed: Bool {
-        status == "failed"
+        status == .failed
     }
 }

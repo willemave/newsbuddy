@@ -10,8 +10,8 @@ import UIKit
 import os.log
 
 private enum DiscussionTab: String, CaseIterable {
-    case comments = "Comments"
-    case links = "Links"
+    case comments = "COMMENTS"
+    case links = "LINKS"
 }
 
 private enum DetailSheetDestination: String, Identifiable {
@@ -68,6 +68,7 @@ private enum DetailDesign {
     static let textOnlyStandardHeaderTopSpacer: CGFloat = 48
     static let actionIconOpticalInset: CGFloat = 12
     static let edgeNavigationSwipeWidth: CGFloat = 44
+    static let edgeNavigationTopExclusionHeight: CGFloat = 120
 }
 
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
@@ -136,6 +137,8 @@ struct ContentDetailView: View {
             contentIds: allContentIds,
             surfaceName: navigationSurfaceName,
             edgeWidth: DetailDesign.edgeNavigationSwipeWidth,
+            topHitExclusionHeight: DetailDesign.edgeNavigationTopExclusionHeight,
+            leadingEdgePreviousEnabled: navigationContext.surface != .fastNews,
             onDismiss: { dismiss() },
             onNext: navigateToNext,
             onPrevious: navigateToPrevious
@@ -299,14 +302,10 @@ struct ContentDetailView: View {
                             }
 
                             if content.apiContentType == .news {
-                                if let newsMetadata = content.newsMetadata {
+                                if content.newsMetadata != nil {
                                     modernSectionPlain(isPadded: false) {
                                         NewsItemDetailView(
-                                            content: content,
-                                            metadata: newsMetadata,
-                                            onDiscussionTap: { url in
-                                                handleDiscussionTap(content: content, fallbackURL: url)
-                                            }
+                                            content: content
                                         )
                                     }
                                     .padding(.horizontal, DetailDesign.horizontalPadding)
@@ -326,7 +325,7 @@ struct ContentDetailView: View {
                             }
 
                             if let discussion = inlineDiscussionSummaryPayload(for: content) {
-                                communityDiscussionSummarySection(discussion: discussion)
+                                communityDiscussionSummarySection(discussion: discussion, content: content)
                                     .padding(.horizontal, DetailDesign.horizontalPadding)
                                     .padding(.top, 16)
                             }
@@ -969,12 +968,12 @@ struct ContentDetailView: View {
             if let existingEpisode = audioEpisodeByContentId[content.id] {
                 episode = existingEpisode
                 detailLogger.info(
-                    "[PodcastAudio] reusing episode | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status, privacy: .public)"
+                    "[PodcastAudio] reusing episode | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public)"
                 )
             } else {
                 episode = try await createPodcastAudioEpisode(for: content)
                 detailLogger.info(
-                    "[PodcastAudio] episode created | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+                    "[PodcastAudio] episode created | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
                 )
             }
             audioEpisodeByContentId[content.id] = episode
@@ -1005,7 +1004,7 @@ struct ContentDetailView: View {
 
     private func createPodcastAudioEpisode(for content: ContentDetail) async throws -> AudioEpisode {
         switch content.apiContentType {
-        case .article, .podcast, .insight_report, .unknown:
+        case .article, .podcast, .insight_report, .unknown, .unknownRaw:
             return try await AudioEpisodeService.shared.createContentCouncilEpisode(
                 contentId: content.id,
                 delivery: .inline
@@ -1250,13 +1249,14 @@ struct ContentDetailView: View {
     }
 
     private func detailTitleFont(for content: ContentDetail) -> Font {
-        content.apiContentType == .news ? .terracottaHeadlineCompact : .appTitle3
+        if content.apiContentType == .news {
+            return .appSerif(size: 20, relativeTo: .title3, weight: .medium)
+        }
+        return .appTitle3
     }
 
     private func detailTitleWeight(for content: ContentDetail) -> Font.Weight {
-        // Match the title token's baked-in weight (.semibold) rather than
-        // overriding it; both serif title tokens are already semibold.
-        .semibold
+        content.apiContentType == .news ? .medium : .semibold
     }
 
     private func detailMetadataAccessibilityLabel(for content: ContentDetail) -> String {
@@ -1339,17 +1339,13 @@ struct ContentDetailView: View {
         case .article: return "doc.text"
         case .podcast: return "headphones"
         case .news: return "newspaper"
-        case .insight_report, .unknown, .none: return "doc.text"
+        case .insight_report, .unknown, .unknownRaw, .none: return "doc.text"
         }
     }
 
     // MARK: - Modern Action Bar (Minimal, Twitter-inspired)
     @ViewBuilder
     private func actionBar(content: ContentDetail, overlaid: Bool = false) -> some View {
-        // Each action is given an equal, gap-free share of the bar width via
-        // .frame(maxWidth: .infinity) + .contentShape(Rectangle()). This makes the
-        // tap target the full segment (≥44pt, larger than the 20pt glyph and with
-        // no dead space between icons) rather than only the icon's 44pt box.
         HStack(spacing: 0) {
             // Primary action - Open in browser
             if let url = URL(string: content.url) {
@@ -1359,8 +1355,7 @@ struct ContentDetailView: View {
                     minimalActionIcon("safari", overlaid: overlaid)
                 }
                 .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+                .detailActionBarSegment()
                 .accessibilityIdentifier("content.action.open_external")
                 .accessibilityLabel("Open article")
             }
@@ -1369,8 +1364,7 @@ struct ContentDetailView: View {
             Button(action: { activeSheet = .share }) {
                 minimalActionIcon("square.and.arrow.up", overlaid: overlaid)
             }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
+            .detailActionBarSegment()
             .accessibilityIdentifier("content.action.share")
 
             if viewModel.canShowReader(for: content) {
@@ -1385,8 +1379,7 @@ struct ContentDetailView: View {
                         minimalActionIcon("doc.richtext", overlaid: overlaid)
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+                .detailActionBarSegment()
                 .accessibilityIdentifier("content.action.reader")
                 .accessibilityLabel("Read full article")
             }
@@ -1396,8 +1389,7 @@ struct ContentDetailView: View {
                 Button { activeSheet = .download } label: {
                     minimalActionIcon("tray.and.arrow.down", overlaid: overlaid)
                 }
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+                .detailActionBarSegment()
                 .accessibilityIdentifier("content.action.download_more")
                 .accessibilityLabel("Download more from this series")
             }
@@ -1420,8 +1412,7 @@ struct ContentDetailView: View {
                     }
                 }
                 .disabled(isConverting)
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+                .detailActionBarSegment()
                 .accessibilityIdentifier("content.action.convert")
                 .accessibilityLabel("Save linked article to Knowledge")
             }
@@ -1432,8 +1423,7 @@ struct ContentDetailView: View {
                 }) {
                     knowledgeActionIcon(isSaved: content.isSavedToKnowledge, overlaid: overlaid)
                 }
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+                .detailActionBarSegment()
                 .accessibilityIdentifier("content.action.knowledge")
                 .accessibilityLabel(content.isSavedToKnowledge ? "Remove from Knowledge" : "Save to Knowledge")
             }
@@ -1456,8 +1446,7 @@ struct ContentDetailView: View {
                 ) {
                     podcastAudioActionIcon(for: content, overlaid: overlaid)
                 }
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+                .detailActionBarSegment()
                 .accessibilityIdentifier("content.action.podcast_audio")
             }
 
@@ -1466,8 +1455,7 @@ struct ContentDetailView: View {
             } label: {
                 minimalActionIcon("rectangle.stack", overlaid: overlaid)
             }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
+            .detailActionBarSegment()
             .accessibilityIdentifier("content.action.learning_deck")
             .accessibilityLabel("Create Learning Deck")
 
@@ -1496,11 +1484,11 @@ struct ContentDetailView: View {
                 }
             }
             .disabled(isCheckingChatSession)
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
+            .detailActionBarSegment()
             .accessibilityIdentifier("content.action.deep_dive")
             .accessibilityLabel("Start deep dive")
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 44)
         .textSelection(.disabled)
     }
@@ -2344,10 +2332,10 @@ struct ContentDetailView: View {
     }
 
     @ViewBuilder
-    private func communityDiscussionSummarySection(discussion: ContentDiscussion) -> some View {
+    private func communityDiscussionSummarySection(discussion: ContentDiscussion, content: ContentDetail) -> some View {
         if let summary = discussion.summary {
             VStack(alignment: .leading, spacing: 14) {
-                discussionSummaryHeader(summary: summary, discussion: discussion)
+                discussionSummaryHeader(summary: summary, discussion: discussion, content: content)
 
                 if !summary.topics.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
@@ -2363,49 +2351,48 @@ struct ContentDetailView: View {
     @ViewBuilder
     private func discussionSummaryHeader(
         summary: DiscussionSummary,
-        discussion: ContentDiscussion
+        discussion: ContentDiscussion,
+        content: ContentDetail
     ) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            Text("Comments")
-                .font(.readerBody)
-                .foregroundColor(Color.onSurface)
+            detailSectionHeaderText("Comments", color: Color.onSurface)
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
                 .layoutPriority(1)
 
             Spacer(minLength: 10)
 
-            HStack(alignment: .center, spacing: 12) {
-                if let commentCount = discussion.commentCount, commentCount > 0 {
-                    Text("\(commentCount) summarized")
-                        .font(.appSubheadline.weight(.medium))
-                        .foregroundColor(Color.onSurfaceSecondary)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
+            if let url = discussionSummaryURL(summary: summary, discussion: discussion) {
+                HStack(alignment: .center, spacing: 4) {
+                    Button {
+                        handleDiscussionTap(content: content, fallbackURL: url)
+                    } label: {
+                        discussionHeaderIcon("bubble.left.and.bubble.right")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open comments")
+                    .accessibilityIdentifier("content.discussion.open")
 
-                if let url = discussionSummaryURL(summary: summary, discussion: discussion) {
                     Button {
                         openInAppBrowser(url)
                     } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.up.right.square")
-                            Text("Open")
-                        }
-                        .font(.appSubheadline.weight(.semibold))
-                        .foregroundColor(Color.onSurfaceSecondary)
-                        .lineLimit(1)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
+                        discussionHeaderIcon("arrow.up.right.square")
                     }
                     .buttonStyle(.plain)
-                    .fixedSize(horizontal: true, vertical: false)
                     .accessibilityLabel("Open original discussion")
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+    }
+
+    private func discussionHeaderIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.appSymbol(size: 17, weight: .regular))
+            .foregroundColor(Color.onSurfaceSecondary)
+            .frame(width: 40, height: 40)
+            .contentShape(Rectangle())
     }
 
     private func discussionSummaryURL(
@@ -2475,8 +2462,7 @@ struct ContentDetailView: View {
         if let summary = discussion.summary {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Community Summary")
-                        .font(.readerBody)
+                    detailSectionHeaderText("Community Summary")
 
                     Text(summary.overview)
                         .font(.appCallout)
@@ -2498,15 +2484,14 @@ struct ContentDetailView: View {
 
                 if !summary.topics.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Key Topics")
-                            .font(.readerBody)
-                            .foregroundColor(Color.onSurfaceSecondary)
+                        detailSectionHeaderText("Key Topics")
 
                         ForEach(summary.topics) { topic in
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(topic.title)
+                                Text(topic.title.uppercased())
                                     .font(.appCallout)
                                     .fontWeight(.semibold)
+                                    .tracking(0.4)
                                 Text(topic.summary)
                                     .font(.appSubheadline)
                                     .foregroundColor(Color.readerBodyText)
@@ -2528,9 +2513,7 @@ struct ContentDetailView: View {
 
                 if !summary.representativeComments.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Representative Comments")
-                            .font(.readerBody)
-                            .foregroundColor(Color.onSurfaceSecondary)
+                        detailSectionHeaderText("Representative Comments")
 
                         ForEach(summary.representativeComments) { comment in
                             VStack(alignment: .leading, spacing: 5) {
@@ -2558,9 +2541,7 @@ struct ContentDetailView: View {
 
                 if !summary.notableLinks.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Notable Links")
-                            .font(.readerBody)
-                            .foregroundColor(Color.onSurfaceSecondary)
+                        detailSectionHeaderText("Notable Links")
 
                         ForEach(summary.notableLinks) { link in
                             if let url = URL(string: link.url) {
@@ -2776,9 +2757,10 @@ struct ContentDetailView: View {
                         .foregroundColor(Color.onSurfaceSecondary.opacity(0.75))
                         .accessibilityHidden(true)
 
-                    Text("Links from article or comments")
+                    Text("Links from article or comments".uppercased())
                         .font(.appFootnote.weight(.semibold))
                         .foregroundColor(Color.onSurfaceSecondary)
+                        .tracking(0.4)
 
                     Text("\(links.count)")
                         .font(.appCaption2.monospacedDigit().weight(.medium))
@@ -2996,9 +2978,7 @@ struct ContentDetailView: View {
                         Image(systemName: icon)
                             .font(.readerBody)
                             .foregroundColor(Color.onSurfaceSecondary)
-                        Text(title)
-                            .font(.readerBody)
-                            .foregroundColor(Color.onSurface)
+                        detailSectionHeaderText(title, color: Color.onSurface)
                     }
 
                     Spacer()
@@ -3047,10 +3027,18 @@ struct ContentDetailView: View {
                 .font(.readerBody)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .accessibilityHidden(true)
-            Text(title)
-                .font(.readerBody)
-                .foregroundColor(Color.onSurfaceSecondary)
+            detailSectionHeaderText(title)
         }
+    }
+
+    private func detailSectionHeaderText(
+        _ title: String,
+        color: Color = Color.onSurfaceSecondary
+    ) -> some View {
+        Text(title.uppercased())
+            .font(.readerBody)
+            .foregroundColor(color)
+            .tracking(0.4)
     }
 
     private func buildImageURL(from urlString: String) -> URL? {
@@ -3172,6 +3160,12 @@ private struct ChatSheetButtonStyle: ButtonStyle {
 }
 
 private extension View {
+    func detailActionBarSegment() -> some View {
+        self
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+    }
+
     func miniSheetOptionSurface() -> some View {
         self
             .padding(.vertical, 10)

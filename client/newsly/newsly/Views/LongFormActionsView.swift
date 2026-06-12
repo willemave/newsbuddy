@@ -19,34 +19,33 @@ struct LongFormActionsView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     Button(action: onCreateNarration) {
-                        LongFormActionChip(
+                        FeedActionChip(
                             title: isCustomNarrationGenerating ? "Creating narration" : "Create narration",
                             systemImage: "waveform",
                             isLoading: isCustomNarrationGenerating
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(EditorialCardButtonStyle())
                     .disabled(isCustomNarrationGenerating)
                     .accessibilityIdentifier("long.custom_narration.create")
 
                     Button(action: onShowNarrations) {
-                        LongFormActionChip(
+                        FeedActionChip(
                             title: "List narrations",
-                            systemImage: "list.bullet.rectangle",
-                            isLoading: false
+                            systemImage: "list.bullet.rectangle"
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(EditorialCardButtonStyle())
                     .accessibilityIdentifier("long.custom_narration.list")
 
                     Button(action: onSummarizeRecent) {
-                        LongFormActionChip(
+                        FeedActionChip(
                             title: "Summarize recent",
                             systemImage: "text.bubble",
                             isLoading: isStartingSummaryChat
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(EditorialCardButtonStyle())
                     .disabled(isStartingSummaryChat)
                     .accessibilityIdentifier("long.quick_action.summarize_recent")
                 }
@@ -62,6 +61,8 @@ struct LongFormActionsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeOut(duration: 0.2), value: customNarrationError)
+        .animation(.easeOut(duration: 0.2), value: summaryError)
     }
 
     private func errorText(_ message: String) -> some View {
@@ -70,39 +71,6 @@ struct LongFormActionsView: View {
             .foregroundStyle(Color.statusDestructive)
             .lineLimit(2)
             .padding(.horizontal, Spacing.appHorizontalMargin)
-    }
-}
-
-private struct LongFormActionChip: View {
-    let title: String
-    let systemImage: String
-    let isLoading: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(Color.terracottaPrimary)
-            } else {
-                Image(systemName: systemImage)
-                    .font(.appSymbol(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.terracottaPrimary)
-            }
-
-            Text(title)
-                .font(.terracottaBodyMedium.weight(.semibold))
-                .foregroundStyle(Color.onSurface)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(minHeight: 44)
-        .background(Color.surfaceSecondary)
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
-        }
+            .transition(.opacity)
     }
 }

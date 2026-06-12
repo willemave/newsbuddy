@@ -18,20 +18,6 @@ enum AudioEpisodeDelivery: String {
     case inline
 }
 
-private struct CustomNarrationCreatePayload: Encodable {
-    let contentIds: [Int]
-    let newsItemIds: [Int]
-    let title: String?
-    let markSourceContentReadOnPlay: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case contentIds = "content_ids"
-        case newsItemIds = "news_item_ids"
-        case title
-        case markSourceContentReadOnPlay = "mark_source_content_read_on_play"
-    }
-}
-
 final class AudioEpisodeService {
     static let shared = AudioEpisodeService()
 
@@ -53,7 +39,7 @@ final class AudioEpisodeService {
                 queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
             )
             audioEpisodeLogger.info(
-                "Create episode completed | kind=fast_news_digest episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
+                "Create episode completed | kind=fast_news_digest episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
             )
             return episode
         } catch {
@@ -79,7 +65,7 @@ final class AudioEpisodeService {
                 queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
             )
             audioEpisodeLogger.info(
-                "Create episode completed | kind=content_council_discussion contentId=\(contentId) episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
+                "Create episode completed | kind=content_council_discussion contentId=\(contentId) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
             )
             return episode
         } catch {
@@ -105,7 +91,7 @@ final class AudioEpisodeService {
                 queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
             )
             audioEpisodeLogger.info(
-                "Create episode completed | kind=news_item_discussion newsItemId=\(newsItemId) episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
+                "Create episode completed | kind=news_item_discussion newsItemId=\(newsItemId) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
             )
             return episode
         } catch {
@@ -124,7 +110,7 @@ final class AudioEpisodeService {
         delivery: AudioEpisodeDelivery = .background
     ) async throws -> AudioEpisode {
         let startedAt = Date()
-        let payload = CustomNarrationCreatePayload(
+        let payload = APICustomNarrationCreateRequest(
             contentIds: contentIds,
             newsItemIds: newsItemIds,
             title: title,
@@ -142,7 +128,7 @@ final class AudioEpisodeService {
                 queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
             )
             audioEpisodeLogger.info(
-                "Create episode completed | kind=custom_narration episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) sourceCount=\(episode.sourceCount)"
+                "Create episode completed | kind=custom_narration episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) sourceCount=\(episode.sourceCount)"
             )
             return episode
         } catch {
@@ -181,7 +167,7 @@ final class AudioEpisodeService {
         let startedAt = Date()
         let episode: AudioEpisode = try await client.request(APIEndpoints.audioEpisode(id: id))
         audioEpisodeLogger.info(
-            "Fetch episode completed | episodeId=\(id) status=\(episode.status, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
+            "Fetch episode completed | episodeId=\(id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
         )
         return episode
     }
@@ -202,7 +188,7 @@ final class AudioEpisodeService {
         let startedAt = Date()
         guard let endpoint = episode.audioUrl ?? episode.streamUrl else {
             audioEpisodeLogger.error(
-                "Stream resource missing | episodeId=\(episode.id) status=\(episode.status, privacy: .public)"
+                "Stream resource missing | episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public)"
             )
             throw NSError(
                 domain: "AudioEpisodeService",
@@ -235,7 +221,7 @@ final class AudioEpisodeService {
         let startedAt = Date()
         var current = episode
         audioEpisodeLogger.info(
-            "Wait episode started | episodeId=\(episode.id) status=\(episode.status, privacy: .public) maxAttempts=\(maxAttempts)"
+            "Wait episode started | episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) maxAttempts=\(maxAttempts)"
         )
         for _ in 0..<maxAttempts {
             if current.isCompleted {

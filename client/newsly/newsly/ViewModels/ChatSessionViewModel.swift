@@ -264,7 +264,7 @@ final class ChatSessionViewModel {
             case .failed:
                 throw ChatServiceError.processingFailed(status.error ?? "Unknown error")
 
-            case .processing:
+            case .processing, .unknown(_):
                 attempts += 1
                 if attempts == 1 || attempts.isMultiple(of: 6) {
                     await refreshTranscriptSnapshot()

@@ -14,6 +14,7 @@ final class ChatMessageDisplayTests: XCTestCase {
             {
               "id": 7,
               "session_id": 21,
+              "display_key": "21|7|tool|process_summary",
               "role": "tool",
               "content": "Thinking • Searched the web and reviewed sources",
               "timestamp": "2026-03-08T18:00:00Z",
@@ -28,7 +29,7 @@ final class ChatMessageDisplayTests: XCTestCase {
         let message = try JSONDecoder().decode(ChatMessage.self, from: data)
 
         XCTAssertEqual(message.role, .tool)
-        XCTAssertEqual(message.displayType, .processSummary)
+        XCTAssertEqual(message.displayType, .process_summary)
         XCTAssertTrue(message.isProcessSummary)
         XCTAssertEqual(message.processSummaryText, "Thinking • Searched the web and reviewed sources")
     }
@@ -57,21 +58,25 @@ final class ChatMessageDisplayTests: XCTestCase {
                 "is_saved_to_knowledge": false,
                 "has_messages": true,
                 "last_message_preview": "Final deep-dive answer.",
-                "last_message_role": "assistant"
+                "last_message_role": "assistant",
+                "council_mode": false
               },
               "messages": [
                 {
                   "id": 1,
                   "session_id": 42,
+                  "display_key": "42|1|user|message",
                   "role": "user",
                   "content": "Dig deeper into these news bullets.",
                   "timestamp": "2026-03-08T18:00:00Z",
+                  "display_type": "message",
                   "status": "completed",
                   "error": null
                 },
                 {
                   "id": 2,
                   "session_id": 42,
+                  "display_key": "42|2|tool|process_summary",
                   "role": "tool",
                   "content": "Thinking • Searched the web and reviewed sources",
                   "timestamp": "2026-03-08T18:00:01Z",
@@ -83,9 +88,11 @@ final class ChatMessageDisplayTests: XCTestCase {
                 {
                   "id": 3,
                   "session_id": 42,
+                  "display_key": "42|3|assistant|message",
                   "role": "assistant",
                   "content": "Final deep-dive answer.",
                   "timestamp": "2026-03-08T18:00:02Z",
+                  "display_type": "message",
                   "status": "completed",
                   "error": null
                 }
@@ -107,9 +114,11 @@ final class ChatMessageDisplayTests: XCTestCase {
             {
               "id": 8,
               "session_id": 21,
+              "display_key": "21|8|assistant|message",
               "role": "assistant",
               "content": "I found a few good matches below.",
               "timestamp": "2026-03-17T18:00:00Z",
+              "display_type": "message",
               "status": "completed",
               "error": null,
               "feed_options": [
@@ -143,9 +152,11 @@ final class ChatMessageDisplayTests: XCTestCase {
             {
               "id": 12,
               "session_id": 21,
+              "display_key": "21|12|assistant|message",
               "role": "assistant",
               "content": "Analyst branch",
               "timestamp": "2026-03-30T18:00:00Z",
+              "display_type": "message",
               "status": "completed",
               "error": null,
               "active_council_child_session_id": 201,
@@ -210,9 +221,11 @@ final class ChatMessageDisplayTests: XCTestCase {
                 {
                   "id": 1,
                   "session_id": 42,
+                  "display_key": "42|1|assistant|message",
                   "role": "assistant",
                   "content": "Analyst branch",
                   "timestamp": "2026-03-30T18:01:00Z",
+                  "display_type": "message",
                   "status": "completed",
                   "error": null,
                   "active_council_child_session_id": 201,

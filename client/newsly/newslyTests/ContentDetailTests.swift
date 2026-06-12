@@ -54,7 +54,8 @@ final class ContentDetailTests: XCTestCase {
                 origin: .leadingEdge,
                 translation: CGSize(width: 120, height: 6),
                 currentIndex: 1,
-                itemCount: 3
+                itemCount: 3,
+                leadingEdgePreviousEnabled: true
             ),
             .previous
         )
@@ -64,7 +65,8 @@ final class ContentDetailTests: XCTestCase {
                 origin: .trailingEdge,
                 translation: CGSize(width: -120, height: 6),
                 currentIndex: 1,
-                itemCount: 3
+                itemCount: 3,
+                leadingEdgePreviousEnabled: true
             ),
             .next
         )
@@ -74,7 +76,8 @@ final class ContentDetailTests: XCTestCase {
                 origin: .trailingEdge,
                 translation: CGSize(width: 120, height: 6),
                 currentIndex: 1,
-                itemCount: 3
+                itemCount: 3,
+                leadingEdgePreviousEnabled: true
             ),
             .ignore
         )
@@ -84,7 +87,21 @@ final class ContentDetailTests: XCTestCase {
                 origin: .leadingEdge,
                 translation: CGSize(width: 120, height: 6),
                 currentIndex: 0,
-                itemCount: 1
+                itemCount: 1,
+                leadingEdgePreviousEnabled: true
+            ),
+            .dismiss
+        )
+    }
+
+    func testFastNewsLeftEdgeSwipeDismissesInsteadOfNavigatingPrevious() {
+        XCTAssertEqual(
+            DetailSwipePolicy.endAction(
+                origin: .leadingEdge,
+                translation: CGSize(width: 120, height: 6),
+                currentIndex: 2,
+                itemCount: 5,
+                leadingEdgePreviousEnabled: false
             ),
             .dismiss
         )

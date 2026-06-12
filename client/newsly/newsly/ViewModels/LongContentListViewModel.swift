@@ -53,8 +53,8 @@ final class LongContentListViewModel: BaseContentListViewModel {
                 logger.info("[LongContentList] Received contentMarkedAsRead notification | contentId=\(contentId) type=\(contentType, privacy: .public)")
 
                 // Only update if it's article or podcast content
-                guard let apiType = APIContentType(rawValue: contentType),
-                      apiType == .article || apiType == .podcast
+                let apiType = APIContentType(rawValue: contentType)
+                guard apiType == .article || apiType == .podcast
                 else {
                     logger.debug("[LongContentList] Ignoring non-article/podcast content | contentId=\(contentId) type=\(contentType, privacy: .public)")
                     return
@@ -95,12 +95,12 @@ final class LongContentListViewModel: BaseContentListViewModel {
         refresh()
     }
 
-    func refreshUnreadFeedInBackground() {
+    func refreshUnreadFeedInBackground() async {
         let previousFilter = currentReadFilter()
         setReadFilter(.unread)
 
         guard previousFilter == .unread else { return }
-        refreshInBackground()
+        await refreshInBackgroundAndWait()
     }
 
     func setReadFilter(_ filter: ReadFilter) {
@@ -120,6 +120,7 @@ final class LongContentListViewModel: BaseContentListViewModel {
             return
         }
 
+        let previousItems = currentItems()
         let markedItems = markItemsLocallyRead(
             ids: [id],
             removeReadItems: currentReadFilter() == .unread
@@ -135,6 +136,11 @@ final class LongContentListViewModel: BaseContentListViewModel {
             .sink { completion in
                 if case .failure(let error) = completion {
                     logger.error("[LongContentList] markAsRead API failed | id=\(id) error=\(error.localizedDescription)")
+                    self.restoreOptimisticReadRollback(
+                        previousItems: previousItems,
+                        restoredIds: [id]
+                    )
+                    self.incrementCount(for: markedItem)
                 }
             } receiveValue: { _ in
                 logger.info("[LongContentList] markAsRead API success | id=\(id)")
@@ -152,6 +158,7 @@ final class LongContentListViewModel: BaseContentListViewModel {
         let ids = unreadItems.map(\.id)
         logger.info("[LongContentList] markAllVisibleAsRead | ids=\(ids, privacy: .public) count=\(ids.count)")
 
+        let previousItems = currentItems()
         let markedItems = markItemsLocallyRead(
             ids: ids,
             removeReadItems: currentReadFilter() == .unread
@@ -188,6 +195,16 @@ final class LongContentListViewModel: BaseContentListViewModel {
                 .sink { completion in
                     if case .failure(let error) = completion {
                         logger.error("[LongContentList] markAllVisibleAsRead API failed | error=\(error.localizedDescription)")
+                        self.restoreOptimisticReadRollback(
+                            previousItems: previousItems,
+                            restoredIds: markedIds
+                        )
+                        if reductions.articles > 0 {
+                            self.unreadCountService.incrementArticleCount(by: reductions.articles)
+                        }
+                        if reductions.podcasts > 0 {
+                            self.unreadCountService.incrementPodcastCount(by: reductions.podcasts)
+                        }
                     }
                     continuation.resume()
                 } receiveValue: { _ in
@@ -210,14 +227,12 @@ final class LongContentListViewModel: BaseContentListViewModel {
         do {
             if targetSavedState {
                 let response = try await contentService.saveToKnowledge(id: contentId)
-                if let isSavedToKnowledge = response["is_saved_to_knowledge"] as? Bool {
-                    updateItem(id: contentId) { $0.updating(isSavedToKnowledge: isSavedToKnowledge) }
-                    logger.info("[LongContentList] toggleKnowledgeSave success | contentId=\(contentId) isSavedToKnowledge=\(isSavedToKnowledge)")
-                }
+                updateItem(id: contentId) { $0.updating(isSavedToKnowledge: response.isSavedToKnowledge) }
+                logger.info("[LongContentList] toggleKnowledgeSave success | contentId=\(contentId) isSavedToKnowledge=\(response.isSavedToKnowledge)")
             } else {
-                try await contentService.removeFromKnowledge(id: contentId)
-                updateItem(id: contentId) { $0.updating(isSavedToKnowledge: false) }
-                logger.info("[LongContentList] toggleKnowledgeSave success | contentId=\(contentId) isSavedToKnowledge=false")
+                let response = try await contentService.removeFromKnowledge(id: contentId)
+                updateItem(id: contentId) { $0.updating(isSavedToKnowledge: response.isSavedToKnowledge) }
+                logger.info("[LongContentList] toggleKnowledgeSave success | contentId=\(contentId) isSavedToKnowledge=\(response.isSavedToKnowledge)")
             }
         } catch {
             updateItem(id: contentId) { $0.updating(isSavedToKnowledge: current.isSavedToKnowledge) }
@@ -247,6 +262,17 @@ final class LongContentListViewModel: BaseContentListViewModel {
             unreadCountService.decrementArticleCount()
         case .podcast:
             unreadCountService.decrementPodcastCount()
+        default:
+            break
+        }
+    }
+
+    private func incrementCount(for item: ContentSummary) {
+        switch item.apiContentType {
+        case .article:
+            unreadCountService.incrementArticleCount()
+        case .podcast:
+            unreadCountService.incrementPodcastCount()
         default:
             break
         }

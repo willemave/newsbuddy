@@ -7,32 +7,14 @@
 
 import Foundation
 
-/// Role of a chat message sender
-enum ChatMessageRole: String, Codable, Hashable, Sendable {
-    case user
-    case assistant
-    case system
-    case tool
-}
-
-enum ChatMessageDisplayType: String, Codable, Hashable, Sendable {
-    case message
-    case processSummary = "process_summary"
-
-    /// Process summaries sort before their associated message content.
+extension APIChatMessageDisplayType {
     var sortOrder: Int {
         switch self {
-        case .processSummary: 0
+        case .process_summary: 0
         case .message: 1
+        case .unknown(_): 2
         }
     }
-}
-
-/// Processing status for async chat messages
-enum MessageProcessingStatus: String, Codable, Hashable, Sendable {
-    case processing
-    case completed
-    case failed
 }
 
 struct AssistantFeedOption: Codable, Identifiable, Equatable {
@@ -56,6 +38,40 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
         case description
         case rationale
         case evidenceURL = "evidence_url"
+    }
+
+    init(
+        id: String,
+        title: String,
+        siteURL: String,
+        feedURL: String,
+        feedType: String,
+        feedFormat: String,
+        description: String? = nil,
+        rationale: String? = nil,
+        evidenceURL: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.siteURL = siteURL
+        self.feedURL = feedURL
+        self.feedType = feedType
+        self.feedFormat = feedFormat
+        self.description = description
+        self.rationale = rationale
+        self.evidenceURL = evidenceURL
+    }
+
+    init(api response: APIAssistantFeedOption) {
+        id = response.id
+        title = response.title
+        siteURL = response.siteUrl
+        feedURL = response.feedUrl
+        feedType = response.feedType.rawValue
+        feedFormat = response.feedFormat.rawValue
+        description = response.description
+        rationale = response.rationale
+        evidenceURL = response.evidenceUrl
     }
 
     var previewURLString: String {
@@ -122,6 +138,31 @@ struct CouncilCandidate: Codable, Identifiable, Equatable {
         case status
         case order
     }
+
+    init(
+        personaId: String,
+        personaName: String,
+        childSessionId: Int,
+        content: String,
+        status: String,
+        order: Int
+    ) {
+        self.personaId = personaId
+        self.personaName = personaName
+        self.childSessionId = childSessionId
+        self.content = content
+        self.status = status
+        self.order = order
+    }
+
+    init(api response: APICouncilCandidate) {
+        personaId = response.personaId
+        personaName = response.personaName
+        childSessionId = response.childSessionId
+        content = response.content
+        status = response.status
+        order = response.order
+    }
 }
 
 /// Individual message in a chat session
@@ -129,47 +170,27 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     let id: Int
     let sourceMessageId: Int?
     let displayKey: String?
-    let role: ChatMessageRole
+    let role: APIChatMessageRole
     let timestamp: String
     let content: String
-    let displayType: ChatMessageDisplayType
+    let displayType: APIChatMessageDisplayType
     let processLabel: String?
-    let status: MessageProcessingStatus?
+    let status: APIMessageProcessingStatus?
     let error: String?
     let feedOptions: [AssistantFeedOption]
     let councilCandidates: [CouncilCandidate]
     let activeCouncilChildSessionId: Int?
 
-    // Allow status to be optional (default to completed for backward compatibility)
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(Int.self, forKey: .id)
-        sourceMessageId = try container.decodeIfPresent(Int.self, forKey: .sourceMessageId)
-        displayKey = try container.decodeIfPresent(String.self, forKey: .displayKey)
-        role = try container.decode(ChatMessageRole.self, forKey: .role)
-        timestamp = try container.decode(String.self, forKey: .timestamp)
-        content = try container.decode(String.self, forKey: .content)
-        displayType =
-            try container.decodeIfPresent(ChatMessageDisplayType.self, forKey: .displayType)
-            ?? .message
-        processLabel = try container.decodeIfPresent(String.self, forKey: .processLabel)
-        status = try container.decodeIfPresent(MessageProcessingStatus.self, forKey: .status)
-        error = try container.decodeIfPresent(String.self, forKey: .error)
-        feedOptions = try container.decodeIfPresent([AssistantFeedOption].self, forKey: .feedOptions) ?? []
-        councilCandidates = try container.decodeIfPresent([CouncilCandidate].self, forKey: .councilCandidates) ?? []
-        activeCouncilChildSessionId = try container.decodeIfPresent(Int.self, forKey: .activeCouncilChildSessionId)
-    }
-
     init(
         id: Int,
         sourceMessageId: Int? = nil,
         displayKey: String? = nil,
-        role: ChatMessageRole,
+        role: APIChatMessageRole,
         timestamp: String,
         content: String,
-        displayType: ChatMessageDisplayType = .message,
+        displayType: APIChatMessageDisplayType = .message,
         processLabel: String? = nil,
-        status: MessageProcessingStatus? = nil,
+        status: APIMessageProcessingStatus? = nil,
         error: String? = nil,
         feedOptions: [AssistantFeedOption] = [],
         councilCandidates: [CouncilCandidate] = [],
@@ -188,6 +209,28 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         self.feedOptions = feedOptions
         self.councilCandidates = councilCandidates
         self.activeCouncilChildSessionId = activeCouncilChildSessionId
+    }
+
+    init(api response: APIChatMessage) {
+        self.init(
+            id: response.id,
+            sourceMessageId: response.sourceMessageId,
+            displayKey: response.displayKey.isEmpty ? nil : response.displayKey,
+            role: response.role,
+            timestamp: response.timestamp,
+            content: response.content,
+            displayType: response.displayType,
+            processLabel: response.processLabel,
+            status: response.status,
+            error: response.error,
+            feedOptions: response.feedOptions.map(AssistantFeedOption.init(api:)),
+            councilCandidates: response.councilCandidates.map(CouncilCandidate.init(api:)),
+            activeCouncilChildSessionId: response.activeCouncilChildSessionId
+        )
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(api: try APIChatMessage(from: decoder))
     }
 
     enum CodingKeys: String, CodingKey {
@@ -222,7 +265,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     }
 
     var isProcessSummary: Bool {
-        displayType == .processSummary
+        displayType == .process_summary
     }
 
     var processSummaryText: String {

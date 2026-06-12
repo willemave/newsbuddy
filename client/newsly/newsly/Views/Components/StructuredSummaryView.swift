@@ -108,9 +108,10 @@ struct StructuredSummaryView: View {
                         Image(systemName: "tag")
                             .font(.readerBody)
                             .foregroundColor(Color.onSurfaceSecondary)
-                        Text("Topics")
+                        Text("TOPICS")
                             .font(.readerBody)
                             .foregroundColor(Color.onSurfaceSecondary)
+                            .tracking(0.4)
                     }
 
                     FlowLayout(spacing: 8) {
@@ -149,9 +150,10 @@ struct StructuredSummaryView: View {
                             .font(.readerBody)
                             .foregroundColor(iconColor)
                             .accessibilityHidden(true)
-                        Text(title)
+                        Text(title.uppercased())
                             .font(.readerBody)
                             .foregroundColor(Color.onSurface)
+                            .tracking(0.4)
                     }
 
                     Spacer()

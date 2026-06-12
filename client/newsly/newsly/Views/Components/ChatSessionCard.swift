@@ -26,22 +26,35 @@ struct ChatSessionCard: View {
         return .none
     }
 
+    private var relativeTimeLabel: String? {
+        guard let date = session.lastActivityDate else { return nil }
+        return ContentTimestampFormatter.compactRelativeText(from: date).uppercased()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Header row: title + badge + arrow
-            HStack(spacing: 8) {
+            // Header row: title + badge + timestamp + arrow
+            HStack(alignment: .top, spacing: 8) {
                 Text(session.displayTitle)
                     .font(.terracottaHeadlineSmall)
                     .foregroundColor(.onSurface)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                Spacer()
+                Spacer(minLength: 8)
 
                 statusBadge
+
+                if badgeStyle == .none, let relativeTimeLabel {
+                    Text(relativeTimeLabel)
+                        .kicker()
+                        .padding(.top, 5)
+                }
 
                 Image(systemName: "arrow.right")
                     .font(.appSymbol(size: 12, weight: .medium))
                     .foregroundColor(.onSurfaceSecondary)
+                    .padding(.top, 4)
             }
 
             // Preview row
@@ -49,9 +62,9 @@ struct ChatSessionCard: View {
         }
         .padding(14)
         .background(Color.surfaceSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.card, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: CornerRadius.card, style: .continuous)
                 .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 1)
         )
     }
@@ -90,17 +103,17 @@ struct ChatSessionCard: View {
 
     @ViewBuilder
     private var previewRow: some View {
-        if let preview = session.lastMessagePreview, !preview.isEmpty {
+        if let preview = session.lastMessagePreview.flatMap(plainTextPreview), !preview.isEmpty {
             let role = session.lastMessageRole ?? "assistant"
-            let prefix = role == "user" ? "You: " : "AI: "
-            let prefixColor: Color = role == "user" ? .onSurface : .terracottaPrimary
 
-            (Text(prefix).foregroundColor(prefixColor).fontWeight(.medium) +
-             Text(preview).foregroundColor(.onSurfaceSecondary))
+            (role == "user"
+                ? Text("You: ").foregroundColor(.onSurface).fontWeight(.medium) + Text(preview)
+                : Text(preview))
                 .font(.terracottaBodyMedium)
+                .foregroundColor(.onSurfaceSecondary)
                 .lineLimit(2)
         } else if session.isEmptyKnowledgeSave, let summary = session.articleSummary, !summary.isEmpty {
-            Text(summary)
+            Text(plainTextPreview(summary))
                 .font(.terracottaBodyMedium)
                 .foregroundColor(.onSurfaceSecondary)
                 .lineLimit(2)
@@ -110,5 +123,30 @@ struct ChatSessionCard: View {
                 .foregroundColor(.onSurfaceSecondary)
                 .lineLimit(2)
         }
+    }
+
+    /// Flatten a markdown-ish message excerpt into single-line plain text for card previews.
+    private func plainTextPreview(_ raw: String) -> String {
+        var text = raw
+        text = text.replacingOccurrences(of: "```", with: " ")
+        text = text.replacingOccurrences(
+            of: #"\[([^\]]*)\]\([^)]*\)"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: #"(?m)^\s{0,3}(#{1,6}(\s+|$)|>\s+|[-*+]\s+|\d+\.\s+)"#,
+            with: "",
+            options: .regularExpression
+        )
+        for marker in ["**", "__", "`"] {
+            text = text.replacingOccurrences(of: marker, with: "")
+        }
+        text = text.replacingOccurrences(
+            of: #"\s+"#,
+            with: " ",
+            options: .regularExpression
+        )
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

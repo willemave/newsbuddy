@@ -79,10 +79,26 @@ class BaseContentListViewModel: ObservableObject {
         requestPage(cursor: nil, replaceItems: false)
     }
 
-    func refreshInBackground() {
-        guard !pagination.isLoading else { return }
+    func refreshInBackground(onComplete: (() -> Void)? = nil) {
+        guard !pagination.isLoading else {
+            onComplete?()
+            return
+        }
         pagination.isLoading = true
-        requestPage(cursor: nil, replaceItems: true)
+        requestPage(cursor: nil, replaceItems: true, onComplete: onComplete)
+    }
+
+    /// Awaitable variant of `refreshInBackground()` so callers like `.refreshable`
+    /// can hold the refresh indicator until the page actually lands.
+    func refreshInBackgroundAndWait() async {
+        await withCheckedContinuation { continuation in
+            var didResume = false
+            refreshInBackground {
+                guard !didResume else { return }
+                didResume = true
+                continuation.resume()
+            }
+        }
     }
 
     func loadNextPage() {
@@ -172,6 +188,28 @@ class BaseContentListViewModel: ObservableObject {
         items = newItems
     }
 
+    func restoreOptimisticReadRollback(previousItems: [ContentSummary], restoredIds: [Int]) {
+        let restoredIdSet = Set(restoredIds)
+        guard !restoredIdSet.isEmpty else { return }
+
+        locallyReadIds.subtract(restoredIdSet)
+
+        var currentById = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        for previousItem in previousItems where restoredIdSet.contains(previousItem.id) {
+            currentById[previousItem.id] = previousItem.updating(isRead: false)
+        }
+
+        var nextItems: [ContentSummary] = []
+        var usedIds = Set<Int>()
+        for previousItem in previousItems {
+            guard let currentItem = currentById[previousItem.id] else { continue }
+            nextItems.append(currentItem)
+            usedIds.insert(previousItem.id)
+        }
+        nextItems.append(contentsOf: items.filter { !usedIds.contains($0.id) })
+        items = nextItems
+    }
+
     // MARK: - Private
     private func bind() {
         refreshTrigger
@@ -193,7 +231,7 @@ class BaseContentListViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func requestPage(cursor: String?, replaceItems: Bool) {
+    private func requestPage(cursor: String?, replaceItems: Bool, onComplete: (() -> Void)? = nil) {
         requestGeneration += 1
         let generation = requestGeneration
         let requestReadFilter = readFilter
@@ -206,7 +244,11 @@ class BaseContentListViewModel: ObservableObject {
                 limit: nil
             )
             .receive(on: DispatchQueue.main)
+            // A superseded request is cancelled without a completion event;
+            // onComplete must still fire so awaiting callers resume.
+            .handleEvents(receiveCancel: { onComplete?() })
             .sink { [weak self] completion in
+                onComplete?()
                 guard let self else { return }
                 guard generation == requestGeneration else { return }
                 pagination.isLoading = false
@@ -235,12 +277,36 @@ class BaseContentListViewModel: ObservableObject {
                     requestReadFilter: requestReadFilter
                 )
                 if replaceItems {
-                    items = incomingItems
+                    let merged = mergedReplacementItems(current: items, incoming: incomingItems)
+                    if merged != items {
+                        items = merged
+                    }
                 } else {
                     let existingIds = Set(items.map(\.id))
                     items.append(contentsOf: incomingItems.filter { !existingIds.contains($0.id) })
                 }
             }
+    }
+
+    /// Background-refresh merge. The incoming first page defines which items remain,
+    /// but items already on screen keep their current order and value identity, so an
+    /// unchanged feed produces no published change (and no view invalidation) at all.
+    /// Genuinely new items surface at the top, matching the newest-first feeds.
+    private func mergedReplacementItems(
+        current: [ContentSummary],
+        incoming: [ContentSummary]
+    ) -> [ContentSummary] {
+        guard !current.isEmpty else { return incoming }
+
+        let incomingById = Dictionary(incoming.map { ($0.id, $0) }) { first, _ in first }
+        let currentIds = Set(current.map(\.id))
+
+        let newItems = incoming.filter { !currentIds.contains($0.id) }
+        let keptItems = current.compactMap { item -> ContentSummary? in
+            guard let updated = incomingById[item.id] else { return nil }
+            return updated == item ? item : updated
+        }
+        return newItems + keptItems
     }
 
     private func applyLocalReadState(

@@ -48,14 +48,18 @@ enum DetailSwipePolicy {
         origin: DetailSwipeOrigin,
         translation: CGSize,
         currentIndex: Int,
-        itemCount: Int
+        itemCount: Int,
+        leadingEdgePreviousEnabled: Bool = true
     ) -> DetailSwipeAction {
         guard isHorizontalSwipe(translation, threshold: actionThreshold) else {
             return .ignore
         }
 
         switch origin {
-        case .leadingEdge where translation.width > actionThreshold && currentIndex > 0:
+        case .leadingEdge
+            where translation.width > actionThreshold
+                && leadingEdgePreviousEnabled
+                && currentIndex > 0:
             return .previous
         case .leadingEdge where translation.width > actionThreshold:
             return .dismiss
@@ -73,41 +77,93 @@ enum DetailSwipePolicy {
     }
 }
 
-struct ContentDetailSwipeOverlay: View {
+struct ContentDetailSwipeContainer<Content: View>: View {
     let currentIndex: Int
     let contentIds: [Int]
     let surfaceName: String
     let edgeWidth: CGFloat
-    @Binding var dragAmount: CGFloat
-    @Binding var isLeadingEdgeSwipeActive: Bool
+    let topHitExclusionHeight: CGFloat
+    let leadingEdgePreviousEnabled: Bool
     let onDismiss: () -> Void
     let onNext: () -> Void
     let onPrevious: () -> Void
+    let content: Content
 
+    @State private var dragAmount: CGFloat = 0
+    @State private var isLeadingEdgeSwipeActive = false
     @State private var didTriggerHaptic = false
+
+    init(
+        currentIndex: Int,
+        contentIds: [Int],
+        surfaceName: String,
+        edgeWidth: CGFloat,
+        topHitExclusionHeight: CGFloat = 0,
+        leadingEdgePreviousEnabled: Bool = true,
+        onDismiss: @escaping () -> Void,
+        onNext: @escaping () -> Void,
+        onPrevious: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.currentIndex = currentIndex
+        self.contentIds = contentIds
+        self.surfaceName = surfaceName
+        self.edgeWidth = edgeWidth
+        self.topHitExclusionHeight = topHitExclusionHeight
+        self.leadingEdgePreviousEnabled = leadingEdgePreviousEnabled
+        self.onDismiss = onDismiss
+        self.onNext = onNext
+        self.onPrevious = onPrevious
+        self.content = content()
+    }
 
     var body: some View {
         GeometryReader { proxy in
-            HStack(spacing: 0) {
-                swipeHitArea(origin: .leadingEdge, viewportWidth: proxy.size.width)
-
-                Spacer(minLength: 0)
-
-                swipeHitArea(origin: .trailingEdge, viewportWidth: proxy.size.width)
-            }
+            content
+                .overlay(alignment: .leading) {
+                    if dragAmount > 30 && (currentIndex > 0 || isLeadingEdgeSwipeActive) {
+                        swipeIndicator(direction: .previous, progress: min(1.0, dragAmount / 100))
+                    }
+                }
+                .overlay(alignment: .trailing) {
+                    if dragAmount < -30 && currentIndex < contentIds.count - 1 {
+                        swipeIndicator(direction: .next, progress: min(1.0, abs(dragAmount) / 100))
+                    }
+                }
+                .simultaneousGesture(swipeGesture(viewportWidth: proxy.size.width))
+                .offset(x: dragAmount)
+                .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragAmount)
         }
     }
 
-    private func swipeHitArea(origin: DetailSwipeOrigin, viewportWidth: CGFloat) -> some View {
-        Color.clear
-            .frame(width: edgeWidth)
-            .contentShape(Rectangle())
-            .simultaneousGesture(swipeGesture(origin: origin, viewportWidth: viewportWidth))
+    /// Edge swipes are recognized by where the touch STARTS rather than via
+    /// hit-testable edge strips overlaid on the content: an overlaid strip
+    /// swallows plain taps, making buttons under it (e.g. the trailing
+    /// action-bar icon) untappable.
+    private func swipeOrigin(
+        startLocation: CGPoint,
+        viewportWidth: CGFloat
+    ) -> DetailSwipeOrigin? {
+        guard startLocation.y >= topHitExclusionHeight else { return nil }
+        if startLocation.x <= edgeWidth {
+            return .leadingEdge
+        }
+        if startLocation.x >= viewportWidth - edgeWidth {
+            return .trailingEdge
+        }
+        return nil
     }
 
-    private func swipeGesture(origin: DetailSwipeOrigin, viewportWidth: CGFloat) -> some Gesture {
+    private func swipeGesture(viewportWidth: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 50, coordinateSpace: .local)
             .onChanged { value in
+                guard let origin = swipeOrigin(
+                    startLocation: value.startLocation,
+                    viewportWidth: viewportWidth
+                ) else {
+                    return
+                }
+
                 guard let newOffset = DetailSwipePolicy.dragOffset(
                     origin: origin,
                     translation: value.translation,
@@ -130,11 +186,19 @@ struct ContentDetailSwipeOverlay: View {
                 didTriggerHaptic = false
                 isLeadingEdgeSwipeActive = false
 
+                guard let origin = swipeOrigin(
+                    startLocation: value.startLocation,
+                    viewportWidth: viewportWidth
+                ) else {
+                    return
+                }
+
                 let action = DetailSwipePolicy.endAction(
                     origin: origin,
                     translation: value.translation,
                     currentIndex: currentIndex,
-                    itemCount: contentIds.count
+                    itemCount: contentIds.count,
+                    leadingEdgePreviousEnabled: leadingEdgePreviousEnabled
                 )
 
                 switch action {
@@ -239,69 +303,6 @@ struct ContentDetailSwipeOverlay: View {
             return "nil"
         }
         return String(contentIds[currentIndex])
-    }
-}
-
-struct ContentDetailSwipeContainer<Content: View>: View {
-    let currentIndex: Int
-    let contentIds: [Int]
-    let surfaceName: String
-    let edgeWidth: CGFloat
-    let onDismiss: () -> Void
-    let onNext: () -> Void
-    let onPrevious: () -> Void
-    let content: Content
-
-    @State private var dragAmount: CGFloat = 0
-    @State private var isLeadingEdgeSwipeActive = false
-
-    init(
-        currentIndex: Int,
-        contentIds: [Int],
-        surfaceName: String,
-        edgeWidth: CGFloat,
-        onDismiss: @escaping () -> Void,
-        onNext: @escaping () -> Void,
-        onPrevious: @escaping () -> Void,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.currentIndex = currentIndex
-        self.contentIds = contentIds
-        self.surfaceName = surfaceName
-        self.edgeWidth = edgeWidth
-        self.onDismiss = onDismiss
-        self.onNext = onNext
-        self.onPrevious = onPrevious
-        self.content = content()
-    }
-
-    var body: some View {
-        content
-            .overlay(alignment: .leading) {
-                if dragAmount > 30 && (currentIndex > 0 || isLeadingEdgeSwipeActive) {
-                    swipeIndicator(direction: .previous, progress: min(1.0, dragAmount / 100))
-                }
-            }
-            .overlay(alignment: .trailing) {
-                if dragAmount < -30 && currentIndex < contentIds.count - 1 {
-                    swipeIndicator(direction: .next, progress: min(1.0, abs(dragAmount) / 100))
-                }
-            }
-            .overlay {
-                ContentDetailSwipeOverlay(
-                    currentIndex: currentIndex,
-                    contentIds: contentIds,
-                    surfaceName: surfaceName,
-                    edgeWidth: edgeWidth,
-                    dragAmount: $dragAmount,
-                    isLeadingEdgeSwipeActive: $isLeadingEdgeSwipeActive,
-                    onDismiss: onDismiss,
-                    onNext: onNext,
-                    onPrevious: onPrevious
-                )
-            }
-            .offset(x: dragAmount)
-            .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragAmount)
     }
 
     @ViewBuilder

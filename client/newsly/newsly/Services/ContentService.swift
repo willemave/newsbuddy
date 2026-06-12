@@ -10,19 +10,9 @@ import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "ContentService")
 
-struct BulkMarkReadResponse: Codable {
-    let status: String
-    let markedCount: Int
-    let failedIds: [Int]
-    let totalRequested: Int
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case markedCount = "marked_count"
-        case failedIds = "failed_ids"
-        case totalRequested = "total_requested"
-    }
-}
+typealias BulkMarkReadResponse = APIBulkMarkReadResponse
+typealias KnowledgeMutationResponse = APIKnowledgeMutationResponse
+typealias SubmitContentResponse = APIContentSubmissionResponse
 
 struct ConvertNewsResponse: Codable {
     let newContentId: Int
@@ -56,28 +46,6 @@ struct DownloadMoreResponse: Codable {
     }
 }
 
-struct SubmitContentResponse: Codable {
-    let contentId: Int
-    let contentType: String
-    let status: String
-    let platform: String?
-    let alreadyExists: Bool
-    let message: String
-    let taskId: Int?
-    let source: String?
-
-    enum CodingKeys: String, CodingKey {
-        case contentId = "content_id"
-        case contentType = "content_type"
-        case status
-        case platform
-        case alreadyExists = "already_exists"
-        case message
-        case taskId = "task_id"
-        case source
-    }
-}
-
 struct TrackContentInteractionResponse: Codable {
     let status: String
     let recorded: Bool
@@ -102,23 +70,9 @@ class ContentService {
                        contentType: String? = nil,
                        title: String? = nil,
                        platform: String? = nil) async throws -> SubmitContentResponse {
-        struct SubmitPayload: Codable {
-            let url: String
-            let contentType: String?
-            let title: String?
-            let platform: String?
-
-            enum CodingKeys: String, CodingKey {
-                case url
-                case contentType = "content_type"
-                case title
-                case platform
-            }
-        }
-
-        let payload = SubmitPayload(
+        let payload = APISubmitContentRequest(
             url: url.absoluteString,
-            contentType: contentType,
+            contentType: contentType.map(APIContentType.init(rawValue:)),
             title: title,
             platform: platform
         )
@@ -377,7 +331,10 @@ class ContentService {
             if contentType == .news {
                 _ = try await bulkMarkNewsItemsAsRead(newsItemIds: [id])
             } else {
-                try await client.requestVoid(APIEndpoints.markContentRead(id: id), method: "POST")
+                let _: APIMarkReadResponse = try await client.request(
+                    APIEndpoints.markContentRead(id: id),
+                    method: "POST"
+                )
             }
             logger.info("[ContentService] markContentAsRead success | id=\(id)")
         } catch {
@@ -389,7 +346,10 @@ class ContentService {
     }
     
     func markContentAsUnread(id: Int) async throws {
-        try await client.requestVoid(APIEndpoints.markContentUnread(id: id), method: "DELETE")
+        let _: APIMarkUnreadResponse = try await client.request(
+            APIEndpoints.markContentUnread(id: id),
+            method: "DELETE"
+        )
     }
     
     func bulkMarkAsRead(contentIds: [Int]) async throws -> BulkMarkReadResponse {
@@ -499,12 +459,13 @@ class ContentService {
         return try await bulkMarkAsRead(contentIds: allUnreadIds)
     }
     
-    func saveToKnowledge(id: Int) async throws -> [String: Any] {
-        return try await client.requestRaw(APIEndpoints.saveToKnowledge(id: id), method: "POST")
+    func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
+        try await client.request(APIEndpoints.saveToKnowledge(id: id), method: "POST")
     }
 
-    func removeFromKnowledge(id: Int) async throws {
-        try await client.requestVoid(APIEndpoints.removeFromKnowledge(id: id), method: "DELETE")
+    @discardableResult
+    func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
+        try await client.request(APIEndpoints.removeFromKnowledge(id: id), method: "DELETE")
     }
 
     func fetchKnowledgeLibrary(cursor: String? = nil, limit: Int = 25) async throws -> ContentListResponse {

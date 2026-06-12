@@ -40,6 +40,7 @@ struct LongFormView: View {
     var body: some View {
         let items = viewModel.currentItems()
         let lastItemId = items.last?.id
+        let hasUnreadItems = items.contains(where: { !$0.isRead })
 
         ZStack {
             VStack(spacing: 0) {
@@ -73,20 +74,25 @@ struct LongFormView: View {
                                 )
                                     .padding(.bottom, 14)
 
-                                VStack(spacing: CardMetrics.cardSpacing) {
-                                    ForEach(items) { content in
-                                        cardLink(
-                                            content: content,
-                                            isLast: content.id == lastItemId
-                                        )
-                                    }
+                                // Cards must be direct LazyVStack children: wrapping them in a
+                                // plain VStack builds every card (and starts every image load)
+                                // eagerly and fires the last card's load-more trigger on appear.
+                                ForEach(items) { content in
+                                    cardLink(
+                                        content: content,
+                                        isLast: content.id == lastItemId
+                                    )
+                                    .padding(.horizontal, Spacing.appHorizontalMargin)
+                                    .padding(.bottom, content.id == lastItemId ? 0 : CardMetrics.cardSpacing)
                                 }
-                                .padding(.horizontal, Spacing.appHorizontalMargin)
 
-                                if items.contains(where: { !$0.isRead }) {
-                                    markAllLongFormButton
-                                        .padding(.horizontal, Spacing.appHorizontalMargin)
-                                        .padding(.vertical, 8)
+                                if hasUnreadItems {
+                                    MarkAllReadButton {
+                                        showMarkAllConfirmation = true
+                                    }
+                                    .padding(.horizontal, Spacing.appHorizontalMargin)
+                                    .padding(.vertical, 8)
+                                    .transition(.opacity)
                                 }
 
                                 if viewModel.state == .loadingMore {
@@ -102,6 +108,7 @@ struct LongFormView: View {
                                     .frame(height: bottomActionScrollPadding)
                                     .accessibilityHidden(true)
                             }
+                            .animation(.easeOut(duration: 0.2), value: hasUnreadItems)
                         }
                         .refreshable {
                             await refreshLongFormSurface(forceReload: true)
@@ -114,6 +121,7 @@ struct LongFormView: View {
                                 showMarkAllConfirmation = false
                             }
                             Button("Mark All as Read", role: .destructive) {
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
                                 showMarkAllConfirmation = false
                                 isProcessingBulk = true
                                 Task {
@@ -138,10 +146,11 @@ struct LongFormView: View {
                 ProgressView("Marking content")
                     .padding(16)
                     .background(Color.surfacePrimary)
-                    .cornerRadius(12)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
             }
         }
         .screenContainer()
+        .topScreenEdgeFade()
         .accessibilityIdentifier("long.screen")
         .sheet(isPresented: $showCustomNarrationPicker) {
             CustomNarrationPickerSheet(
@@ -245,14 +254,22 @@ struct LongFormView: View {
                 handleAudioDiscussion(for: content)
             }
         )
-        .buttonStyle(.plain)
         .accessibilityIdentifier("long.row.\(content.id)")
         .onAppear {
+            prefetchUpcomingCardImages(after: content)
             if isLast {
                 viewModel.loadMoreTrigger.send(())
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func prefetchUpcomingCardImages(after content: ContentSummary) {
+        let items = viewModel.currentItems()
+        guard let index = items.firstIndex(where: { $0.id == content.id }) else { return }
+        let upcoming = Array(items.dropFirst(index + 1).prefix(3))
+        guard !upcoming.isEmpty else { return }
+        ContentImagePrefetcher.prefetch(contents: upcoming)
     }
 
     private func supportsAudioDiscussion(for content: ContentSummary) -> Bool {
@@ -319,7 +336,7 @@ struct LongFormView: View {
             if let existingEpisode = audioEpisodeByContentId[content.id] {
                 episode = existingEpisode
                 longFormAudioLogger.info(
-                    "Long-form audio reusing episode | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status, privacy: .public)"
+                    "Long-form audio reusing episode | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public)"
                 )
             } else {
                 episode = try await AudioEpisodeService.shared.createContentCouncilEpisode(
@@ -327,7 +344,7 @@ struct LongFormView: View {
                     delivery: .inline
                 )
                 longFormAudioLogger.info(
-                    "Long-form audio episode created | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
+                    "Long-form audio episode created | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
                 )
             }
             audioEpisodeByContentId[content.id] = episode
@@ -386,26 +403,14 @@ struct LongFormView: View {
         }
     }
 
-    private var markAllLongFormButton: some View {
-        Button {
-            showMarkAllConfirmation = true
-        } label: {
-            Text("Mark All as Read")
-                .font(.appSubheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .frame(minHeight: 44)
-                .background(Color.surfaceSecondary)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
-
     @ViewBuilder
     private var longFormEmptyState: some View {
-        if shouldShowBootstrapState {
-            longFormBootstrapState
-        } else if unreadCountService.longFormCount == 0 && totalProcessedSourceItems > 0 {
+        // Sorted once here; the bootstrap helpers below all take this list as a
+        // parameter so a single render pass doesn't re-filter and re-sort per access.
+        let sources = longFormSources
+        if shouldShowBootstrapState(sources: sources) {
+            longFormBootstrapState(sources: sources)
+        } else if unreadCountService.longFormCount == 0 && totalProcessedSourceItems(in: sources) > 0 {
             EmptyStateView(
                 icon: "checkmark.circle",
                 title: "You're All Caught Up",
@@ -430,71 +435,77 @@ struct LongFormView: View {
         viewModel.currentItems().isEmpty && unreadCountService.longFormCount == 0
     }
 
-    private var shouldShowBootstrapState: Bool {
+    private func shouldShowBootstrapState(sources: [ScraperConfig]) -> Bool {
         guard shouldUseBootstrapSourceState else { return false }
         if sourcesViewModel.isLoading {
             return true
         }
-        return hasLoadedBootstrapSources && totalProcessedSourceItems == 0 && !longFormSources.isEmpty
+        return hasLoadedBootstrapSources && totalProcessedSourceItems(in: sources) == 0 && !sources.isEmpty
     }
 
-    private var sourcesReadyCount: Int {
-        longFormSources.filter { ($0.stats?.completedCount ?? 0) > 0 }.count
+    private func sourcesReadyCount(in sources: [ScraperConfig]) -> Int {
+        sources.filter { ($0.stats?.completedCount ?? 0) > 0 }.count
     }
 
-    private var totalProcessedSourceItems: Int {
-        longFormSources.reduce(0) { partial, config in
+    private func totalProcessedSourceItems(in sources: [ScraperConfig]) -> Int {
+        sources.reduce(0) { partial, config in
             partial + (config.stats?.completedCount ?? 0)
         }
     }
 
-    private var totalSourceItemsProcessing: Int {
-        longFormSources.reduce(0) { partial, config in
+    private func totalSourceItemsProcessing(in sources: [ScraperConfig]) -> Int {
+        sources.reduce(0) { partial, config in
             partial + (config.stats?.processingCount ?? 0)
         }
     }
 
-    private var bootstrapHeadline: String {
-        if totalSourceItemsProcessing > 0 {
+    private func bootstrapHeadline(sources: [ScraperConfig]) -> String {
+        if totalSourceItemsProcessing(in: sources) > 0 {
             return "Your long-form feed is being assembled"
         }
-        if sourcesReadyCount > 0 {
+        if sourcesReadyCount(in: sources) > 0 {
             return "Your sources are connected"
         }
         return "Waiting for the first long-form items"
     }
 
-    private var bootstrapSubtitle: String {
-        if totalSourceItemsProcessing > 0 {
-            return "\(totalSourceItemsProcessing) items are still processing across \(longFormSources.count) sources."
+    private func bootstrapSubtitle(sources: [ScraperConfig]) -> String {
+        let processing = totalSourceItemsProcessing(in: sources)
+        if processing > 0 {
+            return "\(processing) items are still processing across \(sources.count) sources."
         }
-        if sourcesReadyCount > 0 {
-            return "\(sourcesReadyCount) of \(longFormSources.count) sources have published something, but nothing is ready in this tab yet."
+        let ready = sourcesReadyCount(in: sources)
+        if ready > 0 {
+            return "\(ready) of \(sources.count) sources have published something, but nothing is ready in this tab yet."
         }
         return "We already know the feeds and podcasts you picked. This tab will fill in as their first items are fetched and processed."
     }
 
-    private var bootstrapCheckBackSummary: String {
-        if totalSourceItemsProcessing > 0 {
+    private static let bootstrapRelativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
+
+    private func bootstrapCheckBackSummary(sources: [ScraperConfig]) -> String {
+        if totalSourceItemsProcessing(in: sources) > 0 {
             return "Check back in a minute."
         }
 
-        let predictions = longFormSources.compactMap(\.stats)
+        let predictions = sources.compactMap(\.stats)
         if let earliest = predictions.compactMap(\.nextExpectedDate).min() {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .short
-            let relative = formatter.localizedString(for: earliest, relativeTo: Date())
+            let relative = Self.bootstrapRelativeFormatter.localizedString(for: earliest, relativeTo: Date())
             return earliest > Date() ? "Check back \(relative)." : "Check back later today."
         }
 
-        if totalProcessedSourceItems == 0 {
+        if totalProcessedSourceItems(in: sources) == 0 {
             return "Check back after the first source finishes processing."
         }
 
         return "Check back later today."
     }
 
-    private var longFormBootstrapState: some View {
+    private func longFormBootstrapState(sources: [ScraperConfig]) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 EditorialMastheadHeader(title: "Long Read")
@@ -502,20 +513,20 @@ struct LongFormView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
-                            Image(systemName: totalSourceItemsProcessing > 0 ? "clock.arrow.circlepath" : "dot.radiowaves.left.and.right")
+                            Image(systemName: totalSourceItemsProcessing(in: sources) > 0 ? "clock.arrow.circlepath" : "dot.radiowaves.left.and.right")
                                 .font(.appSymbol(size: 16, weight: .semibold))
                                 .foregroundStyle(Color.terracottaPrimary)
 
-                            Text(bootstrapHeadline)
+                            Text(bootstrapHeadline(sources: sources))
                                 .font(.appTitle3.weight(.semibold))
                                 .foregroundStyle(Color.onSurface)
                         }
 
-                        Text(bootstrapSubtitle)
+                        Text(bootstrapSubtitle(sources: sources))
                             .font(.listSubtitle)
                             .foregroundStyle(Color.onSurfaceSecondary)
 
-                        Text(bootstrapCheckBackSummary)
+                        Text(bootstrapCheckBackSummary(sources: sources))
                             .font(.listSubtitle.weight(.medium))
                             .foregroundStyle(Color.terracottaPrimary)
                     }
@@ -526,16 +537,16 @@ struct LongFormView: View {
                             .foregroundStyle(Color.onSurface)
                             .padding(.bottom, 12)
 
-                        ForEach(longFormSources) { config in
+                        ForEach(sources) { config in
                             sourceProgressRow(config)
-                            if config.id != longFormSources.last?.id {
+                            if config.id != sources.last?.id {
                                 Divider()
                                     .padding(.leading, 40)
                             }
                         }
                     }
 
-                    if sourcesViewModel.isLoading && longFormSources.isEmpty {
+                    if sourcesViewModel.isLoading && sources.isEmpty {
                         HStack(spacing: 10) {
                             ProgressView()
                             Text("Loading your sources")
@@ -629,7 +640,7 @@ struct LongFormView: View {
             if viewModel.currentItems().isEmpty {
                 viewModel.refreshUnreadFeed()
             } else {
-                viewModel.refreshUnreadFeedInBackground()
+                await viewModel.refreshUnreadFeedInBackground()
             }
         } else {
             viewModel.ensureUnreadFeedLoaded()

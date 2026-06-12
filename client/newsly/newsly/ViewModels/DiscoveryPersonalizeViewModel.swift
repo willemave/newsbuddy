@@ -199,7 +199,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
         step = .loading
         await refreshDiscoveryStatus(runId: runId)
 
-        if let status = discoveryRunStatus, status == "completed" || status == "failed" {
+        if isDiscoveryTerminalStatus(discoveryRunStatus) {
             return
         }
         startPolling(runId: runId)
@@ -221,7 +221,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
             while !Task.isCancelled {
                 await refreshDiscoveryStatus(runId: runId)
 
-                if let status = discoveryRunStatus, status == "completed" || status == "failed" {
+                if isDiscoveryTerminalStatus(discoveryRunStatus) {
                     break
                 }
 
@@ -243,14 +243,14 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
         inferredTopics = status.inferredTopics
         discoveryErrorMessage = status.errorMessage
 
-        if status.runStatus == "completed" {
+        if discoveryTaskStatus(status.runStatus) == .completed {
             onboardingStateStore.clearDiscoveryRun(userId: userId)
             if let suggestions = status.suggestions {
                 applySuggestions(suggestions)
             }
             errorMessage = nil
             step = .suggestions
-        } else if status.runStatus == "failed" {
+        } else if discoveryTaskStatus(status.runStatus) == .failed {
             suggestions = nil
             errorMessage = status.errorMessage ?? "Discovery failed."
             step = .suggestions
@@ -327,6 +327,16 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
                 config: nil
             )
         }
+    }
+
+    private func discoveryTaskStatus(_ status: String?) -> APITaskStatus? {
+        guard let status else { return nil }
+        return APITaskStatus(rawValue: status)
+    }
+
+    private func isDiscoveryTerminalStatus(_ status: String?) -> Bool {
+        let taskStatus = discoveryTaskStatus(status)
+        return taskStatus == .completed || taskStatus == .failed
     }
 
     private func handleAudioError(_ error: Error) {

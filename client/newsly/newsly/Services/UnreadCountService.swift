@@ -11,17 +11,7 @@ import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "UnreadCountService")
 
-struct UnreadCountsResponse: Codable {
-    let article: Int
-    let podcast: Int
-    let news: Int
-
-    enum CodingKeys: String, CodingKey {
-        case article
-        case podcast
-        case news
-    }
-}
+typealias UnreadCountsResponse = APIUnreadCountsResponse
 
 @MainActor
 class UnreadCountService: ObservableObject {
@@ -94,12 +84,27 @@ class UnreadCountService: ObservableObject {
     func incrementArticleCount() {
         articleCount += 1
     }
+
+    func incrementArticleCount(by amount: Int) {
+        guard amount > 0 else { return }
+        articleCount += amount
+    }
     
     func incrementPodcastCount() {
         podcastCount += 1
     }
 
+    func incrementPodcastCount(by amount: Int) {
+        guard amount > 0 else { return }
+        podcastCount += amount
+    }
+
     func incrementNewsCount() {
         newsCount += 1
+    }
+
+    func incrementNewsCount(by amount: Int) {
+        guard amount > 0 else { return }
+        newsCount += amount
     }
 }

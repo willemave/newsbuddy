@@ -40,9 +40,10 @@ struct InterleavedSummaryView: View {
                         .font(.readerBody)
                         .foregroundColor(.terracottaPrimary)
                         .accessibilityHidden(true)
-                    Text("Takeaway")
+                    Text("TAKEAWAY")
                         .font(.readerBody)
                         .foregroundColor(Color.onSurfaceSecondary)
+                        .tracking(0.4)
                 }
 
                 Text(summary.takeaway)
@@ -57,9 +58,10 @@ struct InterleavedSummaryView: View {
     @ViewBuilder
     private func insightCard(_ insight: InterleavedInsight) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(insight.topic)
+            Text(insight.topic.uppercased())
                 .font(.readerBody)
                 .foregroundColor(Color.onSurface)
+                .tracking(0.4)
 
             // Insight text
             Text(insight.insight)

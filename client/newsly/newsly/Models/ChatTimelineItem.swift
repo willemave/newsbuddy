@@ -22,8 +22,8 @@ enum ChatTimelineID: Hashable, Sendable {
 
     static func server(
         sourceMessageId: Int,
-        role: ChatMessageRole,
-        displayType: ChatMessageDisplayType
+        role: APIChatMessageRole,
+        displayType: APIChatMessageDisplayType
     ) -> ChatTimelineID {
         .server(
             displayKey: Self.legacyDisplayKey(
@@ -45,8 +45,8 @@ enum ChatTimelineID: Hashable, Sendable {
 
     private static func legacyDisplayKey(
         sourceMessageId: Int,
-        role: ChatMessageRole,
-        displayType: ChatMessageDisplayType
+        role: APIChatMessageRole,
+        displayType: APIChatMessageDisplayType
     ) -> String {
         "server|\(sourceMessageId)|\(role.rawValue)|\(displayType.rawValue)"
     }

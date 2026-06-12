@@ -166,7 +166,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
                 role: .tool,
                 timestamp: "2026-04-01T10:00:01Z",
                 content: "Thinking",
-                displayType: .processSummary
+                displayType: .process_summary
             ),
             message(
                 id: 3,
@@ -186,7 +186,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             localIdentityAliases: &aliases
         )
 
-        XCTAssertEqual(result.map(\.message.displayType), [.message, .processSummary, .message])
+        XCTAssertEqual(result.map(\.message.displayType), [.message, .process_summary, .message])
         XCTAssertEqual(result.last?.message.councilCandidates.map(\.personaName), ["Skeptic", "Analyst"])
     }
 
@@ -206,7 +206,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
                 role: .tool,
                 timestamp: timestamp,
                 content: "Searched 2 sources",
-                displayType: .processSummary
+                displayType: .process_summary
             ),
             message(
                 id: 1,
@@ -337,11 +337,11 @@ final class ChatTimelineReconcilerTests: XCTestCase {
         id: Int,
         sourceMessageId: Int? = nil,
         displayKey: String? = nil,
-        role: ChatMessageRole,
+        role: APIChatMessageRole,
         timestamp: String,
         content: String,
-        displayType: ChatMessageDisplayType = .message,
-        status: MessageProcessingStatus? = .completed,
+        displayType: APIChatMessageDisplayType = .message,
+        status: APIMessageProcessingStatus? = .completed,
         error: String? = nil,
         councilCandidates: [CouncilCandidate] = [],
         activeCouncilChildSessionId: Int? = nil

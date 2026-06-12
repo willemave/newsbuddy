@@ -7,19 +7,7 @@
 
 import Foundation
 
-struct PaginationMetadata: Codable {
-    let nextCursor: String?
-    let hasMore: Bool
-    let pageSize: Int
-    let total: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case nextCursor = "next_cursor"
-        case hasMore = "has_more"
-        case pageSize = "page_size"
-        case total
-    }
-}
+typealias PaginationMetadata = APIPaginationMetadata
 
 struct ContentListResponse: Codable {
     let contents: [ContentSummary]
@@ -32,6 +20,28 @@ struct ContentListResponse: Codable {
         case availableDates = "available_dates"
         case contentTypes = "content_types"
         case meta
+    }
+
+    init(
+        contents: [ContentSummary],
+        availableDates: [String],
+        contentTypes: [String],
+        meta: PaginationMetadata
+    ) {
+        self.contents = contents
+        self.availableDates = availableDates
+        self.contentTypes = contentTypes
+        self.meta = meta
+    }
+
+    init(from decoder: Decoder) throws {
+        let response = try APIContentListResponse(from: decoder)
+        self.init(
+            contents: response.contents.map(ContentSummary.init(api:)),
+            availableDates: response.availableDates,
+            contentTypes: response.contentTypes.map(\.rawValue),
+            meta: response.meta
+        )
     }
 
     var total: Int? { meta.total }

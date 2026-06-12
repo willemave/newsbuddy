@@ -218,17 +218,17 @@ class ContentListViewModel: CursorPaginatedViewModel {
         do {
             if targetSavedState {
                 let response = try await contentService.saveToKnowledge(id: contentId)
-                if let isSavedToKnowledge = response["is_saved_to_knowledge"] as? Bool {
-                    if let currentIndex = contents.firstIndex(where: { $0.id == contentId }) {
-                        contents[currentIndex] = contents[currentIndex].updating(
-                            isSavedToKnowledge: isSavedToKnowledge
-                        )
-                    }
+                if let currentIndex = contents.firstIndex(where: { $0.id == contentId }) {
+                    contents[currentIndex] = contents[currentIndex].updating(
+                        isSavedToKnowledge: response.isSavedToKnowledge
+                    )
                 }
             } else {
-                try await contentService.removeFromKnowledge(id: contentId)
+                let response = try await contentService.removeFromKnowledge(id: contentId)
                 if let currentIndex = contents.firstIndex(where: { $0.id == contentId }) {
-                    contents[currentIndex] = contents[currentIndex].updating(isSavedToKnowledge: false)
+                    contents[currentIndex] = contents[currentIndex].updating(
+                        isSavedToKnowledge: response.isSavedToKnowledge
+                    )
                 }
             }
         } catch {

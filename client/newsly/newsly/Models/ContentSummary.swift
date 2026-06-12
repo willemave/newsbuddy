@@ -101,6 +101,21 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         ContentTimestampFormatter.parse(dateString)
     }
 
+    private static func decode<T: Decodable>(_ type: T.Type, from raw: [String: AnyCodable]?) -> T? {
+        guard let raw else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let data = try? JSONSerialization.data(withJSONObject: raw.mapValues(\.value)) else {
+            return nil
+        }
+        return try? decoder.decode(type, from: data)
+    }
+
+    private static func topComment(from raw: [String: String]?) -> TopComment? {
+        guard let raw, let text = raw["text"] else { return nil }
+        return TopComment(author: raw["author"] ?? "", text: text)
+    }
+
     init(
         id: Int,
         contentType: String,
@@ -166,37 +181,40 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         self.cachedCalendarDayKey = itemDate.map { Self.calendarDayFormatter.string(from: $0) } ?? ""
     }
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
+    init(api response: APIContentSummaryResponse) {
         self.init(
-            id: try container.decode(Int.self, forKey: .id),
-            contentType: try container.decode(String.self, forKey: .contentType),
-            url: try container.decode(String.self, forKey: .url),
-            title: try container.decodeIfPresent(String.self, forKey: .title),
-            source: try container.decodeIfPresent(String.self, forKey: .source),
-            platform: try container.decodeIfPresent(String.self, forKey: .platform),
-            status: try container.decode(String.self, forKey: .status),
-            shortSummary: try container.decodeIfPresent(String.self, forKey: .shortSummary),
-            createdAt: try container.decode(String.self, forKey: .createdAt),
-            processedAt: try container.decodeIfPresent(String.self, forKey: .processedAt),
-            classification: try container.decodeIfPresent(String.self, forKey: .classification),
-            publicationDate: try container.decodeIfPresent(String.self, forKey: .publicationDate),
-            isRead: try container.decode(Bool.self, forKey: .isRead),
-            isSavedToKnowledge: try container.decodeIfPresent(Bool.self, forKey: .isSavedToKnowledge) ?? false,
-            imageUrl: try container.decodeIfPresent(String.self, forKey: .imageUrl),
-            thumbnailUrl: try container.decodeIfPresent(String.self, forKey: .thumbnailUrl),
-            primaryTopic: try container.decodeIfPresent(String.self, forKey: .primaryTopic),
-            topComment: try container.decodeIfPresent(TopComment.self, forKey: .topComment),
-            commentCount: try container.decodeIfPresent(Int.self, forKey: .commentCount),
-            newsSummary: try container.decodeIfPresent(String.self, forKey: .newsSummary),
-            newsKeyPoints: try container.decodeIfPresent([String].self, forKey: .newsKeyPoints),
-            feedPreview: try container.decodeIfPresent(LongformFeedPreview.self, forKey: .feedPreview),
-            artifactType: try container.decodeIfPresent(String.self, forKey: .artifactType),
-            previewBullets: try container.decodeIfPresent([String].self, forKey: .previewBullets),
-            reasonToRead: try container.decodeIfPresent(String.self, forKey: .reasonToRead),
-            keyTakeaway: try container.decodeIfPresent(String.self, forKey: .keyTakeaway),
-            savedSource: try container.decodeIfPresent(String.self, forKey: .savedSource)
+            id: response.id,
+            contentType: response.contentType.rawValue,
+            url: response.url,
+            title: response.title,
+            source: response.source,
+            platform: response.platform,
+            status: response.status.rawValue,
+            shortSummary: response.shortSummary,
+            createdAt: response.createdAt,
+            processedAt: response.processedAt,
+            classification: response.classification?.rawValue,
+            publicationDate: response.publicationDate,
+            isRead: response.isRead,
+            isSavedToKnowledge: response.isSavedToKnowledge,
+            imageUrl: response.imageUrl,
+            thumbnailUrl: response.thumbnailUrl,
+            primaryTopic: response.primaryTopic,
+            topComment: Self.topComment(from: response.topComment),
+            commentCount: response.commentCount,
+            newsSummary: response.newsSummary,
+            newsKeyPoints: response.newsKeyPoints,
+            feedPreview: Self.decode(LongformFeedPreview.self, from: response.feedPreview),
+            artifactType: response.artifactType,
+            previewBullets: response.previewBullets,
+            reasonToRead: response.reasonToRead,
+            keyTakeaway: response.keyTakeaway,
+            savedSource: response.savedSource?.rawValue
         )
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(api: try APIContentSummaryResponse(from: decoder))
     }
 
     func encode(to encoder: Encoder) throws {

@@ -30,7 +30,7 @@ enum ChatPreviewFixtures {
         role: .assistant,
         timestamp: timestamp,
         content: "Searched for counterarguments and compared them with the article's main claim.",
-        displayType: .processSummary,
+        displayType: .process_summary,
         processLabel: "Checked opposing evidence across three sources",
         status: .completed
     )

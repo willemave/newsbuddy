@@ -218,8 +218,8 @@ final class ContentDetailViewModelTests: XCTestCase {
     ) -> SubmitContentResponse {
         SubmitContentResponse(
             contentId: 42,
-            contentType: "article",
-            status: "new",
+            contentType: .article,
+            status: .new,
             platform: nil,
             alreadyExists: alreadyExists,
             message: alreadyExists ? "Existing" : "Queued",

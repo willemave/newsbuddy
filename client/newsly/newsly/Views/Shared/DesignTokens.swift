@@ -347,11 +347,22 @@ enum ReaderContentStyle {
     static let summaryBodyFontSize: CGFloat = 14
 }
 
+// MARK: - Corner Radius
+
+enum CornerRadius {
+    /// Cards and other top-level surfaces.
+    static let card: CGFloat = 24
+    /// Standalone controls (buttons, toasts) sitting directly on a screen surface.
+    static let control: CGFloat = 14
+    /// Controls nested inside a card: card radius minus card content padding.
+    static let nestedControl: CGFloat = 8
+}
+
 // MARK: - Card Metrics
 
 enum CardMetrics {
     static let heroImageHeight: CGFloat = 180
-    static let cardCornerRadius: CGFloat = 24
+    static let cardCornerRadius: CGFloat = CornerRadius.card
     static let cardSpacing: CGFloat = 20
     static let textOverlapOffset: CGFloat = -40
 }
@@ -464,6 +475,17 @@ enum AppRowFamily {
     case regular
 }
 
+// MARK: - Kicker Labels
+
+extension Text {
+    /// Shared uppercase micro-label style: masthead dates, day delimiters, and metadata rows.
+    func kicker(color: Color = .onSurfaceSecondary) -> some View {
+        font(.terracottaCategoryPill)
+            .tracking(1.5)
+            .foregroundStyle(color)
+    }
+}
+
 // MARK: - View Modifiers
 
 extension View {
@@ -493,6 +515,43 @@ extension View {
     /// Apply standard screen-level background.
     func screenContainer() -> some View {
         self.background(Color.surfacePrimary)
+    }
+
+    /// Fade scrolled content out under the status bar instead of letting it collide
+    /// with the clock and Dynamic Island. Solid over the status bar, then a short fade.
+    func topScreenEdgeFade(fadeHeight: CGFloat = 14) -> some View {
+        overlay(alignment: .top) {
+            TopScreenEdgeFade(fadeHeight: fadeHeight)
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+private struct TopScreenEdgeFade: View {
+    let fadeHeight: CGFloat
+
+    // Overlays on ScrollView don't receive safe-area geometry, so read the
+    // window inset directly to size the solid block over the status bar.
+    private var topInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+            .first?.safeAreaInsets.top ?? 0
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Color.surfacePrimary
+                .frame(height: topInset)
+
+            LinearGradient(
+                colors: [Color.surfacePrimary, Color.surfacePrimary.opacity(0)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: fadeHeight)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

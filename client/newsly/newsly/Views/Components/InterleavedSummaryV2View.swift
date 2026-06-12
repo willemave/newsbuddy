@@ -47,9 +47,10 @@ struct InterleavedSummaryV2View: View {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(summary.topics) { topic in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(topic.topic)
+                            Text(topic.topic.uppercased())
                                 .font(.readerBody)
                                 .foregroundColor(Color.onSurface)
+                                .tracking(0.4)
 
                             VStack(alignment: .leading, spacing: InterleavedV2Design.itemSpacing) {
                                 ForEach(Array(topic.bullets.enumerated()), id: \.offset) { _, bullet in
@@ -82,9 +83,10 @@ struct InterleavedSummaryV2View: View {
                 .font(.readerBody)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
-            Text(title)
+            Text(title.uppercased())
                 .font(.readerBody)
                 .foregroundColor(Color.onSurfaceSecondary)
+                .tracking(0.4)
         }
     }
 
