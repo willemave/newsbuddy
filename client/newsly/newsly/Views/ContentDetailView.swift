@@ -59,7 +59,7 @@ private enum DetailDesign {
 
     // Hero
     static let heroHeight: CGFloat = 220
-    static let parallaxHeroHeight: CGFloat = 360
+    static let parallaxHeroHeight: CGFloat = 260
     static let parallaxRate: CGFloat = 0.25
     static let floatingBackButtonSize: CGFloat = 44
     static let textOnlyBackButtonTopPadding: CGFloat = 8
@@ -1118,8 +1118,8 @@ struct ContentDetailView: View {
                 // Layer 3: Title + metadata + action bar
                 VStack(alignment: .leading, spacing: 8) {
                     Text(content.displayTitle)
-                        .font(detailTitleFont(for: content))
-                        .fontWeight(detailTitleWeight(for: content))
+                        .font(detailTitleFont)
+                        .fontWeight(detailTitleWeight)
                         .foregroundColor(.white)
                         .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1183,8 +1183,8 @@ struct ContentDetailView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(content.displayTitle)
-                        .font(detailTitleFont(for: content))
-                        .fontWeight(detailTitleWeight(for: content))
+                        .font(detailTitleFont)
+                        .fontWeight(detailTitleWeight)
                         .foregroundColor(Color.onSurface)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("content.detail.title.\(content.id)")
@@ -1248,15 +1248,12 @@ struct ContentDetailView: View {
             : DetailDesign.textOnlyStandardHeaderTopSpacer
     }
 
-    private func detailTitleFont(for content: ContentDetail) -> Font {
-        if content.apiContentType == .news {
-            return .appSerif(size: 20, relativeTo: .title3, weight: .medium)
-        }
-        return .appTitle3
+    private var detailTitleFont: Font {
+        .appSerif(size: 18, relativeTo: .headline, weight: .medium)
     }
 
-    private func detailTitleWeight(for content: ContentDetail) -> Font.Weight {
-        content.apiContentType == .news ? .medium : .semibold
+    private var detailTitleWeight: Font.Weight {
+        .medium
     }
 
     private func detailMetadataAccessibilityLabel(for content: ContentDetail) -> String {

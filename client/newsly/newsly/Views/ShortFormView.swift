@@ -559,7 +559,7 @@ private struct ShortNewsRow: View, Equatable {
     }
 
     private var titleFont: Font {
-        .appSerif(size: 20, relativeTo: .title3, weight: .medium)
+        .appSerif(size: 18, relativeTo: .headline, weight: .medium)
     }
 
     private var metadataColor: Color {
