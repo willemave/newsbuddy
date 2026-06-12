@@ -1,0 +1,82 @@
+{
+  "id": 401,
+  "content_type": "article",
+  "url": "https://example.com/long-read",
+  "source_url": "https://m.example.com/long-read",
+  "discussion_url": "https://news.ycombinator.com/item?id=401",
+  "title": "Long Read",
+  "display_title": "Structured Long Read",
+  "source": "Example",
+  "status": "completed",
+  "error_message": null,
+  "retry_count": 0,
+  "metadata": {
+    "domain": {
+      "source": "Example"
+    }
+  },
+  "created_at": "2026-04-27T15:00:00Z",
+  "updated_at": "2026-04-27T15:02:00Z",
+  "processed_at": "2026-04-27T15:03:00Z",
+  "checked_out_by": null,
+  "checked_out_at": null,
+  "publication_date": "2026-04-25T09:00:00Z",
+  "is_read": false,
+  "is_saved_to_knowledge": true,
+  "summary": "A long-form summary.",
+  "short_summary": "A short summary.",
+  "summary_kind": "long_interleaved",
+  "summary_version": 2,
+  "structured_summary": {
+    "overview": "A long-form summary.",
+    "bullet_points": [
+      {
+        "text": "First point",
+        "category": "finding"
+      }
+    ],
+    "quotes": [
+      {
+        "text": "Important quote",
+        "context": "Interview"
+      }
+    ],
+    "topics": [
+      "AI",
+      "Media"
+    ]
+  },
+  "longform_artifact": null,
+  "feed_preview": null,
+  "artifact_type": null,
+  "preview_bullets": null,
+  "reason_to_read": null,
+  "bullet_points": [
+    {
+      "text": "First point",
+      "category": "finding"
+    }
+  ],
+  "quotes": [
+    {
+      "text": "Important quote",
+      "context": "Interview"
+    }
+  ],
+  "topics": [
+    "AI",
+    "Media"
+  ],
+  "full_markdown": "# Long Read\n\nBody",
+  "body_available": true,
+  "body_kind": "article",
+  "body_format": "markdown",
+  "news_article_url": null,
+  "news_discussion_url": null,
+  "news_key_points": null,
+  "news_summary": null,
+  "image_url": "/static/images/content/401.png",
+  "thumbnail_url": "/static/images/thumbnails/401.png",
+  "detected_feed": null,
+  "can_subscribe": false
+}

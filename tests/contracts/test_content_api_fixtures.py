@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from app.models.api.content import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
@@ -12,6 +15,8 @@ from app.models.contracts import (
     SummaryKind,
     SummaryVersion,
 )
+
+FIXTURE_DIR = Path("tests/fixtures/contracts")
 
 
 def _summary_response(**kwargs: object) -> ContentSummaryResponse:
@@ -24,6 +29,124 @@ def _detail_response(**kwargs: object) -> ContentDetailResponse:
 
 def _dump(response: ContentSummaryResponse | ContentDetailResponse) -> dict[str, object]:
     return response.model_dump(mode="json")
+
+
+def _canonical_json(response: ContentSummaryResponse | ContentDetailResponse) -> str:
+    return json.dumps(_dump(response), indent=2) + "\n"
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "response"),
+    [
+        (
+            "content_summary_article.json",
+            _summary_response(
+                id=101,
+                content_type=ContentType.ARTICLE,
+                url="https://example.com/article",
+                source_url="https://m.example.com/article",
+                discussion_url="https://news.ycombinator.com/item?id=101",
+                title="Example Article",
+                source="Example",
+                platform="web",
+                status=ContentStatus.COMPLETED,
+                short_summary="A concise article summary.",
+                created_at="2026-04-27T12:00:00Z",
+                processed_at="2026-04-27T12:03:00Z",
+                classification=ContentClassification.TO_READ,
+                publication_date="2026-04-26T10:00:00Z",
+                is_read=False,
+                is_saved_to_knowledge=True,
+                image_url="/static/images/content/101.png",
+                thumbnail_url="/static/images/thumbnails/101.png",
+                primary_topic="AI",
+                top_comment={"author": "alice", "text": "Useful context."},
+                comment_count=12,
+                saved_source="knowledge",
+            ),
+        ),
+        (
+            "content_detail_long_read.json",
+            _detail_response(
+                id=401,
+                content_type=ContentType.ARTICLE,
+                url="https://example.com/long-read",
+                source_url="https://m.example.com/long-read",
+                discussion_url="https://news.ycombinator.com/item?id=401",
+                title="Long Read",
+                display_title="Structured Long Read",
+                source="Example",
+                status=ContentStatus.COMPLETED,
+                error_message=None,
+                retry_count=0,
+                metadata={"domain": {"source": "Example"}},
+                created_at="2026-04-27T15:00:00Z",
+                updated_at="2026-04-27T15:02:00Z",
+                processed_at="2026-04-27T15:03:00Z",
+                publication_date="2026-04-25T09:00:00Z",
+                is_saved_to_knowledge=True,
+                summary="A long-form summary.",
+                short_summary="A short summary.",
+                summary_kind=SummaryKind.LONG_INTERLEAVED,
+                summary_version=SummaryVersion.V2,
+                structured_summary={
+                    "overview": "A long-form summary.",
+                    "bullet_points": [{"text": "First point", "category": "finding"}],
+                    "quotes": [{"text": "Important quote", "context": "Interview"}],
+                    "topics": ["AI", "Media"],
+                },
+                bullet_points=[{"text": "First point", "category": "finding"}],
+                quotes=[{"text": "Important quote", "context": "Interview"}],
+                topics=["AI", "Media"],
+                full_markdown="# Long Read\n\nBody",
+                body_available=True,
+                body_kind="article",
+                body_format="markdown",
+                image_url="/static/images/content/401.png",
+                thumbnail_url="/static/images/thumbnails/401.png",
+            ),
+        ),
+        (
+            "content_detail_null_optionals.json",
+            _detail_response(
+                id=402,
+                content_type=ContentType.ARTICLE,
+                url="https://newsletter.example.com/p/feed",
+                title="Detected Feed",
+                display_title="Detected Feed",
+                source="Newsletter",
+                status=ContentStatus.SKIPPED,
+                error_message="Detected feed URL",
+                retry_count=1,
+                metadata={"processing": {"detected_feed": True}},
+                created_at="2026-04-27T16:00:00Z",
+                updated_at="2026-04-27T16:01:00Z",
+                bullet_points=[],
+                quotes=[],
+                topics=[],
+                detected_feed=DetectedFeed(
+                    url="https://newsletter.example.com/feed",
+                    type="substack",
+                    title="Newsletter",
+                    format="rss",
+                ),
+                can_subscribe=True,
+            ),
+        ),
+    ],
+)
+def test_canonical_content_fixture_matches_backend_model(
+    fixture_name: str,
+    response: ContentSummaryResponse | ContentDetailResponse,
+) -> None:
+    assert (FIXTURE_DIR / fixture_name).read_text() == _canonical_json(response)
+
+
+def test_adversarial_unknown_enum_fixture_is_valid_json() -> None:
+    payload = json.loads((FIXTURE_DIR / "content_summary_unknown_enum.json").read_text())
+
+    assert payload["content_type"] == "future_content_type"
+    assert payload["status"] == "future_status"
 
 
 @pytest.mark.parametrize(

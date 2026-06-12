@@ -9,8 +9,13 @@ PYTHONPATH="$REPO_ROOT" uv run python scripts/export_openapi_schema.py \
   --output "$REPO_ROOT/docs/library/reference/openapi.json"
 
 PYTHONPATH="$REPO_ROOT" uv run python scripts/generate_ios_contracts.py \
-  --output "$REPO_ROOT/client/newsly/newsly/Models/Generated/APIContracts.generated.swift"
+  --output "$REPO_ROOT/client/newsly/newsly/Models/Generated/APIContracts.generated.swift" \
+  --models-output "$REPO_ROOT/client/newsly/newsly/Models/Generated/APIModels.generated.swift"
 
-"$REPO_ROOT/scripts/generate_agent_cli_artifacts.sh"
+PYTHONPATH="$REPO_ROOT" uv run python scripts/export_agent_openapi_schema.py \
+  --output "$REPO_ROOT/cli/openapi/agent-openapi.json"
 
-echo "Regenerated public OpenAPI, Go CLI, and Swift enum contract artifacts."
+PYTHONPATH="$REPO_ROOT" uv run python scripts/generate_go_contracts.py \
+  --output "$REPO_ROOT/cli/internal/api/contracts_gen.go"
+
+echo "Regenerated public OpenAPI, Go CLI, and Swift contract artifacts."

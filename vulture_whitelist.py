@@ -26,6 +26,12 @@ source_fields  # unused variable (app/services/llm_prompts.py:12)
 source_guidelines  # unused variable (app/services/llm_prompts.py:13)
 
 # Public constants and enum contracts
+CLAIMED  # unused variable (app/models/contracts.py:207)
+EXPIRED  # unused variable (app/models/contracts.py:208)
+OPENED  # unused variable (app/models/contracts.py:130)
+PODCAST_RSS  # unused variable (app/models/contracts.py:174)
+SUBSTACK  # unused variable (app/models/contracts.py:173)
+SUMMARY  # unused variable (app/models/contracts.py:215)
 V1  # unused variable (app/models/contracts.py:97)
 
 # Pydantic and settings fields
@@ -81,6 +87,7 @@ jwt_algorithm  # unused variable (app/core/settings.py:99)
 jwt_secret_configured  # unused variable (app/core/settings.py:105)
 journal_ref  # unused variable (app/models/metadata/source.py:71)
 key_actors  # unused variable (app/models/metadata/longform_artifacts.py:94)
+key_takeaway  # unused variable (app/models/api/content.py:102)
 langfuse_public_key_configured  # unused variable (app/core/settings.py:211)
 langfuse_secret_key_configured  # unused variable (app/core/settings.py:212)
 latest_publication_at  # unused variable (app/models/api/scraper_configs.py:19)
@@ -138,6 +145,7 @@ SYSTEM  # unused variable (app/models/api/chat.py:22)
 thesis  # unused variable (app/models/metadata/longform_artifacts.py:63)
 time_or_cost  # unused variable (app/models/metadata/longform_artifacts.py:101)
 timeline  # unused variable (app/models/metadata/longform_artifacts.py:93)
+total_requested  # unused variable (app/models/api/content_actions.py:78)
 twitter_auth_token_configured  # unused variable (app/core/settings.py:182)
 twitter_ct0_configured  # unused variable (app/core/settings.py:183)
 twitter_user_agent_configured  # unused variable (app/core/settings.py:184)
@@ -162,6 +170,7 @@ _.side_effect  # unused attribute (tests/pipeline/test_content_worker.py:357)
 pytestmark  # unused variable (tests/routers/api/test_content_detail_subscribe.py:9)
 
 # Runtime framework attributes
+load_atom_feeds  # unused function (app/scraping/atom_unified.py:62)
 _.namer  # unused attribute (app/core/logging.py:420)
 _.row_factory  # unused attribute (scripts/export_title_clustering_dataset.py:67)
 

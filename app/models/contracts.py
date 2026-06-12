@@ -34,6 +34,13 @@ class ContentClassification(StrEnum):
     SKIP = "skip"
 
 
+class SavedSource(StrEnum):
+    """Source that placed content in the user's saved library."""
+
+    KNOWLEDGE = "knowledge"
+    X_BOOKMARK = "x_bookmark"
+
+
 class TaskType(StrEnum):
     """Queue task types."""
 
@@ -104,6 +111,154 @@ class SummaryVersion(IntEnum):
     V2 = 2
 
 
+class OperationStatus(StrEnum):
+    """Common success status used by mutation-style API responses."""
+
+    SUCCESS = "success"
+
+
+class KnowledgeMutationStatus(StrEnum):
+    """Status values for Knowledge save/remove mutations."""
+
+    SUCCESS = "success"
+    NOT_FOUND = "not_found"
+
+
+class ContentInteractionType(StrEnum):
+    """Client-recorded content interaction kinds."""
+
+    OPENED = "opened"
+
+
+class NarrationTargetType(StrEnum):
+    """Supported narration target families."""
+
+    CONTENT = "content"
+
+
+class SubmissionKind(StrEnum):
+    """Semantic kind for a user-visible submission status row."""
+
+    CONTENT = "content"
+    FEED_SUBSCRIPTION = "feed_subscription"
+
+
+class SubmissionOutcome(StrEnum):
+    """User-facing outcome for a submitted content or feed item."""
+
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    SUBSCRIBED = "subscribed"
+    ALREADY_SUBSCRIBED = "already_subscribed"
+    FEED_NOT_FOUND = "feed_not_found"
+    FEED_FETCH_FAILED = "feed_fetch_failed"
+    FEED_SUBSCRIPTION_FAILED = "feed_subscription_failed"
+
+
+class DiscussionMode(StrEnum):
+    """Shape of discussion data returned for a content item."""
+
+    NONE = "none"
+    COMMENTS = "comments"
+    DISCUSSION_LIST = "discussion_list"
+
+
+class FeedType(StrEnum):
+    """Supported feed/source categories exposed in client contracts."""
+
+    ATOM = "atom"
+    SUBSTACK = "substack"
+    PODCAST_RSS = "podcast_rss"
+
+
+class FeedFormat(StrEnum):
+    """Supported feed document formats."""
+
+    RSS = "rss"
+    ATOM = "atom"
+
+
+class AudioEpisodeKind(StrEnum):
+    """Generated audio episode categories."""
+
+    FAST_NEWS_DIGEST = "fast_news_digest"
+    CONTENT_COUNCIL_DISCUSSION = "content_council_discussion"
+    NEWS_ITEM_DISCUSSION = "news_item_discussion"
+    CUSTOM_NARRATION = "custom_narration"
+
+
+class AudioEpisodeStatus(StrEnum):
+    """Generated audio episode lifecycle statuses."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class CliLinkStatus(StrEnum):
+    """Lifecycle statuses for CLI/mobile link sessions."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    CLAIMED = "claimed"
+    EXPIRED = "expired"
+
+
+class AgentLibraryDocumentVariant(StrEnum):
+    """Available CLI library document variants."""
+
+    SOURCE = "source"
+    SUMMARY = "summary"
+
+
+class AgentSearchResultKind(StrEnum):
+    """Search result family for machine-facing agent search."""
+
+    WEB = "web"
+    PODCAST = "podcast"
+
+
+class OnboardingSuggestionType(StrEnum):
+    """Source types suggested during onboarding discovery."""
+
+    SUBSTACK = "substack"
+    ATOM = "atom"
+    PODCAST_RSS = "podcast_rss"
+    REDDIT = "reddit"
+
+
+class OnboardingSelectedSourceType(StrEnum):
+    """Source types the onboarding completion endpoint can subscribe to."""
+
+    SUBSTACK = "substack"
+    ATOM = "atom"
+    PODCAST_RSS = "podcast_rss"
+
+
+class IntegrationDisconnectStatus(StrEnum):
+    """Status returned after disconnecting an integration."""
+
+    DISCONNECTED = "disconnected"
+
+
+class DeleteStatus(StrEnum):
+    """Status returned after deleting a resource."""
+
+    DELETED = "deleted"
+
+
+class UserLlmProvider(StrEnum):
+    """User-configurable LLM providers accepted by integration endpoints."""
+
+    ANTHROPIC = "anthropic"
+    OPENAI = "openai"
+    GOOGLE = "google"
+
+
 class NewsItemVisibilityScope(StrEnum):
     """Audience visibility for one short-form news item."""
 
@@ -162,6 +317,22 @@ class MessageProcessingStatus(StrEnum):
     FAILED = "failed"
 
 
+class ChatMessageRole(StrEnum):
+    """Role of a chat message."""
+
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+    TOOL = "tool"
+
+
+class ChatMessageDisplayType(StrEnum):
+    """Display type for a chat message row."""
+
+    MESSAGE = "message"
+    PROCESS_SUMMARY = "process_summary"
+
+
 class LLMProvider(StrEnum):
     """Supported LLM providers."""
 
@@ -171,3 +342,11 @@ class LLMProvider(StrEnum):
     CEREBRAS = "cerebras"
     OPENROUTER = "openrouter"
     DEEP_RESEARCH = "deep_research"
+
+
+class TweetLength(StrEnum):
+    """Tweet length preference."""
+
+    SHORT = "short"  # 100-180 chars - concise, punchy
+    MEDIUM = "medium"  # 180-280 chars - balanced
+    LONG = "long"  # 280-400 chars - detailed
