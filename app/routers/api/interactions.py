@@ -11,6 +11,7 @@ from app.models.api.analytics import (
     RecordContentInteractionRequest,
     RecordContentInteractionResponse,
 )
+from app.models.contracts import OperationStatus
 from app.models.db.users import User
 from app.services.content_interactions import (
     ContentInteractionContentNotFoundError,
@@ -56,7 +57,7 @@ def post_content_interaction(
         raise HTTPException(status_code=404, detail="Content not found") from exc
 
     return RecordContentInteractionResponse(
-        status="success",
+        status=OperationStatus.SUCCESS,
         recorded=result.recorded,
         interaction_id=result.interaction_id,
         analytics_interaction_id=result.analytics_interaction_id,

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.api.content_discussions import ContentDiscussionResponse, DiscussionLinkResponse
+from app.models.contracts import DiscussionMode
 from app.models.db import ContentDiscussion, NewsItem, NewsItemDiscussion
 from app.queries.get_content_discussion import build_discussion_response
 from app.services.news_feed import get_visible_news_item
@@ -68,7 +69,11 @@ def _build_response_from_news_item_discussion(
     return ContentDiscussionResponse(
         content_id=news_item_id,
         status=status,
-        mode="comments" if row.discussion_url or row.raw_comments_ref or summary else "none",
+        mode=(
+            DiscussionMode.COMMENTS
+            if row.discussion_url or row.raw_comments_ref or summary
+            else DiscussionMode.NONE
+        ),
         platform=row.platform,
         source_url=row.discussion_url,
         discussion_url=row.discussion_url,

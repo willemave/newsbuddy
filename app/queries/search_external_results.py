@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.models.api.agent import AgentSearchResponse, AgentSearchResultResponse
+from app.models.contracts import AgentSearchResultKind
 from app.services.exa_client import exa_search
 from app.services.podcast_search import search_podcast_episodes
 
@@ -13,7 +14,7 @@ def execute(*, query: str, limit: int, include_podcasts: bool) -> AgentSearchRes
     web_hits = exa_search(query=query, num_results=limit)
     results.extend(
         AgentSearchResultResponse(
-            kind="web",
+            kind=AgentSearchResultKind.WEB,
             title=hit.title,
             url=hit.url,
             snippet=hit.snippet,
@@ -27,7 +28,7 @@ def execute(*, query: str, limit: int, include_podcasts: bool) -> AgentSearchRes
         podcast_hits = search_podcast_episodes(query=query, limit=limit)
         results.extend(
             AgentSearchResultResponse(
-                kind="podcast",
+                kind=AgentSearchResultKind.PODCAST,
                 title=hit.title,
                 url=hit.episode_url,
                 snippet=hit.snippet,

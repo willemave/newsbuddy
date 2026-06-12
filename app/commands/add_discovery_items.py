@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pydantic import HttpUrl, TypeAdapter
 from sqlalchemy.orm import Session
 
 from app.commands import ingest_content as ingest_content_command
@@ -13,8 +12,6 @@ from app.models.db.users import User
 from app.repositories.discovery_repository import list_user_suggestions_by_ids
 
 logger = get_logger(__name__)
-
-_HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
 
 
 def _require_user_id(current_user: User) -> int:
@@ -52,11 +49,10 @@ def execute(
             continue
 
         try:
-            validated_item_url = _HTTP_URL_ADAPTER.validate_python(item_url)
             response = ingest_content_command.execute(
                 db,
                 payload=SubmitContentRequest(
-                    url=validated_item_url,
+                    url=item_url,
                     content_type=None,
                     title=suggestion.title,
                     platform=None,

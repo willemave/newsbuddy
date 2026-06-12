@@ -5,10 +5,11 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.chat import ChatMessageDto, ChatMessageRole, MessageStatusResponse
+from app.models.api.chat import ChatMessageDto, MessageStatusResponse
 from app.models.api.chat import (
     MessageProcessingStatus as MessageProcessingStatusDto,
 )
+from app.models.contracts import ChatMessageRole
 from app.models.db import ChatMessage, ChatSession
 from app.queries.chat_read_models import (
     build_async_assistant_display_id,

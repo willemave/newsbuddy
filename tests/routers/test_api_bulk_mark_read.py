@@ -2,6 +2,7 @@
 
 from sqlalchemy import select
 
+from app.commands import mark_read
 from app.models.db import ContentReadStatus
 
 
@@ -46,3 +47,21 @@ def test_bulk_mark_read_endpoint_handles_invalid_ids(client, content_factory) ->
     detail = response.json()["detail"]
     assert "Invalid content IDs" in detail
     assert "9999" in detail
+
+
+def test_mark_read_endpoint_returns_error_when_repository_write_fails(
+    client,
+    content_factory,
+    monkeypatch,
+) -> None:
+    """Ensure write failures are visible to clients instead of a 200 error payload."""
+    content = content_factory(
+        url="https://example.com/api-mark-read-fails",
+        title="API Mark Read Fails",
+    )
+    monkeypatch.setattr(mark_read.read_status_repository, "mark_content_as_read", lambda *_: None)
+
+    response = client.post(f"/api/content/{content.id}/mark-read")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to mark content as read"

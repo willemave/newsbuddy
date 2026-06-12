@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Literal, cast
-
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.api.agent import AgentOnboardingCompleteRequest
-from app.models.api.onboarding import OnboardingCompleteRequest, OnboardingSelectedSource
+from app.models.api.onboarding import (
+    OnboardingCompleteRequest,
+    OnboardingCompleteResponse,
+    OnboardingSelectedSource,
+)
+from app.models.contracts import OnboardingSelectedSourceType
 from app.models.db import OnboardingDiscoverySuggestion
 from app.services.onboarding import complete_onboarding
 
@@ -19,7 +22,7 @@ def execute(
     user_id: int,
     run_id: int,
     payload: AgentOnboardingCompleteRequest,
-):
+) -> OnboardingCompleteResponse:
     """Complete onboarding from a simplified accept-all or explicit source selection."""
     suggestions = (
         db.query(OnboardingDiscoverySuggestion)
@@ -48,7 +51,7 @@ def execute(
             continue
         selected_sources.append(
             OnboardingSelectedSource(
-                suggestion_type=cast(Literal["substack", "atom", "podcast_rss"], suggestion_type),
+                suggestion_type=OnboardingSelectedSourceType(suggestion_type),
                 title=suggestion.title,
                 feed_url=suggestion.feed_url,
                 config={},

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse, urlunparse
 
+from app.models.contracts import FeedFormat, FeedType
 from app.models.domain.chat_render import (
     AssistantFeedOption,
     AssistantFeedOptionsResult,
@@ -220,8 +221,8 @@ def _build_option(
         title=title or normalized_feed_url,
         site_url=site_url,
         feed_url=normalized_feed_url,
-        feed_type=classification.feed_type,
-        feed_format="atom" if str(feed_format).lower() == "atom" else "rss",
+        feed_type=FeedType(classification.feed_type),
+        feed_format=FeedFormat.ATOM if str(feed_format).lower() == "atom" else FeedFormat.RSS,
         description=description,
         rationale=rationale,
         evidence_url=site_url,

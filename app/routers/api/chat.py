@@ -25,7 +25,6 @@ from app.models.api.chat import (
     AssistantTurnRequest,
     AssistantTurnResponse,
     ChatMessageDto,
-    ChatMessageRole,
     ChatSessionDetailDto,
     ChatSessionListResponse,
     ChatSessionSummaryDto,
@@ -42,6 +41,7 @@ from app.models.api.chat import (
 from app.models.api.chat import (
     MessageProcessingStatus as MessageProcessingStatusDto,
 )
+from app.models.contracts import ChatMessageRole
 from app.models.db import (
     ChatSession,
     Content,

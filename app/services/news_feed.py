@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy import cast as sa_cast
@@ -14,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import AGGREGATOR_SCRAPER_TYPE, SUPPORTED_AGGREGATOR_KEYS
 from app.models.api.content import ContentDetailResponse, ContentListResponse
+from app.models.api.content_actions import BulkMarkReadResponse
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
     ContentType,
@@ -284,7 +284,7 @@ def bulk_mark_news_items_read(
     *,
     user_id: int,
     news_item_ids: list[int],
-) -> dict[str, Any]:
+) -> BulkMarkReadResponse:
     """Mark visible representative news items as read for one user."""
     requested_ids = list(news_item_ids)
     visible_ids = {
@@ -295,12 +295,11 @@ def bulk_mark_news_items_read(
         .all()
     }
     if not visible_ids:
-        return {
-            "status": "success",
-            "marked_count": 0,
-            "failed_ids": requested_ids,
-            "total_requested": len(requested_ids),
-        }
+        return BulkMarkReadResponse(
+            marked_count=0,
+            failed_ids=requested_ids,
+            total_requested=len(requested_ids),
+        )
 
     try:
         timestamp = datetime.now(UTC).replace(tzinfo=None)
@@ -330,18 +329,16 @@ def bulk_mark_news_items_read(
         marked_count = len(inserted_ids)
     except OperationalError:
         db.rollback()
-        return {
-            "status": "success",
-            "marked_count": 0,
-            "failed_ids": sorted(visible_ids),
-            "total_requested": len(requested_ids),
-        }
-    return {
-        "status": "success",
-        "marked_count": marked_count,
-        "failed_ids": sorted(set(requested_ids) - visible_ids),
-        "total_requested": len(requested_ids),
-    }
+        return BulkMarkReadResponse(
+            marked_count=0,
+            failed_ids=sorted(visible_ids),
+            total_requested=len(requested_ids),
+        )
+    return BulkMarkReadResponse(
+        marked_count=marked_count,
+        failed_ids=sorted(set(requested_ids) - visible_ids),
+        total_requested=len(requested_ids),
+    )
 
 
 def count_unread_news_items(db: Session, *, user_id: int) -> int:

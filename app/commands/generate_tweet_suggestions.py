@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
-from app.models.api.content_actions import TweetLength, TweetSuggestion, TweetSuggestionsResponse
-from app.models.contracts import ContentStatus
+from app.models.api.content_actions import TweetSuggestion, TweetSuggestionsResponse
+from app.models.contracts import ContentStatus, TweetLength
 from app.models.db import Content
 from app.models.domain.content_mapper import content_to_domain
 from app.services.tweet_suggestions import generate_tweet_suggestions

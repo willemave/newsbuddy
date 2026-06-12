@@ -23,6 +23,7 @@ from app.services.assistant_router import KNOWLEDGE_SESSION_TYPE, build_screen_c
 from app.services.llm_models import is_deep_research_provider, resolve_model
 from app.services.news_feed import get_visible_news_item
 from app.services.personal_markdown_library import sync_personal_markdown_for_content
+from app.utils.title_utils import derive_chat_session_title
 
 logger = get_logger(__name__)
 
@@ -96,8 +97,8 @@ def execute(
         title = article_title
     elif request.topic:
         title = request.topic
-    elif request.initial_message:
-        title = request.initial_message[:80]
+    elif derived_title := derive_chat_session_title(request.initial_message):
+        title = derived_title
     else:
         title = "New Chat"
 

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from hashlib import sha1
-from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-FeedType = Literal["atom", "substack", "podcast_rss"]
-FeedFormat = Literal["rss", "atom"]
+from app.models.contracts import FeedFormat, FeedType
 
 
 class AssistantFeedOption(BaseModel):
@@ -19,7 +17,7 @@ class AssistantFeedOption(BaseModel):
     site_url: str = Field(..., min_length=1, max_length=2048)
     feed_url: str = Field(..., min_length=1, max_length=2048)
     feed_type: FeedType
-    feed_format: FeedFormat = "rss"
+    feed_format: FeedFormat = FeedFormat.RSS
     description: str | None = Field(default=None, max_length=600)
     rationale: str | None = Field(default=None, max_length=600)
     evidence_url: str | None = Field(default=None, max_length=2048)

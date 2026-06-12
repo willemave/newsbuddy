@@ -10,6 +10,7 @@ from app.commands import save_to_knowledge as save_to_knowledge_command
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.models.api.content import ContentListResponse
+from app.models.api.content_actions import KnowledgeMutationResponse
 from app.models.db.users import User
 from app.queries import get_knowledge_library as get_knowledge_library_query
 
@@ -18,6 +19,7 @@ router = APIRouter()
 
 @router.post(
     "/{content_id}/knowledge",
+    response_model=KnowledgeMutationResponse,
     summary="Save content to knowledge",
     description="Save a specific content item to the user's knowledge library.",
     responses={
@@ -30,7 +32,7 @@ def save_to_knowledge(
     content_id: Annotated[int, Path(..., description="Content ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> dict:
+) -> KnowledgeMutationResponse:
     """Save content to the authenticated user's knowledge library."""
     return save_to_knowledge_command.execute(
         db,
@@ -41,6 +43,7 @@ def save_to_knowledge(
 
 @router.delete(
     "/{content_id}/knowledge",
+    response_model=KnowledgeMutationResponse,
     summary="Remove content from knowledge",
     description="Remove a specific content item from the user's knowledge library.",
     responses={
@@ -53,7 +56,7 @@ def remove_from_knowledge(
     content_id: Annotated[int, Path(..., description="Content ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> dict:
+) -> KnowledgeMutationResponse:
     """Remove content from the authenticated user's knowledge library."""
     return remove_from_knowledge_command.execute(
         db,

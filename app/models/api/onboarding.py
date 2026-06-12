@@ -13,6 +13,8 @@ from app.models.contracts import (
     ContentClassification,
     ContentStatus,
     ContentType,
+    OnboardingSelectedSourceType,
+    OnboardingSuggestionType,
     SummaryKind,
     SummaryVersion,
 )
@@ -119,7 +121,7 @@ class OnboardingAudioDiscoverResponse(BaseModel):
 class OnboardingSuggestion(BaseModel):
     """Single onboarding recommendation item."""
 
-    suggestion_type: Literal["substack", "atom", "podcast_rss", "reddit"]
+    suggestion_type: OnboardingSuggestionType
     title: str | None = None
     site_url: str | None = None
     feed_url: str | None = None
@@ -159,7 +161,7 @@ class OnboardingDiscoveryStatusResponse(BaseModel):
 class OnboardingSelectedSource(BaseModel):
     """Selected source for onboarding completion."""
 
-    suggestion_type: Literal["substack", "atom", "podcast_rss"]
+    suggestion_type: OnboardingSelectedSourceType
     title: str | None = None
     feed_url: str = Field(..., min_length=5, max_length=2048)
     config: dict[str, Any] | None = None

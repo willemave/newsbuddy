@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,6 +11,7 @@ from app.commands import delete_user_llm_integration, upsert_user_llm_integratio
 from app.core.db import get_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.models.api.integrations import (
+    DeleteUserLlmIntegrationResponse,
     IntegrationDisconnectResponse,
     UpsertUserLlmIntegrationRequest,
     UserLlmIntegrationResponse,
@@ -20,6 +21,7 @@ from app.models.api.integrations import (
     XOAuthStartRequest,
     XOAuthStartResponse,
 )
+from app.models.contracts import UserLlmProvider
 from app.models.db.users import User
 from app.queries import list_user_llm_integrations
 from app.services.x_integration import (
@@ -137,12 +139,12 @@ def put_llm_integration(
     )
 
 
-@llm_router.delete("/{provider}", response_model=dict)
+@llm_router.delete("/{provider}", response_model=DeleteUserLlmIntegrationResponse)
 def delete_llm_integration(
     provider: str,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> dict[str, str]:
+) -> DeleteUserLlmIntegrationResponse:
     """Delete a user-managed LLM provider key."""
     return delete_user_llm_integration.execute(
         db,
@@ -165,7 +167,8 @@ def test_llm_integration(
     }
     if provider not in {"anthropic", "openai", "google"}:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported provider")
+    resolved_provider = UserLlmProvider(provider)
     return UserLlmIntegrationTestResponse(
-        provider=cast(Literal["anthropic", "openai", "google"], provider),
-        ok=provider in integrations and integrations[provider].configured,
+        provider=resolved_provider,
+        ok=resolved_provider in integrations and integrations[resolved_provider].configured,
     )

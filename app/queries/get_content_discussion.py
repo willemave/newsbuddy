@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -14,12 +14,11 @@ from app.models.api.content_discussions import (
     DiscussionItemResponse,
     DiscussionLinkResponse,
 )
+from app.models.contracts import DiscussionMode
 from app.models.db import Content, ContentDiscussion
 from app.repositories.content_detail_repository import (
     get_content_discussion as get_content_discussion_repository,
 )
-
-DiscussionMode = Literal["none", "comments", "discussion_list"]
 
 
 def _discussion_mode_has_renderable_content(
@@ -75,7 +74,7 @@ def build_discussion_response(
         return ContentDiscussionResponse(
             content_id=content_id,
             status="not_ready",
-            mode="none",
+            mode=DiscussionMode.NONE,
             platform=platform,
             source_url=discussion_url,
             discussion_url=discussion_url,
@@ -94,9 +93,12 @@ def build_discussion_response(
     if data is None:
         data = {}
     raw_mode = data.get("mode")
-    mode: DiscussionMode = (
-        raw_mode if raw_mode in {"none", "comments", "discussion_list"} else "none"
-    )
+    valid_modes = {
+        DiscussionMode.NONE.value,
+        DiscussionMode.COMMENTS.value,
+        DiscussionMode.DISCUSSION_LIST.value,
+    }
+    mode = DiscussionMode(raw_mode) if raw_mode in valid_modes else DiscussionMode.NONE
 
     comments: list[DiscussionCommentResponse] = []
     for entry in data.get("comments", []):

@@ -10,7 +10,12 @@ from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.core.logging import get_logger
 from app.models.api.content import ContentListResponse
-from app.models.api.content_actions import BulkMarkReadRequest
+from app.models.api.content_actions import (
+    BulkMarkReadRequest,
+    BulkMarkReadResponse,
+    MarkReadResponse,
+    MarkUnreadResponse,
+)
 from app.models.db.users import User
 from app.queries import get_recently_read as get_recently_read_query
 
@@ -21,6 +26,7 @@ router = APIRouter()
 
 @router.post(
     "/{content_id}/mark-read",
+    response_model=MarkReadResponse,
     summary="Mark content as read",
     description="Mark a specific content item as read.",
     responses={
@@ -33,7 +39,7 @@ def mark_content_read(
     content_id: Annotated[int, Path(..., description="Content ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> dict:
+) -> MarkReadResponse:
     """Mark content as read."""
     user_id = require_user_id(current_user)
     logger.info(
@@ -46,6 +52,7 @@ def mark_content_read(
 
 @router.delete(
     "/{content_id}/mark-unread",
+    response_model=MarkUnreadResponse,
     summary="Mark content as unread",
     description="Remove the read status from a specific content item.",
     responses={
@@ -58,7 +65,7 @@ def mark_content_unread(
     content_id: Annotated[int, Path(..., description="Content ID", gt=0)],
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> dict:
+) -> MarkUnreadResponse:
     """Mark content as unread by removing its read status."""
     user_id = require_user_id(current_user)
     logger.info(
@@ -71,6 +78,7 @@ def mark_content_unread(
 
 @router.post(
     "/bulk-mark-read",
+    response_model=BulkMarkReadResponse,
     summary="Bulk mark content as read",
     description="Mark multiple content items as read in a single request.",
     responses={
@@ -83,7 +91,7 @@ def bulk_mark_read(
     request: BulkMarkReadRequest,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> dict:
+) -> BulkMarkReadResponse:
     """Mark multiple content items as read."""
     user_id = require_user_id(current_user)
     logger.info(

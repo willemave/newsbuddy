@@ -10,15 +10,13 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.models.api.chat import (
-    ChatMessageDisplayType,
     ChatMessageDto,
-    ChatMessageRole,
     ChatSessionSummaryDto,
 )
 from app.models.api.chat import (
     MessageProcessingStatus as MessageProcessingStatusDto,
 )
-from app.models.contracts import MessageProcessingStatus
+from app.models.contracts import ChatMessageDisplayType, ChatMessageRole, MessageProcessingStatus
 from app.models.db import (
     ChatMessage,
     ChatSession,

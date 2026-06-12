@@ -114,9 +114,9 @@ def _build_submission_response(content: Content) -> SubmissionStatusResponse | N
             _dict_or_none(metadata.processing_flag("feed_subscription"))
         )
         submission_kind: SubmissionKind = (
-            "feed_subscription"
+            SubmissionKind.FEED_SUBSCRIPTION
             if _is_feed_subscription_submission(metadata, feed_subscription, detected_feed)
-            else "content"
+            else SubmissionKind.CONTENT
         )
         outcome = _resolve_submission_outcome(
             status=ContentStatus(raw_status),
@@ -233,25 +233,25 @@ def _resolve_submission_outcome(
     submission_kind: SubmissionKind,
     feed_subscription: SubmissionFeedSubscriptionResponse | None,
 ) -> SubmissionOutcome:
-    if submission_kind != "feed_subscription":
+    if submission_kind != SubmissionKind.FEED_SUBSCRIPTION:
         return _content_status_outcome(status)
 
     if status in {ContentStatus.NEW, ContentStatus.PENDING}:
-        return "queued"
+        return SubmissionOutcome.QUEUED
     if status == ContentStatus.PROCESSING:
-        return "processing"
+        return SubmissionOutcome.PROCESSING
     if status == ContentStatus.FAILED:
-        return "failed"
+        return SubmissionOutcome.FAILED
 
     subscription_status = (feed_subscription.status if feed_subscription else "").lower()
     if subscription_status == "created":
-        return "subscribed"
+        return SubmissionOutcome.SUBSCRIBED
     if subscription_status == "already_exists":
-        return "already_subscribed"
+        return SubmissionOutcome.ALREADY_SUBSCRIBED
     if subscription_status == "no_feed_found":
-        return "feed_not_found"
+        return SubmissionOutcome.FEED_NOT_FOUND
     if subscription_status == "fetch_failed":
-        return "feed_fetch_failed"
+        return SubmissionOutcome.FEED_FETCH_FAILED
     if subscription_status in {
         "missing_user",
         "missing_feed",
@@ -260,21 +260,21 @@ def _resolve_submission_outcome(
         "unsupported_feed_type",
         "unknown",
     }:
-        return "feed_subscription_failed"
+        return SubmissionOutcome.FEED_SUBSCRIPTION_FAILED
 
     return _content_status_outcome(status)
 
 
 def _content_status_outcome(status: ContentStatus) -> SubmissionOutcome:
     if status in {ContentStatus.NEW, ContentStatus.PENDING}:
-        return "queued"
+        return SubmissionOutcome.QUEUED
     if status in {ContentStatus.PROCESSING, ContentStatus.AWAITING_IMAGE}:
-        return "processing"
+        return SubmissionOutcome.PROCESSING
     if status == ContentStatus.COMPLETED:
-        return "completed"
+        return SubmissionOutcome.COMPLETED
     if status == ContentStatus.SKIPPED:
-        return "skipped"
-    return "failed"
+        return SubmissionOutcome.SKIPPED
+    return SubmissionOutcome.FAILED
 
 
 def _dict_or_none(value: Any) -> dict[str, Any] | None:

@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -13,8 +12,11 @@ from app.models.contracts import (
     ContentClassification,
     ContentStatus,
     ContentType,
+    KnowledgeMutationStatus,
+    OperationStatus,
     SummaryKind,
     SummaryVersion,
+    TweetLength,
 )
 
 
@@ -50,6 +52,39 @@ class BulkMarkReadRequest(BaseModel):
     )
 
     model_config = ConfigDict(json_schema_extra={"example": {"content_ids": [123, 456, 789]}})
+
+
+class MarkReadResponse(BaseModel):
+    """Response for marking one content item as read."""
+
+    status: OperationStatus = OperationStatus.SUCCESS
+    content_id: int = Field(..., description="ID of the content item marked as read")
+
+
+class MarkUnreadResponse(BaseModel):
+    """Response for marking one content item as unread."""
+
+    status: OperationStatus = OperationStatus.SUCCESS
+    content_id: int = Field(..., description="ID of the content item marked as unread")
+    removed_records: int = Field(..., ge=0, description="Read-status rows removed")
+
+
+class BulkMarkReadResponse(BaseModel):
+    """Response for bulk read-status updates."""
+
+    status: OperationStatus = OperationStatus.SUCCESS
+    marked_count: int = Field(..., ge=0)
+    failed_ids: list[int] = Field(default_factory=list)
+    total_requested: int = Field(..., ge=0)
+
+
+class KnowledgeMutationResponse(BaseModel):
+    """Response for Knowledge save/remove actions."""
+
+    status: KnowledgeMutationStatus
+    content_id: int = Field(..., description="ID of the content item")
+    is_saved_to_knowledge: bool
+    message: str
 
 
 class ChatGPTUrlResponse(BaseModel):
@@ -153,14 +188,6 @@ class TweetSuggestion(BaseModel):
             }
         }
     )
-
-
-class TweetLength(StrEnum):
-    """Tweet length preference."""
-
-    SHORT = "short"  # 100-180 chars - concise, punchy
-    MEDIUM = "medium"  # 180-280 chars - balanced
-    LONG = "long"  # 280-400 chars - detailed
 
 
 class TweetSuggestionsRequest(BaseModel):

@@ -2,32 +2,20 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.api.base import UTCDateTime
+from app.models.api.base import UTCDateTime, lenient_field
 from app.models.api.pagination import PaginationMetadata
-from app.models.contracts import LLMProvider, MessageProcessingStatus
+from app.models.contracts import (
+    ChatMessageDisplayType,
+    ChatMessageRole,
+    LLMProvider,
+    MessageProcessingStatus,
+)
 from app.models.domain.chat_render import AssistantFeedOption, CouncilCandidate
 from app.models.internal.assistant import AssistantScreenContext
-
-
-class ChatMessageRole(StrEnum):
-    """Role of a chat message."""
-
-    USER = "user"
-    ASSISTANT = "assistant"
-    SYSTEM = "system"
-    TOOL = "tool"
-
-
-class ChatMessageDisplayType(StrEnum):
-    """Display type for a chat message row."""
-
-    MESSAGE = "message"
-    PROCESS_SUMMARY = "process_summary"
 
 
 class CreateChatSessionRequest(BaseModel):
@@ -149,11 +137,11 @@ class ChatMessageDto(BaseModel):
         description="Processing status for async messages",
     )
     error: str | None = Field(default=None, description="Error message if processing failed")
-    feed_options: list[AssistantFeedOption] = Field(
+    feed_options: list[AssistantFeedOption] = lenient_field(
         default_factory=list,
         description="Optional validated feed options attached to the assistant message",
     )
-    council_candidates: list[CouncilCandidate] = Field(
+    council_candidates: list[CouncilCandidate] = lenient_field(
         default_factory=list,
         description="Optional council reply candidates attached to the assistant message",
     )

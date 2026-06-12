@@ -20,6 +20,7 @@ from app.models.contracts import (
 )
 from app.models.db import ChatMessage, ChatSession, Content, NewsItem
 from app.services.chat_agent import ChatRunResult, create_processing_message, save_messages
+from app.utils.title_utils import derive_chat_session_title
 
 TEST_COUNCIL_EXPERTS = [
     {
@@ -1619,6 +1620,9 @@ def test_create_assistant_turn_titles_new_ad_hoc_session_from_message(
         _fake_process_assistant_turn_async,
     )
     message = "Recommend a few feeds and newsletters I should add based on what I've read lately."
+    expected_title = derive_chat_session_title(message)
+    assert expected_title is not None
+    assert expected_title.endswith("…")
     response = client.post(
         "/api/content/chat/assistant/turns",
         json={
@@ -1634,7 +1638,7 @@ def test_create_assistant_turn_titles_new_ad_hoc_session_from_message(
     payload = response.json()
     assert payload["status"] == "processing"
     assert payload["session"]["content_id"] is None
-    assert payload["session"]["title"] == message[:80]
+    assert payload["session"]["title"] == expected_title
     assert payload["session"]["has_pending_message"] is True
     assert payload["session"]["last_message_preview"] == message[:200]
     assert payload["session"]["last_message_role"] == "user"
@@ -1652,7 +1656,7 @@ def test_create_assistant_turn_titles_new_ad_hoc_session_from_message(
         db_session.query(ChatSession).filter(ChatSession.id == payload["session"]["id"]).first()
     )
     assert session is not None
-    assert session.title == message[:80]
+    assert session.title == expected_title
     assert session.context_snapshot is not None
     assert "Screen Type: knowledge_hub" in session.context_snapshot
 

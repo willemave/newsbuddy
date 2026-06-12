@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -13,8 +13,11 @@ from app.models.contracts import (
     ContentClassification,
     ContentStatus,
     ContentType,
+    DeleteStatus,
+    IntegrationDisconnectStatus,
     SummaryKind,
     SummaryVersion,
+    UserLlmProvider,
 )
 
 
@@ -57,14 +60,14 @@ class XConnectionResponse(BaseModel):
 class IntegrationDisconnectResponse(BaseModel):
     """Response for integration disconnect actions."""
 
-    status: Literal["disconnected"] = "disconnected"
+    status: IntegrationDisconnectStatus = IntegrationDisconnectStatus.DISCONNECTED
     provider: str = "x"
 
 
 class UserLlmIntegrationResponse(BaseModel):
     """User-managed LLM integration summary."""
 
-    provider: Literal["anthropic", "openai", "google"]
+    provider: UserLlmProvider
     configured: bool
     updated_at: UTCDateTime | None = None
 
@@ -78,5 +81,12 @@ class UpsertUserLlmIntegrationRequest(BaseModel):
 class UserLlmIntegrationTestResponse(BaseModel):
     """Response for validating presence of a user-managed LLM key."""
 
-    provider: Literal["anthropic", "openai", "google"]
+    provider: UserLlmProvider
     ok: bool
+
+
+class DeleteUserLlmIntegrationResponse(BaseModel):
+    """Response for deleting a user-managed LLM provider key."""
+
+    status: DeleteStatus = DeleteStatus.DELETED
+    provider: str

@@ -1,8 +1,8 @@
 """API models for authenticated user feedback."""
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.models.contracts import OperationStatus
 
 
 class SubmitFeedbackRequest(BaseModel):
@@ -54,5 +54,5 @@ class SubmitFeedbackRequest(BaseModel):
 class SubmitFeedbackResponse(BaseModel):
     """Response after feedback is stored."""
 
-    status: Literal["success"]
+    status: OperationStatus
     feedback_id: int

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -13,6 +13,7 @@ from app.models.contracts import (
     ContentClassification,
     ContentStatus,
     ContentType,
+    DiscussionMode,
     SummaryKind,
     SummaryVersion,
 )
@@ -60,7 +61,7 @@ class ContentDiscussionResponse(BaseModel):
 
     content_id: int
     status: str
-    mode: Literal["none", "comments", "discussion_list"] = "none"
+    mode: DiscussionMode = DiscussionMode.NONE
     platform: str | None = None
     source_url: str | None = None
     discussion_url: str | None = None

@@ -6,11 +6,16 @@ from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from app.models.api.content_actions import (
+    BulkMarkReadResponse,
+    MarkReadResponse,
+    MarkUnreadResponse,
+)
 from app.models.db import Content, ContentReadStatus
 from app.repositories import read_status_repository
 
 
-def mark_read(db: Session, *, user_id: int, content_id: int) -> dict[str, object]:
+def mark_read(db: Session, *, user_id: int, content_id: int) -> MarkReadResponse:
     """Mark a content item as read."""
     content = db.query(Content).filter(Content.id == content_id).first()
     if not content:
@@ -18,11 +23,11 @@ def mark_read(db: Session, *, user_id: int, content_id: int) -> dict[str, object
 
     result = read_status_repository.mark_content_as_read(db, content_id, user_id)
     if result is None:
-        return {"status": "error", "message": "Failed to mark as read"}
-    return {"status": "success", "content_id": content_id}
+        raise HTTPException(status_code=500, detail="Failed to mark content as read")
+    return MarkReadResponse(content_id=content_id)
 
 
-def mark_unread(db: Session, *, user_id: int, content_id: int) -> dict[str, object]:
+def mark_unread(db: Session, *, user_id: int, content_id: int) -> MarkUnreadResponse:
     """Mark a content item as unread."""
     content = db.query(Content).filter(Content.id == content_id).first()
     if not content:
@@ -38,14 +43,10 @@ def mark_unread(db: Session, *, user_id: int, content_id: int) -> dict[str, obje
     removed_records = getattr(result, "rowcount", 0)
     if not isinstance(removed_records, int):
         removed_records = 0
-    return {
-        "status": "success",
-        "content_id": content_id,
-        "removed_records": removed_records,
-    }
+    return MarkUnreadResponse(content_id=content_id, removed_records=removed_records)
 
 
-def bulk_mark_read(db: Session, *, user_id: int, content_ids: list[int]) -> dict[str, object]:
+def bulk_mark_read(db: Session, *, user_id: int, content_ids: list[int]) -> BulkMarkReadResponse:
     """Bulk mark content items as read."""
     existing_ids = db.query(Content.id).filter(Content.id.in_(content_ids)).all()
     existing_id_set = {row[0] for row in existing_ids}
@@ -58,9 +59,8 @@ def bulk_mark_read(db: Session, *, user_id: int, content_ids: list[int]) -> dict
         content_ids,
         user_id,
     )
-    return {
-        "status": "success",
-        "marked_count": success_count,
-        "failed_ids": failed_ids,
-        "total_requested": len(content_ids),
-    }
+    return BulkMarkReadResponse(
+        marked_count=success_count,
+        failed_ids=failed_ids,
+        total_requested=len(content_ids),
+    )

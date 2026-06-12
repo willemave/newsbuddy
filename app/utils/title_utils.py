@@ -10,6 +10,9 @@ from app.utils.summary_utils import extract_short_summary, extract_summary_text
 
 MAX_TITLE_CHARS = 500
 MAX_SUMMARY_EXCERPT_CHARS = 120
+MAX_CHAT_TITLE_CHARS = 80
+
+_INTERNAL_LABEL_LINE_PATTERN = re.compile(r"[A-Za-z][\w /-]{0,30}:")
 
 _PLACEHOLDER_TITLE_PATTERNS = (re.compile(r"skill\d+", re.IGNORECASE),)
 _PLACEHOLDER_TITLE_VALUES = {
@@ -103,6 +106,40 @@ def summarize_text_as_title(value: Any) -> str | None:
     if len(text) > MAX_SUMMARY_EXCERPT_CHARS:
         return f"{excerpt}…"
     return excerpt
+
+
+def derive_chat_session_title(
+    message: Any,
+    *,
+    max_chars: int = MAX_CHAT_TITLE_CHARS,
+) -> str | None:
+    """Derive a session title from a chat message, skipping internal preamble blocks.
+
+    Messages composed by agents or quick actions may open with a bare label line
+    ("context:") followed by an indented context block; titles should come from
+    the first line of real user text instead.
+    """
+    if not isinstance(message, str):
+        return None
+
+    skipping_label_block = False
+    for raw_line in message.splitlines():
+        candidate = re.sub(r"\s+", " ", raw_line).strip()
+        if not candidate:
+            skipping_label_block = False
+            continue
+        if skipping_label_block:
+            continue
+        if _INTERNAL_LABEL_LINE_PATTERN.fullmatch(candidate):
+            skipping_label_block = True
+            continue
+
+        if len(candidate) > max_chars:
+            truncated = candidate[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:-")
+            candidate = f"{truncated}…"
+        return candidate
+
+    return None
 
 
 def mapping(value: Any) -> dict[str, Any]:

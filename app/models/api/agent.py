@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -11,6 +11,8 @@ from app.models.api.base import UTCDateTime
 from app.models.api.onboarding import OnboardingSelectedAggregator
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
+    AgentLibraryDocumentVariant,
+    AgentSearchResultKind,
     ContentClassification,
     ContentStatus,
     ContentType,
@@ -24,7 +26,7 @@ class AgentLibraryDocumentResponse(BaseModel):
 
     relative_path: str
     content_id: int
-    variant: Literal["source", "summary"]
+    variant: AgentLibraryDocumentVariant
     updated_at: UTCDateTime | None = None
     size_bytes: int
     checksum_sha256: str
@@ -43,7 +45,7 @@ class AgentLibraryFileResponse(BaseModel):
 
     relative_path: str
     content_id: int
-    variant: Literal["source", "summary"]
+    variant: AgentLibraryDocumentVariant
     updated_at: UTCDateTime | None = None
     checksum_sha256: str
     text: str
@@ -60,7 +62,7 @@ class AgentSearchRequest(BaseModel):
 class AgentSearchResultResponse(BaseModel):
     """One agent search result."""
 
-    kind: Literal["web", "podcast"]
+    kind: AgentSearchResultKind
     title: str
     url: str
     snippet: str | None = None

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Literal, cast
-
 from sqlalchemy.orm import Session
 
 from app.models.api.integrations import UserLlmIntegrationResponse
+from app.models.contracts import UserLlmProvider
 from app.repositories.user_integration_repository import list_user_llm_integrations
 
 
@@ -19,7 +18,7 @@ def execute(db: Session, *, user_id: int) -> list[UserLlmIntegrationResponse]:
             continue
         responses.append(
             UserLlmIntegrationResponse(
-                provider=cast(Literal["anthropic", "openai", "google"], provider),
+                provider=UserLlmProvider(provider),
                 configured=bool(record.access_token_encrypted),
                 updated_at=record.updated_at,
             )

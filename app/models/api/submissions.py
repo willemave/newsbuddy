@@ -1,14 +1,24 @@
 """Pydantic models for content submission workflows."""
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    TypeAdapter,
+    field_validator,
+)
 
 from app.models.contracts import ContentStatus, ContentType
+
+_HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
 
 
 class SubmitContentRequest(BaseModel):
     """Request to submit a user-provided URL for processing."""
 
-    url: HttpUrl = Field(..., description="URL to submit (http/https only)")
+    url: str = Field(..., description="URL to submit (http/https only)")
     content_type: ContentType | None = Field(
         None,
         description="Content type hint. If omitted, the server will infer based on the URL.",
@@ -60,6 +70,13 @@ class SubmitContentRequest(BaseModel):
             "read and save it to the user's knowledge library."
         ),
     )
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def validate_url(cls, value: object) -> str:
+        """Keep URL validation while exposing a plain string contract to clients."""
+
+        return str(_HTTP_URL_ADAPTER.validate_python(value))
 
     model_config = ConfigDict(
         json_schema_extra={

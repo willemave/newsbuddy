@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, cast
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.models.api.audio_episodes import AudioEpisodeDelivery, AudioEpisodeResponse
 from app.models.api.content import ContentBodyResponse, ContentDetailResponse, ContentListResponse
-from app.models.api.content_actions import BulkMarkReadRequest
+from app.models.api.content_actions import BulkMarkReadRequest, BulkMarkReadResponse
 from app.models.api.content_discussions import ContentDiscussionResponse
 from app.models.api.news import ConvertNewsItemResponse
 from app.models.db.users import User
@@ -60,12 +60,16 @@ def list_news_items(
     )
 
 
-@router.post("/items/mark-read", summary="Mark visible news items as read")
+@router.post(
+    "/items/mark-read",
+    response_model=BulkMarkReadResponse,
+    summary="Mark visible news items as read",
+)
 def mark_news_items_read(
     payload: BulkMarkReadRequest,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> dict[str, Any]:
+) -> BulkMarkReadResponse:
     """Mark the given visible representative news items as read."""
     user_id = require_user_id(current_user)
     return bulk_mark_news_items_read(

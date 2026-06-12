@@ -3,17 +3,22 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.constants import TWEET_SUGGESTION_MODEL
+from app.models.api.base import lenient_field
 from app.models.api.content_discussions import ContentDiscussionResponse
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
     ContentClassification,
     ContentStatus,
     ContentType,
+    NarrationTargetType,
+    SavedSource,
+    SubmissionKind,
+    SubmissionOutcome,
     SummaryKind,
     SummaryVersion,
 )
@@ -97,7 +102,7 @@ class ContentSummaryResponse(BaseModel):
     key_takeaway: str | None = Field(
         None, description="Key takeaway to display under long-form list titles"
     )
-    saved_source: Literal["knowledge", "x_bookmark"] | None = Field(
+    saved_source: SavedSource | None = Field(
         None,
         description="Saved-library source for this content when it appears in saved views",
     )
@@ -172,7 +177,7 @@ class ContentListResponse(BaseModel):
 class NarrationResponse(BaseModel):
     """Unified narration payload for any supported narration target."""
 
-    target_type: Literal["content"] = Field(
+    target_type: NarrationTargetType = Field(
         ...,
         description="Narration target family",
     )
@@ -233,21 +238,6 @@ class SubmissionFeedSubscriptionResponse(BaseModel):
     )
 
 
-SubmissionKind = Literal["content", "feed_subscription"]
-SubmissionOutcome = Literal[
-    "queued",
-    "processing",
-    "completed",
-    "failed",
-    "skipped",
-    "subscribed",
-    "already_subscribed",
-    "feed_not_found",
-    "feed_fetch_failed",
-    "feed_subscription_failed",
-]
-
-
 class SubmissionStatusResponse(BaseModel):
     """Status information for a user-submitted content item."""
 
@@ -267,10 +257,11 @@ class SubmissionStatusResponse(BaseModel):
         True, description="Whether this content was submitted by the current user"
     )
     submission_kind: SubmissionKind = Field(
-        "content", description="Semantic submission kind for user-facing display"
+        SubmissionKind.CONTENT, description="Semantic submission kind for user-facing display"
     )
     outcome: SubmissionOutcome = Field(
-        "processing", description="Semantic submission outcome for user-facing display"
+        SubmissionOutcome.PROCESSING,
+        description="Semantic submission outcome for user-facing display",
     )
     detected_feed: DetectedFeed | None = Field(
         None, description="RSS/Atom feed detected while handling a feed subscription request"
@@ -391,11 +382,18 @@ class ContentDetailResponse(BaseModel):
     reason_to_read: str | None = Field(
         None, description="Feed-preview reason explaining why the item is worth opening"
     )
-    bullet_points: list[dict[str, str]] = Field(
-        ..., description="Bullet points from structured summary"
+    bullet_points: list[dict[str, str]] = lenient_field(
+        default_factory=list,
+        description="Bullet points from structured summary",
     )
-    quotes: list[dict[str, str]] = Field(..., description="Quotes from structured summary")
-    topics: list[str] = Field(..., description="Topics from structured summary")
+    quotes: list[dict[str, str]] = lenient_field(
+        default_factory=list,
+        description="Quotes from structured summary",
+    )
+    topics: list[str] = lenient_field(
+        default_factory=list,
+        description="Topics from structured summary",
+    )
     full_markdown: str | None = Field(
         None, description="Full article content formatted as markdown"
     )

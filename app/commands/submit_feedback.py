@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models.api.feedback import SubmitFeedbackRequest, SubmitFeedbackResponse
+from app.models.contracts import OperationStatus
 from app.models.db import UserFeedback
 
 
@@ -31,4 +32,4 @@ def execute(
 
     if feedback.id is None:
         raise ValueError("Feedback insert did not produce an id")
-    return SubmitFeedbackResponse(status="success", feedback_id=int(feedback.id))
+    return SubmitFeedbackResponse(status=OperationStatus.SUCCESS, feedback_id=int(feedback.id))

@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 from time import perf_counter
 
 from fastapi.concurrency import run_in_threadpool
-from pydantic import HttpUrl, TypeAdapter
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.models.openai import ReasoningEffort
@@ -82,7 +81,7 @@ from app.services.sandbox_runtime import (
     create_personal_library_sandbox_session,
 )
 from app.utils.news_titles import resolve_news_display_title
-from app.utils.title_utils import resolve_content_display_title
+from app.utils.title_utils import derive_chat_session_title, resolve_content_display_title
 
 logger = get_logger(__name__)
 
@@ -97,7 +96,6 @@ ASSISTANT_SESSION_TYPES = {
     *LEGACY_KNOWLEDGE_SESSION_TYPES,
     "weekly_discovery",
 }
-URL_ADAPTER = TypeAdapter(HttpUrl)
 ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS = "pick_interesting_unread_news"
 
 ASSISTANT_OPENAI_REASONING_EFFORT: ReasoningEffort = "low"
@@ -208,7 +206,7 @@ def _build_submit_content_request(
     subscribe_to_feed: bool = False,
 ) -> SubmitContentRequest:
     return SubmitContentRequest(
-        url=URL_ADAPTER.validate_python(url),
+        url=url,
         content_type=None,
         title=title,
         platform=None,
@@ -1174,8 +1172,8 @@ def create_assistant_session(
         ).get(screen_context.news_item_id)
         if news_item is not None:
             title = _news_item_context_label(news_item)
-    elif initial_message and initial_message.strip():
-        title = initial_message.strip()[:80]
+    elif derived_title := derive_chat_session_title(initial_message):
+        title = derived_title
     elif screen_context.selected_topic:
         title = screen_context.selected_topic
 

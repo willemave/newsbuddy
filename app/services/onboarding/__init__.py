@@ -39,7 +39,7 @@ from app.models.api.onboarding import (
     OnboardingVoiceParseRequest,
     OnboardingVoiceParseResponse,
 )
-from app.models.contracts import ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType, OnboardingSuggestionType
 from app.models.db import (
     Content,
     ContentStatusEntry,
@@ -622,7 +622,7 @@ def complete_onboarding(
         if "limit" not in config_payload:
             config_payload["limit"] = DEFAULT_NEW_FEED_LIMIT
         create_data = CreateUserScraperConfig(
-            scraper_type=selection.suggestion_type,
+            scraper_type=selection.suggestion_type.value,
             display_name=selection.title,
             config=config_payload,
         )
@@ -1890,7 +1890,7 @@ def _normalize_suggestions(
                 continue
             normalized.append(
                 OnboardingSuggestion(
-                    suggestion_type="reddit",
+                    suggestion_type=OnboardingSuggestionType.REDDIT,
                     title=item.title or subreddit,
                     site_url=site_url,
                     subreddit=subreddit,
@@ -1914,7 +1914,7 @@ def _normalize_suggestions(
 
         normalized.append(
             OnboardingSuggestion(
-                suggestion_type=suggestion_type,
+                suggestion_type=OnboardingSuggestionType(suggestion_type),
                 title=item.title or resolved_feed.get("title"),
                 site_url=site_url,
                 feed_url=resolved_feed["feed_url"],
@@ -2334,7 +2334,7 @@ def _load_onboarding_suggestions(db: Session, run_id: int) -> OnboardingFastDisc
         if suggestion_type is None:
             continue
         item = OnboardingSuggestion(
-            suggestion_type=suggestion_type,
+            suggestion_type=OnboardingSuggestionType(suggestion_type),
             title=suggestion.title,
             site_url=suggestion.site_url,
             feed_url=suggestion.feed_url,

@@ -33,7 +33,8 @@ from app.models.api.cli import (
     CliLinkStartResponse,
 )
 from app.models.api.jobs import JobStatusResponse
-from app.models.api.onboarding import OnboardingDiscoveryStatusResponse
+from app.models.api.onboarding import OnboardingCompleteResponse, OnboardingDiscoveryStatusResponse
+from app.models.contracts import AgentLibraryDocumentVariant, CliLinkStatus
 from app.models.db.users import User
 from app.queries import (
     get_agent_onboarding_status,
@@ -108,22 +109,21 @@ def get_onboarding(
 
 @router.post(
     "/agent/onboarding/{run_id}/complete",
-    response_model=dict,
+    response_model=OnboardingCompleteResponse,
 )
 def complete_onboarding(
     run_id: int,
     payload: AgentOnboardingCompleteRequest,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
-) -> dict[str, object]:
+) -> OnboardingCompleteResponse:
     """Complete onboarding from simplified selections."""
-    response = complete_agent_onboarding.execute(
+    return complete_agent_onboarding.execute(
         db,
         user_id=require_user_id(current_user),
         run_id=run_id,
         payload=payload,
     )
-    return response.model_dump(mode="json")
 
 
 @router.post("/agent/cli/link/start", response_model=CliLinkStartResponse)
@@ -138,7 +138,7 @@ def start_cli_link(
     )
     return CliLinkStartResponse(
         session_id=started.session_id,
-        status="pending",
+        status=CliLinkStatus.PENDING,
         poll_token=started.poll_token,
         approve_url=started.approve_url,
         expires_at=started.expires_at,
@@ -166,7 +166,7 @@ def approve_cli_link(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CliLinkApproveResponse(
         session_id=approved.session_id,
-        status="approved",
+        status=CliLinkStatus.APPROVED,
         key_prefix=approved.key_prefix,
         expires_at=approved.expires_at,
     )
@@ -189,7 +189,7 @@ def poll_cli_link(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CliLinkPollResponse(
         session_id=polled.session_id,
-        status=polled.status,
+        status=CliLinkStatus(polled.status),
         expires_at=polled.expires_at,
         api_key=polled.api_key,
         key_prefix=polled.key_prefix,
@@ -217,7 +217,7 @@ def get_agent_library_manifest(
             AgentLibraryDocumentResponse(
                 relative_path=document.relative_path.as_posix(),
                 content_id=document.content_id,
-                variant=document.variant,
+                variant=AgentLibraryDocumentVariant(document.variant),
                 updated_at=document.updated_at,
                 size_bytes=document.size_bytes,
                 checksum_sha256=document.checksum_sha256,
@@ -247,7 +247,7 @@ def get_agent_library_file(
     return AgentLibraryFileResponse(
         relative_path=document.relative_path.as_posix(),
         content_id=document.content_id,
-        variant=document.variant,
+        variant=AgentLibraryDocumentVariant(document.variant),
         updated_at=document.updated_at,
         checksum_sha256=document.checksum_sha256,
         text=document.text,

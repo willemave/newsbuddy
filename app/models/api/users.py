@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, TypeAdapter, field_validator
 
 from app.models.api.base import UTCDateTime
 from app.models.domain.user_profile import (
@@ -11,12 +11,21 @@ from app.models.domain.user_profile import (
     CouncilPersonaConfig,
 )
 
+_EMAIL_ADAPTER = TypeAdapter(EmailStr)
+
 
 class UserBase(BaseModel):
     """Base user schema."""
 
-    email: EmailStr
+    email: str
     full_name: str | None = None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def validate_email(cls, value: object) -> str:
+        """Keep EmailStr validation while exposing a plain string contract."""
+
+        return str(_EMAIL_ADAPTER.validate_python(value))
 
 
 class UserResponse(UserBase):

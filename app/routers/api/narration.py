@@ -12,6 +12,7 @@ from app.core.db import get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.core.logging import get_logger
 from app.models.api.content import NarrationResponse
+from app.models.contracts import NarrationTargetType
 from app.models.db.users import User
 from app.queries import get_narration as get_narration_query
 from app.services.voice.narration_tts import get_content_narration_tts_service
@@ -163,7 +164,7 @@ def get_narration(
         },
     )
     return NarrationResponse(
-        target_type=payload.target_type,
+        target_type=NarrationTargetType(payload.target_type),
         target_id=payload.target_id,
         title=payload.title,
         narration_text=payload.narration_text,

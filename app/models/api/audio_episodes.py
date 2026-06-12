@@ -5,15 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.models.api.base import UTCDateTime
+from app.models.contracts import AudioEpisodeKind, AudioEpisodeStatus
 
-AudioEpisodeKind = Literal[
-    "fast_news_digest",
-    "content_council_discussion",
-    "news_item_discussion",
-    "custom_narration",
-]
 AudioEpisodeDelivery = Literal["background", "stream", "inline"]
-AudioEpisodeStatus = Literal["pending", "processing", "completed", "failed"]
 CUSTOM_NARRATION_MAX_CONTENT_IDS = 12
 
 

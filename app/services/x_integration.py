@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from pydantic import HttpUrl, TypeAdapter
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -54,7 +53,6 @@ UNRECOVERABLE_X_REFRESH_ERROR_MARKERS = (
     "X API 400: invalid_client",
     "X API 400: unauthorized_client",
 )
-URL_ADAPTER = TypeAdapter(HttpUrl)
 
 
 @dataclass(frozen=True)
@@ -539,7 +537,7 @@ def _sync_bookmark_channel(
         else set()
     )
     for tweet in reversed(collected_new):
-        tweet_url = str(URL_ADAPTER.validate_python(canonical_tweet_url(tweet.id)))
+        tweet_url = canonical_tweet_url(tweet.id)
         existing_synced_item = synced_items_by_external_id.get(tweet.id)
         existing_content_id = (
             int(existing_synced_item.content_id)
@@ -569,7 +567,7 @@ def _sync_bookmark_channel(
         ingest_result = ingest_content_command.execute(
             db,
             payload=SubmitContentRequest(
-                url=URL_ADAPTER.validate_python(tweet_url),
+                url=tweet_url,
                 content_type=None,
                 title=None,
                 platform="twitter",

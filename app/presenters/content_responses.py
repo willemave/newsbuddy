@@ -1,9 +1,9 @@
 """API response builders for normalized content."""
 
-from typing import Any, Literal
+from typing import Any
 
 from app.models.api.content import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
-from app.models.contracts import ContentClassification, ContentStatus, ContentType
+from app.models.contracts import ContentClassification, ContentStatus, ContentType, SavedSource
 from app.models.db import Content
 from app.models.domain.content import ContentData
 from app.models.domain.content_display import resolve_image_urls
@@ -142,7 +142,7 @@ def _resolve_saved_source(
     *,
     metadata: dict[str, Any],
     is_saved_to_knowledge: bool,
-) -> Literal["knowledge", "x_bookmark"] | None:
+) -> SavedSource | None:
     if not is_saved_to_knowledge:
         return None
 
@@ -150,9 +150,9 @@ def _resolve_saved_source(
     submitted_via = str(view.processing_flag("submitted_via") or "").strip().lower()
     snapshot_source = str(view.get("tweet_snapshot_source") or "").strip().lower()
     if submitted_via == "x_bookmarks" or snapshot_source == "x_bookmarks_sync":
-        return "x_bookmark"
+        return SavedSource.X_BOOKMARK
 
-    return "knowledge"
+    return SavedSource.KNOWLEDGE
 
 
 def _should_suppress_top_comment_preview(

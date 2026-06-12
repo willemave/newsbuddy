@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -11,8 +11,10 @@ from app.models.api.base import UTCDateTime
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
     ContentClassification,
+    ContentInteractionType,
     ContentStatus,
     ContentType,
+    OperationStatus,
     SummaryKind,
     SummaryVersion,
 )
@@ -28,7 +30,7 @@ class RecordContentInteractionRequest(BaseModel):
         description="Client-generated interaction UUID for idempotency",
     )
     content_id: int = Field(..., gt=0, description="Content ID to associate with the interaction")
-    interaction_type: Literal["opened"] = Field(
+    interaction_type: ContentInteractionType = Field(
         ...,
         description="Interaction type. V1 supports opened.",
     )
@@ -66,7 +68,7 @@ class RecordContentInteractionRequest(BaseModel):
 class RecordContentInteractionResponse(BaseModel):
     """Response after recording a user interaction."""
 
-    status: Literal["success"] = Field(..., description="Operation status")
+    status: OperationStatus = Field(..., description="Operation status")
     recorded: bool = Field(
         ...,
         description="True when a new row was inserted; false when idempotent duplicate",

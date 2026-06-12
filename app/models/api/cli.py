@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -10,6 +10,7 @@ from app.constants import TWEET_SUGGESTION_MODEL
 from app.models.api.base import UTCDateTime
 from app.models.api.pagination import PaginationMetadata
 from app.models.contracts import (
+    CliLinkStatus,
     ContentClassification,
     ContentStatus,
     ContentType,
@@ -28,7 +29,7 @@ class CliLinkStartResponse(BaseModel):
     """Unauthenticated response for bootstrapping CLI QR login."""
 
     session_id: str
-    status: Literal["pending"]
+    status: CliLinkStatus
     poll_token: str
     approve_url: str
     expires_at: UTCDateTime
@@ -46,7 +47,7 @@ class CliLinkApproveResponse(BaseModel):
     """Approval response after issuing a CLI API key."""
 
     session_id: str
-    status: Literal["approved"]
+    status: CliLinkStatus
     key_prefix: str
     expires_at: UTCDateTime
 
@@ -55,7 +56,7 @@ class CliLinkPollResponse(BaseModel):
     """Polling response for a CLI waiting on mobile approval."""
 
     session_id: str
-    status: Literal["pending", "approved", "claimed", "expired"]
+    status: CliLinkStatus
     expires_at: UTCDateTime
     api_key: str | None = None
     key_prefix: str | None = None

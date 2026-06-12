@@ -150,7 +150,7 @@ def create_fast_news_digest_episode(db: Session, *, user_id: int) -> AudioEpisod
     episode = _create_or_reuse_episode(
         db,
         user_id=user_id,
-        kind=FAST_NEWS_DIGEST_KIND,
+        kind=AudioEpisodeKind.FAST_NEWS_DIGEST,
         title=title,
         source_content_id=None,
         source_item_ids=[int(item.id) for item in items if item.id is not None],
@@ -259,7 +259,7 @@ def create_content_council_episode(
     episode = _create_or_reuse_episode(
         db,
         user_id=user_id,
-        kind=CONTENT_COUNCIL_DISCUSSION_KIND,
+        kind=AudioEpisodeKind.CONTENT_COUNCIL_DISCUSSION,
         title=title[:255],
         source_content_id=content_id,
         source_item_ids=[],
@@ -329,7 +329,7 @@ def create_custom_narration_episode(
     episode = _create_or_reuse_episode(
         db,
         user_id=user_id,
-        kind=CUSTOM_NARRATION_KIND,
+        kind=AudioEpisodeKind.CUSTOM_NARRATION,
         title=episode_title[:255],
         source_content_id=None,
         source_item_ids=source_item_ids,
@@ -421,7 +421,7 @@ def create_news_item_discussion_episode(
     episode = _create_or_reuse_episode(
         db,
         user_id=user_id,
-        kind=NEWS_ITEM_DISCUSSION_KIND,
+        kind=AudioEpisodeKind.NEWS_ITEM_DISCUSSION,
         title=title[:255],
         source_content_id=None,
         source_item_ids=[_required_int(item.id, "news item id")],
@@ -619,11 +619,8 @@ def mark_audio_episode_sources_read_on_play(
             user_id=user_id,
             news_item_ids=news_item_ids,
         )
-        raw_news_marked_count = news_result.get("marked_count", 0)
-        news_marked_count = raw_news_marked_count if isinstance(raw_news_marked_count, int) else 0
-        raw_news_failed_ids = news_result.get("failed_ids", [])
-        if isinstance(raw_news_failed_ids, list):
-            news_failed_ids = _int_list_from_snapshot_values(raw_news_failed_ids)
+        news_marked_count = news_result.marked_count
+        news_failed_ids = _int_list_from_snapshot_values(news_result.failed_ids)
 
     return {
         "content_marked_count": content_marked_count,
@@ -1616,25 +1613,25 @@ def _required_datetime(value: datetime | None, field_name: str) -> datetime:
 
 def _audio_episode_kind(value: str | None) -> AudioEpisodeKind:
     if value == FAST_NEWS_DIGEST_KIND:
-        return FAST_NEWS_DIGEST_KIND
+        return AudioEpisodeKind.FAST_NEWS_DIGEST
     if value == CONTENT_COUNCIL_DISCUSSION_KIND:
-        return CONTENT_COUNCIL_DISCUSSION_KIND
+        return AudioEpisodeKind.CONTENT_COUNCIL_DISCUSSION
     if value == NEWS_ITEM_DISCUSSION_KIND:
-        return NEWS_ITEM_DISCUSSION_KIND
+        return AudioEpisodeKind.NEWS_ITEM_DISCUSSION
     if value == CUSTOM_NARRATION_KIND:
-        return CUSTOM_NARRATION_KIND
+        return AudioEpisodeKind.CUSTOM_NARRATION
     raise ValueError(f"Unsupported audio episode kind: {value}")
 
 
 def _audio_episode_status(value: str | None) -> AudioEpisodeStatus:
     if value == "pending":
-        return "pending"
+        return AudioEpisodeStatus.PENDING
     if value == "processing":
-        return "processing"
+        return AudioEpisodeStatus.PROCESSING
     if value == "completed":
-        return "completed"
+        return AudioEpisodeStatus.COMPLETED
     if value == "failed":
-        return "failed"
+        return AudioEpisodeStatus.FAILED
     raise ValueError(f"Unsupported audio episode status: {value}")
 
 
