@@ -141,12 +141,7 @@
             "type": "string"
           },
           "variant": {
-            "enum": [
-              "source",
-              "summary"
-            ],
-            "title": "Variant",
-            "type": "string"
+            "$ref": "#/components/schemas/AgentLibraryDocumentVariant"
           }
         },
         "required": [
@@ -158,6 +153,15 @@
         ],
         "title": "AgentLibraryDocumentResponse",
         "type": "object"
+      },
+      "AgentLibraryDocumentVariant": {
+        "description": "Available CLI library document variants.",
+        "enum": [
+          "source",
+          "summary"
+        ],
+        "title": "AgentLibraryDocumentVariant",
+        "type": "string"
       },
       "AgentLibraryFileResponse": {
         "description": "One markdown document payload for CLI sync download.",
@@ -184,12 +188,7 @@
             "type": "string"
           },
           "variant": {
-            "enum": [
-              "source",
-              "summary"
-            ],
-            "title": "Variant",
-            "type": "string"
+            "$ref": "#/components/schemas/AgentLibraryDocumentVariant"
           }
         },
         "required": [
@@ -364,6 +363,15 @@
         "title": "AgentSearchResponse",
         "type": "object"
       },
+      "AgentSearchResultKind": {
+        "description": "Search result family for machine-facing agent search.",
+        "enum": [
+          "web",
+          "podcast"
+        ],
+        "title": "AgentSearchResultKind",
+        "type": "string"
+      },
       "AgentSearchResultResponse": {
         "description": "One agent search result.",
         "properties": {
@@ -373,12 +381,7 @@
             "type": "string"
           },
           "kind": {
-            "enum": [
-              "web",
-              "podcast"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/AgentSearchResultKind"
           },
           "provider": {
             "nullable": true,
@@ -463,22 +466,11 @@
             "type": "string"
           },
           "feed_format": {
-            "default": "rss",
-            "enum": [
-              "rss",
-              "atom"
-            ],
-            "title": "Feed Format",
-            "type": "string"
+            "$ref": "#/components/schemas/FeedFormat",
+            "default": "rss"
           },
           "feed_type": {
-            "enum": [
-              "atom",
-              "substack",
-              "podcast_rss"
-            ],
-            "title": "Feed Type",
-            "type": "string"
+            "$ref": "#/components/schemas/FeedType"
           },
           "feed_url": {
             "maxLength": 2048,
@@ -645,6 +637,17 @@
         "title": "AssistantTurnResponse",
         "type": "object"
       },
+      "AudioEpisodeKind": {
+        "description": "Generated audio episode categories.",
+        "enum": [
+          "fast_news_digest",
+          "content_council_discussion",
+          "news_item_discussion",
+          "custom_narration"
+        ],
+        "title": "AudioEpisodeKind",
+        "type": "string"
+      },
       "AudioEpisodeResponse": {
         "description": "Client-visible state for one generated audio episode.",
         "properties": {
@@ -672,14 +675,7 @@
             "type": "integer"
           },
           "kind": {
-            "enum": [
-              "fast_news_digest",
-              "content_council_discussion",
-              "news_item_discussion",
-              "custom_narration"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/AudioEpisodeKind"
           },
           "read_on_play_content_ids": {
             "items": {
@@ -732,14 +728,7 @@
             "type": "array"
           },
           "status": {
-            "enum": [
-              "pending",
-              "processing",
-              "completed",
-              "failed"
-            ],
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/AudioEpisodeStatus"
           },
           "stream_url": {
             "nullable": true,
@@ -789,6 +778,17 @@
         ],
         "title": "AudioEpisodeShareResponse",
         "type": "object"
+      },
+      "AudioEpisodeStatus": {
+        "description": "Generated audio episode lifecycle statuses.",
+        "enum": [
+          "pending",
+          "processing",
+          "completed",
+          "failed"
+        ],
+        "title": "AudioEpisodeStatus",
+        "type": "string"
       },
       "AudioTranscriptionHealthResponse": {
         "description": "Dependency readiness for uploaded-audio transcription.",
@@ -916,6 +916,38 @@
         "title": "BulkMarkReadRequest",
         "type": "object"
       },
+      "BulkMarkReadResponse": {
+        "description": "Response for bulk read-status updates.",
+        "properties": {
+          "failed_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Failed Ids",
+            "type": "array"
+          },
+          "marked_count": {
+            "minimum": 0.0,
+            "title": "Marked Count",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OperationStatus",
+            "default": "success"
+          },
+          "total_requested": {
+            "minimum": 0.0,
+            "title": "Total Requested",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "marked_count",
+          "total_requested"
+        ],
+        "title": "BulkMarkReadResponse",
+        "type": "object"
+      },
       "ChatGPTUrlResponse": {
         "description": "Response containing the ChatGPT URL for chatting with content.",
         "example": {
@@ -965,6 +997,9 @@
             "type": "string"
           },
           "council_candidates": {
+            "contract": {
+              "lenient": true
+            },
             "description": "Optional council reply candidates attached to the assistant message",
             "items": {
               "$ref": "#/components/schemas/CouncilCandidate"
@@ -990,6 +1025,9 @@
             "type": "string"
           },
           "feed_options": {
+            "contract": {
+              "lenient": true
+            },
             "description": "Optional validated feed options attached to the assistant message",
             "items": {
               "$ref": "#/components/schemas/AssistantFeedOption"
@@ -1274,9 +1312,7 @@
             "type": "string"
           },
           "status": {
-            "const": "approved",
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/CliLinkStatus"
           }
         },
         "required": [
@@ -1310,14 +1346,7 @@
             "type": "string"
           },
           "status": {
-            "enum": [
-              "pending",
-              "approved",
-              "claimed",
-              "expired"
-            ],
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/CliLinkStatus"
           }
         },
         "required": [
@@ -1366,9 +1395,7 @@
             "type": "string"
           },
           "status": {
-            "const": "pending",
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/CliLinkStatus"
           }
         },
         "required": [
@@ -1380,6 +1407,17 @@
         ],
         "title": "CliLinkStartResponse",
         "type": "object"
+      },
+      "CliLinkStatus": {
+        "description": "Lifecycle statuses for CLI/mobile link sessions.",
+        "enum": [
+          "pending",
+          "approved",
+          "claimed",
+          "expired"
+        ],
+        "title": "CliLinkStatus",
+        "type": "string"
       },
       "ContentBodyResponse": {
         "description": "Resolved canonical body payload.",
@@ -1557,6 +1595,9 @@
             "type": "string"
           },
           "bullet_points": {
+            "contract": {
+              "lenient": true
+            },
             "description": "Bullet points from structured summary",
             "items": {
               "additionalProperties": {
@@ -1714,6 +1755,9 @@
             "type": "string"
           },
           "quotes": {
+            "contract": {
+              "lenient": true
+            },
             "description": "Quotes from structured summary",
             "items": {
               "additionalProperties": {
@@ -1793,6 +1837,9 @@
             "type": "string"
           },
           "topics": {
+            "contract": {
+              "lenient": true
+            },
             "description": "Topics from structured summary",
             "items": {
               "type": "string"
@@ -1820,10 +1867,7 @@
           "status",
           "retry_count",
           "metadata",
-          "created_at",
-          "bullet_points",
-          "quotes",
-          "topics"
+          "created_at"
         ],
         "title": "ContentDetailResponse",
         "type": "object"
@@ -1877,14 +1921,8 @@
             "type": "array"
           },
           "mode": {
-            "default": "none",
-            "enum": [
-              "none",
-              "comments",
-              "discussion_list"
-            ],
-            "title": "Mode",
-            "type": "string"
+            "$ref": "#/components/schemas/DiscussionMode",
+            "default": "none"
           },
           "platform": {
             "nullable": true,
@@ -1918,6 +1956,14 @@
         ],
         "title": "ContentDiscussionResponse",
         "type": "object"
+      },
+      "ContentInteractionType": {
+        "description": "Client-recorded content interaction kinds.",
+        "enum": [
+          "opened"
+        ],
+        "title": "ContentInteractionType",
+        "type": "string"
       },
       "ContentListResponse": {
         "description": "Response for content list endpoint.",
@@ -2232,14 +2278,9 @@
             "type": "string"
           },
           "saved_source": {
+            "$ref": "#/components/schemas/SavedSource",
             "description": "Saved-library source for this content when it appears in saved views",
-            "enum": [
-              "knowledge",
-              "x_bookmark"
-            ],
-            "nullable": true,
-            "title": "Saved Source",
-            "type": "string"
+            "nullable": true
           },
           "short_summary": {
             "description": "Short summary for display; for news items this returns the excerpt or first item text",
@@ -2685,6 +2726,32 @@
           }
         },
         "title": "DebugUserSessionRequest",
+        "type": "object"
+      },
+      "DeleteStatus": {
+        "description": "Status returned after deleting a resource.",
+        "enum": [
+          "deleted"
+        ],
+        "title": "DeleteStatus",
+        "type": "string"
+      },
+      "DeleteUserLlmIntegrationResponse": {
+        "description": "Response for deleting a user-managed LLM provider key.",
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeleteStatus",
+            "default": "deleted"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "DeleteUserLlmIntegrationResponse",
         "type": "object"
       },
       "DetectedFeed": {
@@ -3184,6 +3251,16 @@
         "title": "DiscussionLinkResponse",
         "type": "object"
       },
+      "DiscussionMode": {
+        "description": "Shape of discussion data returned for a content item.",
+        "enum": [
+          "none",
+          "comments",
+          "discussion_list"
+        ],
+        "title": "DiscussionMode",
+        "type": "string"
+      },
       "DownloadMoreRequest": {
         "description": "Request to download older items from the same feed series.",
         "properties": {
@@ -3259,6 +3336,25 @@
         "title": "DownloadMoreResponse",
         "type": "object"
       },
+      "FeedFormat": {
+        "description": "Supported feed document formats.",
+        "enum": [
+          "rss",
+          "atom"
+        ],
+        "title": "FeedFormat",
+        "type": "string"
+      },
+      "FeedType": {
+        "description": "Supported feed/source categories exposed in client contracts.",
+        "enum": [
+          "atom",
+          "substack",
+          "podcast_rss"
+        ],
+        "title": "FeedType",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3281,14 +3377,20 @@
             "type": "string"
           },
           "status": {
-            "const": "disconnected",
-            "default": "disconnected",
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/IntegrationDisconnectStatus",
+            "default": "disconnected"
           }
         },
         "title": "IntegrationDisconnectResponse",
         "type": "object"
+      },
+      "IntegrationDisconnectStatus": {
+        "description": "Status returned after disconnecting an integration.",
+        "enum": [
+          "disconnected"
+        ],
+        "title": "IntegrationDisconnectStatus",
+        "type": "string"
       },
       "JobStatusResponse": {
         "description": "Status payload for an async processing job.",
@@ -3353,6 +3455,44 @@
         ],
         "title": "JobStatusResponse",
         "type": "object"
+      },
+      "KnowledgeMutationResponse": {
+        "description": "Response for Knowledge save/remove actions.",
+        "properties": {
+          "content_id": {
+            "description": "ID of the content item",
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "is_saved_to_knowledge": {
+            "title": "Is Saved To Knowledge",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/KnowledgeMutationStatus"
+          }
+        },
+        "required": [
+          "status",
+          "content_id",
+          "is_saved_to_knowledge",
+          "message"
+        ],
+        "title": "KnowledgeMutationResponse",
+        "type": "object"
+      },
+      "KnowledgeMutationStatus": {
+        "description": "Status values for Knowledge save/remove mutations.",
+        "enum": [
+          "success",
+          "not_found"
+        ],
+        "title": "KnowledgeMutationStatus",
+        "type": "string"
       },
       "LLMProvider": {
         "description": "Supported LLM providers.",
@@ -3667,6 +3807,51 @@
         "title": "LongFormStatsResponse",
         "type": "object"
       },
+      "MarkReadResponse": {
+        "description": "Response for marking one content item as read.",
+        "properties": {
+          "content_id": {
+            "description": "ID of the content item marked as read",
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OperationStatus",
+            "default": "success"
+          }
+        },
+        "required": [
+          "content_id"
+        ],
+        "title": "MarkReadResponse",
+        "type": "object"
+      },
+      "MarkUnreadResponse": {
+        "description": "Response for marking one content item as unread.",
+        "properties": {
+          "content_id": {
+            "description": "ID of the content item marked as unread",
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "removed_records": {
+            "description": "Read-status rows removed",
+            "minimum": 0.0,
+            "title": "Removed Records",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OperationStatus",
+            "default": "success"
+          }
+        },
+        "required": [
+          "content_id",
+          "removed_records"
+        ],
+        "title": "MarkUnreadResponse",
+        "type": "object"
+      },
       "MessageProcessingStatus": {
         "description": "Processing status for async chat messages.",
         "enum": [
@@ -3828,10 +4013,8 @@
             "type": "integer"
           },
           "target_type": {
-            "const": "content",
-            "description": "Narration target family",
-            "title": "Target Type",
-            "type": "string"
+            "$ref": "#/components/schemas/NarrationTargetType",
+            "description": "Narration target family"
           },
           "title": {
             "description": "Resolved title for spoken playback",
@@ -3847,6 +4030,14 @@
         ],
         "title": "NarrationResponse",
         "type": "object"
+      },
+      "NarrationTargetType": {
+        "description": "Supported narration target families.",
+        "enum": [
+          "content"
+        ],
+        "title": "NarrationTargetType",
+        "type": "string"
       },
       "OnboardingAudioDiscoverRequest": {
         "description": "Request to start onboarding audio discovery.",
@@ -4306,13 +4497,7 @@
             "type": "string"
           },
           "suggestion_type": {
-            "enum": [
-              "substack",
-              "atom",
-              "podcast_rss"
-            ],
-            "title": "Suggestion Type",
-            "type": "string"
+            "$ref": "#/components/schemas/OnboardingSelectedSourceType"
           },
           "title": {
             "nullable": true,
@@ -4326,6 +4511,16 @@
         ],
         "title": "OnboardingSelectedSource",
         "type": "object"
+      },
+      "OnboardingSelectedSourceType": {
+        "description": "Source types the onboarding completion endpoint can subscribe to.",
+        "enum": [
+          "substack",
+          "atom",
+          "podcast_rss"
+        ],
+        "title": "OnboardingSelectedSourceType",
+        "type": "string"
       },
       "OnboardingSuggestion": {
         "description": "Single onboarding recommendation item.",
@@ -4361,14 +4556,7 @@
             "type": "string"
           },
           "suggestion_type": {
-            "enum": [
-              "substack",
-              "atom",
-              "podcast_rss",
-              "reddit"
-            ],
-            "title": "Suggestion Type",
-            "type": "string"
+            "$ref": "#/components/schemas/OnboardingSuggestionType"
           },
           "title": {
             "nullable": true,
@@ -4381,6 +4569,17 @@
         ],
         "title": "OnboardingSuggestion",
         "type": "object"
+      },
+      "OnboardingSuggestionType": {
+        "description": "Source types suggested during onboarding discovery.",
+        "enum": [
+          "substack",
+          "atom",
+          "podcast_rss",
+          "reddit"
+        ],
+        "title": "OnboardingSuggestionType",
+        "type": "string"
       },
       "OnboardingTutorialResponse": {
         "description": "Response for tutorial completion.",
@@ -4450,6 +4649,14 @@
         },
         "title": "OnboardingVoiceParseResponse",
         "type": "object"
+      },
+      "OperationStatus": {
+        "description": "Common success status used by mutation-style API responses.",
+        "enum": [
+          "success"
+        ],
+        "title": "OperationStatus",
+        "type": "string"
       },
       "PaginationMetadata": {
         "description": "Pagination metadata for responses.",
@@ -4620,10 +4827,8 @@
             "type": "string"
           },
           "interaction_type": {
-            "const": "opened",
-            "description": "Interaction type. V1 supports opened.",
-            "title": "Interaction Type",
-            "type": "string"
+            "$ref": "#/components/schemas/ContentInteractionType",
+            "description": "Interaction type. V1 supports opened."
           },
           "occurred_at": {
             "description": "Optional ISO timestamp of when interaction occurred",
@@ -4674,10 +4879,8 @@
             "type": "boolean"
           },
           "status": {
-            "const": "success",
-            "description": "Operation status",
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/OperationStatus",
+            "description": "Operation status"
           }
         },
         "required": [
@@ -4701,6 +4904,15 @@
         ],
         "title": "RefreshTokenRequest",
         "type": "object"
+      },
+      "SavedSource": {
+        "description": "Source that placed content in the user's saved library.",
+        "enum": [
+          "knowledge",
+          "x_bookmark"
+        ],
+        "title": "SavedSource",
+        "type": "string"
       },
       "ScraperConfigResponse": {
         "description": "Response model for scraper configs.",
@@ -5006,6 +5218,32 @@
         "title": "SubmissionFeedSubscriptionResponse",
         "type": "object"
       },
+      "SubmissionKind": {
+        "description": "Semantic kind for a user-visible submission status row.",
+        "enum": [
+          "content",
+          "feed_subscription"
+        ],
+        "title": "SubmissionKind",
+        "type": "string"
+      },
+      "SubmissionOutcome": {
+        "description": "User-facing outcome for a submitted content or feed item.",
+        "enum": [
+          "queued",
+          "processing",
+          "completed",
+          "failed",
+          "skipped",
+          "subscribed",
+          "already_subscribed",
+          "feed_not_found",
+          "feed_fetch_failed",
+          "feed_subscription_failed"
+        ],
+        "title": "SubmissionOutcome",
+        "type": "string"
+      },
       "SubmissionStatusListResponse": {
         "description": "Response for user submission status list.",
         "properties": {
@@ -5069,22 +5307,9 @@
             "type": "boolean"
           },
           "outcome": {
+            "$ref": "#/components/schemas/SubmissionOutcome",
             "default": "processing",
-            "description": "Semantic submission outcome for user-facing display",
-            "enum": [
-              "queued",
-              "processing",
-              "completed",
-              "failed",
-              "skipped",
-              "subscribed",
-              "already_subscribed",
-              "feed_not_found",
-              "feed_fetch_failed",
-              "feed_subscription_failed"
-            ],
-            "title": "Outcome",
-            "type": "string"
+            "description": "Semantic submission outcome for user-facing display"
           },
           "processed_at": {
             "description": "ISO timestamp when content was processed",
@@ -5103,14 +5328,9 @@
             "description": "Processing status"
           },
           "submission_kind": {
+            "$ref": "#/components/schemas/SubmissionKind",
             "default": "content",
-            "description": "Semantic submission kind for user-facing display",
-            "enum": [
-              "content",
-              "feed_subscription"
-            ],
-            "title": "Submission Kind",
-            "type": "string"
+            "description": "Semantic submission kind for user-facing display"
           },
           "submitted_via": {
             "description": "Submission channel (share_sheet, etc.)",
@@ -5213,9 +5433,6 @@
           },
           "url": {
             "description": "URL to submit (http/https only)",
-            "format": "uri",
-            "maxLength": 2083,
-            "minLength": 1,
             "title": "Url",
             "type": "string"
           }
@@ -5288,9 +5505,7 @@
             "type": "integer"
           },
           "status": {
-            "const": "success",
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/OperationStatus"
           }
         },
         "required": [
@@ -5660,13 +5875,7 @@
             "type": "boolean"
           },
           "provider": {
-            "enum": [
-              "anthropic",
-              "openai",
-              "google"
-            ],
-            "title": "Provider",
-            "type": "string"
+            "$ref": "#/components/schemas/UserLlmProvider"
           },
           "updated_at": {
             "nullable": true,
@@ -5689,13 +5898,7 @@
             "type": "boolean"
           },
           "provider": {
-            "enum": [
-              "anthropic",
-              "openai",
-              "google"
-            ],
-            "title": "Provider",
-            "type": "string"
+            "$ref": "#/components/schemas/UserLlmProvider"
           }
         },
         "required": [
@@ -5704,6 +5907,16 @@
         ],
         "title": "UserLlmIntegrationTestResponse",
         "type": "object"
+      },
+      "UserLlmProvider": {
+        "description": "User-configurable LLM providers accepted by integration endpoints.",
+        "enum": [
+          "anthropic",
+          "openai",
+          "google"
+        ],
+        "title": "UserLlmProvider",
+        "type": "string"
       },
       "UserResponse": {
         "description": "Schema for user API responses.",
@@ -5724,7 +5937,6 @@
             "type": "string"
           },
           "email": {
-            "format": "email",
             "title": "Email",
             "type": "string"
           },
@@ -6343,9 +6555,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Completeonboarding",
-                  "type": "object"
+                  "$ref": "#/components/schemas/OnboardingCompleteResponse"
                 }
               }
             },
@@ -6877,9 +7087,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Marknewsitemsread",
-                  "type": "object"
+                  "$ref": "#/components/schemas/BulkMarkReadResponse"
                 }
               }
             },
