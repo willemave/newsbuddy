@@ -57,45 +57,45 @@ cli/internal/api/testdata/contracts/*.json            # synced copies (CI-checke
 
 Phase 0 — Spec truth + ratchet
 
-- [ ] 0.1 Typed response models for the 8 dict-returning endpoints
-- [ ] 0.2 Consolidate cross-client enums into `contracts.py`
-- [ ] 0.3 Ratchet test: every route has a real `response_model`; untyped-field allowlist
-- [ ] 0.4 Ratchet test: every datetime field in `app/models/api/` is `UTCDateTime`
+- [x] 0.1 Typed response models for the 8 dict-returning endpoints
+- [x] 0.2 Consolidate cross-client enums into `contracts.py`
+- [x] 0.3 Ratchet test: every route has a real `response_model`; untyped-field allowlist
+- [x] 0.4 Ratchet test: every datetime field in `app/models/api/` is `UTCDateTime`
 
 Phase 1 — Generator core
 
-- [ ] 1.1 `contracts_codegen` package: introspection IR + registry
-- [ ] 1.2 Policy annotations (`lenient_field`) and escape-hatch rules
-- [ ] 1.3 Swift emitter: enums with open/closed support (regenerate existing 7 + add missing enums)
-- [ ] 1.4 Migrate iOS call sites for open-enum shape changes
+- [x] 1.1 `contracts_codegen` package: introspection IR + registry
+- [x] 1.2 Policy annotations (`lenient_field`) and escape-hatch rules
+- [x] 1.3 Swift emitter: enums with open/closed support (regenerate existing 7 + add missing enums)
+- [x] 1.4 Migrate iOS call sites for open-enum shape changes
 
 Phase 2 — Swift wire structs
 
-- [ ] 2.1 Swift struct emission + `APIModels.generated.swift` wired into the check script
-- [ ] 2.2 Batch 1: simple responses (counts, mark-read/knowledge, jobs, narration)
-- [ ] 2.3 Batch 2: `ContentSummary` + list responses
-- [ ] 2.4 Batch 3: chat models
-- [ ] 2.5 Batch 4: `ContentDetail` (wire/domain split; summary fields stay as-is)
-- [ ] 2.6 Batch 5: request models — typed `SubmitContentRequest` for ShareExtension; delete `requestRaw`
-- [ ] 2.7 Coverage ratchet: shrink-only manifest of remaining hand-rolled models
+- [x] 2.1 Swift struct emission + `APIModels.generated.swift` wired into the check script
+- [x] 2.2 Batch 1: simple responses (counts, mark-read/knowledge, jobs, narration)
+- [x] 2.3 Batch 2: `ContentSummary` + list responses
+- [x] 2.4 Batch 3: chat models
+- [x] 2.5 Batch 4: `ContentDetail` (wire/domain split; summary fields stay as-is)
+- [x] 2.6 Batch 5: request models — typed `SubmitContentRequest` for ShareExtension; delete `requestRaw`
+- [x] 2.7 Coverage ratchet: shrink-only manifest of remaining hand-rolled models
 
 Phase 3 — Go clean models
 
-- [ ] 3.1 Go emitter + `contracts_gen.go` from the same registry
-- [ ] 3.2 Thin hand-written client; port `cmd/` call sites; fold `runtime` hand-rolled structs
-- [ ] 3.3 Delete ogen generation + `decodeFlexibleDateTime` patch; update `--go-only` check
-- [ ] 3.4 Decide fate of `cli/openapi/agent-openapi.json` (keep export only if consumed)
+- [x] 3.1 Go emitter + `contracts_gen.go` from the same registry
+- [x] 3.2 Thin hand-written client; port `cmd/` call sites; fold `runtime` hand-rolled structs
+- [x] 3.3 Delete ogen generation + `decodeFlexibleDateTime` patch; update `--go-only` check
+- [x] 3.4 Decide fate of `cli/openapi/agent-openapi.json` (keep export only if consumed)
 
 Phase 4 — Cross-language golden fixtures
 
-- [ ] 4.1 Backend fixture tests write checked-in canonical JSON (fail on diff)
-- [ ] 4.2 iOS tests decode the synced fixtures (replace inline string literals)
-- [ ] 4.3 Go tests decode the synced fixtures
-- [ ] 4.4 Adversarial fixtures: unknown enum values, absent-vs-null optionals
+- [x] 4.1 Backend fixture tests write checked-in canonical JSON (fail on diff)
+- [x] 4.2 iOS tests decode the synced fixtures (replace inline string literals)
+- [x] 4.3 Go tests decode the synced fixtures
+- [x] 4.4 Adversarial fixtures: unknown enum values, absent-vs-null optionals
 
 Phase 5 — Policy
 
-- [ ] 5.1 Write `20-contract-policy.md` (tolerance rules, enum table, evolution rules, endpoint definition-of-done)
+- [x] 5.1 Write `20-contract-policy.md` (tolerance rules, enum table, evolution rules, endpoint definition-of-done)
 
 ---
 

@@ -1287,13 +1287,16 @@ Supporting scripts:
 - `scripts/export_openapi_schema.py`
 - `scripts/export_agent_openapi_schema.py`
 - `scripts/generate_ios_contracts.py`
+- `scripts/generate_go_contracts.py`
 - `scripts/generate_agent_cli_artifacts.sh`
 - `scripts/regenerate_public_contracts.sh`
 - `scripts/check_public_contracts.sh`
 
-OpenAPI is authoritative for the public wire format. Checked-in Go and Swift generated artifacts must be regenerated from those scripts rather than edited manually.
+OpenAPI is authoritative for the public wire format. `app/models/contracts_registry.py` is the reviewed generated-client surface for Swift and Go artifacts. Checked-in generated artifacts must be regenerated from the supporting scripts rather than edited manually.
 
-The iOS runtime still uses hand-written `APIClient`, `APIEndpoints`, services, and Codable DTOs for most networking. Generated Swift contracts are selectively consumed for canonical enums and future typed-client/drift-check work.
+The iOS runtime still uses hand-written `APIClient`, `APIEndpoints`, services, and domain DTOs for networking. Generated Swift contracts are consumed as canonical wire models and bridged into app-facing models. The Go CLI uses generated API models with a hand-written HTTP runtime client.
+
+Contract evolution rules live in `docs/initiatives/typed-contracts-2026-06/20-contract-policy.md`.
 
 ## 18. iOS Share Extension
 

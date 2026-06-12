@@ -409,7 +409,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the full system referen
 | **Async & queue** | PostgreSQL-backed queue (`SKIP LOCKED`, `LISTEN`/`NOTIFY`), Supervisor, cron scheduler |
 | **AI / LLM** | pydantic-ai · OpenAI, Anthropic Claude, Google Gemini, Cerebras, OpenRouter, DeepSeek · Exa search · local SentenceTransformers + Qwen reranker |
 | **Ingestion & media** | crawl4ai, trafilatura, Firecrawl, feedparser, yt-dlp, Whisper, Gemini + Runware images |
-| **CLI** | Go, Cobra, ogen, `newsbuddy` binary |
+| **CLI** | Go, Cobra, registry-generated API models, `newsbuddy` binary |
 | **iOS** | SwiftUI, Apple Sign In, Share Extension |
 | **Admin / Web** | Jinja2 templates, Tailwind CSS v4 |
 | **Observability** | Langfuse tracing, structured JSONL logs |

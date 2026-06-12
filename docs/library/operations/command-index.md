@@ -37,8 +37,9 @@ Use this index as the single entrypoint for operational scripts.
 
 - `scripts/export_openapi_schema.py` - Export current OpenAPI schema to `docs/library/reference/openapi.json`.
 - `scripts/export_agent_openapi_schema.py` - Export the filtered CLI schema to `cli/openapi/agent-openapi.json`.
-- `scripts/generate_ios_contracts.py` - Generate iOS enum contracts from backend canonical enums.
-- `scripts/generate_agent_cli_artifacts.sh` - Regenerate the filtered CLI schema and generated Go client.
+- `scripts/generate_ios_contracts.py` - Generate iOS enum and model contracts from backend canonical models.
+- `scripts/generate_go_contracts.py` - Generate Go CLI model and enum contracts from backend canonical models.
+- `scripts/generate_agent_cli_artifacts.sh` - Regenerate the filtered CLI schema and generated Go contracts.
 - `scripts/regenerate_public_contracts.sh` - Regenerate all checked-in public contract artifacts.
 - `scripts/check_public_contracts.sh` - Verify all checked-in public contract artifacts are current.
 - `client/newsly/scripts/regenerate_api_contracts.sh` - One-command iOS contract regeneration workflow.
