@@ -25,11 +25,12 @@ func (a *App) newNewsCommand() *cobra.Command {
 		Short: "List visible news items",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runRemote(cmd, "news.list", func(ctx context.Context, client *runtime.Client) (commandResult, error) {
-				params := api.ListNewsItemsParams{}
-				params.Limit.SetTo(listArgs.Limit)
-				params.ReadFilter.SetTo(listArgs.ReadFilter)
+				params := api.ListNewsItemsParams{
+					Limit:      api.Ptr(listArgs.Limit),
+					ReadFilter: api.Ptr(listArgs.ReadFilter),
+				}
 				if listArgs.Cursor != "" {
-					params.Cursor.SetTo(listArgs.Cursor)
+					params.Cursor = api.Ptr(listArgs.Cursor)
 				}
 				data, err := client.ListNewsItems(ctx, params)
 				if err != nil {

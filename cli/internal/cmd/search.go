@@ -20,9 +20,11 @@ func (a *App) newSearchCommand() *cobra.Command {
 		Short: "Search provider-backed sources",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, positional []string) error {
-			request := &api.AgentSearchRequest{Query: positional[0]}
-			request.Limit.SetTo(args.Limit)
-			request.IncludePodcasts.SetTo(args.IncludePodcasts)
+			request := &api.AgentSearchRequest{
+				Query:           positional[0],
+				Limit:           api.Ptr(args.Limit),
+				IncludePodcasts: api.Ptr(args.IncludePodcasts),
+			}
 
 			return a.runRemote(cmd, "search", func(ctx context.Context, client *runtime.Client) (commandResult, error) {
 				data, err := client.SearchAgent(ctx, request)

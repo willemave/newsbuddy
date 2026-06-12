@@ -105,7 +105,7 @@ Notes:
 
 ## Regeneration
 
-The CLI-specific OpenAPI contract and generated client are checked in. Regenerate both with:
+The CLI-specific OpenAPI contract and registry-generated Go API models are checked in. Regenerate both with:
 
 ```bash
 ./scripts/generate_agent_cli_artifacts.sh

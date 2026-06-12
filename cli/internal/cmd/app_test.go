@@ -613,7 +613,13 @@ func TestOnboardingStatusAndCompleteOutputEnvelopes(t *testing.T) {
 				t.Fatalf("unexpected payload: %s", string(body))
 			}
 			writeJSON(t, w, map[string]any{
-				"status": "completed",
+				"configured_source_count":         2,
+				"has_completed_new_user_tutorial": true,
+				"has_completed_onboarding":        true,
+				"inbox_count_estimate":            5,
+				"longform_status":                 "queued",
+				"status":                          "completed",
+				"task_id":                         91,
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -799,7 +805,10 @@ func TestNewsMarkReadOutputsEnvelope(t *testing.T) {
 			t.Fatalf("unexpected payload: %s", string(body))
 		}
 		writeJSON(t, w, map[string]any{
-			"marked_read": 2,
+			"failed_ids":      []int{},
+			"marked_count":    2,
+			"status":          "success",
+			"total_requested": 2,
 		})
 	}))
 	defer server.Close()
@@ -819,7 +828,7 @@ func TestNewsMarkReadOutputsEnvelope(t *testing.T) {
 		t.Fatalf("unexpected command: %#v", envelope["command"])
 	}
 	data := envelope["data"].(map[string]any)
-	if int(data["marked_read"].(float64)) != 2 {
+	if int(data["marked_count"].(float64)) != 2 {
 		t.Fatalf("unexpected data: %#v", data)
 	}
 }

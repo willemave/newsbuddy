@@ -31,7 +31,7 @@ func (a *App) newOnboardingCommand() *cobra.Command {
 				return a.renderError("onboarding.start", err)
 			}
 			request := &api.AgentOnboardingStartRequest{Brief: startArgs.Brief}
-			request.SeedUrls = startArgs.SeedURLs
+			request.SeedURLs = startArgs.SeedURLs
 			request.SeedFeeds = startArgs.SeedFeeds
 
 			return a.runRemote(cmd, "onboarding.start", func(ctx context.Context, client *runtime.Client) (commandResult, error) {
@@ -91,8 +91,8 @@ func (a *App) newOnboardingCommand() *cobra.Command {
 				return err
 			}
 			request := &api.AgentOnboardingCompleteRequest{}
-			request.AcceptAll.SetTo(completeArgs.AcceptAll)
-			request.SourceIds = completeArgs.SourceIDs
+			request.AcceptAll = api.Ptr(completeArgs.AcceptAll)
+			request.SourceIDs = completeArgs.SourceIDs
 			request.SelectedSubreddits = completeArgs.Subreddits
 
 			return a.runRemote(cmd, "onboarding.complete", func(ctx context.Context, client *runtime.Client) (commandResult, error) {

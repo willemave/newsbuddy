@@ -27,19 +27,20 @@ func (a *App) newContentCommand() *cobra.Command {
 		Short: "List content cards",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runRemote(cmd, "content.list", func(ctx context.Context, client *runtime.Client) (commandResult, error) {
-				params := api.ListContentsParams{}
-				params.Limit.SetTo(listArgs.Limit)
+				params := api.ListContentsParams{
+					Limit: api.Ptr(listArgs.Limit),
+				}
 				if listArgs.Cursor != "" {
-					params.Cursor.SetTo(listArgs.Cursor)
+					params.Cursor = api.Ptr(listArgs.Cursor)
 				}
 				if len(listArgs.ContentType) > 0 {
-					params.ContentType.SetTo(listArgs.ContentType)
+					params.ContentType = listArgs.ContentType
 				}
 				if listArgs.Date != "" {
-					params.Date.SetTo(listArgs.Date)
+					params.Date = api.Ptr(listArgs.Date)
 				}
 				if listArgs.ReadFilter != "" {
-					params.ReadFilter.SetTo(listArgs.ReadFilter)
+					params.ReadFilter = api.Ptr(listArgs.ReadFilter)
 				}
 				data, err := client.ListContent(ctx, params)
 				if err != nil {
@@ -99,10 +100,11 @@ func (a *App) newSubmissionsCommand() *cobra.Command {
 		Short: "List active or failed user submissions",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runRemote(cmd, "content.submissions.list", func(ctx context.Context, client *runtime.Client) (commandResult, error) {
-				params := api.ListContentSubmissionStatusesParams{}
-				params.Limit.SetTo(listArgs.Limit)
+				params := api.ListContentSubmissionStatusesParams{
+					Limit: api.Ptr(listArgs.Limit),
+				}
 				if listArgs.Cursor != "" {
-					params.Cursor.SetTo(listArgs.Cursor)
+					params.Cursor = api.Ptr(listArgs.Cursor)
 				}
 				data, err := client.ListContentSubmissionStatuses(ctx, params)
 				if err != nil {
@@ -144,28 +146,27 @@ func (a *App) newSubmitCommand(use string, commandName string) *cobra.Command {
 				return a.renderError(commandName, err)
 			}
 
-			request := &api.SubmitContentRequest{}
-			request.SetURL(submitURL)
+			request := &api.SubmitContentRequest{URL: submitURL.String()}
 			if args.Note != "" {
-				request.Instruction.SetTo(args.Note)
+				request.Instruction = api.Ptr(args.Note)
 			}
 			if args.CrawlLinks {
-				request.CrawlLinks.SetTo(true)
+				request.CrawlLinks = api.Ptr(true)
 			}
 			if args.SubscribeToFeed {
-				request.SubscribeToFeed.SetTo(true)
+				request.SubscribeToFeed = api.Ptr(true)
 			}
 			if use == "summarize" {
-				request.SaveToKnowledgeAndMarkRead.SetTo(true)
+				request.SaveToKnowledgeAndMarkRead = api.Ptr(true)
 			}
 			if args.Title != "" {
-				request.Title.SetTo(args.Title)
+				request.Title = api.Ptr(args.Title)
 			}
 			if args.Platform != "" {
-				request.Platform.SetTo(args.Platform)
+				request.Platform = api.Ptr(args.Platform)
 			}
 			if args.ContentType != "" {
-				request.ContentType.SetTo(api.ContentType(args.ContentType))
+				request.ContentType = api.Ptr(api.ContentType(args.ContentType))
 			}
 
 			return a.runRemote(cmd, commandName, func(ctx context.Context, client *runtime.Client) (commandResult, error) {
@@ -175,9 +176,8 @@ func (a *App) newSubmitCommand(use string, commandName string) *cobra.Command {
 				}
 				result := commandResult{Data: data}
 				if shouldWait {
-					jobID, ok := data.TaskID.Get()
-					if ok {
-						job, err := client.WaitForJob(ctx, jobID, wait)
+					if data.TaskID != nil {
+						job, err := client.WaitForJob(ctx, *data.TaskID, wait)
 						if err != nil {
 							return commandResult{}, err
 						}

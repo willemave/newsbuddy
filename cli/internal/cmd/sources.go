@@ -28,7 +28,7 @@ func (a *App) newSourcesCommand() *cobra.Command {
 			return a.runRemote(cmd, "sources.list", func(ctx context.Context, client *runtime.Client) (commandResult, error) {
 				params := api.ListScraperConfigsParams{}
 				if listType != "" {
-					params.Type.SetTo(listType)
+					params.Type = api.Ptr(listType)
 				}
 				data, err := client.ListSources(ctx, params)
 				if err != nil {
@@ -68,7 +68,7 @@ func (a *App) newSourcesCommand() *cobra.Command {
 				FeedType: addArgs.FeedType,
 			}
 			if addArgs.DisplayName != "" {
-				request.DisplayName.SetTo(addArgs.DisplayName)
+				request.DisplayName = api.Ptr(addArgs.DisplayName)
 			}
 			return a.runRemote(cmd, "sources.add", func(ctx context.Context, client *runtime.Client) (commandResult, error) {
 				data, err := client.SubscribeSource(ctx, request)

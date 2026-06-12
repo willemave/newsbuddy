@@ -1,62 +1,34 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/willem/newsbuddy/cli/internal/api"
 )
 
-type CLILinkStartResponse struct {
-	SessionID  string `json:"session_id"`
-	PollToken  string `json:"poll_token"`
-	ApproveURL string `json:"approve_url"`
-}
-
-type CLILinkPollResponse struct {
-	SessionID string `json:"session_id"`
-	Status    string `json:"status"`
-	APIKey    string `json:"api_key"`
-	KeyPrefix string `json:"key_prefix"`
-}
-
-type AgentLibraryDocument struct {
-	RelativePath   string `json:"relative_path"`
-	ChecksumSHA256 string `json:"checksum_sha256"`
-}
-
-type AgentLibraryManifestResponse struct {
-	Documents []AgentLibraryDocument `json:"documents"`
-}
-
-type AgentLibraryFileResponse struct {
-	Text string `json:"text"`
-}
-
-func (c *Client) StartCLILink(ctx context.Context, deviceName string) (*CLILinkStartResponse, error) {
-	payload := map[string]string{}
+func (c *Client) StartCLILink(ctx context.Context, deviceName string) (*api.CliLinkStartResponse, error) {
+	payload := &api.CliLinkStartRequest{}
 	if strings.TrimSpace(deviceName) != "" {
-		payload["device_name"] = deviceName
+		payload.DeviceName = api.Ptr(deviceName)
 	}
-	var response CLILinkStartResponse
+	var response api.CliLinkStartResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/api/agent/cli/link/start", payload, false, nil, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
 }
 
-func (c *Client) PollCLILink(ctx context.Context, sessionID string, pollToken string) (*CLILinkPollResponse, error) {
+func (c *Client) PollCLILink(ctx context.Context, sessionID string, pollToken string) (*api.CliLinkPollResponse, error) {
 	query := url.Values{}
 	query.Set("poll_token", pollToken)
-	var response CLILinkPollResponse
+	var response api.CliLinkPollResponse
 	if err := c.doJSON(ctx, http.MethodGet, "/api/agent/cli/link/"+url.PathEscape(sessionID), nil, false, query, &response); err != nil {
 		return nil, err
 	}
@@ -68,16 +40,16 @@ func (c *Client) WaitForCLILink(
 	sessionID string,
 	pollToken string,
 	wait WaitOptions,
-) (*CLILinkPollResponse, error) {
+) (*api.CliLinkPollResponse, error) {
 	deadline := time.Now().Add(wait.Timeout)
 	for {
 		polled, err := c.PollCLILink(ctx, sessionID, pollToken)
 		if err != nil {
 			return nil, err
 		}
-		switch normalizeStatus(polled.Status) {
+		switch normalizeStatus(string(polled.Status)) {
 		case "approved":
-			if polled.APIKey != "" {
+			if polled.APIKey != nil && *polled.APIKey != "" {
 				return polled, nil
 			}
 		case "claimed":
@@ -94,20 +66,20 @@ func (c *Client) WaitForCLILink(
 	}
 }
 
-func (c *Client) GetLibraryManifest(ctx context.Context, includeSource bool) (*AgentLibraryManifestResponse, error) {
+func (c *Client) GetLibraryManifest(ctx context.Context, includeSource bool) (*api.AgentLibraryManifestResponse, error) {
 	query := url.Values{}
 	query.Set("include_source", strconv.FormatBool(includeSource))
-	var response AgentLibraryManifestResponse
+	var response api.AgentLibraryManifestResponse
 	if err := c.doJSON(ctx, http.MethodGet, "/api/agent/library/manifest", nil, true, query, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
 }
 
-func (c *Client) GetLibraryFile(ctx context.Context, relativePath string) (*AgentLibraryFileResponse, error) {
+func (c *Client) GetLibraryFile(ctx context.Context, relativePath string) (*api.AgentLibraryFileResponse, error) {
 	query := url.Values{}
 	query.Set("path", relativePath)
-	var response AgentLibraryFileResponse
+	var response api.AgentLibraryFileResponse
 	if err := c.doJSON(ctx, http.MethodGet, "/api/agent/library/file", nil, true, query, &response); err != nil {
 		return nil, err
 	}
@@ -121,69 +93,4 @@ func DefaultDeviceName() string {
 		}
 	}
 	return "Newsbuddy CLI"
-}
-
-func (c *Client) doJSON(
-	ctx context.Context,
-	method string,
-	path string,
-	body any,
-	includeAuth bool,
-	query url.Values,
-	into any,
-) error {
-	endpoint := c.baseURL + path
-	if query != nil && len(query) > 0 {
-		endpoint += "?" + query.Encode()
-	}
-
-	var bodyReader io.Reader
-	if body != nil {
-		payload, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		bodyReader = bytes.NewReader(payload)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, bodyReader)
-	if err != nil {
-		return err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Accept", "application/json")
-	if includeAuth && strings.TrimSpace(c.apiKey) != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		payload, _ := decodeBody(res)
-		message := fmt.Sprintf("request failed with status %d", res.StatusCode)
-		if detail, ok := payload["detail"].(string); ok && detail != "" {
-			message = detail
-		}
-		return &APIError{
-			Message:    message,
-			StatusCode: res.StatusCode,
-			Payload:    payload,
-		}
-	}
-
-	return json.NewDecoder(res.Body).Decode(into)
-}
-
-func decodeBody(res *http.Response) (map[string]any, error) {
-	var payload map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-		return map[string]any{}, err
-	}
-	return payload, nil
 }

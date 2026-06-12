@@ -61,13 +61,13 @@ func (a *App) newAuthCommand() *cobra.Command {
 			if err != nil {
 				return a.renderErrorWithPath("auth.login", runtimeCfg.Path, err)
 			}
-			if polled.APIKey == "" {
+			if polled.APIKey == nil || *polled.APIKey == "" {
 				return a.renderError("auth.login", errors.New("CLI link completed without an API key"))
 			}
 
 			savedCfg, err := config.Update(runtimeCfg.Path, func(current config.FileConfig) config.FileConfig {
 				current.ServerURL = runtimeCfg.ServerURL
-				current.APIKey = polled.APIKey
+				current.APIKey = *polled.APIKey
 				if current.LibraryRoot == "" {
 					current.LibraryRoot = runtimeCfg.LibraryRoot
 				}
