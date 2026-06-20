@@ -1,0 +1,29 @@
+[
+  {
+    "AXFrame" : "{{0, 0}, {402, 874}}",
+    "AXUniqueId" : null,
+    "frame" : {
+      "y" : 0,
+      "x" : 0,
+      "width" : 402,
+      "height" : 874
+    },
+    "role_description" : "application",
+    "AXLabel" : "Safari",
+    "content_required" : false,
+    "type" : "Application",
+    "title" : null,
+    "help" : null,
+    "custom_actions" : [
+
+    ],
+    "AXValue" : null,
+    "enabled" : true,
+    "role" : "AXApplication",
+    "children" : [
+
+    ],
+    "subrole" : null,
+    "pid" : 27756
+  }
+]
