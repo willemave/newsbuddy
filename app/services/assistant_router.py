@@ -21,7 +21,12 @@ from app.core.model_defaults import DEEP_RESEARCH_MODEL_SPEC
 from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.api.submissions import SubmitContentRequest
-from app.models.contracts import ContentType
+from app.models.contracts import (
+    ContentType,
+    LlmTaskApprovalPolicy,
+    LlmTaskKind,
+    LlmTaskMode,
+)
 from app.models.db import ChatSession, Content, NewsItem
 from app.models.db.users import User
 from app.models.domain.chat_render import (
@@ -71,7 +76,9 @@ from app.services.llm_models import (
     DEFAULT_PROVIDER,
     build_pydantic_model,
     resolve_effective_api_key,
+    resolve_model_provider,
 )
+from app.services.llm_task_turn_tracker import LlmTaskTurnSpec, LlmTaskTurnTracker
 from app.services.news_feed import list_unread_visible_news_items
 from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
 from app.services.prompt_library import load_prompt
@@ -101,6 +108,27 @@ ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS = "pick_interesting_unread_news"
 ASSISTANT_OPENAI_REASONING_EFFORT: ReasoningEffort = "low"
 
 ASSISTANT_SYSTEM_PROMPT = load_prompt("chat/contextual_assistant#system")
+CONTEXTUAL_ASSISTANT_TURN_SPEC = LlmTaskTurnSpec(
+    task_kind=LlmTaskKind.ASSISTANT_CHAT,
+    mode=LlmTaskMode.CONTEXTUAL_ASSISTANT,
+    workflow_key="chat.contextual_assistant.v1",
+    approval_policy={"default": LlmTaskApprovalPolicy.APPROVAL_REQUIRED.value},
+    allowed_actions=[
+        "subscribe_to_feed",
+        "save_to_knowledge",
+        "remove_from_knowledge",
+        "mark_content_read",
+        "mark_content_unread",
+        "create_learning_deck",
+    ],
+    tool_policy={
+        "execute_bash": False,
+        "web_search": True,
+        "personal_library": "read_only",
+        "app_tools": "host_managed",
+    },
+    prompt_pack="chat.contextual_assistant",
+)
 
 SMALL_TALK_PHRASES = {
     "hi",
@@ -1283,6 +1311,8 @@ async def process_assistant_turn_async(
         ),
     )
     deps: AssistantDeps | None = None
+    assistant_llm_task = LlmTaskTurnTracker(task_id=None)
+    assistant_llm_task_id: int | None = None
     try:
         if db is None:
             raise RuntimeError("Database session was not initialized")
@@ -1293,6 +1323,23 @@ async def process_assistant_turn_async(
         session_row_id = _require_session_id(session)
         session_user_id = _require_session_user_id(session)
         model_spec = _resolve_session_model(session)
+        provider = resolve_model_provider(model_spec)
+        assistant_llm_task = LlmTaskTurnTracker.create(
+            db,
+            user_id=session_user_id,
+            spec=CONTEXTUAL_ASSISTANT_TURN_SPEC,
+            input_json={
+                "chat_session_id": session_row_id,
+                "content_id": session.content_id,
+                "news_item_id": session.news_item_id,
+                "source": source,
+                "screen_type": screen_context.screen_type,
+                "assistant_action": screen_context.assistant_action,
+                "prompt_chars": len(user_prompt),
+                "model": model_spec,
+            },
+        )
+        assistant_llm_task_id = assistant_llm_task.task_id
 
         history_start = perf_counter()
         history = load_message_history(
@@ -1314,7 +1361,10 @@ async def process_assistant_turn_async(
                 message_id=message_id,
                 user_id=session_user_id,
                 content_id=session.content_id,
-                context_data={"history_count": len(history)},
+                context_data={
+                    "history_count": len(history),
+                    "llm_task_id": assistant_llm_task_id,
+                },
             ),
         )
 
@@ -1351,6 +1401,7 @@ async def process_assistant_turn_async(
                 context_data={
                     "screen_type": screen_context.screen_type,
                     "context_chars": len(context_snapshot or ""),
+                    "llm_task_id": assistant_llm_task_id,
                 },
             ),
         )
@@ -1358,6 +1409,12 @@ async def process_assistant_turn_async(
             db=db,
             user_id=session_user_id,
             model_spec=model_spec,
+        )
+        assistant_llm_task.running(
+            db,
+            note="Running contextual assistant agent",
+            model_provider=provider,
+            model_name=model_spec,
         )
         db.close()
         db = None
@@ -1376,6 +1433,7 @@ async def process_assistant_turn_async(
                 context_data={
                     "model": model_spec,
                     "screen_type": screen_context.screen_type,
+                    "llm_task_id": assistant_llm_task_id,
                 },
             ),
         )
@@ -1407,6 +1465,19 @@ async def process_assistant_turn_async(
             session_to_update.last_message_at = datetime.now(UTC)
             session_to_update.updated_at = datetime.now(UTC)
             persist_db.commit()
+            assistant_llm_task.completed(
+                persist_db,
+                note="Contextual assistant turn completed",
+                output_json={
+                    "chat_session_id": session_id,
+                    "message_id": message_id,
+                    "content_id": session.content_id,
+                    "news_item_id": session.news_item_id,
+                    "output_chars": len(str(getattr(result, "output", "") or "")),
+                },
+                model_provider=provider,
+                model_name=model_spec,
+            )
         tool_calls = getattr(result, "tool_calls", []) or []
         tool_names = [
             getattr(call, "name", None)
@@ -1432,6 +1503,7 @@ async def process_assistant_turn_async(
                     "tool_names": tool_names,
                     "tool_count": len([name for name in tool_names if name]),
                     "agent_ms": round(agent_ms, 2),
+                    "llm_task_id": assistant_llm_task_id,
                 },
             ),
         )
@@ -1447,15 +1519,30 @@ async def process_assistant_turn_async(
                 session_id=session_id,
                 message_id=message_id,
                 source=source,
-                context_data={"failure_class": type(exc).__name__},
+                context_data={
+                    "failure_class": type(exc).__name__,
+                    "llm_task_id": assistant_llm_task_id,
+                },
             ),
         )
         if db is not None:
             db.rollback()
             update_message_failed(db, message_id, str(exc))
+            assistant_llm_task.failed(
+                db,
+                note="Contextual assistant turn failed",
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
         else:
             with SessionLocal() as fail_db:
                 update_message_failed(fail_db, message_id, str(exc))
+                assistant_llm_task.failed(
+                    fail_db,
+                    note="Contextual assistant turn failed",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
     finally:
         _close_sandbox_session(deps.sandbox_session if deps is not None else None)
         if db is not None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, Text, text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.db import Base
@@ -67,6 +67,12 @@ class LearningDeckRun(Base):
     id = Column(Integer, primary_key=True)
     deck_id = Column(Integer, nullable=False, index=True)
     user_id = Column(Integer, nullable=False, index=True)
+    llm_task_id = Column(
+        Integer,
+        ForeignKey("llm_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     status = Column(String(32), nullable=False, default="queued", index=True)
     interests_prompt = Column(Text, nullable=True)
     source_snapshot = Column(JSONB, nullable=False, default=dict)

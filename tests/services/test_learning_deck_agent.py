@@ -3,9 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
+from app.models.contracts import LlmTaskKind, LlmTaskMode
 from app.models.db import VendorUsageRecord
 from app.services import learning_deck_agent
-from app.services.learning_deck_sandbox import LearningDeckSandboxSession
+from app.services.llm_tasks import create_llm_task
 
 
 class _FakeAgentResult:
@@ -42,6 +43,14 @@ class _FakeSandbox:
     ) -> SimpleNamespace:
         del timeout_seconds
         return SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+    def execute_bash(
+        self,
+        command: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> SimpleNamespace:
+        return self.run_command(command, timeout_seconds=timeout_seconds)
 
     def write_file(self, path: str, text: str) -> None:
         self.files[path] = text
@@ -97,7 +106,7 @@ def test_learning_deck_agent_persists_vendor_usage_row(
         interests_prompt="Focus on systems",
         user_id=test_user.id,
         run_id=123,
-        sandbox_factory=lambda _user_id, _run_id: cast(LearningDeckSandboxSession, sandbox),
+        sandbox_factory=lambda _user_id, _run_id: cast(Any, sandbox),
     )
 
     assert result.model_provider == "openai"
@@ -120,3 +129,89 @@ def test_learning_deck_agent_persists_vendor_usage_row(
         "source_identity": "content:77",
         "source_content_id": 77,
     }
+
+
+def test_learning_deck_agent_uses_generic_vm_session_when_llm_task_exists(
+    db_session,
+    test_user,
+    vendor_usage_db,
+    monkeypatch,
+) -> None:
+    del vendor_usage_db
+    llm_task = create_llm_task(
+        db_session,
+        user_id=test_user.id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+    )
+    db_session.commit()
+    sandbox = _FakeSandbox()
+    calls: list[dict[str, object]] = []
+
+    def fake_create_agent_vm_session(**kwargs):
+        calls.append(kwargs)
+        return sandbox
+
+    monkeypatch.setattr(learning_deck_agent, "Agent", _FakeAgent)
+    monkeypatch.setattr(
+        learning_deck_agent,
+        "build_pydantic_model",
+        lambda _model_spec: (object(), {}),
+    )
+    monkeypatch.setattr(learning_deck_agent, "resolve_model_provider", lambda _model_spec: "openai")
+    monkeypatch.setattr(
+        learning_deck_agent,
+        "create_agent_vm_session",
+        fake_create_agent_vm_session,
+    )
+
+    result = learning_deck_agent.run_learning_deck_agent(
+        source_snapshot={
+            "source_kind": "content",
+            "source_identity": "content:88",
+            "source_content_id": 88,
+            "source_title": "Deck Source",
+            "body_text": "Source body for a generated learning deck.",
+        },
+        interests_prompt=None,
+        user_id=test_user.id,
+        run_id=456,
+        llm_task=llm_task,
+    )
+
+    assert result.sandbox_provider == "local"
+    assert calls == [
+        {
+            "user_id": test_user.id,
+            "llm_task_id": llm_task.id,
+            "vm_namespace": llm_task.vm_namespace,
+            "workspace_path": llm_task.workspace_path,
+            "shared_workspace_path": llm_task.shared_workspace_path,
+            "feature": "learning_deck",
+        }
+    ]
+
+
+def test_learning_deck_agent_log_event_accepts_deps_object() -> None:
+    events: list[dict[str, Any]] = []
+    deps = learning_deck_agent.LearningDeckAgentDeps(
+        sandbox=cast(Any, _FakeSandbox()),
+        user_id=1,
+        run_id=2,
+        agent_log_events=events,
+    )
+
+    learning_deck_agent._append_agent_log_event(
+        deps,
+        "read_file",
+        {"path": "output/index.html"},
+    )
+
+    assert events == [
+        {
+            "created_at": events[0]["created_at"],
+            "event_type": "read_file",
+            "payload": {"path": "output/index.html"},
+        }
+    ]

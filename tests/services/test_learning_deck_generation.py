@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.contracts import ContentStatus, ContentType
+from app.models.contracts import (
+    ContentStatus,
+    ContentType,
+    LlmTaskKind,
+    LlmTaskMode,
+    LlmTaskStatus,
+    LlmWorkflowState,
+)
 from app.models.db import LearningDeck, LearningDeckRun
 from app.services.gateways.object_storage_gateway import LocalObjectStorageGateway
 from app.services.learning_deck_agent import (
@@ -14,6 +21,7 @@ from app.services.learning_deck_generation import (
     generate_learning_deck,
 )
 from app.services.learning_decks import promote_learning_deck_run
+from app.services.llm_tasks import create_llm_task
 from tests.support.builders import create_content_status_entry_row
 
 
@@ -236,6 +244,49 @@ def test_promote_learning_deck_run_does_not_delete_new_artifact_keys(
     )
 
     assert deleted_keys == ["learning/decks/1/runs/old/index.html"]
+
+
+def test_generate_learning_deck_repairs_completed_llm_task_status(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    deck, run = _create_run(db_session, test_user, content_factory)
+    llm_task = create_llm_task(
+        db_session,
+        user_id=test_user.id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+        allowed_actions=["create_learning_deck"],
+    )
+    run.llm_task_id = llm_task.id
+    run.status = "completed"
+    run.artifact_storage_prefix = "learning/decks/1/runs/22"
+    run.deck_object_key = "learning/decks/1/runs/22/index.html"
+    run.source_notes_object_key = "learning/decks/1/runs/22/source-notes.md"
+    run.source_notes_html_object_key = "learning/decks/1/runs/22/source-notes.html"
+    run.artifact_object_keys = [
+        "learning/decks/1/runs/22/index.html",
+        "learning/decks/1/runs/22/source-notes.md",
+        "learning/decks/1/runs/22/source-notes.html",
+    ]
+    db_session.commit()
+
+    generate_learning_deck(
+        db_session,
+        learning_deck_run_id=_required_id(run.id),
+        agent_runner=lambda *_args: pytest.fail("completed run should not invoke agent"),
+    )
+
+    db_session.refresh(llm_task)
+    assert llm_task.status == LlmTaskStatus.COMPLETED.value
+    assert llm_task.workflow_state == LlmWorkflowState.COMPLETED.value
+    assert llm_task.output_json is not None
+    assert llm_task.artifact_manifest is not None
+    assert llm_task.output_json["learning_deck_run_id"] == run.id
+    assert llm_task.output_json["deck_object_key"] == run.deck_object_key
+    assert llm_task.artifact_manifest["artifact_storage_prefix"] == run.artifact_storage_prefix
 
 
 def test_generate_learning_deck_waits_for_unprocessed_source(

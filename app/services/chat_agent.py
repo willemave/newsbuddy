@@ -15,7 +15,12 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.core.settings import get_settings
-from app.models.contracts import MessageProcessingStatus
+from app.models.contracts import (
+    LlmTaskApprovalPolicy,
+    LlmTaskKind,
+    LlmTaskMode,
+    MessageProcessingStatus,
+)
 from app.models.db import ChatMessage, ChatSession, Content
 from app.models.domain.chat_render import ChatMessageRenderMetadata
 from app.services.chat_turn_runtime import (
@@ -47,6 +52,7 @@ from app.services.llm_models import (
     resolve_effective_api_key,
     resolve_model_provider,
 )
+from app.services.llm_task_turn_tracker import LlmTaskTurnSpec, LlmTaskTurnTracker
 from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
 from app.services.prompt_library import load_prompt, render_prompt
 from app.services.sandbox_runtime import (
@@ -63,6 +69,19 @@ SYSTEM_AND_ARTICLE_BUDGET_RATIO = 0.75
 TOKEN_CHARS_PER_TOKEN = 4
 
 SYSTEM_PROMPT_TEXT = load_prompt("chat/article#system")
+ARTICLE_CHAT_TURN_SPEC = LlmTaskTurnSpec(
+    task_kind=LlmTaskKind.ARTICLE_CHAT,
+    mode=LlmTaskMode.ARTICLE_CHAT,
+    workflow_key="chat.article.v1",
+    approval_policy={"default": LlmTaskApprovalPolicy.APPROVAL_REQUIRED.value},
+    allowed_actions=[],
+    tool_policy={
+        "execute_bash": False,
+        "web_search": True,
+        "personal_library": "read_only",
+    },
+    prompt_pack="chat.article",
+)
 
 
 def _estimate_tokens(text: str | None) -> int:
@@ -945,6 +964,20 @@ async def run_chat_turn(
     session_user_id = _require_session_user_id(session)
     model_spec = _resolve_session_model(session)
     provider = resolve_model_provider(model_spec)
+    chat_llm_task = LlmTaskTurnTracker.create(
+        db,
+        user_id=session_user_id,
+        spec=ARTICLE_CHAT_TURN_SPEC,
+        input_json={
+            "chat_session_id": session_row_id,
+            "content_id": session.content_id,
+            "source": source,
+            "queue_task_id": task_id,
+            "prompt_chars": len(user_prompt),
+            "model": model_spec,
+        },
+    )
+    chat_llm_task_id = chat_llm_task.task_id
     logger.info(
         "Chat turn started",
         extra=build_log_extra(
@@ -959,6 +992,7 @@ async def run_chat_turn(
             context_data={
                 "model": model_spec,
                 "provider": provider,
+                "llm_task_id": chat_llm_task_id,
                 "session_type": session.session_type,
                 "prompt_chars": len(user_prompt),
             },
@@ -1025,6 +1059,12 @@ async def run_chat_turn(
                 context_data={"model": model_spec},
             ),
         )
+        chat_llm_task.running(
+            db,
+            note="Running article chat agent",
+            model_provider=provider,
+            model_name=model_spec,
+        )
         agent_start = perf_counter()
         result = await run_in_threadpool(
             _run_agent_sync,
@@ -1061,6 +1101,19 @@ async def run_chat_turn(
             or getattr(tc, "tool_name", None)
             for tc in tool_calls
         ]
+        chat_llm_task.completed(
+            db,
+            note="Article chat turn completed",
+            output_json={
+                "chat_session_id": session_row_id,
+                "content_id": session.content_id,
+                "output_chars": len(output_text),
+                "new_message_count": len(new_messages),
+                "tool_names": [name for name in tool_names if name],
+            },
+            model_provider=provider,
+            model_name=model_spec,
+        )
         logger.info(
             "Chat turn completed",
             extra=build_log_extra(
@@ -1075,6 +1128,7 @@ async def run_chat_turn(
                 source=source,
                 context_data={
                     "model": model_spec,
+                    "llm_task_id": chat_llm_task_id,
                     "deps_ms": round(deps_ms, 2),
                     "history_ms": round(history_ms, 2),
                     "agent_ms": round(agent_ms, 2),
@@ -1091,6 +1145,13 @@ async def run_chat_turn(
             tool_calls=getattr(result, "tool_calls", []),
         )
     except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        chat_llm_task.failed(
+            db,
+            note="Article chat turn failed",
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+        )
         logger.exception(
             "Chat turn failed",
             extra=build_log_extra(
@@ -1103,10 +1164,12 @@ async def run_chat_turn(
                 user_id=session_user_id,
                 content_id=session.content_id,
                 source=source,
-                context_data={"failure_class": type(exc).__name__},
+                context_data={
+                    "failure_class": type(exc).__name__,
+                    "llm_task_id": chat_llm_task_id,
+                },
             ),
         )
-        db.rollback()
         raise
     finally:
         _close_sandbox_session(deps.sandbox_session)
@@ -1153,6 +1216,8 @@ async def process_message_async(
     SessionLocal = get_session_factory()
     db: Session | None = SessionLocal()
     deps: ChatDeps | None = None
+    chat_llm_task = LlmTaskTurnTracker(task_id=None)
+    chat_llm_task_id: int | None = None
     try:
         if db is None:
             raise RuntimeError("Database session was not initialized")
@@ -1163,6 +1228,21 @@ async def process_message_async(
         session_row_id = _require_session_id(session)
         session_user_id = _require_session_user_id(session)
         model_spec = _resolve_session_model(session)
+        provider = resolve_model_provider(model_spec)
+        chat_llm_task = LlmTaskTurnTracker.create(
+            db,
+            user_id=session_user_id,
+            spec=ARTICLE_CHAT_TURN_SPEC,
+            input_json={
+                "chat_session_id": session_row_id,
+                "content_id": session.content_id,
+                "source": source,
+                "queue_task_id": task_id,
+                "prompt_chars": len(user_prompt),
+                "model": model_spec,
+            },
+        )
+        chat_llm_task_id = chat_llm_task.task_id
 
         include_full_text = True
 
@@ -1187,6 +1267,7 @@ async def process_message_async(
                 context_data={
                     "context_chars": context_len,
                     "has_content": deps.content is not None,
+                    "llm_task_id": chat_llm_task_id,
                 },
             ),
         )
@@ -1219,6 +1300,12 @@ async def process_message_async(
             user_id=session_user_id,
             model_spec=model_spec,
         )
+        chat_llm_task.running(
+            db,
+            note="Running async article chat agent",
+            model_provider=provider,
+            model_name=model_spec,
+        )
         db.close()
         db = None
 
@@ -1235,7 +1322,11 @@ async def process_message_async(
                 user_id=session_user_id,
                 content_id=session.content_id,
                 source=source,
-                context_data={"model": model_spec, "history_count": len(history)},
+                context_data={
+                    "model": model_spec,
+                    "history_count": len(history),
+                    "llm_task_id": chat_llm_task_id,
+                },
             ),
         )
         agent_start = perf_counter()
@@ -1281,6 +1372,7 @@ async def process_message_async(
                     "tool_names": tool_names,
                     "tool_count": len([name for name in tool_names if name]),
                     "output_chars": output_len,
+                    "llm_task_id": chat_llm_task_id,
                 },
             ),
         )
@@ -1304,6 +1396,20 @@ async def process_message_async(
             session_to_update.updated_at = datetime.now(UTC)
             _sync_parent_session_activity(persist_db, session_to_update)
             persist_db.commit()
+            chat_llm_task.completed(
+                persist_db,
+                note="Async article chat turn completed",
+                output_json={
+                    "chat_session_id": session_id,
+                    "message_id": message_id,
+                    "content_id": session.content_id,
+                    "output_chars": output_len,
+                    "new_message_count": len(new_messages),
+                    "tool_names": [name for name in tool_names if name],
+                },
+                model_provider=provider,
+                model_name=model_spec,
+            )
         save_ms = (perf_counter() - save_start) * 1000
 
         total_ms = (perf_counter() - total_start) * 1000
@@ -1326,6 +1432,7 @@ async def process_message_async(
                     "history_ms": round(history_ms, 2),
                     "agent_ms": round(agent_ms, 2),
                     "save_ms": round(save_ms, 2),
+                    "llm_task_id": chat_llm_task_id,
                 },
             ),
         )
@@ -1343,15 +1450,30 @@ async def process_message_async(
                 session_id=session_id,
                 message_id=message_id,
                 source=source,
-                context_data={"failure_class": type(exc).__name__},
+                context_data={
+                    "failure_class": type(exc).__name__,
+                    "llm_task_id": chat_llm_task_id,
+                },
             ),
         )
         try:
             if db is not None:
                 update_message_failed(db, message_id, str(exc))
+                chat_llm_task.failed(
+                    db,
+                    note="Async article chat turn failed",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
             else:
                 with SessionLocal() as fail_db:
                     update_message_failed(fail_db, message_id, str(exc))
+                    chat_llm_task.failed(
+                        fail_db,
+                        note="Async article chat turn failed",
+                        error_type=type(exc).__name__,
+                        error_message=str(exc),
+                    )
         except Exception as update_exc:
             logger.error("[AsyncChat:UPDATE_FAILED] mid=%s error=%s", message_id, update_exc)
     finally:

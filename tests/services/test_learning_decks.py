@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.contracts import ContentType, TaskType
-from app.models.db import LearningDeck, LearningDeckRun, ProcessingTask
+from app.models.contracts import ContentType, LlmTaskKind, LlmTaskMode, LlmTaskStatus, TaskType
+from app.models.db import LearningDeck, LearningDeckRun, LlmTask, ProcessingTask
 from app.services.learning_deck_viewer import with_learning_deck_navigation_controls
 from app.services.learning_decks import (
     build_private_learning_deck_token,
@@ -82,6 +82,13 @@ def test_create_learning_deck_from_content_enqueues_generation(
     run = db_session.query(LearningDeckRun).filter_by(deck_id=deck.id).one()
     assert run.status == "queued"
     assert run.interests_prompt == "Focus on architecture"
+    assert run.llm_task_id is not None
+    llm_task = db_session.query(LlmTask).filter_by(id=run.llm_task_id).one()
+    assert llm_task.task_kind == LlmTaskKind.LEARNING_DECK.value
+    assert llm_task.mode == LlmTaskMode.LEARNING_DECK_PRESENTATION.value
+    assert llm_task.status == LlmTaskStatus.QUEUED.value
+    assert llm_task.workflow_key == "learning_deck.presentation.v1"
+    assert llm_task.input_json["learning_deck_run_id"] == run.id
     task = db_session.query(ProcessingTask).one()
     assert task.task_type == TaskType.GENERATE_LEARNING_DECK.value
     assert task.queue_name == "learning"

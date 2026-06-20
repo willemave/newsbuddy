@@ -8,19 +8,27 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.services.exa_client import ExaSearchResult, exa_search
+from app.models.db import LlmTask
+from app.services.agent_toolset import (
+    AgentToolPolicy,
+    AgentToolsetConfig,
+    register_agent_vm_tools,
+)
+from app.services.agent_vm_runtime import AgentVmSession, agent_vm_session_log_payload
+from app.services.agent_vm_sessions import create_agent_vm_session
+from app.services.agent_vm_tool_scripts import install_agent_vm_task_tools
 from app.services.learning_deck_sandbox import (
-    LearningDeckSandboxSession,
     create_learning_deck_sandbox_session,
     guess_asset_content_type,
 )
 from app.services.learning_deck_theme import DECK_DESIGN_GUIDE
 from app.services.llm_models import build_pydantic_model, resolve_model_provider
+from app.services.llm_tasks import require_llm_task_id
 from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_usage import record_model_usage
 
@@ -69,13 +77,13 @@ class LearningDeckAgentExecutionError(RuntimeError):
 class LearningDeckAgentDeps:
     """Dependencies exposed to the pydantic-ai tool layer."""
 
-    sandbox: LearningDeckSandboxSession
+    sandbox: AgentVmSession
     user_id: int
     run_id: int
     agent_log_events: list[dict[str, Any]]
 
 
-LearningDeckSandboxFactory = Callable[[int, int], LearningDeckSandboxSession]
+LearningDeckSandboxFactory = Callable[[int, int], AgentVmSession]
 
 
 LEARNING_DECK_SYSTEM_PROMPT = load_prompt("learning_decks/agent#system")
@@ -90,19 +98,25 @@ def run_learning_deck_agent(
     interests_prompt: str | None,
     user_id: int,
     run_id: int,
+    llm_task: LlmTask | None = None,
     sandbox_factory: LearningDeckSandboxFactory | None = None,
 ) -> LearningDeckAgentResult:
     """Run the coarse agent loop and read the artifact files it produced."""
     settings = get_settings()
-    sandbox_factory = sandbox_factory or _create_configured_sandbox
-    sandbox = sandbox_factory(user_id, run_id)
+    sandbox = (
+        sandbox_factory(user_id, run_id)
+        if sandbox_factory is not None
+        else _create_configured_sandbox(user_id, run_id, llm_task=llm_task)
+    )
     agent_log_events: list[dict[str, Any]] = []
     try:
         _append_agent_log_event(
             agent_log_events,
             "sandbox_started",
-            {"provider": sandbox.provider, "sandbox_id": sandbox.sandbox_id},
+            agent_vm_session_log_payload(sandbox),
         )
+        if llm_task is not None:
+            install_agent_vm_task_tools(sandbox, task=llm_task)
         _prepare_sandbox_inputs(
             sandbox,
             source_snapshot=source_snapshot,
@@ -117,7 +131,7 @@ def run_learning_deck_agent(
             output_type=str,
             system_prompt=LEARNING_DECK_SYSTEM_PROMPT,
         )
-        _register_tools(agent)
+        _register_tools(agent, llm_task=llm_task)
 
         try:
             result = agent.run_sync(
@@ -202,120 +216,51 @@ def run_learning_deck_agent(
         sandbox.close()
 
 
-def _register_tools(agent: Agent[LearningDeckAgentDeps, str]) -> None:
-    @agent.tool
-    def bash(
-        ctx: RunContext[LearningDeckAgentDeps],
-        command: str,
-        timeout_seconds: int | None = None,
-    ) -> str:
-        """Run a bash command inside the sandbox."""
-        result = ctx.deps.sandbox.run_command(command, timeout_seconds=timeout_seconds)
-        _append_agent_log_event(
-            ctx.deps.agent_log_events,
-            "bash",
-            {
-                "command": command,
-                "timeout_seconds": timeout_seconds,
-                "exit_code": result.exit_code,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            },
-        )
-        return f"exit_code={result.exit_code}\nstdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
-
-    @agent.tool
-    def write_file(ctx: RunContext[LearningDeckAgentDeps], path: str, text: str) -> str:
-        """Write a UTF-8 file below the sandbox workdir."""
-        ctx.deps.sandbox.write_file(path, text)
-        _append_agent_log_event(
-            ctx.deps.agent_log_events,
-            "write_file",
-            {"path": path, "chars": len(text)},
-        )
-        return f"Wrote {path}"
-
-    @agent.tool
-    def read_file(ctx: RunContext[LearningDeckAgentDeps], path: str) -> str:
-        """Read a UTF-8 file below the sandbox workdir."""
-        try:
-            text = ctx.deps.sandbox.read_file(path, max_bytes=100_000)
-        except Exception as exc:
-            message = f"File not found or unreadable: {path}"
-            _append_agent_log_event(
-                ctx.deps.agent_log_events,
-                "read_file_failed",
-                {"path": path, "error": str(exc), "failure_class": type(exc).__name__},
-            )
-            return message
-        _append_agent_log_event(
-            ctx.deps.agent_log_events,
-            "read_file",
-            {"path": path, "chars": len(text)},
-        )
-        return text
-
-    @agent.tool
-    def list_files(ctx: RunContext[LearningDeckAgentDeps], path: str = ".") -> str:
-        """List files below a sandbox workdir path."""
-        files = ctx.deps.sandbox.list_files(path)
-        _append_agent_log_event(
-            ctx.deps.agent_log_events,
-            "list_files",
-            {"path": path, "files": files},
-        )
-        return "\n".join(files) if files else "No files found."
-
-    @agent.tool
-    def web_search(
-        ctx: RunContext[LearningDeckAgentDeps],
-        query: str,
-        num_results: int = 5,
-    ) -> str:
-        """Search the web with Newsly's configured Exa client."""
-        bounded_results = min(max(int(num_results), 1), 8)
-        results = exa_search(
-            query,
-            num_results=bounded_results,
-            max_characters=2500,
-            telemetry={
-                "feature": "learning_deck_generation",
-                "operation": "learning_deck.web_search",
-                "source": "queue",
-                "user_id": ctx.deps.user_id,
-                "metadata": {"run_id": ctx.deps.run_id},
-            },
-        )
-        _append_agent_log_event(
-            ctx.deps.agent_log_events,
-            "web_search",
-            {
-                "query": query,
-                "num_results": bounded_results,
-                "results": [
-                    {
-                        "title": result.title,
-                        "url": result.url,
-                        "published_date": result.published_date,
-                    }
-                    for result in results
-                ],
-            },
-        )
-        return _format_search_results(results)
+def _register_tools(agent: Agent[LearningDeckAgentDeps, str], *, llm_task: LlmTask | None) -> None:
+    register_agent_vm_tools(
+        agent,
+        session_getter=lambda deps: deps.sandbox,
+        log_event=_append_agent_log_event,
+        user_id_getter=lambda deps: deps.user_id,
+        metadata_getter=lambda deps: {"run_id": deps.run_id},
+        config=AgentToolsetConfig(
+            feature="learning_deck_generation",
+            operation_prefix="learning_deck",
+            source="queue",
+            tool_policy=AgentToolPolicy.from_mapping(
+                llm_task.tool_policy if llm_task is not None else None,
+            ),
+            register_direct_web_search_tool=llm_task is None,
+        ),
+        include_legacy_bash_alias=True,
+    )
 
 
-def _create_configured_sandbox(user_id: int, run_id: int) -> LearningDeckSandboxSession:
+def _create_configured_sandbox(
+    user_id: int,
+    run_id: int,
+    *,
+    llm_task: LlmTask | None = None,
+) -> AgentVmSession:
+    if llm_task is not None and llm_task.workspace_path and llm_task.shared_workspace_path:
+        return create_agent_vm_session(
+            user_id=user_id,
+            llm_task_id=require_llm_task_id(llm_task),
+            vm_namespace=llm_task.vm_namespace or f"user:{user_id}",
+            workspace_path=llm_task.workspace_path,
+            shared_workspace_path=llm_task.shared_workspace_path,
+            feature="learning_deck",
+        )
     return create_learning_deck_sandbox_session(user_id=user_id, run_id=run_id)
 
 
 def _prepare_sandbox_inputs(
-    sandbox: LearningDeckSandboxSession,
+    sandbox: AgentVmSession,
     *,
     source_snapshot: dict[str, Any],
     interests_prompt: str | None,
 ) -> None:
-    sandbox.run_command("mkdir -p input output/assets")
+    sandbox.execute_bash("mkdir -p input output/assets")
     body_text = source_snapshot.get("body_text")
     snapshot_for_json = {key: value for key, value in source_snapshot.items() if key != "body_text"}
     if isinstance(body_text, str) and body_text.strip():
@@ -384,7 +329,7 @@ def _learning_deck_usage_metadata(
     return metadata
 
 
-def _collect_assets(sandbox: LearningDeckSandboxSession) -> dict[str, tuple[bytes, str]]:
+def _collect_assets(sandbox: AgentVmSession) -> dict[str, tuple[bytes, str]]:
     settings = get_settings()
     files = sandbox.list_files(OUTPUT_ASSET_DIR)
     assets: dict[str, tuple[bytes, str]] = {}
@@ -400,7 +345,7 @@ def _collect_assets(sandbox: LearningDeckSandboxSession) -> dict[str, tuple[byte
     return assets
 
 
-def _read_source_metadata_updates(sandbox: LearningDeckSandboxSession) -> dict[str, Any]:
+def _read_source_metadata_updates(sandbox: AgentVmSession) -> dict[str, Any]:
     try:
         raw_json = sandbox.read_file(OUTPUT_SOURCE_METADATA, max_bytes=100_000)
     except Exception:
@@ -412,26 +357,16 @@ def _read_source_metadata_updates(sandbox: LearningDeckSandboxSession) -> dict[s
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _format_search_results(results: list[ExaSearchResult]) -> str:
-    if not results:
-        return "No web search results available."
-    lines: list[str] = []
-    for index, result in enumerate(results, start=1):
-        lines.append(f"[{index}] {result.title}")
-        lines.append(f"URL: {result.url}")
-        if result.published_date:
-            lines.append(f"Published: {result.published_date}")
-        if result.snippet:
-            lines.append(f"Snippet: {result.snippet}")
-        lines.append("")
-    return "\n".join(lines).strip()
-
-
 def _append_agent_log_event(
-    events: list[dict[str, Any]],
+    deps_or_events: LearningDeckAgentDeps | list[dict[str, Any]],
     event_type: str,
     payload: dict[str, Any],
 ) -> None:
+    events = (
+        deps_or_events.agent_log_events
+        if isinstance(deps_or_events, LearningDeckAgentDeps)
+        else deps_or_events
+    )
     events.append(
         {
             "created_at": datetime.now(UTC).isoformat(),

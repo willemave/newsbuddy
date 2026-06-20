@@ -7,11 +7,12 @@ import shlex
 import subprocess
 import tempfile
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from app.core.settings import get_settings
+from app.services.agent_vm_runtime import AgentCommandResult, AgentVmLease, AgentVmSession
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 
@@ -20,15 +21,11 @@ class LearningDeckSandboxError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class LearningDeckCommandResult:
+class LearningDeckCommandResult(AgentCommandResult):
     """Normalized command result from the sandbox."""
 
-    stdout: str
-    stderr: str
-    exit_code: int
 
-
-class LearningDeckSandboxSession(ABC):
+class LearningDeckSandboxSession(AgentVmSession, ABC):
     """Small provider-independent sandbox interface."""
 
     provider: str
@@ -43,6 +40,15 @@ class LearningDeckSandboxSession(ABC):
     ) -> LearningDeckCommandResult:
         """Run one shell command in the sandbox."""
 
+    def execute_bash(
+        self,
+        command: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> LearningDeckCommandResult:
+        """Run one shell command in the sandbox workdir."""
+        return self.run_command(command, timeout_seconds=timeout_seconds)
+
     @abstractmethod
     def write_file(self, path: str, text: str) -> None:
         """Write UTF-8 text inside the sandbox workdir."""
@@ -56,7 +62,7 @@ class LearningDeckSandboxSession(ABC):
         """Read raw bytes from the sandbox workdir."""
 
     @abstractmethod
-    def list_files(self, path: str) -> list[str]:
+    def list_files(self, path: str = ".") -> list[str]:
         """List files below a sandbox workdir path."""
 
     @abstractmethod
@@ -69,8 +75,18 @@ class LocalLearningDeckSandboxSession(LearningDeckSandboxSession):
     """Local sandbox used by tests and explicit dependency injection."""
 
     root_dir: Path
+    lease: AgentVmLease = field(init=False)
     provider: str = "local"
     sandbox_id: str | None = None
+
+    def __post_init__(self) -> None:
+        self.lease = AgentVmLease(
+            provider=self.provider,
+            vm_namespace=f"learning_deck:{self.root_dir.name}",
+            sandbox_id=self.sandbox_id,
+            reuse_scope="per_run",
+            reused=False,
+        )
 
     @classmethod
     def create(cls) -> LocalLearningDeckSandboxSession:
@@ -112,7 +128,7 @@ class LocalLearningDeckSandboxSession(LearningDeckSandboxSession):
             raise LearningDeckSandboxError(f"Sandbox file exceeds {max_bytes} bytes: {path}")
         return data
 
-    def list_files(self, path: str) -> list[str]:
+    def list_files(self, path: str = ".") -> list[str]:
         root = self._resolve_path(path)
         if not root.exists():
             return []
@@ -167,6 +183,13 @@ class E2BLearningDeckSandboxSession(LearningDeckSandboxSession):
         self._workdir = PurePosixPath(settings.learning_sandbox_workdir)
         self._max_output_chars = settings.learning_sandbox_max_output_chars
         self.sandbox_id = _sandbox_identifier(self._sandbox)
+        self.lease = AgentVmLease(
+            provider=self.provider,
+            vm_namespace=f"learning_deck:{user_id}:{run_id}",
+            sandbox_id=self.sandbox_id,
+            reuse_scope="per_run",
+            reused=False,
+        )
         self._run_raw_command(f"mkdir -p {shlex.quote(self._workdir.as_posix())}")
 
         record_vendor_usage_out_of_band(
@@ -217,7 +240,7 @@ class E2BLearningDeckSandboxSession(LearningDeckSandboxSession):
             raise LearningDeckSandboxError(f"Sandbox file exceeds {max_bytes} bytes: {path}")
         return data
 
-    def list_files(self, path: str) -> list[str]:
+    def list_files(self, path: str = ".") -> list[str]:
         target = self._resolve_workspace_path(path)
         relative_target = _relative_to_workdir(target, self._workdir)
         command = f"find {shlex.quote(relative_target)} -type f | sort"

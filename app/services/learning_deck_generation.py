@@ -8,8 +8,13 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.contracts import LearningDeckSourceKind
-from app.models.db import LearningDeck, LearningDeckRun
+from app.models.contracts import (
+    LearningDeckRunStatus,
+    LearningDeckSourceKind,
+    LlmTaskStatus,
+    LlmWorkflowState,
+)
+from app.models.db import LearningDeck, LearningDeckRun, LlmTask
 from app.services.learning_deck_agent import (
     LearningDeckAgentExecutionError,
     LearningDeckAgentResult,
@@ -37,6 +42,7 @@ from app.services.learning_decks import (
     mark_learning_deck_run_failed,
     promote_learning_deck_run,
 )
+from app.services.llm_tasks import set_llm_task_status
 
 logger = get_logger(__name__)
 
@@ -77,7 +83,8 @@ def generate_learning_deck(
     deck = db.query(LearningDeck).filter(LearningDeck.id == deck_id).first()
     if deck is None or deck.deleted_at is not None:
         raise LearningDeckError("Learning Deck not found", status_code=404)
-    if run.status == "completed":
+    if run.status == LearningDeckRunStatus.COMPLETED.value:
+        _repair_completed_run_llm_task_status(db, run)
         return run
 
     _set_run_status(
@@ -97,19 +104,35 @@ def generate_learning_deck(
     _set_run_status(db, run, status="generating", note="Running Learning Deck agent")
 
     try:
-        runner = agent_runner or _run_default_agent
-        agent_result = runner(
-            source_snapshot,
-            run.interests_prompt,
-            user_id,
-            run_id,
-        )
+        if agent_runner is not None:
+            agent_result = agent_runner(
+                source_snapshot,
+                run.interests_prompt,
+                user_id,
+                run_id,
+            )
+        else:
+            agent_result = _run_default_agent(
+                source_snapshot,
+                run.interests_prompt,
+                user_id,
+                run_id,
+                llm_task=_get_llm_task_for_run(db, run),
+            )
         _store_agent_log_events(db, run, agent_result.agent_log_events)
 
         run.model_provider = agent_result.model_provider
         run.model_name = agent_result.model_name
         run.sandbox_provider = agent_result.sandbox_provider
         run.sandbox_id = agent_result.sandbox_id
+        _set_llm_task_execution_metadata(
+            db,
+            run,
+            model_provider=agent_result.model_provider,
+            model_name=agent_result.model_name,
+            sandbox_provider=agent_result.sandbox_provider,
+            sandbox_id=agent_result.sandbox_id,
+        )
         _merge_source_metadata(run, deck, agent_result.source_metadata_updates)
         _set_run_status(db, run, status="validating", note="Validating generated artifact")
 
@@ -197,6 +220,16 @@ def _store_agent_log_events(
         )
         return
     run.agent_log_object_key = log_key
+    task = _get_llm_task_for_run(db, run)
+    if task is not None:
+        set_llm_task_status(
+            db,
+            task,
+            status=LlmTaskStatus.RUNNING,
+            workflow_state=LlmWorkflowState.RUNNING,
+            note="Stored Learning Deck agent log",
+            agent_log_object_key=log_key,
+        )
     db.commit()
 
 
@@ -205,12 +238,15 @@ def _run_default_agent(
     interests_prompt: str | None,
     user_id: int,
     run_id: int,
+    *,
+    llm_task: LlmTask | None = None,
 ) -> LearningDeckAgentResult:
     return run_learning_deck_agent(
         source_snapshot=source_snapshot,
         interests_prompt=interests_prompt,
         user_id=user_id,
         run_id=run_id,
+        llm_task=llm_task,
     )
 
 
@@ -246,7 +282,110 @@ def _set_run_status(
     if deck is not None:
         deck.latest_run_id = run_id
         deck.updated_at = utcnow()
+    _set_llm_task_for_run_status(db, run, status=status, note=note)
     db.commit()
+
+
+def _set_llm_task_for_run_status(
+    db: Session,
+    run: LearningDeckRun,
+    *,
+    status: str,
+    note: str | None,
+) -> None:
+    """Mirror Learning Deck intermediate status onto its generic LLM task."""
+    mapped = _llm_status_for_learning_deck_status(status)
+    if mapped is None:
+        return
+    task = _get_llm_task_for_run(db, run)
+    if task is None:
+        return
+    set_llm_task_status(
+        db,
+        task,
+        status=mapped[0],
+        workflow_state=mapped[1],
+        note=note,
+    )
+
+
+def _set_llm_task_execution_metadata(
+    db: Session,
+    run: LearningDeckRun,
+    *,
+    model_provider: str,
+    model_name: str,
+    sandbox_provider: str,
+    sandbox_id: str | None,
+) -> None:
+    task = _get_llm_task_for_run(db, run)
+    if task is None:
+        return
+    set_llm_task_status(
+        db,
+        task,
+        status=LlmTaskStatus.RUNNING,
+        workflow_state=LlmWorkflowState.RUNNING,
+        note="Learning Deck agent completed",
+        model_provider=model_provider,
+        model_name=model_name,
+        sandbox_provider=sandbox_provider,
+        sandbox_id=sandbox_id,
+    )
+
+
+def _get_llm_task_for_run(db: Session, run: LearningDeckRun) -> LlmTask | None:
+    if not run.llm_task_id:
+        return None
+    return db.query(LlmTask).filter(LlmTask.id == run.llm_task_id).first()
+
+
+def _repair_completed_run_llm_task_status(db: Session, run: LearningDeckRun) -> None:
+    """Keep the generic LLM task ledger consistent for idempotent completed runs."""
+    task = _get_llm_task_for_run(db, run)
+    if task is None:
+        return
+    run_id = require_int_value(run.id, "Learning Deck run id")
+    deck_id = require_int_value(run.deck_id, "Learning Deck id")
+    artifact_object_keys = [key for key in (run.artifact_object_keys or []) if isinstance(key, str)]
+    output_json = {
+        "learning_deck_run_id": run_id,
+        "deck_id": deck_id,
+        "deck_object_key": run.deck_object_key,
+        "source_notes_object_key": run.source_notes_object_key,
+        "source_notes_html_object_key": run.source_notes_html_object_key,
+        "artifact_object_keys": artifact_object_keys,
+    }
+    if task.status == LlmTaskStatus.COMPLETED.value and task.output_json == output_json:
+        return
+    set_llm_task_status(
+        db,
+        task,
+        status=LlmTaskStatus.COMPLETED,
+        workflow_state=LlmWorkflowState.COMPLETED,
+        note="Learning Deck is ready",
+        output_json=output_json,
+        artifact_manifest={
+            "artifact_storage_prefix": run.artifact_storage_prefix,
+            "deck_object_key": run.deck_object_key,
+            "source_notes_object_key": run.source_notes_object_key,
+            "source_notes_html_object_key": run.source_notes_html_object_key,
+            "artifact_object_keys": artifact_object_keys,
+        },
+    )
+    db.commit()
+
+
+def _llm_status_for_learning_deck_status(
+    status: str,
+) -> tuple[LlmTaskStatus, LlmWorkflowState] | None:
+    if status == "preparing":
+        return LlmTaskStatus.PREPARING, LlmWorkflowState.PREPARING
+    if status in {"generating", "validating"}:
+        return LlmTaskStatus.RUNNING, LlmWorkflowState.RUNNING
+    if status == "publishing":
+        return LlmTaskStatus.APPLYING, LlmWorkflowState.APPLYING
+    return None
 
 
 def _persistable_source_snapshot(source_snapshot: dict[str, Any]) -> dict[str, Any]:
