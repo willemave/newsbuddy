@@ -49,7 +49,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textView.dataDetectorTypes = [.link]
-        textView.tintColor = UIColor.link.resolvedColor(with: textView.traitCollection)
+        textView.tintColor = UIColor.appAccent.resolvedColor(with: textView.traitCollection)
         textView.linkTextAttributes = [.underlineStyle: NSUnderlineStyle.single.rawValue]
         textView.onDigDeeper = onDigDeeper
         return textView
@@ -264,6 +264,7 @@ struct MarkdownNSRenderer {
                 let topSpacing: CGFloat = [16, 14, 12, 10, 10, 10][min(level - 1, 5)]
                 let bottomSpacing: CGFloat = [8, 6, 6, 4, 4, 4][min(level - 1, 5)]
                 if result.length > 0 { appendSpacing(topSpacing, to: result) }
+                if level <= 3 { appendHeadingAccentRule(to: result) }
                 let rendered = renderInline(text)
                 applyHeadingStyle(to: rendered, level: level)
                 result.append(rendered)
@@ -574,15 +575,14 @@ struct MarkdownNSRenderer {
         let range = NSRange(location: 0, length: attrStr.length)
         let scales: [CGFloat] = [1.36, 1.22, 1.12, 1.02, 0.94, 0.88]
         let scale = scales[min(level - 1, 5)]
-        let weight: UIFont.Weight = .bold
-        let headingFont = UIFont.appSans(size: baseFont.pointSize * scale, weight: weight)
-        let descriptor = headingFont.fontDescriptor.addingAttributes([
-            .traits: [UIFontDescriptor.TraitKey.weight: weight.rawValue]
-        ])
-        let styledHeadingFont = UIFont(descriptor: descriptor, size: headingFont.pointSize)
+        // Option A: section headings are serif (matching the reader title), with a
+        // terracotta accent rule rendered directly above them (see appendHeadingAccentRule).
+        let weight: UIFont.Weight = .semibold
+        let styledHeadingFont = UIFont.appSerif(size: baseFont.pointSize * scale, weight: weight)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineHeightMultiple = 1.08
-        paragraph.paragraphSpacingBefore = level <= 2 ? 8 : 4
+        // Levels 1–3 carry an accent rule above, so keep the gap to the rule tight.
+        paragraph.paragraphSpacingBefore = level <= 3 ? 0 : 4
         paragraph.paragraphSpacing = level <= 2 ? 7 : 5
 
         // Rebuild the heading font per run so inline emphasis (bold/italic) survives,
@@ -605,6 +605,42 @@ struct MarkdownNSRenderer {
         }
         attrStr.addAttribute(.paragraphStyle, value: paragraph, range: range)
         attrStr.addAttribute(.foregroundColor, value: textColor, range: range)
+    }
+
+    /// Option A editorial accent: a short terracotta rule rendered on its own line
+    /// directly above a section heading, anchoring it against the body copy.
+    private func appendHeadingAccentRule(to result: NSMutableAttributedString) {
+        if result.length > 0, !result.string.hasSuffix("\n") {
+            result.append(NSAttributedString(string: "\n"))
+        }
+
+        let width: CGFloat = 26
+        let height: CGFloat = 2.5
+        let accent = UIColor.appAccent.resolvedColor(with: traitCollection)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height)).image { _ in
+            accent.setFill()
+            UIBezierPath(
+                roundedRect: CGRect(x: 0, y: 0, width: width, height: height),
+                cornerRadius: height / 2
+            ).fill()
+        }
+
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(x: 0, y: 0, width: width, height: height)
+
+        let ruleParagraph = NSMutableParagraphStyle()
+        ruleParagraph.lineSpacing = 0
+        ruleParagraph.paragraphSpacing = 6
+
+        let rule = NSMutableAttributedString(attachment: attachment)
+        rule.append(NSAttributedString(string: "\n"))
+        rule.addAttribute(
+            .paragraphStyle,
+            value: ruleParagraph,
+            range: NSRange(location: 0, length: rule.length)
+        )
+        result.append(rule)
     }
 
     private func applyBlockquoteStyle(to attrStr: NSMutableAttributedString) {

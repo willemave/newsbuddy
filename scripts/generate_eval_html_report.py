@@ -40,6 +40,8 @@ from app.services.admin_eval import (
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt
 from app.services.llm_summarization import resolve_summarization_output_type
+from app.services.longform_artifact_prompts import build_longform_artifact_prompt
+from app.services.longform_artifact_routing import resolve_artifact_source_hint
 from app.services.news_article_bodies import get_news_item_article_body_resolver
 from app.services.news_processing import _build_processing_prompt
 from app.services.prompt_library import load_prompt
@@ -50,6 +52,7 @@ logger = get_logger(__name__)
 EvalContentType = Literal["article", "podcast", "news"]
 LongformTemplate = Literal[
     "source_aware_editorial_v2",
+    "longform_artifact_v1",
     "long_bullets_v1",
     "interleaved_v2",
     "structured_v1",
@@ -181,6 +184,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         choices=[
             "source_aware_editorial_v2",
+            "longform_artifact_v1",
             "long_bullets_v1",
             "interleaved_v2",
             "structured_v1",
@@ -645,6 +649,8 @@ def resolve_builtin_prompt_settings(
         )
         return cast(PromptType, prompt_type), max_bullet_points, max_quotes
 
+    if longform_template == "longform_artifact_v1":
+        return "longform_artifact", 8, 5
     if longform_template == "interleaved_v2":
         return "interleaved", 8, 8
     if longform_template == "structured_v1":
@@ -733,6 +739,25 @@ def resolve_prompt_for_source(
         longform_template,
         source_url=source_url,
     )
+    if prompt_type == "longform_artifact":
+        source_hint = resolve_artifact_source_hint(
+            content_type,
+            url=source_url,
+            platform=None,
+            metadata={"source_content_type": content_type},
+        )
+        system_prompt, user_template = build_longform_artifact_prompt(
+            source_hint=source_hint,
+            content_payload="{content}",
+            title=None,
+            url=source_url,
+            source_name=None,
+            platform=None,
+            publication_date=None,
+            metadata={"source_content_type": content_type},
+        )
+        return system_prompt, user_template, prompt_type
+
     system_prompt, user_template = generate_summary_prompt(
         prompt_type,
         max_bullet_points=max_bullet_points,
@@ -1233,6 +1258,8 @@ def build_source_input_quality_counts(results: list[dict[str, Any]]) -> dict[str
     """Count source quality classes for the report summary."""
     counts = {status: 0 for status in SOURCE_QUALITY_ORDER}
     for item in results:
+        if str(item.get("content_type") or "news") != "news":
+            continue
         quality = source_input_quality_for_item(item)
         status = str(quality.get("status") or "missing_body")
         counts[status] = counts.get(status, 0) + 1
@@ -1245,6 +1272,8 @@ def build_source_input_quality_domain_counts(
     """Summarize weak source-body quality by domain for the report header."""
     domain_counts: dict[str, dict[str, int]] = {}
     for item in results:
+        if str(item.get("content_type") or "news") != "news":
+            continue
         quality = source_input_quality_for_item(item)
         status = str(quality.get("status") or "missing_body")
         if status == "full_body":
@@ -1563,6 +1592,29 @@ def build_model_run_settings(model_alias: str, timeout_seconds: int) -> dict[str
     return model_settings
 
 
+def build_longform_artifact_message_for_source(
+    source: Any, content_payload: str
+) -> tuple[str, str]:
+    """Build the same long-form artifact prompt shape used by production summarization."""
+    metadata = {"source_content_type": source.content_type}
+    source_hint = resolve_artifact_source_hint(
+        source.content_type,
+        url=source.url,
+        platform=None,
+        metadata=metadata,
+    )
+    return build_longform_artifact_prompt(
+        source_hint=source_hint,
+        content_payload=content_payload,
+        title=source.source_title,
+        url=source.url,
+        source_name=None,
+        platform=None,
+        publication_date=None,
+        metadata=metadata,
+    )
+
+
 def run_single_model_call(
     *,
     source: Any,
@@ -1615,12 +1667,23 @@ def run_single_model_call(
         custom_news_output_type=custom_news_output_type,
         news_prompt_variant=news_prompt_variant,
     )
-    if "{content}" not in user_template:
-        raise ValueError("User template must include a {content} placeholder")
 
     clipped_input = clip_eval_input(source.input_text, max_input_chars)
-    title_prefix = f"Title: {source.source_title}\n\n" if source.source_title else ""
-    user_message = user_template.format(content=f"{title_prefix}{clipped_input}")
+    is_builtin_longform_artifact = (
+        prompt_type == "longform_artifact"
+        and source.content_type != "news"
+        and not (custom_longform_system_prompt and custom_longform_user_template)
+    )
+    if is_builtin_longform_artifact:
+        system_prompt, user_message = build_longform_artifact_message_for_source(
+            source,
+            clipped_input,
+        )
+    else:
+        if "{content}" not in user_template:
+            raise ValueError("User template must include a {content} placeholder")
+        title_prefix = f"Title: {source.source_title}\n\n" if source.source_title else ""
+        user_message = user_template.format(content=f"{title_prefix}{clipped_input}")
 
     prompt_variant_label = None
     prompt_variant_description = None
@@ -1873,7 +1936,22 @@ def _render_source_details(source_details: Any) -> str:
         label = key.replace("_", " ").title()
         if isinstance(value, list):
             items = _collect_text_items(value, keys=("text", "point"))
-            rendered = _render_string_list(items, class_name="source-detail-list")
+            if items:
+                rendered = _render_string_list(items, class_name="source-detail-list")
+            else:
+                nested_items: list[str] = []
+                for entry in value:
+                    if isinstance(entry, dict):
+                        nested = _render_source_details(entry)
+                        if nested:
+                            nested_items.append(f"<li>{nested}</li>")
+                    elif entry is not None:
+                        nested_items.append(f"<li>{html_escape(str(entry))}</li>")
+                rendered = (
+                    f'<ul class="source-detail-list">{"".join(nested_items)}</ul>'
+                    if nested_items
+                    else ""
+                )
         elif isinstance(value, dict):
             rendered = _render_source_details(value)
         else:
@@ -1891,6 +1969,157 @@ def _render_source_details(source_details: Any) -> str:
     if not rows:
         return ""
     return f'<div class="source-details">{"".join(rows)}</div>'
+
+
+def _render_artifact_key_points(points: Any) -> str:
+    """Render headed long-form artifact key points."""
+    if not isinstance(points, list) or not points:
+        return ""
+
+    rows: list[str] = []
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        heading = _get_text(point, keys=("heading", "title"))
+        content = _get_text(point, keys=("content", "text", "point"))
+        if not heading and not content:
+            continue
+        rows.append(
+            f"""
+            <li class="bullet-point-item">
+              <div class="point-text">{html_escape(heading or "Point")}</div>
+              <div class="point-detail">{_render_paragraphs(content) if content else ""}</div>
+            </li>
+            """
+        )
+
+    if not rows:
+        return ""
+    return f'<ol class="bullet-point-list">{"".join(rows)}</ol>'
+
+
+def _render_longform_artifact(payload: dict[str, Any]) -> str:
+    """Render the production long-form artifact envelope."""
+    blocks: list[str] = []
+
+    one_line = _get_text(payload, keys=("one_line",))
+    ask = _get_text(payload, keys=("ask",))
+    artifact = payload.get("artifact") if isinstance(payload.get("artifact"), dict) else {}
+    artifact_type = _get_text(artifact, keys=("type",)) if isinstance(artifact, dict) else ""
+    artifact_payload = (
+        cast(dict[str, Any], artifact.get("payload"))
+        if isinstance(artifact, dict) and isinstance(artifact.get("payload"), dict)
+        else {}
+    )
+
+    meta_items = [
+        item for item in [artifact_type.replace("_", " "), f"ask: {ask}" if ask else ""] if item
+    ]
+    if meta_items:
+        blocks.append(f'<div class="class-pill">{html_escape(" · ".join(meta_items))}</div>')
+
+    if one_line:
+        blocks.append(
+            f"""
+            <section class="output-section summary-output">
+              <h6>One Line</h6>
+              {_render_paragraphs(one_line)}
+            </section>
+            """
+        )
+
+    if isinstance(payload.get("feed_preview"), dict):
+        feed_preview = cast(dict[str, Any], payload["feed_preview"])
+        preview_title = _get_text(feed_preview, keys=("title",))
+        preview_line = _get_text(feed_preview, keys=("one_line",))
+        preview_bullets = _collect_text_items(feed_preview.get("preview_bullets"))
+        reason_to_read = _get_text(feed_preview, keys=("reason_to_read",))
+        feed_blocks: list[str] = []
+        if preview_title:
+            feed_blocks.append(f"<p><strong>{html_escape(preview_title)}</strong></p>")
+        if preview_line:
+            feed_blocks.append(_render_paragraphs(preview_line))
+        if preview_bullets:
+            feed_blocks.append(_render_string_list(preview_bullets))
+        if reason_to_read:
+            feed_blocks.append(_render_paragraphs(reason_to_read))
+        if feed_blocks:
+            blocks.append(
+                f"""
+                <section class="output-section">
+                  <h6>Feed Preview</h6>
+                  {"".join(feed_blocks)}
+                </section>
+                """
+            )
+
+    overview = _get_text(artifact_payload, keys=("overview",))
+    if overview:
+        blocks.append(
+            f"""
+            <section class="output-section">
+              <h6>Overview</h6>
+              {_render_paragraphs(overview)}
+            </section>
+            """
+        )
+
+    key_points_html = _render_artifact_key_points(artifact_payload.get("key_points"))
+    if key_points_html:
+        blocks.append(
+            f"""
+            <section class="output-section">
+              <h6>Key Points</h6>
+              {key_points_html}
+            </section>
+            """
+        )
+
+    quotes_html = _render_quotes(artifact_payload.get("quotes"))
+    if quotes_html:
+        blocks.append(
+            f"""
+            <section class="output-section">
+              <h6>Quotes</h6>
+              {quotes_html}
+            </section>
+            """
+        )
+
+    takeaway = _get_text(artifact_payload, keys=("takeaway",))
+    if takeaway:
+        blocks.append(
+            f"""
+            <section class="output-section">
+              <h6>Takeaway</h6>
+              {_render_paragraphs(takeaway)}
+            </section>
+            """
+        )
+
+    selection_html = _render_source_details(payload.get("selection_trace"))
+    if selection_html:
+        blocks.append(
+            f"""
+            <section class="output-section">
+              <h6>Selection Trace</h6>
+              {selection_html}
+            </section>
+            """
+        )
+
+    extras_html = _render_source_details(artifact_payload.get("extras"))
+    if extras_html:
+        blocks.append(
+            f"""
+            <section class="output-section">
+              <h6>Extras</h6>
+              {extras_html}
+            </section>
+            """
+        )
+
+    return "".join(blocks)
 
 
 def _render_bulleted_points(points: Any) -> str:
@@ -1933,6 +2162,12 @@ def _render_output_payload(payload: dict[str, Any]) -> str:
     title = _get_text(payload, keys=("title",))
     if title:
         blocks.append(f"<h5>{html_escape(title)}</h5>")
+
+    if isinstance(payload.get("artifact"), dict):
+        artifact_html = _render_longform_artifact(payload)
+        if artifact_html:
+            blocks.append(artifact_html)
+        return "".join(blocks)
 
     if "editorial_narrative" in payload:
         narrative = _get_text(payload, keys=("editorial_narrative",))
@@ -2195,6 +2430,21 @@ def _render_source_quality_summary(quality: dict[str, Any]) -> str:
     """
 
 
+def _render_longform_source_summary(item: dict[str, Any]) -> str:
+    """Render source-input diagnostics for article/podcast eval rows."""
+    input_text = str(item.get("input_text") or "")
+    input_chars = int(item.get("input_chars") or len(input_text))
+    input_words = len(SOURCE_WORD_RE.findall(input_text))
+    return f"""
+      <div class="source-quality tone-good">
+        <span class="quality-chip tone-good">Production source input</span>
+        <span>Resolved from production long-form source storage for this eval run.</span>
+        <span>{input_chars:,} input chars</span>
+        <span>{input_words:,} words</span>
+      </div>
+    """
+
+
 def _render_weak_domain_summary(rows: list[dict[str, Any]]) -> str:
     """Render domains with the most weak source-body rows."""
     if not rows:
@@ -2227,6 +2477,15 @@ def _render_weak_domain_summary(rows: list[dict[str, Any]]) -> str:
     """
 
 
+def count_rendered_key_points(output: dict[str, Any]) -> int:
+    """Count key points for the model-card summary across supported output shapes."""
+    artifact = output.get("artifact")
+    if isinstance(artifact, dict) and isinstance(artifact.get("payload"), dict):
+        points = artifact["payload"].get("key_points")
+        return len(points) if isinstance(points, list) else 0
+    return len(_collect_text_items(output.get("key_points"), keys=("text", "point")))
+
+
 def render_html(report_payload: dict[str, Any]) -> str:
     """Render a complete static HTML report.
 
@@ -2243,20 +2502,25 @@ def render_html(report_payload: dict[str, Any]) -> str:
     prompt_definitions = report_payload.get("prompt_definitions", [])
     results = report_payload["results"]
     strip_source_input_urls = bool(config.get("strip_source_input_urls"))
-    quality_counts = aggregate.get("source_input_quality_counts")
-    if not isinstance(quality_counts, dict):
-        quality_counts = build_source_input_quality_counts(cast(list[dict[str, Any]], results))
-    quality_overview = _render_source_quality_overview(
-        {str(key): int(value) for key, value in quality_counts.items()}
-    )
-    domain_counts = aggregate.get("source_input_quality_domain_counts")
-    if not isinstance(domain_counts, list):
-        domain_counts = build_source_input_quality_domain_counts(
-            cast(list[dict[str, Any]], results)
+    has_news_results = any(str(item.get("content_type") or "") == "news" for item in results)
+    if has_news_results:
+        quality_counts = aggregate.get("source_input_quality_counts")
+        if not isinstance(quality_counts, dict):
+            quality_counts = build_source_input_quality_counts(cast(list[dict[str, Any]], results))
+        quality_overview = _render_source_quality_overview(
+            {str(key): int(value) for key, value in quality_counts.items()}
         )
-    weak_domain_summary = _render_weak_domain_summary(
-        [row for row in domain_counts if isinstance(row, dict)]
-    )
+        domain_counts = aggregate.get("source_input_quality_domain_counts")
+        if not isinstance(domain_counts, list):
+            domain_counts = build_source_input_quality_domain_counts(
+                cast(list[dict[str, Any]], results)
+            )
+        weak_domain_summary = _render_weak_domain_summary(
+            [row for row in domain_counts if isinstance(row, dict)]
+        )
+    else:
+        quality_overview = ""
+        weak_domain_summary = ""
 
     def _prompt_title(prompt: dict[str, Any]) -> str:
         content_type = str(prompt.get("content_type", "unknown"))
@@ -2293,8 +2557,17 @@ def render_html(report_payload: dict[str, Any]) -> str:
 
     sections: list[str] = []
     for item in results:
-        source_quality = source_input_quality_for_item(cast(dict[str, Any], item))
-        source_quality_status = str(source_quality.get("status") or "unknown")
+        is_news_item = str(item.get("content_type") or "") == "news"
+        source_quality = (
+            source_input_quality_for_item(cast(dict[str, Any], item))
+            if is_news_item
+            else {
+                "status": "longform_source",
+                "label": "Production source input",
+                "tone": "good",
+            }
+        )
+        source_quality_status = str(source_quality.get("status") or "longform_source")
         search_text = " ".join(
             [
                 str(item.get("content_id") or ""),
@@ -2303,7 +2576,11 @@ def render_html(report_payload: dict[str, Any]) -> str:
                 str(item.get("url") or ""),
             ]
         ).lower()
-        source_quality_block = _render_source_quality_summary(source_quality)
+        source_quality_block = (
+            _render_source_quality_summary(source_quality)
+            if is_news_item
+            else _render_longform_source_summary(cast(dict[str, Any], item))
+        )
         ok_cells = [cell for cell in item["model_results"] if cell.get("status") == "ok"]
         error_cells = [cell for cell in item["model_results"] if cell.get("status") != "ok"]
 
@@ -2315,15 +2592,24 @@ def render_html(report_payload: dict[str, Any]) -> str:
             prompt_variant_label = str(
                 cell.get("prompt_variant_label") or cell.get("prompt_variant") or "Default"
             )
-            key_point_count = len(
-                _collect_text_items(output.get("key_points"), keys=("text", "point"))
+            model_label = str(cell.get("model_label") or cell.get("model_alias") or "Model")
+            model_spec = str(cell.get("model_spec") or "")
+            prompt_label = str(cell.get("prompt_type") or "unknown")
+            variant_line = (
+                f'<p class="prompt-variant">Prompt variant: {html_escape(prompt_variant_label)}</p>'
+                if prompt_variant_label != "Default"
+                else ""
             )
+            key_point_count = count_rendered_key_points(output)
             model_columns.append(
                 f"""
                 <article class="model-card ok">
                   <header>
                     <div>
-                      <h4>{html_escape(prompt_variant_label)}</h4>
+                      <h4>{html_escape(model_label)}</h4>
+                      <p class="model-spec">{html_escape(model_spec)}</p>
+                      <p class="prompt-variant">Prompt: {html_escape(prompt_label)}</p>
+                      {variant_line}
                       <p class="key-point-count">{key_point_count} key points</p>
                     </div>
                   </header>
@@ -2334,9 +2620,9 @@ def render_html(report_payload: dict[str, Any]) -> str:
                     <summary>Run details</summary>
                     <dl class="metrics">
                       <div><dt>Status</dt><dd>{html_escape(cell["status"])}</dd></div>
-                      <div><dt>Model</dt><dd>{html_escape(cell["model_spec"])}</dd></div>
+                      <div><dt>Model</dt><dd>{html_escape(model_spec)}</dd></div>
                       <div><dt>Attempt</dt><dd>{cell["attempt"]}</dd></div>
-                      <div><dt>Prompt</dt><dd>{html_escape(str(cell.get("prompt_type", "unknown")))}</dd></div>
+                      <div><dt>Prompt</dt><dd>{html_escape(prompt_label)}</dd></div>
                       <div><dt>Latency</dt><dd>{cell["latency_ms"] if cell["latency_ms"] is not None else "n/a"} ms</dd></div>
                       <div><dt>Input Tokens</dt><dd>{usage.get("input_tokens") if usage.get("input_tokens") is not None else "n/a"}</dd></div>
                       <div><dt>Output Tokens</dt><dd>{usage.get("output_tokens") if usage.get("output_tokens") is not None else "n/a"}</dd></div>
@@ -2434,7 +2720,7 @@ def render_html(report_payload: dict[str, Any]) -> str:
                   <span class="quality-chip tone-{html_escape(str(source_quality.get("tone") or "warn"))}">{html_escape(str(source_quality.get("label") or "Unknown"))}</span>
                   <span>ID {item["content_id"]}</span>
                   <span>Input chars {item["input_chars"]}</span>
-                  <span>Body chars {int(source_quality.get("body_chars") or 0):,}</span>
+                  {f"<span>Body chars {int(source_quality.get('body_chars') or 0):,}</span>" if is_news_item else ""}
                 </div>
                 <h3>{html_escape(item["source_title"] or "Untitled")}</h3>
                 <a href="{html_escape(item["url"])}" target="_blank">{html_escape(item["url"])}</a>

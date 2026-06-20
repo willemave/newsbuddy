@@ -27,10 +27,7 @@ struct NewsItemDetailView: View {
     @ViewBuilder
     private func keyPointsSection() -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("KEY POINTS")
-                .font(.readerBody.weight(.bold))
-                .foregroundColor(Color.readerBodyText)
-                .tracking(0.4)
+            ReaderSectionHeader("Key Points")
 
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(keyPoints.enumerated()), id: \.offset) { _, point in

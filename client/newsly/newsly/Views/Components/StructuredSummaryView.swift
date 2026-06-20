@@ -35,8 +35,6 @@ struct StructuredSummaryView: View {
             if !summary.quotes.isEmpty {
                 modernSection(
                     title: "Notable Quotes",
-                    icon: "quote.opening",
-                    iconColor: .brandPrimary,
                     isExpanded: $isQuotesExpanded
                 ) {
                     VStack(alignment: .leading, spacing: 16) {
@@ -51,8 +49,6 @@ struct StructuredSummaryView: View {
             if !summary.bulletPoints.isEmpty {
                 modernSection(
                     title: "Key Points",
-                    icon: "list.bullet.rectangle",
-                    iconColor: .terracottaPrimary,
                     isExpanded: $isKeyPointsExpanded
                 ) {
                     VStack(alignment: .leading, spacing: SummaryDesign.itemSpacing) {
@@ -73,8 +69,6 @@ struct StructuredSummaryView: View {
             if !(summary.questions ?? []).isEmpty {
                 modernSection(
                     title: "Questions to Explore",
-                    icon: "questionmark.circle",
-                    iconColor: .summaryQuestionAccent,
                     isExpanded: $isQuestionsExpanded
                 ) {
                     VStack(alignment: .leading, spacing: SummaryDesign.itemSpacing) {
@@ -89,8 +83,6 @@ struct StructuredSummaryView: View {
             if !(summary.counterArguments ?? []).isEmpty {
                 modernSection(
                     title: "Counter Arguments",
-                    icon: "arrow.left.arrow.right",
-                    iconColor: .summaryCounterpointAccent,
                     isExpanded: $isCounterArgsExpanded
                 ) {
                     VStack(alignment: .leading, spacing: SummaryDesign.itemSpacing) {
@@ -104,15 +96,7 @@ struct StructuredSummaryView: View {
             // Topics Section (always visible, no disclosure)
             if !summary.topics.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "tag")
-                            .font(.readerBody.weight(.bold))
-                            .foregroundColor(Color.readerBodyText)
-                        Text("TOPICS")
-                            .font(.readerBody.weight(.bold))
-                            .foregroundColor(Color.readerBodyText)
-                            .tracking(0.4)
-                    }
+                    ReaderSectionHeader("Topics")
 
                     FlowLayout(spacing: 8) {
                         ForEach(summary.topics, id: \.self) { topic in
@@ -133,8 +117,6 @@ struct StructuredSummaryView: View {
     @ViewBuilder
     private func modernSection<Content: View>(
         title: String,
-        icon: String,
-        iconColor: Color,
         isExpanded: Binding<Bool>,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -144,20 +126,8 @@ struct StructuredSummaryView: View {
                     isExpanded.wrappedValue.toggle()
                 }
             } label: {
-                HStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: icon)
-                            .font(.readerBody.weight(.bold))
-                            .foregroundColor(Color.readerBodyText)
-                            .accessibilityHidden(true)
-                        Text(title.uppercased())
-                            .font(.readerBody.weight(.bold))
-                            .foregroundColor(Color.readerBodyText)
-                            .tracking(0.4)
-                    }
-
+                ReaderSectionHeader(title) {
                     Spacer()
-
                     Image(systemName: "chevron.right")
                         .font(.appCaption2)
                         .fontWeight(.bold)

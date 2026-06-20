@@ -113,7 +113,6 @@ struct ContentDetailView: View {
     @State private var discussionRequestToken = UUID()
     // Transcript/Full Article collapsed state
     @State private var isTranscriptExpanded: Bool = false
-    @State private var isRelevantLinksExpanded: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     init(
         contentId: Int,
@@ -313,7 +312,7 @@ struct ContentDetailView: View {
                                 } else {
                                     modernSectionPlain(isPadded: false) {
                                         VStack(alignment: .leading, spacing: 16) {
-                                            sectionHeader("News Updates", icon: "newspaper")
+                                            ReaderSectionHeader("News Updates")
                                             Text("No news metadata available.")
                                                 .font(.appSubheadline)
                                                 .foregroundColor(Color.onSurfaceSecondary)
@@ -2335,7 +2334,7 @@ struct ContentDetailView: View {
                 discussionSummaryHeader(summary: summary, discussion: discussion, content: content)
 
                 if !summary.topics.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 16) {
                         ForEach(Array(summary.topics.prefix(4))) { topic in
                             discussionTopicRow(topic)
                         }
@@ -2351,12 +2350,7 @@ struct ContentDetailView: View {
         discussion: ContentDiscussion,
         content: ContentDetail
     ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            detailSectionHeaderText("Comments", color: Color.onSurface)
-                .lineLimit(1)
-                .minimumScaleFactor(0.9)
-                .layoutPriority(1)
-
+        ReaderSectionHeader("Comments") {
             Spacer(minLength: 10)
 
             if let url = discussionSummaryURL(summary: summary, discussion: discussion) {
@@ -2381,7 +2375,6 @@ struct ContentDetailView: View {
                 .fixedSize(horizontal: true, vertical: false)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func discussionHeaderIcon(_ systemName: String) -> some View {
@@ -2403,23 +2396,22 @@ struct ContentDetailView: View {
 
     @ViewBuilder
     private func discussionTopicRow(_ topic: DiscussionSummaryTopic) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 5) {
+            if let stance = topic.stance {
+                Text(stance)
+                    .font(.appFootnote.weight(.semibold))
+                    .foregroundColor(Color.onSurfaceSecondary)
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             Text(topic.summary)
                 .font(.appCallout)
                 .foregroundColor(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let stance = topic.stance {
-                Text(stance)
-                    .font(.appCaption2)
-                    .fontWeight(.medium)
-                    .foregroundColor(Color.onSurfaceSecondary.opacity(0.85))
-                    .textCase(.uppercase)
-                    .tracking(0.4)
-                    .lineLimit(2)
-                    .padding(.top, 1)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -2742,93 +2734,70 @@ struct ContentDetailView: View {
     // MARK: - Modern Section Components (Flat, no borders)
     @ViewBuilder
     private func relevantLinksSection(links: [RelevantLink]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isRelevantLinksExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "link")
-                        .font(.appFootnote)
-                        .foregroundColor(Color.onSurfaceSecondary.opacity(0.75))
-                        .accessibilityHidden(true)
-
-                    Text("Links from article or comments".uppercased())
-                        .font(.appFootnote.weight(.semibold))
-                        .foregroundColor(Color.onSurfaceSecondary)
-                        .tracking(0.4)
-
-                    Text("\(links.count)")
-                        .font(.appCaption2.monospacedDigit().weight(.medium))
-                        .foregroundColor(Color.onSurfaceSecondary.opacity(0.85))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.surfaceSecondary.opacity(0.55), in: Capsule())
-
-                    Spacer(minLength: 8)
-
-                    Image(systemName: "chevron.right")
-                        .font(.appCaption2.weight(.bold))
-                        .foregroundColor(Color.onSurfaceSecondary.opacity(0.55))
-                        .rotationEffect(.degrees(isRelevantLinksExpanded ? 90 : 0))
-                        .accessibilityHidden(true)
-                }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 16) {
+            ReaderSectionHeader("Links") {
+                Spacer(minLength: 10)
+                Text("\(links.count)")
+                    .font(.appCaption.monospacedDigit().weight(.semibold))
+                    .foregroundColor(Color.brandPrimary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.brandPrimary.opacity(0.12), in: Capsule())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Links from article or comments, \(links.count)")
 
-            if isRelevantLinksExpanded {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(links.enumerated()), id: \.element.id) { index, link in
-                        relevantLinkRow(link)
-                        if index < links.count - 1 {
-                            Divider()
-                                .opacity(0.4)
-                                .padding(.leading, 28)
-                                .padding(.vertical, 8)
-                        }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(links.enumerated()), id: \.element.id) { index, link in
+                    relevantLinkRow(link)
+                    if index < links.count - 1 {
+                        Divider()
+                            .overlay(Color.outlineVariant.opacity(0.35))
+                            .padding(.leading, 30)
+                            .padding(.vertical, 12)
                     }
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Links, \(links.count)")
     }
 
     @ViewBuilder
     private func relevantLinkRow(_ link: RelevantLink) -> some View {
         if let url = URL(string: link.url) {
             let state = viewModel.relevantLinkReadLaterState(for: link.id)
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
                 Button {
                     openInAppBrowser(url)
                 } label: {
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "arrow.up.right")
-                            .font(.appCaption.weight(.semibold))
+                            .font(.appFootnote.weight(.semibold))
                             .foregroundColor(Color.onSurfaceSecondary.opacity(0.75))
-                            .frame(width: 20, height: 20)
+                            .frame(width: 20, height: 22, alignment: .top)
 
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 5) {
                             Text(link.title ?? link.url)
-                                .font(.appSubheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(Color.onSurface)
+                                .font(.appCallout.weight(.semibold))
+                                .foregroundColor(Color.readerBodyText)
                                 .multilineTextAlignment(.leading)
-                                .lineLimit(2)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
 
                             Text(link.reason)
-                                .font(.appCaption)
+                                .font(.appFootnote)
                                 .foregroundColor(Color.onSurfaceSecondary)
                                 .multilineTextAlignment(.leading)
-                                .lineLimit(2)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
 
                             HStack(spacing: 6) {
                                 if let source = relevantLinkSourceLabel(link.source) {
                                     Text(source)
                                         .font(.appCaption2)
+                                        .fontWeight(.semibold)
                                         .foregroundColor(Color.onSurfaceTertiary)
+                                        .textCase(.uppercase)
+                                        .tracking(0.4)
                                 }
 
                                 Text(link.url)
@@ -2839,6 +2808,7 @@ struct ContentDetailView: View {
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -3015,17 +2985,6 @@ struct ContentDetailView: View {
 
     private var detailBodyUIFont: UIFont {
         .appReaderBody
-    }
-
-    @ViewBuilder
-    private func sectionHeader(_ title: String, icon: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.readerBody.weight(.bold))
-                .foregroundColor(Color.readerBodyText)
-                .accessibilityHidden(true)
-            detailSectionHeaderText(title)
-        }
     }
 
     private func detailSectionHeaderText(

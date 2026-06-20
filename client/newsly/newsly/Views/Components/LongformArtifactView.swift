@@ -69,11 +69,11 @@ private struct ExtraSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ArtifactSectionHeader("Extra", icon: "square.stack.3d.up", tint: tint)
+            ReaderSectionHeader("Extra")
 
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 18) {
                 ForEach(sections) { section in
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
                         ArtifactEyebrowText(section.title)
 
                         ForEach(section.items, id: \.self) { item in
@@ -96,7 +96,7 @@ private struct SourceQuotesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ArtifactSectionHeader("Source Quotes", icon: "quote.opening", tint: tint)
+            ReaderSectionHeader("Source Quotes")
             ForEach(Array(quotes.enumerated()), id: \.offset) { _, quote in
                 ArtifactQuoteCard(quote: quote, tint: tint)
             }
@@ -110,7 +110,7 @@ private struct KeyPointList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ArtifactSectionHeader("Key Points", icon: "list.bullet.rectangle", tint: tint)
+            ReaderSectionHeader("Key Points")
 
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(Array(points.enumerated()), id: \.offset) { _, point in
@@ -135,7 +135,7 @@ private struct TakeawayBanner: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ArtifactSectionHeader("Takeaway", icon: "checkmark.seal", tint: tint)
+            ReaderSectionHeader("Takeaway")
             Text(text)
                 .font(.appCallout)
                 .foregroundStyle(Color.readerBodyText)
@@ -182,34 +182,9 @@ private struct ArtifactEyebrowText: View {
 
     var body: some View {
         Text(title.uppercased())
-            .font(.readerBody.weight(.bold))
-            .foregroundColor(Color.readerBodyText)
-            .tracking(0.4)
+            .font(.appFootnote.weight(.semibold))
+            .foregroundColor(Color.onSurfaceSecondary)
+            .tracking(0.6)
             .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-private struct ArtifactSectionHeader: View {
-    let title: String
-    let icon: String
-    let tint: Color
-
-    init(_ title: String, icon: String, tint: Color) {
-        self.title = title
-        self.icon = icon
-        self.tint = tint
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.readerBody.weight(.bold))
-                .foregroundColor(Color.readerBodyText)
-                .accessibilityHidden(true)
-            Text(title.uppercased())
-                .font(.readerBody.weight(.bold))
-                .foregroundColor(Color.readerBodyText)
-                .tracking(0.4)
-        }
     }
 }

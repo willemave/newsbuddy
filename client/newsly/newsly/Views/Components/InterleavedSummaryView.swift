@@ -35,16 +35,7 @@ struct InterleavedSummaryView: View {
 
             // Takeaway
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "lightbulb")
-                        .font(.readerBody.weight(.bold))
-                        .foregroundColor(Color.readerBodyText)
-                        .accessibilityHidden(true)
-                    Text("TAKEAWAY")
-                        .font(.readerBody.weight(.bold))
-                        .foregroundColor(Color.readerBodyText)
-                        .tracking(0.4)
-                }
+                ReaderSectionHeader("Takeaway")
 
                 Text(summary.takeaway)
                     .font(.appCallout)

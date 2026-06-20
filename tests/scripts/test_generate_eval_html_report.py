@@ -81,6 +81,76 @@ def test_resolve_prompt_for_source_uses_news_variant() -> None:
     assert "{content}" in user_template
 
 
+def test_resolve_prompt_for_source_can_use_longform_artifact_template() -> None:
+    system_prompt, user_template, prompt_type = report.resolve_prompt_for_source(
+        content_type="podcast",
+        source_url="https://example.com/show",
+        longform_template="longform_artifact_v1",
+        custom_longform_system_prompt=None,
+        custom_longform_user_template=None,
+        custom_longform_output_type="editorial_narrative",
+        custom_news_system_prompt=None,
+        custom_news_user_template=None,
+        custom_news_output_type="news",
+    )
+
+    assert prompt_type == "longform_artifact"
+    assert "selection_trace" in system_prompt
+    assert "Source hint: podcast:conversation" in user_template
+    assert "{content}" in user_template
+
+
+def test_render_output_payload_includes_longform_artifact_sections() -> None:
+    html = report._render_output_payload(
+        {
+            "title": "How teams learn from outages",
+            "one_line": "A practical look at post-incident learning.",
+            "ask": "copy",
+            "artifact": {
+                "type": "playbook",
+                "payload": {
+                    "quotes": [
+                        {"text": "The review found the alert did not fire.", "attribution": "host"}
+                    ],
+                    "extras": {
+                        "situation": "A platform team needs to make incident reviews useful.",
+                        "outcome": "Reviews produce concrete changes rather than ritual notes.",
+                        "evidence": ["Alert coverage missed the failing component."],
+                    },
+                    "key_points": [
+                        {
+                            "heading": "Start from the timeline",
+                            "content": (
+                                "Anchor the review in observed events before discussing fixes."
+                            ),
+                        }
+                    ],
+                    "takeaway": "Use the outage record to change the next operating decision.",
+                },
+            },
+            "selection_trace": {
+                "source_hint": "podcast:conversation",
+                "candidates": ["playbook", "portrait", "mental_model"],
+                "selected": "playbook",
+                "reason": "The source explains a repeatable incident-review workflow.",
+                "confidence": 0.82,
+            },
+            "feed_preview": {
+                "title": "Incident reviews that change behavior",
+                "one_line": "A guide to making reviews operational.",
+                "preview_bullets": ["Build the timeline first."],
+                "reason_to_read": "Useful when your reviews do not change follow-up work.",
+                "artifact_type": "playbook",
+            },
+        }
+    )
+
+    assert "Selection Trace" in html
+    assert "Extras" in html
+    assert "Start from the timeline" in html
+    assert "podcast:conversation" in html
+
+
 def test_load_news_snapshot_export_envelope(tmp_path) -> None:
     snapshot_path = tmp_path / "snapshot.json"
     snapshot_path.write_text(

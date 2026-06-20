@@ -95,7 +95,6 @@ struct ContentView: View {
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize
                 )
-                .id(settings.readerPaletteId)
             }
             .toolbar(longFormPath.isEmpty ? .visible : .hidden, for: .tabBar)
             .tag(RootTab.longContent)
@@ -122,7 +121,6 @@ struct ContentView: View {
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize
                 )
-                .id(settings.readerPaletteId)
             }
             .toolbar(shortFormPath.isEmpty ? .visible : .hidden, for: .tabBar)
             .tag(RootTab.shortNews)
@@ -154,7 +152,6 @@ struct ContentView: View {
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize
                 )
-                .id(settings.readerPaletteId)
             }
             .tag(RootTab.knowledge)
             .tabItem {
@@ -182,9 +179,6 @@ struct ContentView: View {
             restoreIfNeeded()
             applyE2EOpenContentRouteIfNeeded()
             applyE2EOpenChatRouteIfNeeded()
-        }
-        .onChange(of: settings.readerPaletteId) { _, _ in
-            AppChrome.configure()
         }
         .onChange(of: tabCoordinator.selectedTab) { _, newValue in
             logger.info("[TabChange] selectedTab=\(String(describing: newValue), privacy: .public)")

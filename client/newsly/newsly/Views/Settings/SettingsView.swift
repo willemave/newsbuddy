@@ -240,10 +240,6 @@ struct SettingsView: View {
 
             VStack(spacing: 0) {
                 textSizeRow
-
-                RowDivider()
-
-                paletteRow
             }
             .settingsCard()
         }
@@ -428,20 +424,6 @@ struct SettingsView: View {
                 range: 0...4
             )
         }
-    }
-
-    private var paletteRow: some View {
-        NavigationLink {
-            ReaderPaletteSettingsView()
-        } label: {
-            SettingsRow(
-                icon: "paintpalette",
-                iconColor: .brandPrimary,
-                title: "Color Theme",
-                subtitle: settings.readerPalette.displayName
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     private func textSizeSlider(

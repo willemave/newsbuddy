@@ -32,7 +32,7 @@ struct EditorialNarrativeSummaryView: View {
             }
 
             if !summary.keyPoints.isEmpty {
-                sectionHeader("Key Points", icon: "list.bullet.rectangle", tint: .terracottaPrimary)
+                ReaderSectionHeader("Key Points")
                 VStack(alignment: .leading, spacing: EditorialNarrativeDesign.itemSpacing) {
                     ForEach(summary.keyPoints) { point in
                         bulletRow(text: point.point)
@@ -41,11 +41,7 @@ struct EditorialNarrativeSummaryView: View {
             }
 
             if !summary.sourceDetailSections.isEmpty {
-                sectionHeader(
-                    summary.sourceTemplateDisplayName ?? "Structured Details",
-                    icon: "square.stack.3d.up",
-                    tint: .summarySecondaryAccent
-                )
+                ReaderSectionHeader(summary.sourceTemplateDisplayName ?? "Structured Details")
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(summary.sourceDetailSections) { section in
                         VStack(alignment: .leading, spacing: 8) {
@@ -65,31 +61,13 @@ struct EditorialNarrativeSummaryView: View {
             }
 
             if !summary.quotes.isEmpty {
-                sectionHeader("Notable Quotes", icon: "quote.opening", tint: .brandPrimary)
+                ReaderSectionHeader("Notable Quotes")
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(summary.quotes.enumerated()), id: \.offset) { _, quote in
                         quoteCard(quote)
                     }
                 }
             }
-        }
-    }
-
-    @ViewBuilder
-    private func sectionHeader(
-        _ title: String,
-        icon: String,
-        tint: Color
-    ) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.readerBody.weight(.bold))
-                .foregroundColor(Color.readerBodyText)
-                .accessibilityHidden(true)
-            Text(title.uppercased())
-                .font(.readerBody.weight(.bold))
-                .foregroundColor(Color.readerBodyText)
-                .tracking(0.4)
         }
     }
 
