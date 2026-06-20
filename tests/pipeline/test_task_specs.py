@@ -17,6 +17,7 @@ def test_task_spec_defines_queue_payload_and_dedupe_for_core_tasks() -> None:
     onboarding = get_task_spec(TaskType.ONBOARDING_DISCOVER)
     dig_deeper = get_task_spec(TaskType.DIG_DEEPER)
     insight_report = get_task_spec(TaskType.GENERATE_INSIGHT_REPORT)
+    llm_task = get_task_spec(TaskType.RUN_LLM_TASK)
 
     assert analyze.queue == TaskQueue.CONTENT
     assert analyze.normalize_payload({"content_id": 1, "instruction": "Read links"}) == {
@@ -54,6 +55,11 @@ def test_task_spec_defines_queue_payload_and_dedupe_for_core_tasks() -> None:
         "initial_message": "why?",
     }
     assert insight_report.normalize_payload({"user_id": 5}) == {"user_id": 5}
+    assert llm_task.queue == TaskQueue.LLM
+    assert llm_task.normalize_payload({"user_id": 6, "llm_task_id": 7}) == {
+        "user_id": 6,
+        "llm_task_id": 7,
+    }
 
 
 def test_task_spec_payload_validation_rejects_bad_types() -> None:

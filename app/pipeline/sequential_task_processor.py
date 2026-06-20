@@ -34,6 +34,7 @@ from app.pipeline.handlers.onboarding_discover import OnboardingDiscoverHandler
 from app.pipeline.handlers.process_content import ProcessContentHandler
 from app.pipeline.handlers.process_news_item import ProcessNewsItemHandler
 from app.pipeline.handlers.process_podcast_media import ProcessPodcastMediaHandler
+from app.pipeline.handlers.run_llm_task import RunLlmTaskHandler
 from app.pipeline.handlers.scrape import ScrapeHandler
 from app.pipeline.handlers.summarize import SummarizeHandler
 from app.pipeline.handlers.sync_integration import SyncIntegrationHandler
@@ -189,6 +190,7 @@ class SequentialTaskProcessor:
             GenerateInsightReportHandler(),
             GenerateAudioEpisodeHandler(),
             GenerateLearningDeckHandler(),
+            RunLlmTaskHandler(),
         ]
 
     def _idle_wait(self, timeout_seconds: float) -> None:

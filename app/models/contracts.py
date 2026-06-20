@@ -66,6 +66,7 @@ class TaskType(StrEnum):
     GENERATE_INSIGHT_REPORT = "generate_insight_report"
     GENERATE_AUDIO_EPISODE = "generate_audio_episode"
     GENERATE_LEARNING_DECK = "generate_learning_deck"
+    RUN_LLM_TASK = "run_llm_task"
 
 
 class TaskQueue(StrEnum):
@@ -81,6 +82,7 @@ class TaskQueue(StrEnum):
     TWITTER = "twitter"
     CHAT = "chat"
     LEARNING = "learning"
+    LLM = "llm"
 
 
 class TaskStatus(StrEnum):
@@ -90,6 +92,78 @@ class TaskStatus(StrEnum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class LlmTaskKind(StrEnum):
+    """High-level product family for one LLM task run."""
+
+    SHARE_ACTION = "share_action"
+    LEARNING_DECK = "learning_deck"
+    ARTICLE_CHAT = "article_chat"
+    ASSISTANT_CHAT = "assistant_chat"
+    GENERIC = "generic"
+
+
+class LlmTaskMode(StrEnum):
+    """Specific mode inside an LLM task family."""
+
+    ADD_CONTENT = "add_content"
+    ADD_LINKS = "add_links"
+    ADD_FEED = "add_feed"
+    CHAT = "chat"
+    PRESENTATION = "presentation"
+    BOOKMARK_ONLY = "bookmark_only"
+    ARTICLE_CHAT = "article_chat"
+    CONTEXTUAL_ASSISTANT = "contextual_assistant"
+    LEARNING_DECK_PRESENTATION = "learning_deck_presentation"
+    GENERIC = "generic"
+
+
+class LlmTaskStatus(StrEnum):
+    """Execution status for the generic LLM task ledger."""
+
+    QUEUED = "queued"
+    PREPARING = "preparing"
+    RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
+    APPLYING = "applying"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class LlmWorkflowState(StrEnum):
+    """Workflow state exposed by host-mediated LLM tasks."""
+
+    QUEUED = "queued"
+    PREPARING = "preparing"
+    RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
+    APPLYING = "applying"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class LlmTaskActionStatus(StrEnum):
+    """Lifecycle status for one host-mediated action requested by an LLM task."""
+
+    PROPOSED = "proposed"
+    AWAITING_APPROVAL = "awaiting_approval"
+    APPROVED = "approved"
+    APPLYING = "applying"
+    APPLIED = "applied"
+    REJECTED = "rejected"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class LlmTaskApprovalPolicy(StrEnum):
+    """Action approval policy values accepted by workflow configuration."""
+
+    AUTO_APPLY = "auto_apply"
+    APPROVAL_REQUIRED = "approval_required"
+    DRY_RUN = "dry_run"
 
 
 class SummaryKind(StrEnum):

@@ -59,6 +59,10 @@ class LearningDeckRunPayload(RequiredUserPayload):
     learning_deck_run_id: int
 
 
+class LlmTaskRunPayload(RequiredUserPayload):
+    llm_task_id: int
+
+
 class SyncIntegrationPayload(RequiredUserPayload):
     provider: str = "x"
     trigger: str = "cron"
@@ -170,6 +174,11 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         TaskType.GENERATE_LEARNING_DECK,
         TaskQueue.LEARNING,
         LearningDeckRunPayload,
+    ),
+    TaskType.RUN_LLM_TASK: TaskSpec(
+        TaskType.RUN_LLM_TASK,
+        TaskQueue.LLM,
+        LlmTaskRunPayload,
     ),
 }
 

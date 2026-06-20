@@ -22,6 +22,7 @@ from app.core.model_defaults import (
     CHEAP_GOOGLE_MODEL_NAME,
     CHEAP_MODEL_SPEC,
     IMAGE_GENERATION_MODEL_NAME,
+    OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
     SMART_MODEL_SPEC,
 )
 
@@ -392,7 +393,6 @@ class Settings(BaseSettings):
     whisper_model_size: str = "base"  # tiny, base, small, medium, large
     whisper_device: str = "auto"  # auto, cpu, cuda, mps
     tweet_video_enabled: bool = True
-    tweet_video_max_duration_seconds: int = Field(default=1800, ge=1)
 
     # HTTP client
     http_timeout_seconds: int = 30
@@ -442,7 +442,7 @@ class Settings(BaseSettings):
     chat_sandbox_allow_internet_access: bool = True
     chat_sandbox_library_root: str = "/workspace/personal_markdown"
     chat_sandbox_max_output_chars: int = Field(default=12_000, ge=1_000, le=100_000)
-    learning_deck_model: str = SMART_MODEL_SPEC
+    learning_deck_model: str = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
     learning_sandbox_provider: Literal["disabled", "e2b"] = "e2b"
     learning_sandbox_e2b_api_key: str | None = Field(
         default=None,
@@ -453,6 +453,19 @@ class Settings(BaseSettings):
     learning_sandbox_allow_internet_access: bool = True
     learning_sandbox_workdir: str = "/tmp/newsly_learning_deck"
     learning_sandbox_max_output_chars: int = Field(default=20_000, ge=1_000, le=200_000)
+    llm_task_model: str = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+    llm_task_sandbox_provider: Literal["disabled", "local", "e2b"] = "e2b"
+    llm_task_sandbox_e2b_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_TASK_SANDBOX_E2B_API_KEY", "E2B_API_KEY"),
+    )
+    llm_task_sandbox_template: str | None = None
+    llm_task_sandbox_timeout_seconds: int = Field(default=1800, ge=60, le=86_400)
+    llm_task_sandbox_allow_internet_access: bool = True
+    llm_task_sandbox_root: str = "/tmp/newsly"
+    llm_task_sandbox_max_output_chars: int = Field(default=20_000, ge=1_000, le=200_000)
+    llm_task_agent_api_base_url: str = "http://127.0.0.1:8000"
+    llm_task_tool_token_ttl_seconds: int = Field(default=7200, ge=60, le=86_400)
     learning_deck_signed_url_ttl_seconds: int = Field(default=900, ge=60, le=86_400)
     learning_deck_max_index_html_bytes: int = Field(default=2_000_000, ge=10_000)
     learning_deck_max_source_notes_bytes: int = Field(default=1_000_000, ge=1_000)
