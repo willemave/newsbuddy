@@ -33,10 +33,12 @@ from app.routers.api import (
     integrations,
     interactions,
     learning_decks,
+    llm_tasks,
     news,
     onboarding,
     openai,
     scraper_configs,
+    share_actions,
 )
 from app.services.langfuse_tracing import (
     flush_langfuse_tracing,
@@ -354,6 +356,8 @@ app.include_router(discovery.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
 app.include_router(integrations.router, prefix="/api")
 app.include_router(integrations.llm_router, prefix="/api")
+app.include_router(llm_tasks.router, prefix="/api")
+app.include_router(share_actions.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
 app.include_router(openai.router, prefix="/api")
 

@@ -297,6 +297,8 @@ CONTRACT_UNTYPED_FIELD_ALLOWLIST_BY_CATEGORY: dict[str, frozenset[str]] = {
             "CreateUserScraperConfig.config",
             "JobStatusResponse.payload",
             "LearningDeckResponse.source_metadata",
+            "LlmTaskActionResponse.action_input",
+            "LlmTaskActionResponse.action_result",
             "OnboardingSelectedSource.config",
             "RecordContentInteractionRequest.context_data",
             "ScraperConfigResponse.config",
