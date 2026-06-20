@@ -137,6 +137,7 @@ enum APITaskType: Codable, Equatable, Hashable {
     case generate_insight_report
     case generate_audio_episode
     case generate_learning_deck
+    case run_llm_task
     case unknown(String)
 
     static let knownCases: [APITaskType] = [
@@ -162,6 +163,7 @@ enum APITaskType: Codable, Equatable, Hashable {
         .generate_insight_report,
         .generate_audio_episode,
         .generate_learning_deck,
+        .run_llm_task,
     ]
 
     var rawValue: String {
@@ -188,6 +190,7 @@ enum APITaskType: Codable, Equatable, Hashable {
         case .generate_insight_report: "generate_insight_report"
         case .generate_audio_episode: "generate_audio_episode"
         case .generate_learning_deck: "generate_learning_deck"
+        case .run_llm_task: "run_llm_task"
         case .unknown(let rawValue): rawValue
         }
     }
@@ -216,6 +219,7 @@ enum APITaskType: Codable, Equatable, Hashable {
         case "generate_insight_report": self = .generate_insight_report
         case "generate_audio_episode": self = .generate_audio_episode
         case "generate_learning_deck": self = .generate_learning_deck
+        case "run_llm_task": self = .run_llm_task
         default: self = .unknown(rawValue)
         }
     }

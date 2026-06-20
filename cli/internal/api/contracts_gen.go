@@ -88,11 +88,12 @@ const (
 	TaskTypeGenerateInsightReport TaskType = "generate_insight_report"
 	TaskTypeGenerateAudioEpisode TaskType = "generate_audio_episode"
 	TaskTypeGenerateLearningDeck TaskType = "generate_learning_deck"
+	TaskTypeRunLLMTask TaskType = "run_llm_task"
 )
 
 func (v TaskType) Known() bool {
 	switch v {
-	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadAudio, TaskTypeTranscribe, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateInsightReport, TaskTypeGenerateAudioEpisode, TaskTypeGenerateLearningDeck:
+	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadAudio, TaskTypeTranscribe, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateInsightReport, TaskTypeGenerateAudioEpisode, TaskTypeGenerateLearningDeck, TaskTypeRunLLMTask:
 		return true
 	default:
 		return false

@@ -4864,6 +4864,225 @@
         "title": "LearningDeckUrlResponse",
         "type": "object"
       },
+      "LlmTaskActionListResponse": {
+        "description": "List response for actions attached to one LLM task.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/LlmTaskActionResponse"
+            },
+            "title": "Actions",
+            "type": "array"
+          }
+        },
+        "title": "LlmTaskActionListResponse",
+        "type": "object"
+      },
+      "LlmTaskActionRejectRequest": {
+        "description": "Request body for rejecting a proposed or approval-pending action.",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "LlmTaskActionRejectRequest",
+        "type": "object"
+      },
+      "LlmTaskActionResponse": {
+        "description": "Client-facing view of one host-mediated LLM task action.",
+        "properties": {
+          "action_input": {
+            "additionalProperties": true,
+            "title": "Action Input",
+            "type": "object"
+          },
+          "action_name": {
+            "title": "Action Name",
+            "type": "string"
+          },
+          "action_result": {
+            "additionalProperties": true,
+            "title": "Action Result",
+            "type": "object"
+          },
+          "action_status": {
+            "$ref": "#/components/schemas/LlmTaskActionStatus"
+          },
+          "approval_policy": {
+            "$ref": "#/components/schemas/LlmTaskApprovalPolicy"
+          },
+          "approval_required": {
+            "title": "Approval Required",
+            "type": "boolean"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By User Id"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "llm_task_id": {
+            "title": "Llm Task Id",
+            "type": "integer"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "id",
+          "llm_task_id",
+          "action_name",
+          "action_status",
+          "approval_policy",
+          "approval_required",
+          "created_at"
+        ],
+        "title": "LlmTaskActionResponse",
+        "type": "object"
+      },
+      "LlmTaskActionStatus": {
+        "description": "Lifecycle status for one host-mediated action requested by an LLM task.",
+        "enum": [
+          "proposed",
+          "awaiting_approval",
+          "approved",
+          "applying",
+          "applied",
+          "rejected",
+          "failed",
+          "cancelled"
+        ],
+        "title": "LlmTaskActionStatus",
+        "type": "string"
+      },
+      "LlmTaskApprovalPolicy": {
+        "description": "Action approval policy values accepted by workflow configuration.",
+        "enum": [
+          "auto_apply",
+          "approval_required",
+          "dry_run"
+        ],
+        "title": "LlmTaskApprovalPolicy",
+        "type": "string"
+      },
+      "LlmTaskMode": {
+        "description": "Specific mode inside an LLM task family.",
+        "enum": [
+          "add_content",
+          "add_links",
+          "add_feed",
+          "chat",
+          "presentation",
+          "bookmark_only",
+          "article_chat",
+          "contextual_assistant",
+          "learning_deck_presentation",
+          "generic"
+        ],
+        "title": "LlmTaskMode",
+        "type": "string"
+      },
+      "LlmTaskStatus": {
+        "description": "Execution status for the generic LLM task ledger.",
+        "enum": [
+          "queued",
+          "preparing",
+          "running",
+          "awaiting_approval",
+          "applying",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "LlmTaskStatus",
+        "type": "string"
+      },
       "LongFormStatsResponse": {
         "description": "Response containing unread long-form count for a user.",
         "properties": {
@@ -6458,6 +6677,133 @@
           "message_id"
         ],
         "title": "SendMessageResponse",
+        "type": "object"
+      },
+      "ShareActionCreateRequest": {
+        "description": "Request to run a VM-backed ShareSheet action workflow.",
+        "example": {
+          "approval_policy": {
+            "default": "auto_apply"
+          },
+          "instruction": "Find the publication feed",
+          "mode": "add_feed",
+          "url": "https://example.com/article"
+        },
+        "properties": {
+          "approval_policy": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/LlmTaskApprovalPolicy"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional workflow approval policy overrides",
+            "title": "Approval Policy"
+          },
+          "chat_initial_message": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Initial user question for chat mode",
+            "title": "Chat Initial Message"
+          },
+          "instruction": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional user instruction for the share action",
+            "title": "Instruction"
+          },
+          "interests_prompt": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional presentation interests prompt",
+            "title": "Interests Prompt"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/LlmTaskMode",
+            "description": "ShareSheet action mode to run"
+          },
+          "save_to_knowledge_and_mark_read": {
+            "default": false,
+            "description": "When true, host-applied content actions should save resulting content to Knowledge and mark it read after submission.",
+            "title": "Save To Knowledge And Mark Read",
+            "type": "boolean"
+          },
+          "url": {
+            "description": "Submitted http/https URL",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "mode"
+        ],
+        "title": "ShareActionCreateRequest",
+        "type": "object"
+      },
+      "ShareActionResponse": {
+        "description": "Response describing a queued or running Share Action LLM task.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/LlmTaskActionResponse"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/LlmTaskMode"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LlmTaskStatus"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "integer"
+          },
+          "workflow_state": {
+            "title": "Workflow State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "mode",
+          "status",
+          "workflow_state",
+          "created_at"
+        ],
+        "title": "ShareActionResponse",
         "type": "object"
       },
       "SubmissionFeedInitialDownloadResponse": {
@@ -13448,6 +13794,183 @@
         ]
       }
     },
+    "/api/llm-tasks/{task_id}/actions": {
+      "get": {
+        "description": "Return user-visible action events for one owned LLM task.",
+        "operationId": "listLlmTaskActions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmTaskActionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List actions for one LLM task",
+        "tags": [
+          "llm-tasks"
+        ]
+      }
+    },
+    "/api/llm-tasks/{task_id}/actions/{action_id}/approve": {
+      "post": {
+        "description": "Approve an action that is waiting for user confirmation.",
+        "operationId": "approveLlmTaskAction",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Task Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Action Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmTaskActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve an LLM task action",
+        "tags": [
+          "llm-tasks"
+        ]
+      }
+    },
+    "/api/llm-tasks/{task_id}/actions/{action_id}/reject": {
+      "post": {
+        "description": "Reject an action that is waiting for user confirmation.",
+        "operationId": "rejectLlmTaskAction",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Task Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Action Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmTaskActionRejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmTaskActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject an LLM task action",
+        "tags": [
+          "llm-tasks"
+        ]
+      }
+    },
     "/api/news/items": {
       "get": {
         "description": "Return the visible representative news feed for the current user.",
@@ -14578,6 +15101,102 @@
         "summary": "Update Scraper Config",
         "tags": [
           "scrapers"
+        ]
+      }
+    },
+    "/api/share-actions": {
+      "post": {
+        "description": "Create and enqueue a VM-backed ShareSheet action workflow.",
+        "operationId": "createShareAction",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareActionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a VM-backed ShareSheet action",
+        "tags": [
+          "share-actions"
+        ]
+      }
+    },
+    "/api/share-actions/{task_id}": {
+      "get": {
+        "description": "Return one Share Action task for the current user.",
+        "operationId": "getShareAction",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get one ShareSheet action task",
+        "tags": [
+          "share-actions"
         ]
       }
     },

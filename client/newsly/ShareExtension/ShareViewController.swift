@@ -438,27 +438,17 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     // MARK: - API Submission
 
     private func submitURL(_ url: URL) async throws {
-        if linkHandlingMode == .createLearningDeck {
-            try await createLearningDeck(from: url)
-            return
-        }
-
-        let handler = ShareURLRouting.handler(for: url)
-        let shouldStartChat = linkHandlingMode == .chat
-        let payload = APISubmitContentRequest(
+        let payload = ShareActionRequest(
             url: url.absoluteString,
-            platform: handler.platform,
-            crawlLinks: linkHandlingMode == .addLinks && !shouldStartChat,
-            subscribeToFeed: linkHandlingMode == .addFeed && !shouldStartChat,
-            shareAndChat: shouldStartChat,
-            chatInitialMessage: shouldStartChat ? chatInitialMessage : nil,
-            saveToKnowledgeAndMarkRead: shouldStartChat || bookmarkOnlyToggleView.isOn
+            mode: shareActionMode(),
+            chatInitialMessage: linkHandlingMode == .chat ? chatInitialMessage : nil,
+            saveToKnowledgeAndMarkRead: shouldSaveToKnowledgeAndMarkRead()
         )
         let requestBody = try JSONEncoder().encode(payload)
 
         do {
             try await APIClient.shared.requestVoid(
-                "/api/content/submit",
+                "/api/share-actions",
                 method: "POST",
                 body: requestBody
             )
@@ -485,38 +475,32 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         }
     }
 
-    private func createLearningDeck(from url: URL) async throws {
-        let body: [String: Any] = [
-            "url": url.absoluteString,
-        ]
-        let requestBody = try JSONSerialization.data(withJSONObject: body)
+    private func shareActionMode() -> String {
+        if linkHandlingMode == .addContent && shouldSaveToKnowledgeAndMarkRead() {
+            return "bookmark_only"
+        }
+        switch linkHandlingMode {
+        case .addContent:
+            return "add_content"
+        case .createLearningDeck:
+            return "presentation"
+        case .addLinks:
+            return "add_links"
+        case .addFeed:
+            return "add_feed"
+        case .chat:
+            return "chat"
+        }
+    }
 
-        do {
-            try await APIClient.shared.requestVoid(
-                "/api/learning/decks",
-                method: "POST",
-                body: requestBody
-            )
-        } catch let error as APIError {
-            switch error {
-            case .unauthorized:
-                throw ShareError.notAuthenticated
-            case .invalidURL:
-                throw ShareError.invalidURL
-            case .networkError(let underlying):
-                throw ShareError.networkError(underlying.localizedDescription)
-            case .httpError(let statusCode, let detail):
-                if let message = detail?.trimmingCharacters(in: .whitespacesAndNewlines), !message.isEmpty {
-                    throw ShareError.serverError(message)
-                }
-                throw ShareError.serverError("Request failed with status \(statusCode)")
-            case .decodingError(let underlying):
-                throw ShareError.serverError(underlying.localizedDescription)
-            case .noData, .unknown:
-                throw ShareError.invalidResponse
-            }
-        } catch {
-            throw ShareError.serverError(error.localizedDescription)
+    private func shouldSaveToKnowledgeAndMarkRead() -> Bool {
+        switch linkHandlingMode {
+        case .addContent, .addLinks:
+            return bookmarkOnlyToggleView.isOn
+        case .chat:
+            return true
+        case .addFeed, .createLearningDeck:
+            return false
         }
     }
 
@@ -532,6 +516,20 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             self.extensionContext?.cancelRequest(withError: ShareError.userCancelled)
         })
         present(alert, animated: true)
+    }
+}
+
+private struct ShareActionRequest: Encodable {
+    let url: String
+    let mode: String
+    let chatInitialMessage: String?
+    let saveToKnowledgeAndMarkRead: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case url
+        case mode
+        case chatInitialMessage = "chat_initial_message"
+        case saveToKnowledgeAndMarkRead = "save_to_knowledge_and_mark_read"
     }
 }
 
