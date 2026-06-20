@@ -74,7 +74,6 @@ class TestContentWorker:
             "app.pipeline.worker.settings",
             SimpleNamespace(
                 tweet_video_enabled=True,
-                tweet_video_max_duration_seconds=600,
             ),
         )
         content = ContentData(
@@ -104,7 +103,6 @@ class TestContentWorker:
             "app.pipeline.worker.settings",
             SimpleNamespace(
                 tweet_video_enabled=True,
-                tweet_video_max_duration_seconds=600,
             ),
         )
         content = ContentData(
@@ -133,7 +131,6 @@ class TestContentWorker:
             "app.pipeline.worker.settings",
             SimpleNamespace(
                 tweet_video_enabled=True,
-                tweet_video_max_duration_seconds=1800,
             ),
         )
         content = ContentData(
@@ -159,7 +156,7 @@ class TestContentWorker:
         assert content.metadata["video_duration_ms"] == 1_202_451
         assert "tweet_video_skip_reason" not in content.metadata
 
-    def test_tweet_video_duration_limit_degrades_to_text_summary(
+    def test_tweet_video_has_no_duration_limit(
         self,
         mock_dependencies,
         monkeypatch,
@@ -169,7 +166,6 @@ class TestContentWorker:
             "app.pipeline.worker.settings",
             SimpleNamespace(
                 tweet_video_enabled=True,
-                tweet_video_max_duration_seconds=10,
             ),
         )
         content = ContentData(
@@ -181,15 +177,16 @@ class TestContentWorker:
             metadata={
                 "platform": "twitter",
                 "has_video": True,
-                "video_duration_ms": 45_000,
+                "video_duration_ms": 3_395_666,
                 "content_to_summarize": "Tweet text",
                 "article": {"url": "https://x.com/i/status/123"},
             },
         )
 
-        assert worker._tweet_video_audio_task(content) is None
-        assert content.metadata["has_video"] is False
-        assert content.metadata["tweet_video_skip_reason"] == "duration_limit"
+        assert worker._tweet_video_audio_task(content) == TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO
+        assert content.metadata["has_video"] is True
+        assert content.metadata["video_duration_ms"] == 3_395_666
+        assert "tweet_video_skip_reason" not in content.metadata
 
     def test_process_article_sync_success(self, mock_dependencies):
         """Test successful article processing."""

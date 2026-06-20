@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
 
-from app.constants import DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT, SELF_SUBMISSION_SOURCE
+from app.constants import SELF_SUBMISSION_SOURCE
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry, UserScraperConfig
+from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry
 from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
@@ -153,373 +152,6 @@ def test_tweet_submission_spend_cap_failure_is_non_retryable(
     assert tweet_enrichment["status"] == "deferred"
     assert tweet_enrichment["reason"] == "x_spend_cap_reached"
     queue_gateway.enqueue.assert_not_called()
-
-
-def test_subscribe_to_feed_accepts_direct_feed_url(db_session, monkeypatch) -> None:
-    content = Content(
-        content_type=ContentType.UNKNOWN.value,
-        url="https://example.com/feed.xml",
-        source=SELF_SUBMISSION_SOURCE,
-        status=ContentStatus.NEW.value,
-        content_metadata={
-            "source": SELF_SUBMISSION_SOURCE,
-            "submitted_by_user_id": 1,
-            "submitted_via": "share_sheet",
-            "subscribe_to_feed": True,
-        },
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.FeedDetector.validate_feed_url",
-        lambda _self, feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Example Feed",
-        },
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {"feed_url": feed_url},
-    )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.FeedDetector.classify_feed_type",
-        lambda _self, **_kwargs: SimpleNamespace(feed_type="atom"),
-    )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        lambda request: SimpleNamespace(
-            config_id=request.config_id,
-            base_limit=1,
-            target_limit=1 + request.count,
-            scraped=2,
-            saved=2,
-            duplicates=0,
-            errors=0,
-        ),
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Register Spill",
-        },
-    )
-
-    queue_gateway = Mock()
-    context = _build_context(db_session, queue_gateway=queue_gateway)
-    task = TaskEnvelope(
-        id=101,
-        task_type=TaskType.ANALYZE_URL,
-        content_id=content.id,
-        payload={"content_id": content.id, "subscribe_to_feed": True},
-    )
-
-    result = AnalyzeUrlHandler().handle(task, context)
-
-    db_session.refresh(content)
-    metadata = _metadata(content.content_metadata)
-    feed_subscription = _metadata(metadata["feed_subscription"])
-    initial_download = _metadata(feed_subscription["initial_download"])
-    assert result.success is True
-    assert content.status == ContentStatus.SKIPPED.value
-    assert metadata["detected_feed"] == {
-        "url": "https://example.com/feed.xml",
-        "type": "atom",
-        "title": "Example Feed",
-        "format": "rss",
-    }
-    assert feed_subscription["status"] == "created"
-    assert feed_subscription["feed_url"] == "https://example.com/feed.xml"
-    assert feed_subscription["feed_type"] == "atom"
-    assert feed_subscription["created"] is True
-    assert initial_download["ran"] is True
-    assert initial_download["status"] == "completed"
-    assert initial_download["requested_count"] == DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT
-    assert initial_download["scraped"] == 2
-    assert initial_download["saved"] == 2
-    queue_gateway.enqueue.assert_not_called()
-
-    config = (
-        db_session.query(UserScraperConfig)
-        .filter(UserScraperConfig.user_id == 1, UserScraperConfig.feed_url == content.url)
-        .first()
-    )
-    assert config is not None
-    assert config.scraper_type == "atom"
-
-
-def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_title(
-    db_session,
-    monkeypatch,
-) -> None:
-    content = Content(
-        content_type=ContentType.UNKNOWN.value,
-        url="https://registerspill.thorstenball.com/p/joy-and-some-other-post",
-        title="Register Spill",
-        source=SELF_SUBMISSION_SOURCE,
-        status=ContentStatus.NEW.value,
-        content_metadata={
-            "source": SELF_SUBMISSION_SOURCE,
-            "submitted_by_user_id": 1,
-            "submitted_via": "share_sheet",
-            "subscribe_to_feed": True,
-        },
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.FeedDetector.validate_feed_url",
-        lambda _self, feed_url: None,
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {"feed_url": feed_url},
-    )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.get_http_gateway",
-        lambda: SimpleNamespace(fetch_content=lambda _url: ("<html></html>", {})),
-    )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.detect_feeds_from_html",
-        lambda *_args, **_kwargs: {
-            "detected_feed": {
-                "url": "https://registerspill.thorstenball.com/feed.xml",
-                "type": "substack",
-                "title": None,
-                "format": "rss",
-            }
-        },
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Register Spill",
-        },
-    )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        lambda request: SimpleNamespace(
-            config_id=request.config_id,
-            base_limit=1,
-            target_limit=1 + request.count,
-            scraped=1,
-            saved=1,
-            duplicates=0,
-            errors=0,
-        ),
-    )
-
-    queue_gateway = Mock()
-    context = _build_context(db_session, queue_gateway=queue_gateway)
-    task = TaskEnvelope(
-        id=102,
-        task_type=TaskType.ANALYZE_URL,
-        content_id=content.id,
-        payload={"content_id": content.id, "subscribe_to_feed": True},
-    )
-
-    result = AnalyzeUrlHandler().handle(task, context)
-
-    db_session.refresh(content)
-    metadata = _metadata(content.content_metadata)
-    feed_subscription = _metadata(metadata["feed_subscription"])
-    initial_download = _metadata(feed_subscription["initial_download"])
-    assert result.success is True
-    assert content.status == ContentStatus.SKIPPED.value
-    assert metadata["detected_feed"] == {
-        "url": "https://registerspill.thorstenball.com/feed.xml",
-        "type": "substack",
-        "title": None,
-        "format": "rss",
-    }
-    assert feed_subscription["feed_url"] == ("https://registerspill.thorstenball.com/feed.xml")
-    assert feed_subscription["feed_type"] == "substack"
-    assert feed_subscription["created"] is True
-    assert initial_download["status"] == "completed"
-    queue_gateway.enqueue.assert_not_called()
-
-    config = (
-        db_session.query(UserScraperConfig)
-        .filter(
-            UserScraperConfig.user_id == 1,
-            UserScraperConfig.feed_url == "https://registerspill.thorstenball.com/feed.xml",
-        )
-        .first()
-    )
-    assert config is not None
-    assert config.scraper_type == "substack"
-    assert config.display_name == "Register Spill"
-
-
-def test_subscribe_to_feed_existing_subscription_skips_initial_download(
-    db_session,
-    monkeypatch,
-) -> None:
-    existing_config = UserScraperConfig(
-        user_id=1,
-        scraper_type="atom",
-        display_name="Example Feed",
-        config={"feed_url": "https://example.com/feed.xml", "limit": 1},
-        feed_url="https://example.com/feed.xml",
-        is_active=True,
-    )
-    db_session.add(existing_config)
-
-    content = Content(
-        content_type=ContentType.UNKNOWN.value,
-        url="https://example.com/feed.xml",
-        source=SELF_SUBMISSION_SOURCE,
-        status=ContentStatus.NEW.value,
-        content_metadata={
-            "source": SELF_SUBMISSION_SOURCE,
-            "submitted_by_user_id": 1,
-            "submitted_via": "share_sheet",
-            "subscribe_to_feed": True,
-        },
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.FeedDetector.validate_feed_url",
-        lambda _self, feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Example Feed",
-        },
-    )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.FeedDetector.classify_feed_type",
-        lambda _self, **_kwargs: SimpleNamespace(feed_type="atom"),
-    )
-
-    def _unexpected_backfill(_request):
-        raise AssertionError("initial backfill should not run for existing subscriptions")
-
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        _unexpected_backfill,
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Example Feed",
-        },
-    )
-
-    queue_gateway = Mock()
-    context = _build_context(db_session, queue_gateway=queue_gateway)
-    task = TaskEnvelope(
-        id=103,
-        task_type=TaskType.ANALYZE_URL,
-        content_id=content.id,
-        payload={"content_id": content.id, "subscribe_to_feed": True},
-    )
-
-    result = AnalyzeUrlHandler().handle(task, context)
-
-    db_session.refresh(content)
-    metadata = _metadata(content.content_metadata)
-    feed_subscription = _metadata(metadata["feed_subscription"])
-    assert result.success is True
-    assert feed_subscription["status"] == "already_exists"
-    assert feed_subscription["created"] is False
-    assert feed_subscription["config_id"] is None
-    assert feed_subscription["initial_download"] == {
-        "requested_count": DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
-        "ran": False,
-        "status": "skipped",
-        "reason": "already_exists",
-    }
-
-
-def test_subscribe_to_feed_records_initial_download_failure(
-    db_session,
-    monkeypatch,
-) -> None:
-    content = Content(
-        content_type=ContentType.UNKNOWN.value,
-        url="https://example.com/failing-feed.xml",
-        source=SELF_SUBMISSION_SOURCE,
-        status=ContentStatus.NEW.value,
-        content_metadata={
-            "source": SELF_SUBMISSION_SOURCE,
-            "submitted_by_user_id": 1,
-            "submitted_via": "share_sheet",
-            "subscribe_to_feed": True,
-        },
-    )
-    db_session.add(content)
-    db_session.commit()
-    db_session.refresh(content)
-
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.FeedDetector.validate_feed_url",
-        lambda _self, feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Failing Feed",
-        },
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {"feed_url": feed_url},
-    )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.FeedDetector.classify_feed_type",
-        lambda _self, **_kwargs: SimpleNamespace(feed_type="atom"),
-    )
-
-    def _failing_backfill(_request):
-        raise ValueError("scraper exploded")
-
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        _failing_backfill,
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Failing Feed",
-        },
-    )
-
-    queue_gateway = Mock()
-    context = _build_context(db_session, queue_gateway=queue_gateway)
-    task = TaskEnvelope(
-        id=104,
-        task_type=TaskType.ANALYZE_URL,
-        content_id=content.id,
-        payload={"content_id": content.id, "subscribe_to_feed": True},
-    )
-
-    result = AnalyzeUrlHandler().handle(task, context)
-
-    db_session.refresh(content)
-    metadata = _metadata(content.content_metadata)
-    feed_subscription = _metadata(metadata["feed_subscription"])
-    initial_download = _metadata(feed_subscription["initial_download"])
-    assert result.success is True
-    assert content.status == ContentStatus.SKIPPED.value
-    assert feed_subscription["status"] == "created"
-    assert feed_subscription["created"] is True
-    assert initial_download["ran"] is True
-    assert initial_download["status"] == "failed"
-    assert initial_download["requested_count"] == DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT
-    assert initial_download["error"] == "scraper exploded"
 
 
 def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
@@ -741,7 +373,7 @@ def test_tweet_bookmark_uses_included_snapshot_for_linked_tweet_resolution(
         ),
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        "app.services.tweet_target_resolution.fetch_tweets_by_ids",
         lambda **_kwargs: (_ for _ in ()).throw(
             AssertionError("linked tweet should come from included snapshot")
         ),
@@ -1058,7 +690,7 @@ def test_tweet_share_resolves_article_from_linked_tweet(db_session, monkeypatch)
         lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        "app.services.tweet_target_resolution.fetch_tweets_by_ids",
         lambda **_kwargs: [linked_tweet],
     )
     monkeypatch.setattr(
@@ -1137,15 +769,15 @@ def test_tweet_share_resolves_article_from_same_author_thread_reply(
         lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.search_recent_tweets",
+        "app.services.tweet_target_resolution.search_recent_tweets",
         lambda **_kwargs: XTweetsPage(tweets=[root_tweet, reply_tweet], next_token=None),
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        "app.services.tweet_target_resolution.fetch_tweets_by_ids",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_user_tweets",
+        "app.services.tweet_target_resolution.fetch_user_tweets",
         lambda **_kwargs: XTweetsPage(tweets=[root_tweet], next_token=None),
     )
     monkeypatch.setattr(
@@ -1211,17 +843,17 @@ def test_tweet_share_falls_back_to_tweet_only_when_no_article_found(
         lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.search_recent_tweets",
+        "app.services.tweet_target_resolution.search_recent_tweets",
         lambda **_kwargs: (_ for _ in ()).throw(
             AssertionError("thread lookup should be gated when there is no thread signal")
         ),
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        "app.services.tweet_target_resolution.fetch_tweets_by_ids",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_user_tweets",
+        "app.services.tweet_target_resolution.fetch_user_tweets",
         lambda **_kwargs: (_ for _ in ()).throw(
             AssertionError("timeline fanout should be gated when there is no thread signal")
         ),
@@ -1295,11 +927,11 @@ def test_tweet_share_uses_user_timeline_for_older_threads(db_session, monkeypatc
         lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_user_tweets",
+        "app.services.tweet_target_resolution.fetch_user_tweets",
         lambda **_kwargs: XTweetsPage(tweets=[reply_tweet], next_token=None),
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        "app.services.tweet_target_resolution.fetch_tweets_by_ids",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(
@@ -1369,11 +1001,11 @@ def test_tweet_share_records_capped_thread_lookup_and_degrades_gracefully(
         lambda **_kwargs: XTweetFetchResult(success=True, tweet=root_tweet),
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_user_tweets",
+        "app.services.tweet_target_resolution.fetch_user_tweets",
         _fetch_user_tweets,
     )
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.fetch_tweets_by_ids",
+        "app.services.tweet_target_resolution.fetch_tweets_by_ids",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(

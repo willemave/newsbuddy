@@ -333,19 +333,6 @@ class ContentWorker:
             metadata["tweet_video_skip_reason"] = "disabled"
             return None
 
-        if isinstance(duration_ms, int):
-            max_ms = settings.tweet_video_max_duration_seconds * 1000
-            if duration_ms > max_ms:
-                metadata["has_video"] = False
-                metadata["tweet_video_skip_reason"] = "duration_limit"
-                logger.info(
-                    "Skipping tweet video for content %s: duration %sms exceeds limit %sms",
-                    content.id,
-                    duration_ms,
-                    max_ms,
-                )
-                return None
-
         promote_tweet_video_metadata(metadata, duration_ms=duration_ms)
         return TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO
 

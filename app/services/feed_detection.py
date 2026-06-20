@@ -683,7 +683,7 @@ class FeedDetector:
     def _validate_feed_candidates(self, feed_urls: list[str]) -> list[dict[str, str]]:
         validated: list[dict[str, str]] = []
         for feed_url in feed_urls[: self.max_candidate_fetches]:
-            result = self._validate_feed_candidate(feed_url)
+            result = self.validate_feed_url(feed_url)
             if result:
                 validated.append(result)
                 break
@@ -695,7 +695,7 @@ class FeedDetector:
             feed_url = feed_link.get("feed_url")
             if not isinstance(feed_url, str) or not feed_url.strip():
                 continue
-            result = self._validate_feed_candidate(feed_url.strip())
+            result = self.validate_feed_url(feed_url.strip())
             if not result:
                 continue
             validated.append(
@@ -875,6 +875,8 @@ def detect_feeds_from_html(
     source: str | None = None,
     content_type: ContentType | str | None = None,
     *,
+    force_detect: bool = False,
+    use_exa_search: bool = True,
     db: Session | None = None,
     usage_persist: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
@@ -892,13 +894,14 @@ def detect_feeds_from_html(
     Returns:
         Dict with detected_feed info, or None if no feed found or not applicable
     """
-    detector = FeedDetector()
+    detector = FeedDetector(use_exa_search=use_exa_search)
     return detector.detect_from_html(
         html_content,
         page_url,
         page_title=page_title,
         source=source,
         content_type=content_type,
+        force_detect=force_detect,
         db=db,
         usage_persist=usage_persist,
     )

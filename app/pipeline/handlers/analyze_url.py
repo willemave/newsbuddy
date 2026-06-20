@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -23,14 +23,16 @@ from app.services import knowledge as knowledge_service
 from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.content_analyzer import AnalysisError
 from app.services.content_metadata_merge import refresh_merge_content_metadata
-from app.services.content_submission import normalize_url
 from app.services.feed_backfill import backfill_feed_for_config
-from app.services.feed_detection import FeedDetector, detect_feeds_from_html
 from app.services.feed_subscription import subscribe_to_detected_feed_result
-from app.services.gateways.http_gateway import get_http_gateway
+from app.services.feed_subscription_resolution import FeedSubscriptionResolver
 from app.services.gateways.llm_gateway import get_llm_gateway
 from app.services.instruction_links import create_contents_from_instruction_links
 from app.services.queue import TaskType
+from app.services.tweet_target_resolution import (
+    TweetTargetResolver,
+    normalize_tweet_external_urls,
+)
 from app.services.twitter_share import (
     canonical_tweet_url,
     extract_tweet_id,
@@ -41,21 +43,18 @@ from app.services.url_detection import (
     should_use_llm_analysis,
 )
 from app.services.x_api import (
-    XTweet,
     build_tweet_processing_text,
     fetch_tweet_by_id,
-    fetch_tweets_by_ids,
-    fetch_user_tweets,
-    search_recent_tweets,
 )
 from app.services.x_integration import get_x_user_access_token
 from app.services.x_tweet_metadata import (
     hydrate_included_tweets_from_metadata,
     hydrate_tweet_from_metadata,
-    parse_x_created_at,
 )
 
 logger = get_logger(__name__)
+
+FEED_BACKFILL_SUPPORTED_TYPES = {"substack", "atom", "podcast_rss"}
 
 
 def _build_analysis_instruction(
@@ -69,12 +68,6 @@ def _build_analysis_instruction(
     if not crawl_links:
         return None
     return "Extract relevant links from the submitted page."
-
-
-def _build_thread_text(tweet_texts: list[str]) -> str:
-    """Join tweet/thread text into a single body."""
-    cleaned = [text.strip() for text in tweet_texts if isinstance(text, str) and text.strip()]
-    return "\n\n".join(cleaned)
 
 
 def _is_nonfatal_tweet_lookup_error(error_message: str) -> bool:
@@ -117,20 +110,11 @@ class FlowOutcome:
     retryable: bool = True
 
 
-@dataclass(frozen=True)
-class TweetTargetResolution:
-    """Resolved canonical target and thread context for a submitted tweet URL."""
-
-    selected_article_url: str | None
-    resolution_source: str
-    resolution_tweet_id: str
-    thread_text: str
-    linked_tweet_ids: list[str]
-    thread_lookup_status: str
-
-
 class FeedSubscriptionFlow:
     """Handle feed subscription requests during URL analysis."""
+
+    def __init__(self, *, resolver: FeedSubscriptionResolver | None = None) -> None:
+        self._resolver = resolver or FeedSubscriptionResolver()
 
     def _run_initial_feed_download(
         self,
@@ -138,6 +122,7 @@ class FeedSubscriptionFlow:
         user_id: Any,
         subscription_status: str,
         config_id: int | None,
+        feed_type: str | None,
     ) -> dict[str, object]:
         """Run the one-time initial feed backfill for newly created subscriptions."""
         initial_download: dict[str, object] = {
@@ -147,6 +132,9 @@ class FeedSubscriptionFlow:
             "reason": subscription_status,
         }
         if subscription_status != "created":
+            return initial_download
+        if feed_type not in FEED_BACKFILL_SUPPORTED_TYPES:
+            initial_download["reason"] = f"unsupported_scraper_type:{feed_type}"
             return initial_download
         if not isinstance(user_id, int):
             initial_download["reason"] = "missing_user"
@@ -197,45 +185,6 @@ class FeedSubscriptionFlow:
         )
         return initial_download
 
-    def _detect_direct_feed_url(
-        self,
-        url: str,
-        page_title: str | None,
-        *,
-        db,
-        content_id: int | None = None,
-    ) -> dict[str, str] | None:
-        """Return detected feed metadata when the submitted URL is already a feed."""
-        detector = FeedDetector(use_exa_search=False)
-        validated_feed = detector.validate_feed_url(url)
-        if not validated_feed:
-            return None
-
-        classification = detector.classify_feed_type(
-            feed_url=url,
-            page_url=url,
-            page_title=page_title or validated_feed.get("title"),
-            html_content=None,
-            db=db,
-            usage_persist={
-                "feature": "feed_detection",
-                "operation": "feed_detection.classify_feed_type",
-                "source": "queue",
-                "content_id": content_id,
-                "metadata": {"page_url": url},
-            },
-        )
-        title_value = validated_feed.get("title")
-        resolved_title = (
-            title_value if isinstance(title_value, str) and title_value else (page_title or "")
-        )
-        return {
-            "url": url,
-            "type": classification.feed_type,
-            "title": resolved_title,
-            "format": validated_feed.get("feed_format", "rss"),
-        }
-
     def run(
         self,
         db,
@@ -250,67 +199,31 @@ class FeedSubscriptionFlow:
         if not subscribe_to_feed:
             return FlowOutcome(handled=False, success=True)
 
-        fetch_status = "no_feed_found"
-        detected_feed = self._detect_direct_feed_url(
-            url,
-            content.title,
+        resolution = self._resolver.resolve(
             db=db,
-            content_id=content.id,
+            content=content,
+            metadata=metadata,
+            url=url,
         )
-        all_detected_feeds = None
-        if not detected_feed:
-            html_content: str | None = None
-            try:
-                http_gateway = get_http_gateway()
-                body, _headers = http_gateway.fetch_content(url)
-                if isinstance(body, str):
-                    html_content = body
-            except Exception as exc:  # noqa: BLE001
-                fetch_status = "fetch_failed"
-                logger.error(
-                    "Failed to fetch URL for feed detection: %s",
-                    exc,
-                    extra={
-                        "component": "sequential_task_processor",
-                        "operation": "feed_detect_fetch",
-                        "item_id": content.id,
-                        "context_data": {"url": url, "error": str(exc)},
-                    },
-                )
-
-            if html_content:
-                feed_data = detect_feeds_from_html(
-                    html_content,
-                    str(url),
-                    page_title=content.title,
-                    source=SELF_SUBMISSION_SOURCE,
-                    content_type=content.content_type,
-                    db=db,
-                    usage_persist={
-                        "feature": "feed_detection",
-                        "operation": "feed_detection.classify_feed_type",
-                        "source": "queue",
-                        "content_id": content.id,
-                        "metadata": {"page_url": str(url)},
-                    },
-                )
-                if feed_data:
-                    detected_feed = feed_data.get("detected_feed")
-                    all_detected_feeds = feed_data.get("all_detected_feeds")
-
-        if detected_feed:
-            fetch_status = "detected"
-        if detected_feed:
+        metadata.update(resolution.metadata_updates)
+        if resolution.detected_feed:
+            detected_feed = resolution.detected_feed
             detected_title = detected_feed.get("title")
             resolved_display_name = (
                 detected_title.strip()
                 if isinstance(detected_title, str) and detected_title.strip()
                 else content.title
             )
-            processing_updates: dict[str, object] = {"subscribe_to_feed": True}
-            processing_updates["detected_feed"] = detected_feed
-            if all_detected_feeds:
-                processing_updates["all_detected_feeds"] = all_detected_feeds
+            processing_updates: dict[str, object] = {
+                "subscribe_to_feed": True,
+                "detected_feed": detected_feed,
+            }
+            if resolution.source:
+                processing_updates["feed_resolution_source"] = resolution.source
+            if resolution.source_url:
+                processing_updates["feed_resolution_source_url"] = resolution.source_url
+            if resolution.all_detected_feeds:
+                processing_updates["all_detected_feeds"] = resolution.all_detected_feeds
 
             subscription_result = subscribe_to_detected_feed_result(
                 db,
@@ -318,22 +231,25 @@ class FeedSubscriptionFlow:
                 detected_feed,
                 display_name=resolved_display_name,
             )
-            fetch_status = subscription_result.status
+            feed_type = detected_feed.get("type")
             processing_updates["feed_subscription"] = {
-                "status": fetch_status,
+                "status": subscription_result.status,
                 "feed_url": detected_feed.get("url"),
-                "feed_type": detected_feed.get("type"),
+                "feed_type": feed_type,
                 "created": subscription_result.created,
                 "config_id": subscription_result.config_id,
                 "initial_download": self._run_initial_feed_download(
                     user_id=metadata.get("submitted_by_user_id"),
                     subscription_status=subscription_result.status,
                     config_id=subscription_result.config_id,
+                    feed_type=feed_type if isinstance(feed_type, str) else None,
                 ),
             }
         else:
-            processing_updates = {"subscribe_to_feed": True}
-            processing_updates["feed_subscription"] = {"status": fetch_status}
+            processing_updates = {
+                "subscribe_to_feed": True,
+                "feed_subscription": {"status": resolution.status},
+            }
         metadata = update_processing_state(metadata, **processing_updates)
 
         content.content_metadata = refresh_merge_content_metadata(
@@ -357,9 +273,8 @@ class FeedSubscriptionFlow:
 class TweetResolutionFlow:
     """Resolve submitted tweet URLs into canonical long-form content."""
 
-    _THREAD_PAGE_LIMIT = 10
-    _THREAD_TWEET_LIMIT = 1000
-    _THREAD_SIGNAL_MARKERS = ("1/", "thread", "🧵", "part 1", "1 of")
+    def __init__(self, *, target_resolver: TweetTargetResolver | None = None) -> None:
+        self._target_resolver = target_resolver or TweetTargetResolver()
 
     def _resolve_target_type(
         self,
@@ -396,267 +311,6 @@ class TweetResolutionFlow:
         if content_id is None:
             return
         knowledge_service.save_to_knowledge(db, content_id, submitter_id)
-
-    def _normalize_candidate_urls(self, urls: list[str], *, content_id: int) -> list[str]:
-        normalized_urls: list[str] = []
-        seen: set[str] = set()
-        for raw_url in urls:
-            try:
-                normalized = normalize_url(raw_url)
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Skipping invalid tweet external URL: %s",
-                    raw_url,
-                    extra={
-                        "component": "tweet_resolution",
-                        "operation": "normalize_external_url",
-                        "item_id": content_id,
-                    },
-                )
-                continue
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            normalized_urls.append(normalized)
-        return normalized_urls
-
-    def _build_same_author_thread(self, root_tweet: XTweet, tweets: list[XTweet]) -> list[XTweet]:
-        by_id: dict[str, XTweet] = {root_tweet.id: root_tweet}
-        for tweet in tweets:
-            if tweet.id == root_tweet.id:
-                continue
-            if tweet.author_id and root_tweet.author_id and tweet.author_id != root_tweet.author_id:
-                continue
-            if tweet.conversation_id != root_tweet.conversation_id:
-                continue
-            by_id[tweet.id] = tweet
-
-        def _sort_key(tweet: XTweet) -> tuple[datetime, str]:
-            created_at = parse_x_created_at(tweet.created_at) or datetime.min.replace(tzinfo=UTC)
-            return created_at, tweet.id
-
-        return sorted(by_id.values(), key=_sort_key)
-
-    def _resolve_from_thread(
-        self,
-        *,
-        root_tweet: XTweet,
-        access_token: str | None,
-    ) -> tuple[str | None, str, str, list[XTweet]]:
-        if not root_tweet.author_id or not root_tweet.conversation_id:
-            return None, "unavailable", root_tweet.id, [root_tweet]
-
-        cutoff = datetime.now(UTC) - timedelta(days=7)
-        root_created_at = parse_x_created_at(root_tweet.created_at)
-        can_use_recent_search = bool(
-            root_created_at and root_created_at >= cutoff and root_tweet.author_username
-        )
-        collected: list[XTweet] = [root_tweet]
-
-        if can_use_recent_search:
-            query = (
-                f"conversation_id:{root_tweet.conversation_id} from:{root_tweet.author_username}"
-            )
-            try:
-                page = search_recent_tweets(query=query, access_token=access_token, max_results=100)
-                collected.extend(page.tweets)
-                thread_tweets = self._build_same_author_thread(root_tweet, collected)
-                for tweet in thread_tweets:
-                    normalized_urls = self._normalize_candidate_urls(
-                        tweet.external_urls,
-                        content_id=0,
-                    )
-                    if normalized_urls:
-                        return normalized_urls[0], "found", tweet.id, thread_tweets
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Recent search thread lookup failed for tweet %s",
-                    root_tweet.id,
-                    extra={
-                        "component": "tweet_resolution",
-                        "operation": "recent_search_thread_lookup",
-                    },
-                )
-
-        scanned = len([tweet for tweet in collected if tweet.id != root_tweet.id])
-        pages = 0
-        pagination_token: str | None = None
-        while pages < self._THREAD_PAGE_LIMIT and scanned < self._THREAD_TWEET_LIMIT:
-            page = fetch_user_tweets(
-                user_id=root_tweet.author_id,
-                access_token=access_token,
-                pagination_token=pagination_token,
-                max_results=min(100, self._THREAD_TWEET_LIMIT - scanned),
-            )
-            pages += 1
-            scanned += len(page.tweets)
-            collected.extend(page.tweets)
-            thread_tweets = self._build_same_author_thread(root_tweet, collected)
-            for tweet in thread_tweets:
-                normalized_urls = self._normalize_candidate_urls(
-                    tweet.external_urls,
-                    content_id=0,
-                )
-                if normalized_urls:
-                    return normalized_urls[0], "found", tweet.id, thread_tweets
-            if not page.next_token:
-                return None, "not_found", root_tweet.id, thread_tweets
-            pagination_token = page.next_token
-
-        thread_tweets = self._build_same_author_thread(root_tweet, collected)
-        return None, "capped", root_tweet.id, thread_tweets
-
-    def _should_attempt_thread_lookup(self, root_tweet: XTweet) -> bool:
-        if not root_tweet.author_id or not root_tweet.conversation_id:
-            return False
-        if root_tweet.article_text or root_tweet.note_tweet_text:
-            return False
-        if root_tweet.external_urls:
-            return False
-        lowered = root_tweet.text.lower()
-        if any(marker in lowered for marker in self._THREAD_SIGNAL_MARKERS):
-            return True
-        return (root_tweet.reply_count or 0) >= 3
-
-    def _resolve_tweet_target(
-        self,
-        *,
-        root_tweet: XTweet,
-        access_token: str | None,
-        content_id: int,
-        included_tweets_by_id: dict[str, XTweet] | None = None,
-    ) -> TweetTargetResolution:
-        root_urls = self._normalize_candidate_urls(root_tweet.external_urls, content_id=content_id)
-        linked_tweet_ids = list(root_tweet.linked_tweet_ids)
-        if root_urls:
-            return TweetTargetResolution(
-                selected_article_url=root_urls[0],
-                resolution_source="root_tweet",
-                resolution_tweet_id=root_tweet.id,
-                thread_text=_build_thread_text([build_tweet_processing_text(root_tweet)]),
-                linked_tweet_ids=linked_tweet_ids,
-                thread_lookup_status="not_needed",
-            )
-
-        if root_tweet.article_text or root_tweet.note_tweet_text:
-            return TweetTargetResolution(
-                selected_article_url=None,
-                resolution_source="root_tweet",
-                resolution_tweet_id=root_tweet.id,
-                thread_text=_build_thread_text([build_tweet_processing_text(root_tweet)]),
-                linked_tweet_ids=linked_tweet_ids,
-                thread_lookup_status="not_needed",
-            )
-
-        included_lookup = included_tweets_by_id or {}
-        if linked_tweet_ids:
-            for linked_tweet_id in linked_tweet_ids:
-                linked_tweet = included_lookup.get(linked_tweet_id)
-                if linked_tweet is None:
-                    continue
-                linked_urls = self._normalize_candidate_urls(
-                    linked_tweet.external_urls,
-                    content_id=content_id,
-                )
-                if linked_urls:
-                    return TweetTargetResolution(
-                        selected_article_url=linked_urls[0],
-                        resolution_source="linked_tweet",
-                        resolution_tweet_id=linked_tweet.id,
-                        thread_text=_build_thread_text([build_tweet_processing_text(root_tweet)]),
-                        linked_tweet_ids=linked_tweet_ids,
-                        thread_lookup_status="not_needed",
-                    )
-
-        remaining_linked_tweet_ids = [
-            linked_tweet_id
-            for linked_tweet_id in linked_tweet_ids
-            if linked_tweet_id not in included_lookup
-        ]
-
-        if remaining_linked_tweet_ids:
-            try:
-                linked_tweets = fetch_tweets_by_ids(
-                    tweet_ids=remaining_linked_tweet_ids,
-                    access_token=access_token,
-                )
-                for linked_tweet in linked_tweets:
-                    linked_urls = self._normalize_candidate_urls(
-                        linked_tweet.external_urls,
-                        content_id=content_id,
-                    )
-                    if linked_urls:
-                        return TweetTargetResolution(
-                            selected_article_url=linked_urls[0],
-                            resolution_source="linked_tweet",
-                            resolution_tweet_id=linked_tweet.id,
-                            thread_text=_build_thread_text(
-                                [build_tweet_processing_text(root_tweet)]
-                            ),
-                            linked_tweet_ids=linked_tweet_ids,
-                            thread_lookup_status="not_needed",
-                        )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "Linked tweet lookup failed for tweet %s",
-                    root_tweet.id,
-                    extra={
-                        "component": "tweet_resolution",
-                        "operation": "linked_tweet_lookup",
-                        "item_id": content_id,
-                    },
-                )
-
-        if not self._should_attempt_thread_lookup(root_tweet):
-            return TweetTargetResolution(
-                selected_article_url=None,
-                resolution_source="tweet_only",
-                resolution_tweet_id=root_tweet.id,
-                thread_text=_build_thread_text([build_tweet_processing_text(root_tweet)]),
-                linked_tweet_ids=linked_tweet_ids,
-                thread_lookup_status="not_attempted",
-            )
-
-        try:
-            selected_article_url, thread_lookup_status, resolution_tweet_id, thread_tweets = (
-                self._resolve_from_thread(root_tweet=root_tweet, access_token=access_token)
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Thread lookup failed for tweet %s",
-                root_tweet.id,
-                extra={
-                    "component": "tweet_resolution",
-                    "operation": "thread_lookup",
-                    "item_id": content_id,
-                },
-            )
-            selected_article_url = None
-            thread_lookup_status = "unavailable"
-            resolution_tweet_id = root_tweet.id
-            thread_tweets = [root_tweet]
-        thread_text = _build_thread_text(
-            [build_tweet_processing_text(tweet) for tweet in thread_tweets]
-        )
-        if selected_article_url:
-            return TweetTargetResolution(
-                selected_article_url=selected_article_url,
-                resolution_source="thread_reply",
-                resolution_tweet_id=resolution_tweet_id,
-                thread_text=thread_text,
-                linked_tweet_ids=linked_tweet_ids,
-                thread_lookup_status=thread_lookup_status,
-            )
-
-        return TweetTargetResolution(
-            selected_article_url=None,
-            resolution_source="tweet_only",
-            resolution_tweet_id=root_tweet.id,
-            thread_text=thread_text
-            or _build_thread_text([build_tweet_processing_text(root_tweet)]),
-            linked_tweet_ids=linked_tweet_ids,
-            thread_lookup_status=thread_lookup_status,
-        )
 
     def run(
         self,
@@ -764,13 +418,13 @@ class TweetResolutionFlow:
         if content_id is None:
             raise ValueError("Tweet resolution flow requires persisted content")
         included_tweets_by_id = hydrate_included_tweets_from_metadata(metadata)
-        resolution = self._resolve_tweet_target(
+        resolution = self._target_resolver.resolve_tweet_target(
             root_tweet=tweet,
             access_token=access_token,
             content_id=content_id,
             included_tweets_by_id=included_tweets_by_id,
         )
-        external_urls = self._normalize_candidate_urls(
+        external_urls = normalize_tweet_external_urls(
             tweet.external_urls,
             content_id=content_id,
         )

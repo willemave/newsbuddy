@@ -52,16 +52,6 @@ class DownloadTweetVideoAudioHandler:
                     context.queue.enqueue(TaskType.SUMMARIZE, content_id=content_id)
                     return TaskResult.ok()
 
-                if isinstance(duration_ms, int):
-                    max_ms = context.settings.tweet_video_max_duration_seconds * 1000
-                    if duration_ms > max_ms:
-                        metadata["has_video"] = False
-                        metadata["tweet_video_skip_reason"] = "duration_limit"
-                        content.content_metadata = metadata
-                        db.commit()
-                        context.queue.enqueue(TaskType.SUMMARIZE, content_id=content_id)
-                        return TaskResult.ok()
-
                 promote_tweet_video_metadata(metadata, duration_ms=duration_ms)
                 target_dir = context.settings.tweet_video_media_dir / f"content-{content_id}"
                 tweet_url = (

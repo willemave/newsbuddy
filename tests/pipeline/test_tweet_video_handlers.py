@@ -27,7 +27,6 @@ def _build_context(db_session, tmp_path, queue_gateway: Mock) -> TaskContext:
             Settings,
             SimpleNamespace(
                 tweet_video_enabled=True,
-                tweet_video_max_duration_seconds=1800,
                 tweet_video_media_dir=tmp_path,
             ),
         ),
@@ -54,7 +53,7 @@ def test_download_tweet_video_uses_snapshot_video_metadata(
             "tweet_video_skip_reason": "duration_limit",
             "tweet_snapshot": {
                 "has_video": True,
-                "video_duration_ms": 1_202_451,
+                "video_duration_ms": 3_395_666,
             },
         },
     )
@@ -85,7 +84,7 @@ def test_download_tweet_video_uses_snapshot_video_metadata(
     metadata = content.content_metadata
     assert isinstance(metadata, dict)
     assert metadata["has_video"] is True
-    assert metadata["video_duration_ms"] == 1_202_451
+    assert metadata["video_duration_ms"] == 3_395_666
     assert "tweet_video_skip_reason" not in metadata
     assert metadata["video_audio_path"] == str(audio_path)
     queue_gateway.enqueue.assert_called_once_with(
