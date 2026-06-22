@@ -25,7 +25,7 @@ Common options:
 Examples:
   scripts/start_services.sh all --env-file .env
   scripts/start_services.sh server --port 8000 --reload
-  scripts/start_services.sh workers --content-workers 4 --discussion-workers 1 --media-workers 1 --learning-workers 1
+  scripts/start_services.sh workers --content-workers 4 --discussion-workers 1 --media-workers 1 --learning-workers 1 --llm-workers 1
   scripts/start_services.sh migrate --env-file .env
 EOF
 }
@@ -217,6 +217,7 @@ start_workers() {
   local twitter_workers=""
   local chat_workers=""
   local learning_workers=""
+  local llm_workers=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -276,6 +277,10 @@ start_workers() {
         learning_workers="$2"
         shift 2
         ;;
+      --llm-workers)
+        llm_workers="$2"
+        shift 2
+        ;;
       --no-stats)
         stats_interval="0"
         shift
@@ -307,6 +312,7 @@ start_workers() {
   twitter_workers="${twitter_workers:-$(dotenv_get TWITTER_WORKER_PROCS 1)}"
   chat_workers="${chat_workers:-$(dotenv_get CHAT_WORKER_PROCS 1)}"
   learning_workers="${learning_workers:-$(dotenv_get LEARNING_WORKER_PROCS 1)}"
+  llm_workers="${llm_workers:-$(dotenv_get LLM_WORKER_PROCS 1)}"
 
   local database_target
   database_target="$(print_database_target)"
@@ -326,12 +332,13 @@ start_workers() {
      ! [[ "${discussion_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${twitter_workers}" =~ ^[0-9]+$ ]] || \
      ! [[ "${chat_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${learning_workers}" =~ ^[0-9]+$ ]]; then
+     ! [[ "${learning_workers}" =~ ^[0-9]+$ ]] || \
+     ! [[ "${llm_workers}" =~ ^[0-9]+$ ]]; then
     echo "ERROR: worker counts must be non-negative integers" >&2
     exit 1
   fi
 
-  local total_workers=$((content_workers + media_workers + audio_episode_workers + image_workers + onboarding_workers + backfill_workers + discussion_workers + twitter_workers + chat_workers + learning_workers))
+  local total_workers=$((content_workers + media_workers + audio_episode_workers + image_workers + onboarding_workers + backfill_workers + discussion_workers + twitter_workers + chat_workers + learning_workers + llm_workers))
   if [[ "${total_workers}" -le 0 ]]; then
     echo "ERROR: at least one worker must be enabled" >&2
     exit 1
@@ -378,6 +385,7 @@ start_workers() {
   launch_worker_pool twitter "${twitter_workers}"
   launch_worker_pool chat "${chat_workers}"
   launch_worker_pool learning "${learning_workers}"
+  launch_worker_pool llm "${llm_workers}"
 
   local exit_code=0
   for pid in "${pids[@]}"; do
@@ -521,6 +529,7 @@ start_all() {
   local twitter_workers=""
   local chat_workers=""
   local learning_workers=""
+  local llm_workers=""
   local stats_interval="30"
   local max_tasks=""
   local skip_browser_install="false"
@@ -595,6 +604,10 @@ start_all() {
         learning_workers="$2"
         shift 2
         ;;
+      --llm-workers)
+        llm_workers="$2"
+        shift 2
+        ;;
       --stats-interval)
         stats_interval="$2"
         shift 2
@@ -630,6 +643,7 @@ start_all() {
   twitter_workers="${twitter_workers:-$(dotenv_get TWITTER_WORKER_PROCS 1)}"
   chat_workers="${chat_workers:-$(dotenv_get CHAT_WORKER_PROCS 1)}"
   learning_workers="${learning_workers:-$(dotenv_get LEARNING_WORKER_PROCS 1)}"
+  llm_workers="${llm_workers:-$(dotenv_get LLM_WORKER_PROCS 1)}"
 
   local database_target
   database_target="$(print_database_target)"
@@ -681,6 +695,7 @@ start_all() {
     --twitter-workers "${twitter_workers}"
     --chat-workers "${chat_workers}"
     --learning-workers "${learning_workers}"
+    --llm-workers "${llm_workers}"
     --stats-interval "${stats_interval}"
   )
   if [[ "${debug_mode}" == "true" ]]; then

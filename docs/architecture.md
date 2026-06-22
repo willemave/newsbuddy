@@ -727,6 +727,8 @@ Defined in `app/models/contracts.py`:
 - `sync_integration`
 - `generate_insight_report`
 - `generate_audio_episode`
+- `generate_learning_deck`
+- `run_llm_task`
 
 ### 9.2 Queue partitions
 
@@ -741,6 +743,8 @@ Defined in `TaskQueue`:
 - `discussion`
 - `twitter`
 - `chat`
+- `learning`
+- `llm`
 
 Current task-to-queue mapping is declared in `app/pipeline/task_specs.py` and
 used by `app/services/queue.py`:
@@ -768,6 +772,8 @@ used by `app/services/queue.py`:
 | `sync_integration` | `twitter` |
 | `generate_insight_report` | `content` |
 | `generate_audio_episode` | `audio_episode` |
+| `generate_learning_deck` | `learning` |
+| `run_llm_task` | `llm` |
 
 ### 9.3 Queue semantics
 
@@ -822,10 +828,12 @@ Registered handlers:
 - sync integration
 - generate insight report
 - generate audio episode
+- generate learning deck
+- run LLM task
 
 ### 9.5 Worker launch and drift guards
 
-Workers are launched per queue partition. `scripts/dev.sh` and `scripts/start_services.sh` start `content`, `media`, `audio_episode`, `image`, `onboarding`, `backfill`, `discussion`, `twitter`, and `chat` workers. The `content` queue runs with higher parallelism by default because it carries the widest set of user-visible work.
+Workers are launched per queue partition. `scripts/dev.sh` and `scripts/start_services.sh` start `content`, `media`, `audio_episode`, `image`, `onboarding`, `backfill`, `discussion`, `twitter`, `chat`, `learning`, and `llm` workers. The `content` queue runs with higher parallelism by default because it carries the widest set of user-visible work.
 
 `supervisor.conf` and `docker/supervisord.conf` mirror the same queue partitions; `docker/supervisord.server.conf` intentionally starts only server/bootstrap processes. `tests/scripts/test_supervisor_queue_config.py` derives expected worker coverage from `TaskQueue` and guards host/Docker config drift.
 
@@ -1302,9 +1310,10 @@ Contract evolution rules live in `docs/initiatives/typed-contracts-2026-06/20-co
 
 The share extension lives in `client/newsly/ShareExtension/`.
 
-`ShareViewController.swift` currently supports four submission modes:
+`ShareViewController.swift` currently supports five submission modes:
 
 - Add content
+- Create learning deck
 - Add links
 - Add feed
 - Chat
@@ -1314,7 +1323,7 @@ The extension:
 - extracts shared URLs from extension items
 - shares auth state through the app group / shared keychain
 - submits URLs to the backend
-- lets the user choose whether the backend should summarize, crawl linked pages, or subscribe to the site feed
+- lets the user choose whether the backend should summarize, create a learning deck, crawl linked pages, or subscribe to the site feed
 - supports a "Bookmark only" path that sends `save_to_knowledge_and_mark_read`
 - can submit a chat-start request that saves the item to Knowledge, processes it normally, and uses the typed share-sheet message as the first content-linked chat turn
 - applies platform hints for X, YouTube, podcast hosts, and other known URL shapes

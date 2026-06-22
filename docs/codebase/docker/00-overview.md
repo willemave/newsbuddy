@@ -7,7 +7,7 @@ Container entrypoints and supervisor configuration for the staging/production-st
 
 ## Runtime behavior
 - `entrypoint.sh` starts Supervisor, which coordinates Postgres, bootstrap, API, workers, queue watchdog, and scheduler processes.
-- `supervisord.conf` is the full single-container runtime: Postgres, API, content workers, media workers, image, onboarding, backfill, discussion, twitter, chat, audio-episode, queue-watchdog, and scheduler programs.
+- `supervisord.conf` is the full single-container runtime: Postgres, API, content workers, media workers, image, onboarding, backfill, discussion, twitter, chat, audio-episode, learning, llm, queue-watchdog, and scheduler programs.
 - `supervisord.server.conf` is the server profile variant.
 - Worker entrypoints call the Python queue processor for named task queues; scheduler and watchdog entrypoints call the corresponding scripts.
 - `crontab` and `supercronic.py` support cron-style scheduled tasks where the deployment profile needs them.
