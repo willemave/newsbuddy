@@ -7,10 +7,9 @@ import SwiftUI
 import UIKit
 
 private enum LearningDeckReaderLayout {
-    static let compactChatHeight: CGFloat = 250
-    static let regularChatHeight: CGFloat = 320
-    static let maxChatHeight: CGFloat = 380
-    static let peekChatHeight: CGFloat = 58
+    static let compactChatHeight: CGFloat = 300
+    static let regularChatHeight: CGFloat = 340
+    static let maxChatHeight: CGFloat = 400
     static let landscapeHorizontalSafeReserve: CGFloat = 76
 }
 
@@ -19,7 +18,6 @@ struct LearningDeckReaderView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: LearningDeckReaderViewModel
     @StateObject private var webController = LearningDeckReaderWebController()
-    @State private var chatExpanded = false
     @State private var showLandscapeChat = false
 
     let deck: LearningDeck
@@ -102,17 +100,14 @@ struct LearningDeckReaderView: View {
                 LearningDeckChatPanel(
                     deck: deck,
                     viewModel: viewModel,
-                    isExpanded: $chatExpanded,
-                    isPeekable: true
+                    isExpanded: .constant(true),
+                    isPeekable: false
                 )
-                .frame(height: chatExpanded
-                    ? chatHeight(for: geometry.size)
-                    : LearningDeckReaderLayout.peekChatHeight)
+                .frame(height: chatHeight(for: geometry.size))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.2), value: isLandscape)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: chatExpanded)
     }
 
     private func deckRegion(url: URL, isLandscape: Bool) -> some View {
@@ -365,9 +360,9 @@ struct LearningDeckReaderView: View {
             ? LearningDeckReaderLayout.compactChatHeight
             : LearningDeckReaderLayout.regularChatHeight
         let cap = dynamicTypeSize.isAccessibilitySize
-            ? size.height * 0.6
-            : LearningDeckReaderLayout.maxChatHeight
-        return min(max(preferred, size.height * 0.32), cap)
+            ? size.height * 0.62
+            : min(LearningDeckReaderLayout.maxChatHeight, size.height * 0.46)
+        return min(max(preferred, size.height * 0.34), cap)
     }
 
     private var closeButtonTopPadding: CGFloat {

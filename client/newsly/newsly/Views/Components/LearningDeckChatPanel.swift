@@ -75,7 +75,7 @@ struct LearningDeckChatPanel: View {
             LearningDeckChatComposer(viewModel: viewModel)
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 8)
-                .padding(.bottom, 10)
+                .padding(.bottom, 18)
         }
     }
 

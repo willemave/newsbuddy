@@ -45,6 +45,18 @@ final class LearningDeckReaderWebController: ObservableObject {
     }
 }
 
+private extension URL {
+    /// Whether two URLs point at the same document, ignoring the fragment that
+    /// reveal.js mutates during in-deck slide navigation.
+    func newslySameDocument(as other: URL) -> Bool {
+        var lhs = URLComponents(url: self, resolvingAgainstBaseURL: false)
+        var rhs = URLComponents(url: other, resolvingAgainstBaseURL: false)
+        lhs?.fragment = nil
+        rhs?.fragment = nil
+        return lhs?.url == rhs?.url
+    }
+}
+
 struct LearningDeckWebView: UIViewRepresentable {
     let url: URL
     let controller: LearningDeckReaderWebController
@@ -74,7 +86,13 @@ struct LearningDeckWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        guard webView.url != url else { return }
+        // reveal.js (hash: true) writes the current slide into the URL fragment
+        // (#/h/v) as the deck is navigated, which changes webView.url. Reloading on
+        // those fragment-only changes would clobber navigation back to the first
+        // slide, so only reload when the underlying document URL actually changes.
+        if let current = webView.url, current.newslySameDocument(as: url) {
+            return
+        }
         controller.markLoading()
         webView.load(URLRequest(url: url))
     }
