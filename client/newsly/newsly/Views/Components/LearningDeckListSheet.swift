@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import UIKit
 
 private struct LearningDeckBrowserDestination: Identifiable {
     let url: URL
@@ -23,21 +22,18 @@ struct LearningDeckListSheet: View {
     @Binding var isPresented: Bool
 
     @State private var showCreateSheet = false
+    @State private var readerDestination: LearningDeckReaderDestination?
     @State private var browserDestination: LearningDeckBrowserDestination?
+    @State private var shareContent: ShareContent?
     @State private var notice: LearningDeckNotice?
     @State private var deckPendingDeletion: LearningDeck?
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(spacing: 2) {
                     if let errorMessage = viewModel.errorMessage {
-                        Text(errorMessage)
-                            .font(.terracottaBodySmall)
-                            .foregroundStyle(Color.statusDestructive)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, Spacing.appHorizontalMargin)
-                            .padding(.vertical, 14)
+                        errorBanner(errorMessage)
                     }
 
                     if viewModel.isLoading && viewModel.decks.isEmpty {
@@ -45,7 +41,7 @@ struct LearningDeckListSheet: View {
                             .padding(.horizontal, Spacing.appHorizontalMargin)
                             .padding(.vertical, 14)
                     } else if viewModel.decks.isEmpty {
-                        LearningDeckEmptyRow()
+                        LearningDeckEmptyRow(onCreate: { showCreateSheet = true })
                             .padding(.horizontal, Spacing.appHorizontalMargin)
                             .padding(.vertical, 18)
                     } else {
@@ -56,15 +52,26 @@ struct LearningDeckListSheet: View {
                                 open: { Task { await openDeck(deck) } },
                                 openNotes: { Task { await openSourceNotes(deck) } },
                                 toggleShare: { Task { await toggleShare(deck) } },
+                                retry: { Task { await retry(deck) } },
                                 delete: { deckPendingDeletion = deck }
                             )
                         }
                     }
                 }
-                .padding(.top, 6)
+                .padding(.top, 8)
                 .padding(.bottom, 28)
             }
-            .background(Color.surfacePrimary)
+            .background {
+                LinearGradient(
+                    colors: [
+                        Color.surfacePrimary,
+                        Color.surfaceContainer.opacity(0.42),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+            }
             .navigationTitle("Learning Decks")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -75,6 +82,7 @@ struct LearningDeckListSheet: View {
                         Text("Done")
                             .frame(minHeight: 44)
                     }
+                    .accessibilityIdentifier("learning_deck.list.done")
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -85,6 +93,7 @@ struct LearningDeckListSheet: View {
                             .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel("Create Learning Deck")
+                    .accessibilityIdentifier("learning_deck.list.create")
                 }
             }
             .refreshable {
@@ -98,9 +107,22 @@ struct LearningDeckListSheet: View {
                     onCreate: createDeck
                 )
             }
+            .sheet(item: $shareContent) { content in
+                ShareSheet(content: content)
+            }
             .fullScreenCover(item: $browserDestination) { destination in
                 SafariView(url: destination.url)
                     .ignoresSafeArea()
+            }
+            .fullScreenCover(item: $readerDestination) { destination in
+                LearningDeckReaderView(
+                    deck: destination.deck,
+                    viewerURL: destination.url,
+                    onClose: {
+                        readerDestination = nil
+                    }
+                )
+                .ignoresSafeArea()
             }
             .alert(item: $notice) { notice in
                 Alert(
@@ -124,7 +146,29 @@ struct LearningDeckListSheet: View {
             } message: {
                 Text("This removes the deck from your library.")
             }
+            .withToast()
         }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(message)
+                .font(.terracottaBodySmall)
+                .foregroundStyle(Color.statusDestructive)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                Task { await viewModel.load() }
+            } label: {
+                Text("Try again")
+                    .font(.terracottaBodySmall.weight(.semibold))
+                    .foregroundStyle(Color.brandPrimary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("learning_deck.list.retry")
+        }
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .padding(.vertical, 14)
     }
 
     private var deleteConfirmationBinding: Binding<Bool> {
@@ -152,36 +196,27 @@ struct LearningDeckListSheet: View {
             return false
         }
 
-        if deck.viewerAvailable {
-            await openDeck(deck)
-        } else {
-            notice = LearningDeckNotice(
-                title: "Learning Deck queued",
-                message: deck.latestNote ?? "The deck is being generated."
-            )
-        }
+        await openDeck(deck)
         return true
     }
 
     @MainActor
     private func openDeck(_ deck: LearningDeck) async {
-        if deck.viewerAvailable, let url = await viewModel.viewerURL(for: deck) {
-            browserDestination = LearningDeckBrowserDestination(url: url)
-            return
-        }
-
-        await viewModel.refresh(deck)
-        guard let latest = viewModel.decks.first(where: { $0.id == deck.id }) else {
-            return
-        }
-        if latest.viewerAvailable, let url = await viewModel.viewerURL(for: latest) {
-            browserDestination = LearningDeckBrowserDestination(url: url)
+        if deck.viewerAvailable {
+            let url = await viewModel.viewerURL(for: deck)
+            readerDestination = LearningDeckReaderDestination(deck: deck, url: url)
         } else {
-            notice = LearningDeckNotice(
-                title: "Learning Deck",
-                message: latest.latestNote ?? "The deck is still being generated."
-            )
+            // Open the reader anyway; it shows live generation progress and swaps
+            // in the deck when ready instead of stranding the user on an alert.
+            readerDestination = LearningDeckReaderDestination(deck: deck, url: nil)
         }
+    }
+
+    @MainActor
+    private func retry(_ deck: LearningDeck) async {
+        guard let replacement = await viewModel.regenerate(deck) else { return }
+        ToastService.shared.show("Regenerating your deck", type: .info)
+        await openDeck(replacement)
     }
 
     @MainActor
@@ -194,13 +229,13 @@ struct LearningDeckListSheet: View {
     private func toggleShare(_ deck: LearningDeck) async {
         let shareURL = await viewModel.toggleShare(for: deck)
         if let shareURL {
-            UIPasteboard.general.string = shareURL
-            notice = LearningDeckNotice(title: "Share link copied", message: shareURL)
-        } else if deck.shareEnabled {
-            notice = LearningDeckNotice(
-                title: "Share link disabled",
-                message: "This deck is private again."
+            shareContent = ShareContent(
+                messageContent: shareURL,
+                articleTitle: deck.displayTitle,
+                articleUrl: nil
             )
+        } else if deck.shareEnabled {
+            ToastService.shared.show("Deck is private again", type: .success)
         }
     }
 }

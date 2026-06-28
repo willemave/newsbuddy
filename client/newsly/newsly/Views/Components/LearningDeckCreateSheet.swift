@@ -40,6 +40,8 @@ struct LearningDeckCreateSheet: View {
         return nonEmptyTrimmed(sourceTitle)
     }
 
+    private let focusSuggestions = ["Key takeaways", "How it works", "Why it matters"]
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 18) {
@@ -56,6 +58,9 @@ struct LearningDeckCreateSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .learningDeckCreatePanelSurface()
 
                 if requiresURL {
                     TextField("Article, GitHub, podcast, or PDF URL", text: $urlText)
@@ -66,16 +71,21 @@ struct LearningDeckCreateSheet: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .background(Color.surfaceSecondary)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .learningDeckCreateInputSurface()
                         .accessibilityLabel("Learning Deck URL")
+                        .accessibilityIdentifier("learning_deck.create.url")
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
-                        Text("Focus")
-                            .font(.terracottaBodyMedium.weight(.semibold))
-                            .foregroundStyle(Color.onSurface)
+                        HStack(spacing: 6) {
+                            Text("Focus")
+                                .font(.terracottaBodyMedium.weight(.semibold))
+                                .foregroundStyle(Color.onSurface)
+                            Text("optional")
+                                .font(.terracottaBodySmall)
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                        }
 
                         Spacer(minLength: 0)
 
@@ -101,26 +111,77 @@ struct LearningDeckCreateSheet: View {
                         .accessibilityIdentifier("learning_deck.focus_mic")
                     }
 
-                    TextEditor(text: $interestsText)
-                        .font(.terracottaBodyMedium)
-                        .scrollContentBackground(.hidden)
-                        .frame(minHeight: 126)
-                        .padding(10)
-                        .background(Color.surfaceSecondary)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    ZStack(alignment: .topLeading) {
+                        if normalizedInterestsText == nil {
+                            Text("What should this deck zoom in on? — e.g. the security tradeoffs, or just the key takeaways")
+                                .font(.terracottaBodyMedium)
+                                .foregroundStyle(Color.onSurfaceSecondary.opacity(0.55))
+                                .padding(.horizontal, 15)
+                                .padding(.vertical, 18)
+                                .allowsHitTesting(false)
+                        }
+
+                        TextEditor(text: $interestsText)
+                            .font(.terracottaBodyMedium)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: 126)
+                            .padding(10)
+                    }
+                    .learningDeckCreateInputSurface()
+                    .accessibilityIdentifier("learning_deck.create.focus")
+
+                    if normalizedInterestsText == nil {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(focusSuggestions, id: \.self) { suggestion in
+                                    Button {
+                                        appendInterestsTranscript(suggestion)
+                                    } label: {
+                                        Text(suggestion)
+                                            .font(.terracottaBodySmall.weight(.semibold))
+                                            .foregroundStyle(Color.onSurface)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 7)
+                                            .background(Color.surfaceSecondary, in: Capsule())
+                                            .overlay {
+                                                Capsule()
+                                                    .stroke(Color.outlineVariant.opacity(0.18), lineWidth: 1)
+                                            }
+                                            .contentShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier("learning_deck.create.focus_suggestion")
+                                }
+                            }
+                        }
+                    }
 
                     focusRecordingStatus
                 }
+                .padding(16)
+                .learningDeckCreatePanelSurface()
 
                 Spacer(minLength: 0)
             }
             .padding(20)
-            .background(Color.surfacePrimary.ignoresSafeArea())
+            .disabled(isSubmitting)
+            .background {
+                LinearGradient(
+                    colors: [
+                        Color.surfacePrimary,
+                        Color.surfaceContainer.opacity(0.42),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .accessibilityIdentifier("learning_deck.create.cancel")
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
@@ -142,6 +203,7 @@ struct LearningDeckCreateSheet: View {
                         }
                     }
                     .disabled(!canSubmit)
+                    .accessibilityIdentifier("learning_deck.create.submit")
                 }
             }
         }
@@ -194,151 +256,26 @@ struct LearningDeckCreateSheet: View {
         interestsText = "\(existingText)\n\(normalizedTranscript)"
     }
 
-    private func nonEmptyTrimmed(_ value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
 }
 
-@MainActor
-private final class LearningDeckFocusRecorder: ObservableObject {
-    @Published private(set) var isRecording = false
-    @Published private(set) var isTranscribing = false
-    @Published private(set) var isVoiceActionInFlight = false
-    @Published var errorMessage: String?
-
-    private let transcriptionService: any SpeechTranscribing
-    private var voiceDictationAvailable = false
-    private var pendingTranscript: String?
-    private var transcriptHandler: ((String) -> Void)?
-    private var hasConfiguredCallbacks = false
-
-    init(transcriptionService: (any SpeechTranscribing)? = nil) {
-        self.transcriptionService = transcriptionService
-            ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
-    }
-
-    func toggleRecording(onTranscript: @escaping (String) -> Void) async {
-        guard !isVoiceActionInFlight, !isTranscribing else { return }
-        transcriptHandler = onTranscript
-
-        if isRecording {
-            await stopRecording()
-        } else {
-            await startRecording()
-        }
-    }
-
-    func cancelRecording() {
-        guard hasConfiguredCallbacks || isRecording || isTranscribing || pendingTranscript != nil else {
-            return
-        }
-        transcriptionService.reset()
-        hasConfiguredCallbacks = false
-        pendingTranscript = nil
-        transcriptHandler = nil
-        isRecording = false
-        isTranscribing = false
-        isVoiceActionInFlight = false
-    }
-
-    private func startRecording() async {
-        if !voiceDictationAvailable {
-            await checkAndRefreshVoiceDictation()
-        }
-        guard voiceDictationAvailable else {
-            errorMessage = "Microphone is unavailable right now. Try again in a moment."
-            return
-        }
-
-        configureTranscriptionCallbacks()
-        pendingTranscript = nil
-        errorMessage = nil
-        isVoiceActionInFlight = true
-        defer { isVoiceActionInFlight = false }
-
-        do {
-            try await transcriptionService.start()
-            isRecording = true
-            isTranscribing = false
-        } catch {
-            errorMessage = error.localizedDescription
-            isRecording = false
-            isTranscribing = false
-        }
-    }
-
-    private func stopRecording() async {
-        guard isRecording else { return }
-        isVoiceActionInFlight = true
-        defer { isVoiceActionInFlight = false }
-
-        do {
-            let transcript = try await transcriptionService.stop()
-            pendingTranscript = nil
-            isRecording = false
-            isTranscribing = false
-            applyTranscript(transcript)
-        } catch {
-            errorMessage = error.localizedDescription
-            pendingTranscript = nil
-            isRecording = false
-            isTranscribing = false
-        }
-    }
-
-    private func checkAndRefreshVoiceDictation() async {
-        if transcriptionService.isAvailable {
-            voiceDictationAvailable = true
-            return
-        }
-
-        voiceDictationAvailable = await OpenAIService.shared.refreshTranscriptionAvailability()
-    }
-
-    private func configureTranscriptionCallbacks() {
-        hasConfiguredCallbacks = true
-        transcriptionService.onTranscriptDelta = nil
-        transcriptionService.onTranscriptFinal = { [weak self] transcript in
-            self?.pendingTranscript = transcript
-        }
-        transcriptionService.onStopReason = { [weak self] reason in
-            guard let self else { return }
-            switch reason {
-            case .manual:
-                return
-            case .silenceAutoStop:
-                let transcript = self.pendingTranscript ?? ""
-                self.pendingTranscript = nil
-                self.isRecording = false
-                self.isTranscribing = false
-                self.isVoiceActionInFlight = false
-                self.applyTranscript(transcript)
-            case .cancel, .failure:
-                self.pendingTranscript = nil
-                self.isRecording = false
-                self.isTranscribing = false
-                self.isVoiceActionInFlight = false
+private extension View {
+    func learningDeckCreatePanelSurface() -> some View {
+        self
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.outlineVariant.opacity(0.22), lineWidth: 1)
             }
-        }
-        transcriptionService.onError = { [weak self] message in
-            self?.errorMessage = message
-            self?.pendingTranscript = nil
-            self?.isRecording = false
-            self?.isTranscribing = false
-            self?.isVoiceActionInFlight = false
-        }
-        transcriptionService.onStateChange = nil
     }
 
-    private func applyTranscript(_ transcript: String) {
-        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTranscript.isEmpty else {
-            errorMessage = "I didn't catch that. Try again."
-            return
-        }
-
-        errorMessage = nil
-        transcriptHandler?(trimmedTranscript)
+    @ViewBuilder
+    func learningDeckCreateInputSurface() -> some View {
+        glassSurface(
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous),
+            tint: Color.surfaceSecondary,
+            opacity: 0.22,
+            interactive: true,
+            fallback: .tintStroke(fillOpacity: 1, strokeOpacity: 0.18)
+        )
     }
 }

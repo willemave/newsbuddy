@@ -100,7 +100,11 @@ struct ContentDetailView: View {
     @State private var activeAlert: ViewAlert?
     @State private var activeReaderContent: ContentDetail?
     @State private var activeBrowserDestination: BrowserDestination?
+    @State private var activeLearningDeckReader: LearningDeckReaderDestination?
     @State private var showLearningDeckCreateSheet = false
+    @AppStorage("hasSeenLearningDeckHint") private var hasSeenLearningDeckHint = false
+    @State private var showLearningDeckHint = false
+    @State private var learningDeckHintBounce = false
     // Full image viewer
     @State private var selectedImageAsset: DetailImageAsset?
     // Discussion sheet
@@ -514,8 +518,11 @@ struct ContentDetailView: View {
             if let content = viewModel.content {
                 LearningDeckContentCreateSheet(
                     content: content,
-                    onOpenURL: { url in
-                        activeBrowserDestination = BrowserDestination(url: url)
+                    onOpenDeck: { deck, url in
+                        activeLearningDeckReader = LearningDeckReaderDestination(
+                            deck: deck,
+                            url: url
+                        )
                     },
                     onNotice: { title, message in
                         activeAlert = ViewAlert(title: title, message: message)
@@ -544,6 +551,16 @@ struct ContentDetailView: View {
         .fullScreenCover(item: $activeBrowserDestination) { destination in
             SafariView(url: destination.url)
                 .ignoresSafeArea()
+        }
+        .fullScreenCover(item: $activeLearningDeckReader) { destination in
+            LearningDeckReaderView(
+                deck: destination.deck,
+                viewerURL: destination.url,
+                onClose: {
+                    activeLearningDeckReader = nil
+                }
+            )
+            .ignoresSafeArea()
         }
     }
 
@@ -1450,10 +1467,23 @@ struct ContentDetailView: View {
                 showLearningDeckCreateSheet = true
             } label: {
                 minimalActionIcon("rectangle.stack", overlaid: overlaid)
+                    .symbolEffect(.bounce, value: learningDeckHintBounce)
             }
             .detailActionBarSegment()
             .accessibilityIdentifier("content.action.learning_deck")
             .accessibilityLabel("Create Learning Deck")
+            .popover(isPresented: $showLearningDeckHint) {
+                LearningDeckEntryHint()
+                    .presentationCompactAdaptation(.popover)
+            }
+            .task {
+                guard !hasSeenLearningDeckHint else { return }
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard !Task.isCancelled else { return }
+                hasSeenLearningDeckHint = true
+                learningDeckHintBounce.toggle()
+                showLearningDeckHint = true
+            }
 
             // Deep Dive chat
             Button(action: {
@@ -1658,7 +1688,7 @@ struct ContentDetailView: View {
         .buttonStyle(ChatSheetButtonStyle())
         .disabled(disabled)
         .opacity(disabled ? 0.55 : 1)
-        .accessibilityLabel(badge == nil ? title : "\(title), \(badge)")
+        .accessibilityLabel(badge.map { "\(title), \($0)" } ?? title)
         .accessibilityIdentifier(accessibilityIdentifier)
     }
 
@@ -2751,7 +2781,6 @@ struct ContentDetailView: View {
                     if index < links.count - 1 {
                         Divider()
                             .overlay(Color.outlineVariant.opacity(0.35))
-                            .padding(.leading, 30)
                             .padding(.vertical, 12)
                     }
                 }
@@ -2769,43 +2798,36 @@ struct ContentDetailView: View {
                 Button {
                     openInAppBrowser(url)
                 } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "arrow.up.right")
-                            .font(.appFootnote.weight(.semibold))
-                            .foregroundColor(Color.onSurfaceSecondary.opacity(0.75))
-                            .frame(width: 20, height: 22, alignment: .top)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(link.title ?? link.url)
+                            .font(.appCallout.weight(.semibold))
+                            .foregroundColor(Color.readerBodyText)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(link.title ?? link.url)
-                                .font(.appCallout.weight(.semibold))
-                                .foregroundColor(Color.readerBodyText)
-                                .multilineTextAlignment(.leading)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
+                        Text(link.reason)
+                            .font(.appFootnote)
+                            .foregroundColor(Color.onSurfaceSecondary)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                            Text(link.reason)
-                                .font(.appFootnote)
-                                .foregroundColor(Color.onSurfaceSecondary)
-                                .multilineTextAlignment(.leading)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            HStack(spacing: 6) {
-                                if let source = relevantLinkSourceLabel(link.source) {
-                                    Text(source)
-                                        .font(.appCaption2)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(Color.onSurfaceTertiary)
-                                        .textCase(.uppercase)
-                                        .tracking(0.4)
-                                }
-
-                                Text(link.url)
+                        HStack(spacing: 6) {
+                            if let source = relevantLinkSourceLabel(link.source) {
+                                Text(source)
                                     .font(.appCaption2)
+                                    .fontWeight(.semibold)
                                     .foregroundColor(Color.onSurfaceTertiary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
+                                    .textCase(.uppercase)
+                                    .tracking(0.4)
                             }
+
+                            Text(link.url)
+                                .font(.appCaption2)
+                                .foregroundColor(Color.onSurfaceTertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

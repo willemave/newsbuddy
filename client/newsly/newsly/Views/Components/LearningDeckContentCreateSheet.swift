@@ -7,7 +7,7 @@ import SwiftUI
 
 struct LearningDeckContentCreateSheet: View {
     let content: ContentDetail
-    let onOpenURL: (URL) -> Void
+    let onOpenDeck: (LearningDeck, URL?) -> Void
     let onNotice: (String, String) -> Void
 
     @State private var isSubmitting = false
@@ -32,12 +32,12 @@ struct LearningDeckContentCreateSheet: View {
             let deck = try await createDeck(for: content, interestsPrompt: interestsPrompt)
             if deck.viewerAvailable {
                 let url = try await LearningDeckService.shared.viewerURL(deckId: deck.id)
-                onOpenURL(url)
+                onOpenDeck(deck, url)
             } else {
-                onNotice(
-                    "Learning Deck queued",
-                    deck.latestNote ?? "The deck is being generated."
-                )
+                // The deck is still generating — open the reader anyway so it can
+                // show live progress and swap in the deck when it's ready, instead
+                // of stranding the user on a dismiss-only alert.
+                onOpenDeck(deck, nil)
             }
             return true
         } catch where isNetworkCancellation(error) {
@@ -62,5 +62,29 @@ struct LearningDeckContentCreateSheet: View {
             contentId: content.id,
             interestsPrompt: interestsPrompt
         )
+    }
+}
+
+/// One-shot coachmark popover shown the first time the Learning Deck entry point
+/// appears in the article action bar.
+struct LearningDeckEntryHint: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "rectangle.stack")
+                .font(.appSymbol(size: 18, weight: .semibold))
+                .foregroundStyle(Color.brandPrimary)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Learning Deck")
+                    .font(.terracottaBodyMedium.weight(.semibold))
+                    .foregroundStyle(Color.onSurface)
+                Text("Turn this into a deck you can flip through and chat with.")
+                    .font(.terracottaBodySmall)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(width: 264)
     }
 }

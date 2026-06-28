@@ -10,7 +10,7 @@ struct SafariView: UIViewControllerRepresentable {
     let url: URL
 
     func makeUIViewController(context: Context) -> SFSafariViewController {
-        SFSafariViewController(url: url.newslySafariCompatibleLocalURL)
+        SFSafariViewController(url: url.newslyBrowserCompatibleLocalURL)
     }
 
     func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {
@@ -18,8 +18,8 @@ struct SafariView: UIViewControllerRepresentable {
     }
 }
 
-private extension URL {
-    var newslySafariCompatibleLocalURL: URL {
+extension URL {
+    var newslyBrowserCompatibleLocalURL: URL {
 #if targetEnvironment(simulator)
         guard host == "127.0.0.1",
               AppSettings.shared.serverHost.caseInsensitiveCompare("localhost") == .orderedSame,
