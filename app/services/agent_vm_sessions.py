@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.services.agent_vm_runtime import (
     AgentCommandResult,
@@ -21,6 +22,8 @@ from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 _PROCESS_LOCAL_ROOTS_BY_NAMESPACE: dict[str, Path] = {}
 _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE: dict[str, Any] = {}
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -117,24 +120,13 @@ class E2BAgentVmSession(AgentVmSession):
         except ImportError as exc:  # pragma: no cover
             raise AgentVmError("e2b-code-interpreter is not installed") from exc
 
-        sandbox: Any = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(vm_namespace)
-        created = False
-        if sandbox is None:
-            create_kwargs: dict[str, Any] = {
-                "timeout": settings.llm_task_sandbox_timeout_seconds,
-                "allow_internet_access": settings.llm_task_sandbox_allow_internet_access,
-                "api_key": api_key,
-                "metadata": {
-                    "feature": feature,
-                    "user_id": str(user_id),
-                    "vm_namespace": vm_namespace,
-                },
-            }
-            if settings.llm_task_sandbox_template:
-                create_kwargs["template"] = settings.llm_task_sandbox_template
-            sandbox = Sandbox.create(**create_kwargs)
-            _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[vm_namespace] = sandbox
-            created = True
+        sandbox, created = _get_or_create_e2b_sandbox(
+            sandbox_class=Sandbox,
+            vm_namespace=vm_namespace,
+            user_id=user_id,
+            feature=feature,
+            settings=settings,
+        )
 
         self.vm_namespace = vm_namespace
         self._sandbox = sandbox
@@ -149,11 +141,37 @@ class E2BAgentVmSession(AgentVmSession):
             reuse_scope="process_namespace",
             reused=not created,
         )
-        self._run_raw_command(
-            "mkdir -p "
-            f"{shlex.quote(self._workdir.as_posix())} "
-            f"{shlex.quote(self._shared_workdir.as_posix())}"
-        )
+        try:
+            self._run_raw_command(
+                "mkdir -p "
+                f"{shlex.quote(self._workdir.as_posix())} "
+                f"{shlex.quote(self._shared_workdir.as_posix())}"
+            )
+        except Exception as exc:
+            if created or not _is_missing_e2b_sandbox_error(exc):
+                raise
+            _evict_e2b_sandbox(vm_namespace, sandbox)
+            sandbox, created = _get_or_create_e2b_sandbox(
+                sandbox_class=Sandbox,
+                vm_namespace=vm_namespace,
+                user_id=user_id,
+                feature=feature,
+                settings=settings,
+            )
+            self._sandbox = sandbox
+            self.sandbox_id = _sandbox_identifier(self._sandbox)
+            self.lease = AgentVmLease(
+                provider=self.provider,
+                vm_namespace=vm_namespace,
+                sandbox_id=self.sandbox_id,
+                reuse_scope="process_namespace",
+                reused=False,
+            )
+            self._run_raw_command(
+                "mkdir -p "
+                f"{shlex.quote(self._workdir.as_posix())} "
+                f"{shlex.quote(self._shared_workdir.as_posix())}"
+            )
         if created:
             record_vendor_usage_out_of_band(
                 provider="e2b",
@@ -187,19 +205,30 @@ class E2BAgentVmSession(AgentVmSession):
             )
         except _e2b_command_exit_exception() as exc:
             return self._normalize_command_exit_exception(exc)
+        except Exception as exc:
+            self._evict_if_missing(exc)
+            raise
         return self._normalize_command_result(result)
 
     def write_file(self, path: str, text: str) -> None:
         destination = self._resolve_workspace_path(path)
         parent = PurePosixPath(destination).parent
         self._run_raw_command(f"mkdir -p {shlex.quote(parent.as_posix())}")
-        self._sandbox.files.write(destination, text)
+        try:
+            self._sandbox.files.write(destination, text)
+        except Exception as exc:
+            self._evict_if_missing(exc)
+            raise
 
     def read_file(self, path: str, *, max_bytes: int | None = None) -> str:
         return self.read_file_bytes(path, max_bytes=max_bytes).decode("utf-8")
 
     def read_file_bytes(self, path: str, *, max_bytes: int | None = None) -> bytes:
-        payload = self._sandbox.files.read(self._resolve_workspace_path(path))
+        try:
+            payload = self._sandbox.files.read(self._resolve_workspace_path(path))
+        except Exception as exc:
+            self._evict_if_missing(exc)
+            raise
         data = payload if isinstance(payload, bytes) else str(payload).encode("utf-8")
         if max_bytes is not None and len(data) > max_bytes:
             raise AgentVmError(f"VM file exceeds {max_bytes} bytes: {path}")
@@ -231,7 +260,11 @@ class E2BAgentVmSession(AgentVmSession):
         *,
         timeout_seconds: int | None = None,
     ) -> AgentCommandResult:
-        result = self._sandbox.commands.run(command, timeout=timeout_seconds)
+        try:
+            result = self._sandbox.commands.run(command, timeout=timeout_seconds)
+        except Exception as exc:
+            self._evict_if_missing(exc)
+            raise
         return self._normalize_command_result(result)
 
     def _normalize_command_result(self, result: object) -> AgentCommandResult:
@@ -253,6 +286,10 @@ class E2BAgentVmSession(AgentVmSession):
             stderr=_truncate_output(str(getattr(exc, "stderr", "") or ""), self._max_output_chars),
             exit_code=int(getattr(exc, "exit_code", 1) or 1),
         )
+
+    def _evict_if_missing(self, exc: Exception) -> None:
+        if _is_missing_e2b_sandbox_error(exc):
+            _evict_e2b_sandbox(self.vm_namespace, self._sandbox)
 
 
 def create_agent_vm_session(
@@ -353,6 +390,91 @@ def _with_workspace_tool_env(command: str) -> str:
         "fi\n"
         f"{command}"
     )
+
+
+def _get_or_create_e2b_sandbox(
+    *,
+    sandbox_class: type[Any],
+    vm_namespace: str,
+    user_id: int,
+    feature: str,
+    settings: Any,
+) -> tuple[Any, bool]:
+    cached = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(vm_namespace)
+    if cached is not None:
+        try:
+            _refresh_e2b_sandbox_timeout(
+                cached,
+                timeout_seconds=settings.llm_task_sandbox_timeout_seconds,
+            )
+        except Exception as exc:
+            if not _is_missing_e2b_sandbox_error(exc):
+                raise
+            _evict_e2b_sandbox(vm_namespace, cached)
+        else:
+            return cached, False
+
+    cached = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(vm_namespace)
+    if cached is not None:
+        return cached, False
+
+    create_kwargs: dict[str, Any] = {
+        "timeout": settings.llm_task_sandbox_timeout_seconds,
+        "allow_internet_access": settings.llm_task_sandbox_allow_internet_access,
+        "api_key": settings.llm_task_sandbox_e2b_api_key,
+        "metadata": {
+            "feature": feature,
+            "user_id": str(user_id),
+            "vm_namespace": vm_namespace,
+        },
+    }
+    if settings.llm_task_sandbox_template:
+        create_kwargs["template"] = settings.llm_task_sandbox_template
+    sandbox = sandbox_class.create(**create_kwargs)
+    _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[vm_namespace] = sandbox
+    return sandbox, True
+
+
+def _refresh_e2b_sandbox_timeout(sandbox: object, *, timeout_seconds: int) -> None:
+    set_timeout = getattr(sandbox, "set_timeout", None)
+    if callable(set_timeout):
+        set_timeout(timeout_seconds)
+
+
+def _evict_e2b_sandbox(vm_namespace: str, sandbox: object) -> None:
+    cached = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(vm_namespace)
+    if cached is not sandbox:
+        return
+    _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.pop(vm_namespace, None)
+    kill = getattr(sandbox, "kill", None)
+    if callable(kill):
+        try:
+            kill()
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "Unable to kill stale E2B sandbox after eviction: %s",
+                exc,
+                extra={
+                    "component": "llm_task_sandbox",
+                    "operation": "evict_e2b_sandbox",
+                    "vm_namespace": vm_namespace,
+                    "sandbox_id": _sandbox_identifier(sandbox),
+                },
+            )
+    logger.warning(
+        "Evicted stale E2B sandbox from process cache",
+        extra={
+            "component": "llm_task_sandbox",
+            "operation": "evict_e2b_sandbox",
+            "vm_namespace": vm_namespace,
+            "sandbox_id": _sandbox_identifier(sandbox),
+        },
+    )
+
+
+def _is_missing_e2b_sandbox_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "sandbox was not found" in message or "sandbox not found" in message
 
 
 def _sandbox_identifier(sandbox: object) -> str | None:
