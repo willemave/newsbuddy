@@ -24,6 +24,9 @@ from app.models.contracts import (
 from app.models.db import ChatMessage, ChatSession, Content
 from app.models.domain.chat_render import ChatMessageRenderMetadata
 from app.services.chat_turn_runtime import (
+    ChatUsageSnapshot as _ChatUsageSnapshot,
+)
+from app.services.chat_turn_runtime import (
     close_sandbox_session as _close_sandbox_session,
 )
 from app.services.chat_turn_runtime import get_or_create_cached_agent as _get_or_create_cached_agent
@@ -38,9 +41,6 @@ from app.services.chat_turn_runtime import (
 )
 from app.services.chat_turn_runtime import (
     require_session_user_id as _require_session_user_id,
-)
-from app.services.chat_turn_runtime import (
-    resolve_session_model as _resolve_session_model,
 )
 from app.services.exa_client import exa_search, get_exa_client
 from app.services.langfuse_tracing import langfuse_trace_context
@@ -961,8 +961,11 @@ async def run_chat_turn(
     """
     total_start = perf_counter()
     session_row_id = _require_session_id(session)
-    session_user_id = _require_session_user_id(session)
-    model_spec = _resolve_session_model(session)
+    session_usage_snapshot = _ChatUsageSnapshot.from_session(session)
+    session_user_id = session_usage_snapshot.user_id
+    model_spec = session_usage_snapshot.model
+    session_content_id = session_usage_snapshot.content_id
+    session_type = session_usage_snapshot.session_type
     provider = resolve_model_provider(model_spec)
     chat_llm_task = LlmTaskTurnTracker.create(
         db,
@@ -970,7 +973,7 @@ async def run_chat_turn(
         spec=ARTICLE_CHAT_TURN_SPEC,
         input_json={
             "chat_session_id": session_row_id,
-            "content_id": session.content_id,
+            "content_id": session_content_id,
             "source": source,
             "queue_task_id": task_id,
             "prompt_chars": len(user_prompt),
@@ -987,13 +990,13 @@ async def run_chat_turn(
             status="started",
             session_id=session_row_id,
             user_id=session_user_id,
-            content_id=session.content_id,
+            content_id=session_content_id,
             source=source,
             context_data={
                 "model": model_spec,
                 "provider": provider,
                 "llm_task_id": chat_llm_task_id,
-                "session_type": session.session_type,
+                "session_type": session_type,
                 "prompt_chars": len(user_prompt),
             },
         ),
@@ -1039,7 +1042,7 @@ async def run_chat_turn(
             duration_ms=deps_ms,
             session_id=session_row_id,
             user_id=session_user_id,
-            content_id=session.content_id,
+            content_id=session_content_id,
             context_data={"context_chars": len(deps.article_context or "")},
         ),
     )
@@ -1054,7 +1057,7 @@ async def run_chat_turn(
                 status="started",
                 session_id=session_row_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 source=source,
                 context_data={"model": model_spec},
             ),
@@ -1078,7 +1081,7 @@ async def run_chat_turn(
             provider_api_key=provider_api_key,
         )
         agent_ms = (perf_counter() - agent_start) * 1000
-        _log_chat_usage(result, session, session_row_id, None, "sync")
+        _log_chat_usage(result, session_usage_snapshot, session_row_id, None, "sync")
         output_text = _agent_output_text(result)
         new_messages = result.new_messages()
         save_messages(
@@ -1106,7 +1109,7 @@ async def run_chat_turn(
             note="Article chat turn completed",
             output_json={
                 "chat_session_id": session_row_id,
-                "content_id": session.content_id,
+                "content_id": session_content_id,
                 "output_chars": len(output_text),
                 "new_message_count": len(new_messages),
                 "tool_names": [name for name in tool_names if name],
@@ -1124,7 +1127,7 @@ async def run_chat_turn(
                 duration_ms=total_ms,
                 session_id=session_row_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 source=source,
                 context_data={
                     "model": model_spec,
@@ -1226,8 +1229,10 @@ async def process_message_async(
             logger.error("[AsyncChat:ERROR] Session %s not found", session_id)
             return
         session_row_id = _require_session_id(session)
-        session_user_id = _require_session_user_id(session)
-        model_spec = _resolve_session_model(session)
+        session_usage_snapshot = _ChatUsageSnapshot.from_session(session)
+        session_user_id = session_usage_snapshot.user_id
+        model_spec = session_usage_snapshot.model
+        session_content_id = session_usage_snapshot.content_id
         provider = resolve_model_provider(model_spec)
         chat_llm_task = LlmTaskTurnTracker.create(
             db,
@@ -1235,7 +1240,7 @@ async def process_message_async(
             spec=ARTICLE_CHAT_TURN_SPEC,
             input_json={
                 "chat_session_id": session_row_id,
-                "content_id": session.content_id,
+                "content_id": session_content_id,
                 "source": source,
                 "queue_task_id": task_id,
                 "prompt_chars": len(user_prompt),
@@ -1262,7 +1267,7 @@ async def process_message_async(
                 session_id=session_id,
                 message_id=message_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 source=source,
                 context_data={
                     "context_chars": context_len,
@@ -1320,7 +1325,7 @@ async def process_message_async(
                 session_id=session_id,
                 message_id=message_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 source=source,
                 context_data={
                     "model": model_spec,
@@ -1343,7 +1348,7 @@ async def process_message_async(
             provider_api_key=provider_api_key,
         )
         agent_ms = (perf_counter() - agent_start) * 1000
-        _log_chat_usage(result, session, session_id, message_id, "async")
+        _log_chat_usage(result, session_usage_snapshot, session_id, message_id, "async")
         output_text = _agent_output_text(result)
 
         # Extract tool calls info
@@ -1366,7 +1371,7 @@ async def process_message_async(
                 session_id=session_id,
                 message_id=message_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 source=source,
                 context_data={
                     "tool_names": tool_names,
@@ -1502,8 +1507,11 @@ async def generate_initial_suggestions(
     """
     total_start = perf_counter()
     session_row_id = _require_session_id(session)
-    session_user_id = _require_session_user_id(session)
-    model_spec = _resolve_session_model(session)
+    session_usage_snapshot = _ChatUsageSnapshot.from_session(session)
+    session_user_id = session_usage_snapshot.user_id
+    model_spec = session_usage_snapshot.model
+    session_content_id = session_usage_snapshot.content_id
+    session_type = session_usage_snapshot.session_type
     logger.info(
         "Initial suggestions started",
         extra=build_log_extra(
@@ -1513,13 +1521,13 @@ async def generate_initial_suggestions(
             status="started",
             session_id=session_row_id,
             user_id=session_user_id,
-            content_id=session.content_id,
+            content_id=session_content_id,
             source=source,
-            context_data={"model": model_spec, "session_type": session.session_type},
+            context_data={"model": model_spec, "session_type": session_type},
         ),
     )
 
-    if not session.content_id and not session.context_snapshot:
+    if not session_content_id and not session.context_snapshot:
         logger.warning(
             "Initial suggestions skipped because session has no context",
             extra=build_log_extra(
@@ -1556,7 +1564,13 @@ async def generate_initial_suggestions(
             provider_api_key=provider_api_key,
         )
         agent_ms = (perf_counter() - agent_start) * 1000
-        _log_chat_usage(result, session, session_row_id, None, "initial_suggestions")
+        _log_chat_usage(
+            result,
+            session_usage_snapshot,
+            session_row_id,
+            None,
+            "initial_suggestions",
+        )
         output_text = _agent_output_text(result)
         from pydantic_ai.messages import ModelResponse, TextPart
 
@@ -1587,7 +1601,7 @@ async def generate_initial_suggestions(
                 duration_ms=total_ms,
                 session_id=session_row_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 source=source,
                 context_data={
                     "model": model_spec,

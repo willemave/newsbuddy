@@ -1,6 +1,8 @@
 """Tests for shared chat turn runtime helpers."""
 
+from app.models.db import ChatSession
 from app.services import chat_turn_runtime
+from app.services.llm_models import DEFAULT_MODEL
 
 
 def test_get_or_create_cached_agent_scopes_by_namespace_model_and_credential() -> None:
@@ -41,3 +43,19 @@ def test_get_or_create_cached_agent_scopes_by_namespace_model_and_credential() -
     assert other_namespace is not first
     assert calls == ["first", "other_model", "other_namespace"]
     chat_turn_runtime.clear_agent_cache_for_tests()
+
+
+def test_chat_usage_snapshot_captures_validated_session_fields() -> None:
+    session = ChatSession(
+        user_id=42,
+        llm_model="",
+        content_id=99,
+        session_type="article",
+    )
+
+    snapshot = chat_turn_runtime.ChatUsageSnapshot.from_session(session)
+
+    assert snapshot.user_id == 42
+    assert snapshot.model == DEFAULT_MODEL
+    assert snapshot.content_id == 99
+    assert snapshot.session_type == "article"

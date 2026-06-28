@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from dataclasses import dataclass
 from threading import Lock
 from typing import cast
 
@@ -18,6 +19,25 @@ logger = get_logger(__name__)
 
 _AGENT_CACHE_LOCK = Lock()
 _AGENT_CACHE: dict[tuple[str, str, str], object] = {}
+
+
+@dataclass(frozen=True)
+class ChatUsageSnapshot:
+    """Detached-safe chat session fields used to record usage after a turn."""
+
+    user_id: int
+    model: str
+    content_id: int | None
+    session_type: str | None
+
+    @classmethod
+    def from_session(cls, session: ChatSession) -> ChatUsageSnapshot:
+        return cls(
+            user_id=require_session_user_id(session),
+            model=resolve_session_model(session),
+            content_id=session.content_id,
+            session_type=session.session_type,
+        )
 
 
 def require_session_id(session: ChatSession) -> int:
@@ -94,7 +114,7 @@ def close_sandbox_session(sandbox_session: PersonalLibrarySandboxSession | None)
 
 def log_chat_usage(
     result: object,
-    session: ChatSession,
+    usage_snapshot: ChatUsageSnapshot,
     session_id: int,
     message_id: int | None,
     context: str,
@@ -104,8 +124,8 @@ def log_chat_usage(
     if usage_details is None:
         return
 
-    user_id = require_session_user_id(session)
-    model_spec = resolve_session_model(session)
+    user_id = usage_snapshot.user_id
+    model_spec = usage_snapshot.model
     provider = resolve_model_provider(model_spec)
 
     try:
@@ -119,8 +139,8 @@ def log_chat_usage(
             session_id=session_id,
             message_id=message_id,
             user_id=user_id,
-            content_id=session.content_id,
-            metadata={"session_type": session.session_type},
+            content_id=usage_snapshot.content_id,
+            metadata={"session_type": usage_snapshot.session_type},
         )
     except Exception:  # noqa: BLE001
         return
@@ -135,7 +155,7 @@ def log_chat_usage(
             session_id=session_id,
             message_id=message_id,
             user_id=user_id,
-            content_id=session.content_id,
+            content_id=usage_snapshot.content_id,
             source=context,
             context_data={
                 "model": model_spec,

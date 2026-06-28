@@ -50,6 +50,9 @@ from app.services.chat_agent import (
     update_message_failed,
 )
 from app.services.chat_turn_runtime import (
+    ChatUsageSnapshot as _ChatUsageSnapshot,
+)
+from app.services.chat_turn_runtime import (
     close_sandbox_session as _close_sandbox_session,
 )
 from app.services.chat_turn_runtime import get_or_create_cached_agent as _get_or_create_cached_agent
@@ -61,12 +64,6 @@ from app.services.chat_turn_runtime import (
 )
 from app.services.chat_turn_runtime import (
     require_session_id as _require_session_id,
-)
-from app.services.chat_turn_runtime import (
-    require_session_user_id as _require_session_user_id,
-)
-from app.services.chat_turn_runtime import (
-    resolve_session_model as _resolve_session_model,
 )
 from app.services.exa_client import exa_search
 from app.services.knowledge_search import search_knowledge as search_knowledge_hits
@@ -1321,8 +1318,11 @@ async def process_assistant_turn_async(
             logger.error("Assistant session %s not found", session_id)
             return
         session_row_id = _require_session_id(session)
-        session_user_id = _require_session_user_id(session)
-        model_spec = _resolve_session_model(session)
+        session_usage_snapshot = _ChatUsageSnapshot.from_session(session)
+        session_user_id = session_usage_snapshot.user_id
+        model_spec = session_usage_snapshot.model
+        session_content_id = session_usage_snapshot.content_id
+        session_news_item_id = session.news_item_id
         provider = resolve_model_provider(model_spec)
         assistant_llm_task = LlmTaskTurnTracker.create(
             db,
@@ -1330,8 +1330,8 @@ async def process_assistant_turn_async(
             spec=CONTEXTUAL_ASSISTANT_TURN_SPEC,
             input_json={
                 "chat_session_id": session_row_id,
-                "content_id": session.content_id,
-                "news_item_id": session.news_item_id,
+                "content_id": session_content_id,
+                "news_item_id": session_news_item_id,
                 "source": source,
                 "screen_type": screen_context.screen_type,
                 "assistant_action": screen_context.assistant_action,
@@ -1360,7 +1360,7 @@ async def process_assistant_turn_async(
                 session_id=session_row_id,
                 message_id=message_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 context_data={
                     "history_count": len(history),
                     "llm_task_id": assistant_llm_task_id,
@@ -1397,7 +1397,7 @@ async def process_assistant_turn_async(
                 session_id=session_row_id,
                 message_id=message_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 context_data={
                     "screen_type": screen_context.screen_type,
                     "context_chars": len(context_snapshot or ""),
@@ -1428,7 +1428,7 @@ async def process_assistant_turn_async(
                 session_id=session_row_id,
                 message_id=message_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 source=source,
                 context_data={
                     "model": model_spec,
@@ -1448,7 +1448,13 @@ async def process_assistant_turn_async(
         )
         agent_ms = (perf_counter() - agent_start) * 1000
         render_metadata = _extract_render_metadata(result.new_messages())
-        _log_chat_usage(result, session, session_id, message_id, source)
+        _log_chat_usage(
+            result,
+            session_usage_snapshot,
+            session_id,
+            message_id,
+            source,
+        )
         with SessionLocal() as persist_db:
             update_message_completed(
                 persist_db,
@@ -1471,8 +1477,8 @@ async def process_assistant_turn_async(
                 output_json={
                     "chat_session_id": session_id,
                     "message_id": message_id,
-                    "content_id": session.content_id,
-                    "news_item_id": session.news_item_id,
+                    "content_id": session_content_id,
+                    "news_item_id": session_news_item_id,
                     "output_chars": len(str(getattr(result, "output", "") or "")),
                 },
                 model_provider=provider,
@@ -1496,7 +1502,7 @@ async def process_assistant_turn_async(
                 session_id=session_id,
                 message_id=message_id,
                 user_id=session_user_id,
-                content_id=session.content_id,
+                content_id=session_content_id,
                 source=source,
                 context_data={
                     "model": model_spec,
