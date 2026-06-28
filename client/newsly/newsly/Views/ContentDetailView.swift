@@ -1477,6 +1477,7 @@ struct ContentDetailView: View {
                     .presentationCompactAdaptation(.popover)
             }
             .task {
+                guard !E2ETestLaunch.isEnabled else { return }
                 guard !hasSeenLearningDeckHint else { return }
                 try? await Task.sleep(nanoseconds: 600_000_000)
                 guard !Task.isCancelled else { return }
