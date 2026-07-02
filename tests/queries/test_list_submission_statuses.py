@@ -2,14 +2,27 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models.contracts import ContentStatus, ContentType
+from app.models.contracts import (
+    ContentStatus,
+    ContentType,
+    LearningDeckRunStatus,
+    LearningDeckSourceKind,
+    LlmTaskActionStatus,
+    LlmTaskApprovalPolicy,
+    LlmTaskKind,
+    LlmTaskMode,
+    LlmTaskStatus,
+)
+from app.models.db import LearningDeck, LearningDeckRun, LlmTask, LlmTaskAction
 from app.queries import list_submission_statuses
 
 
-def test_list_submission_statuses_filters_and_shapes_rows(
+def test_list_submission_statuses_projects_share_action_content_targets(
     db_session: Session,
     content_factory,
     test_user,
@@ -20,7 +33,8 @@ def test_list_submission_statuses_filters_and_shapes_rows(
         email="other-query@example.com",
         full_name="Other Query User",
     )
-    processing = content_factory(
+    now = datetime(2026, 6, 28, 12, 0, 0)
+    processing_content = content_factory(
         url="https://example.com/query-processing",
         source_url="https://example.com/query-processing",
         content_type=ContentType.UNKNOWN.value,
@@ -29,11 +43,11 @@ def test_list_submission_statuses_filters_and_shapes_rows(
         content_metadata={
             "processing": {
                 "submitted_by_user_id": test_user.id,
-                "submitted_via": "share_sheet",
+                "submitted_via": "share_action",
             }
         },
     )
-    completed = content_factory(
+    completed_content = content_factory(
         url="https://example.com/query-completed",
         source_url="https://example.com/query-completed",
         content_type=ContentType.ARTICLE.value,
@@ -42,22 +56,72 @@ def test_list_submission_statuses_filters_and_shapes_rows(
         content_metadata={
             "processing": {
                 "submitted_by_user_id": test_user.id,
+                "submitted_via": "share_action",
+            }
+        },
+    )
+    awaiting_image_content = content_factory(
+        url="https://example.com/query-awaiting-image",
+        source_url="https://example.com/query-awaiting-image",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.AWAITING_IMAGE.value,
+        title="Awaiting Image Item",
+        content_metadata={
+            "processing": {
+                "submitted_by_user_id": test_user.id,
+                "submitted_via": "share_action",
+            }
+        },
+    )
+    direct_content = content_factory(
+        url="https://example.com/query-direct",
+        source_url="https://example.com/query-direct",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.PROCESSING.value,
+        title="Direct Content Submit",
+        content_metadata={
+            "processing": {
+                "submitted_by_user_id": test_user.id,
                 "submitted_via": "share_sheet",
             }
         },
     )
-    other_user_item = content_factory(
+
+    processing_task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_CONTENT,
+        url="https://example.com/query-processing",
+        created_at=now,
+        action_name="add_content",
+        action_result={"content_id": processing_content.id},
+    )
+    completed_task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_CONTENT,
+        url="https://example.com/query-completed",
+        created_at=now - timedelta(minutes=1),
+        action_name="add_content",
+        action_result={"content_id": completed_content.id},
+    )
+    awaiting_image_task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_CONTENT,
+        url="https://example.com/query-awaiting-image",
+        created_at=now - timedelta(minutes=2),
+        action_name="add_content",
+        action_result={"content_id": awaiting_image_content.id},
+    )
+    other_user_task, _ = _create_share_action_task(
+        db_session,
+        user_id=other_user.id,
+        mode=LlmTaskMode.ADD_CONTENT,
         url="https://example.com/query-other",
-        source_url="https://example.com/query-other",
-        content_type=ContentType.UNKNOWN.value,
-        status=ContentStatus.PROCESSING.value,
-        title="Other User Item",
-        content_metadata={
-            "processing": {
-                "submitted_by_user_id": other_user.id,
-                "submitted_via": "share_sheet",
-            }
-        },
+        created_at=now,
+        action_name="add_content",
+        action_result={"content_id": processing_content.id},
     )
 
     response = list_submission_statuses.execute(
@@ -68,12 +132,122 @@ def test_list_submission_statuses_filters_and_shapes_rows(
     )
 
     ids = {item.id for item in response.submissions}
-    assert processing.id in ids
-    assert completed.id not in ids
-    assert other_user_item.id not in ids
-    item = next(item for item in response.submissions if item.id == processing.id)
-    assert item.submitted_via == "share_sheet"
-    assert item.is_self_submission is True
+    assert processing_task.id in ids
+    assert completed_task.id in ids
+    assert awaiting_image_task.id in ids
+    assert direct_content.id not in ids
+    assert other_user_task.id not in ids
+
+    processing_item = next(item for item in response.submissions if item.id == processing_task.id)
+    assert processing_item.title == "Processing Item"
+    assert processing_item.status == "processing"
+    assert processing_item.submitted_via == "share_action"
+    assert processing_item.is_self_submission is True
+
+    completed_item = next(item for item in response.submissions if item.id == completed_task.id)
+    assert completed_item.outcome == "completed"
+
+    awaiting_item = next(item for item in response.submissions if item.id == awaiting_image_task.id)
+    assert awaiting_item.outcome == "processing"
+
+
+def test_list_submission_statuses_projects_share_action_status_without_target(
+    db_session: Session,
+    test_user,
+) -> None:
+    now = datetime(2026, 6, 28, 12, 0, 0)
+    running_task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_CONTENT,
+        url="https://example.com/running-share",
+        created_at=now,
+        status=LlmTaskStatus.RUNNING,
+        output_json={"title": "Running Share"},
+    )
+    failed_task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_CONTENT,
+        url="https://example.com/failed-share",
+        created_at=now - timedelta(minutes=1),
+        status=LlmTaskStatus.FAILED,
+        error_message="Share Action failed",
+    )
+
+    response = list_submission_statuses.execute(
+        db_session,
+        user_id=test_user.id,
+        cursor=None,
+        limit=10,
+    )
+
+    running_item = next(item for item in response.submissions if item.id == running_task.id)
+    assert running_item.url == "https://example.com/running-share"
+    assert running_item.title == "Running Share"
+    assert running_item.status == "processing"
+    assert running_item.outcome == "processing"
+
+    failed_item = next(item for item in response.submissions if item.id == failed_task.id)
+    assert failed_item.status == "failed"
+    assert failed_item.outcome == "failed"
+    assert failed_item.error_message == "Share Action failed"
+
+
+def test_list_submission_statuses_includes_learning_deck_targets_only_from_share_actions(
+    db_session: Session,
+    test_user,
+) -> None:
+    now = datetime(2026, 6, 28, 12, 0, 0)
+    marked_deck, marked_run = _create_learning_deck_submission(
+        db_session,
+        user_id=test_user.id,
+        source_identity="github:deepseek-ai/DeepSpec",
+        source_url="https://github.com/deepseek-ai/DeepSpec",
+        title="DeepSpec",
+        status=LearningDeckRunStatus.COMPLETED,
+        created_at=now,
+        source_metadata={"submission": {"submitted_via": "share_action"}},
+    )
+    manual_deck, _manual_run = _create_learning_deck_submission(
+        db_session,
+        user_id=test_user.id,
+        source_identity="github:example/manual",
+        source_url="https://github.com/example/manual",
+        title="Manual Deck",
+        status=LearningDeckRunStatus.FAILED,
+        created_at=now - timedelta(minutes=1),
+        source_metadata={},
+    )
+    deck_task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.PRESENTATION,
+        url="https://github.com/deepseek-ai/DeepSpec",
+        created_at=now,
+        action_name="create_learning_deck",
+        action_input={"source_url": "https://github.com/deepseek-ai/DeepSpec"},
+        action_result={"learning_deck_id": marked_deck.id},
+    )
+
+    response = list_submission_statuses.execute(
+        db_session,
+        user_id=test_user.id,
+        cursor=None,
+        limit=10,
+    )
+
+    ids = {item.id for item in response.submissions}
+    assert deck_task.id in ids
+    assert marked_run.id is not None
+    assert manual_deck.latest_run_id is not None
+    assert -marked_run.id not in ids
+    assert -manual_deck.latest_run_id not in ids
+    deck_item = next(item for item in response.submissions if item.id == deck_task.id)
+    assert deck_item.submission_kind == "learning_deck"
+    assert deck_item.status == "completed"
+    assert deck_item.outcome == "completed"
+    assert deck_item.title == "DeepSpec"
 
 
 @pytest.mark.parametrize(
@@ -102,7 +276,7 @@ def test_list_submission_statuses_maps_feed_subscription_outcomes(
         content_metadata={
             "processing": {
                 "submitted_by_user_id": test_user.id,
-                "submitted_via": "share_sheet",
+                "submitted_via": "share_action",
                 "subscribe_to_feed": True,
                 "detected_feed": {
                     "url": "https://example.com/feed.xml",
@@ -126,6 +300,15 @@ def test_list_submission_statuses_maps_feed_subscription_outcomes(
             }
         },
     )
+    task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_FEED,
+        url=f"https://example.com/{subscription_status}",
+        created_at=datetime(2026, 6, 28, 12, 0, 0),
+        action_name="subscribe_to_feed",
+        action_result={"content_id": content.id},
+    )
 
     response = list_submission_statuses.execute(
         db_session,
@@ -134,7 +317,7 @@ def test_list_submission_statuses_maps_feed_subscription_outcomes(
         limit=10,
     )
 
-    item = next(item for item in response.submissions if item.id == content.id)
+    item = next(item for item in response.submissions if item.id == task.id)
     assert item.submission_kind == "feed_subscription"
     assert item.outcome == expected_outcome
     assert item.detected_feed is not None
@@ -159,9 +342,18 @@ def test_list_submission_statuses_keeps_generic_skipped_content_as_skipped(
         content_metadata={
             "processing": {
                 "submitted_by_user_id": test_user.id,
-                "submitted_via": "share_sheet",
+                "submitted_via": "share_action",
             }
         },
+    )
+    task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_CONTENT,
+        url="https://example.com/generic-skipped",
+        created_at=datetime(2026, 6, 28, 12, 0, 0),
+        action_name="add_content",
+        action_result={"content_id": content.id},
     )
 
     response = list_submission_statuses.execute(
@@ -171,8 +363,133 @@ def test_list_submission_statuses_keeps_generic_skipped_content_as_skipped(
         limit=10,
     )
 
-    item = next(item for item in response.submissions if item.id == content.id)
+    item = next(item for item in response.submissions if item.id == task.id)
     assert item.submission_kind == "content"
     assert item.outcome == "skipped"
     assert item.detected_feed is None
     assert item.feed_subscription is None
+
+
+def _create_learning_deck_submission(
+    db_session: Session,
+    *,
+    user_id: int,
+    source_identity: str,
+    source_url: str,
+    title: str,
+    status: LearningDeckRunStatus,
+    created_at: datetime,
+    source_metadata: dict,
+) -> tuple[LearningDeck, LearningDeckRun]:
+    deck = LearningDeck(
+        user_id=user_id,
+        source_kind=LearningDeckSourceKind.GITHUB_REPO.value,
+        source_identity=source_identity,
+        source_url=source_url,
+        source_content_id=None,
+        source_title=title,
+        source_metadata=source_metadata,
+        title=title,
+        artifact_object_keys=[],
+        share_enabled=False,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    db_session.add(deck)
+    db_session.flush()
+    run = LearningDeckRun(
+        deck_id=deck.id,
+        user_id=user_id,
+        status=status.value,
+        source_snapshot={
+            "source_kind": LearningDeckSourceKind.GITHUB_REPO.value,
+            "source_identity": source_identity,
+            "source_url": source_url,
+            "source_content_id": None,
+            "source_title": title,
+            "source_metadata": source_metadata,
+        },
+        timeline=[],
+        artifact_object_keys=[],
+        created_at=created_at,
+        updated_at=created_at,
+        completed_at=created_at if status == LearningDeckRunStatus.COMPLETED else None,
+    )
+    db_session.add(run)
+    db_session.flush()
+    deck.latest_run_id = run.id
+    if status == LearningDeckRunStatus.COMPLETED:
+        deck.latest_successful_run_id = run.id
+    db_session.commit()
+    db_session.refresh(deck)
+    db_session.refresh(run)
+    return deck, run
+
+
+def _create_share_action_task(
+    db_session: Session,
+    *,
+    user_id: int,
+    mode: LlmTaskMode,
+    url: str,
+    created_at: datetime,
+    status: LlmTaskStatus = LlmTaskStatus.COMPLETED,
+    action_name: str | None = None,
+    action_status: LlmTaskActionStatus = LlmTaskActionStatus.APPLIED,
+    action_input: dict | None = None,
+    action_result: dict | None = None,
+    output_json: dict | None = None,
+    error_message: str | None = None,
+) -> tuple[LlmTask, LlmTaskAction | None]:
+    completed_at = (
+        created_at
+        if status
+        in {
+            LlmTaskStatus.COMPLETED,
+            LlmTaskStatus.FAILED,
+            LlmTaskStatus.CANCELLED,
+        }
+        else None
+    )
+    task = LlmTask(
+        user_id=user_id,
+        task_kind=LlmTaskKind.SHARE_ACTION.value,
+        mode=mode.value,
+        workflow_key=f"share_action.{mode.value}.v1",
+        workflow_state=status.value,
+        status=status.value,
+        approval_policy={"default": LlmTaskApprovalPolicy.AUTO_APPLY.value},
+        allowed_actions=[action_name] if action_name else [],
+        tool_policy={},
+        input_json={"url": url, "mode": mode.value},
+        output_json=output_json or {},
+        artifact_manifest={},
+        usage_json={},
+        status_history=[],
+        error_message=error_message,
+        created_at=created_at,
+        updated_at=created_at,
+        completed_at=completed_at,
+    )
+    db_session.add(task)
+    db_session.flush()
+    action = None
+    if action_name is not None:
+        action = LlmTaskAction(
+            llm_task_id=task.id,
+            action_name=action_name,
+            action_status=action_status.value,
+            approval_policy=LlmTaskApprovalPolicy.AUTO_APPLY.value,
+            approval_required=False,
+            action_input=action_input or {},
+            action_result=action_result or {},
+            created_at=created_at,
+            updated_at=created_at,
+            completed_at=created_at if action_status == LlmTaskActionStatus.APPLIED else None,
+        )
+        db_session.add(action)
+    db_session.commit()
+    db_session.refresh(task)
+    if action is not None:
+        db_session.refresh(action)
+    return task, action

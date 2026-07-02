@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import String, and_, cast, or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
@@ -18,12 +19,32 @@ from app.models.api.content import (
     SubmissionStatusResponse,
 )
 from app.models.api.pagination import PaginationMetadata
-from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content
+from app.models.contracts import (
+    ContentStatus,
+    ContentType,
+    LearningDeckRunStatus,
+    LlmTaskActionStatus,
+    LlmTaskKind,
+    LlmTaskMode,
+    LlmTaskStatus,
+)
+from app.models.db import Content, LearningDeck, LearningDeckRun, LlmTask, LlmTaskAction
 from app.models.metadata.access import ContentMetadataView, metadata_view
 from app.utils.pagination import PaginationCursor
 
 logger = get_logger(__name__)
+
+LEARNING_DECK_ACTIVE_STATUSES = {
+    LearningDeckRunStatus.PREPARING,
+    LearningDeckRunStatus.GENERATING,
+    LearningDeckRunStatus.VALIDATING,
+    LearningDeckRunStatus.PUBLISHING,
+}
+LLM_TASK_ACTIVE_STATUSES = {
+    LlmTaskStatus.RUNNING,
+    LlmTaskStatus.AWAITING_APPROVAL,
+    LlmTaskStatus.APPLYING,
+}
 
 
 def execute(
@@ -33,7 +54,7 @@ def execute(
     cursor: str | None,
     limit: int,
 ) -> SubmissionStatusListResponse:
-    """Return non-completed self-submitted content for one user."""
+    """Return ShareSheet submissions anchored on their Share Action LLM tasks."""
     last_id = None
     last_created_at = None
     if cursor:
@@ -41,52 +62,56 @@ def execute(
         last_id = cursor_data.last_id
         last_created_at = cursor_data.last_created_at
 
-    status_filter = [
-        ContentStatus.NEW.value,
-        ContentStatus.PENDING.value,
-        ContentStatus.PROCESSING.value,
-        ContentStatus.FAILED.value,
-        ContentStatus.SKIPPED.value,
-    ]
-    submitter_filter = or_(
-        cast(Content.content_metadata["processing"]["submitted_by_user_id"], String)
-        == str(user_id),
-        cast(Content.content_metadata["submitted_by_user_id"], String) == str(user_id),
-    )
-
     query = (
-        db.query(Content)
-        .filter(submitter_filter)
-        .filter(Content.status.in_(status_filter))
-        .order_by(Content.created_at.desc(), Content.id.desc())
+        db.query(LlmTask)
+        .filter(
+            LlmTask.user_id == user_id,
+            LlmTask.task_kind == LlmTaskKind.SHARE_ACTION.value,
+        )
+        .order_by(LlmTask.created_at.desc(), LlmTask.id.desc())
     )
-
-    if last_id and last_created_at:
+    if last_id is not None and last_created_at is not None:
         query = query.filter(
             or_(
-                Content.created_at < last_created_at,
-                and_(Content.created_at == last_created_at, Content.id < last_id),
+                LlmTask.created_at < last_created_at,
+                and_(LlmTask.created_at == last_created_at, LlmTask.id < last_id),
             )
         )
 
-    contents = query.limit(limit + 1).all()
-    has_more = len(contents) > limit
+    tasks = query.limit(limit + 1).all()
+    has_more = len(tasks) > limit
     if has_more:
-        contents = contents[:limit]
+        tasks = tasks[:limit]
 
-    submissions: list[SubmissionStatusResponse] = []
-    for content in contents:
-        submission = _build_submission_response(content)
-        if submission is not None:
-            submissions.append(submission)
+    actions_by_task_id = _actions_by_task_id(db, tasks)
+    content_by_id = _content_targets_by_id(db, actions_by_task_id)
+    deck_targets_by_id = _learning_deck_targets_by_id(
+        db,
+        user_id=user_id,
+        actions_by_task_id=actions_by_task_id,
+    )
+
+    submissions = [
+        submission
+        for task in tasks
+        if (
+            submission := _build_task_submission_response(
+                task,
+                actions=actions_by_task_id.get(_require_task_id(task.id), []),
+                content_by_id=content_by_id,
+                deck_targets_by_id=deck_targets_by_id,
+            )
+        )
+        is not None
+    ]
 
     next_cursor = None
-    if has_more and contents:
-        last_item = contents[-1]
+    if has_more and tasks:
+        last_item = tasks[-1]
         if last_item.created_at is None:
-            raise ValueError("Submission row is missing created_at")
+            raise ValueError("Submission task is missing created_at")
         next_cursor = PaginationCursor.encode_cursor(
-            last_id=_require_content_id(last_item.id),
+            last_id=_require_task_id(last_item.id),
             last_created_at=last_item.created_at,
             filters={},
         )
@@ -102,63 +127,352 @@ def execute(
     )
 
 
-def _build_submission_response(content: Content) -> SubmissionStatusResponse | None:
+def _actions_by_task_id(
+    db: Session,
+    tasks: list[LlmTask],
+) -> dict[int, list[LlmTaskAction]]:
+    task_ids = [_require_task_id(task.id) for task in tasks]
+    if not task_ids:
+        return {}
+    actions = (
+        db.query(LlmTaskAction)
+        .filter(LlmTaskAction.llm_task_id.in_(task_ids))
+        .order_by(LlmTaskAction.created_at, LlmTaskAction.id)
+        .all()
+    )
+    by_task_id: dict[int, list[LlmTaskAction]] = {task_id: [] for task_id in task_ids}
+    for action in actions:
+        task_id = _int_or_none(action.llm_task_id)
+        if task_id is not None:
+            by_task_id.setdefault(task_id, []).append(action)
+    return by_task_id
+
+
+def _content_targets_by_id(
+    db: Session,
+    actions_by_task_id: dict[int, list[LlmTaskAction]],
+) -> dict[int, Content]:
+    content_ids = {
+        content_id
+        for actions in actions_by_task_id.values()
+        for action in actions
+        if (content_id := _action_content_id(action)) is not None
+    }
+    if not content_ids:
+        return {}
+    return {
+        _require_content_id(content.id): content
+        for content in db.query(Content).filter(Content.id.in_(content_ids)).all()
+    }
+
+
+def _learning_deck_targets_by_id(
+    db: Session,
+    *,
+    user_id: int,
+    actions_by_task_id: dict[int, list[LlmTaskAction]],
+) -> dict[int, tuple[LearningDeck, LearningDeckRun]]:
+    deck_ids = {
+        deck_id
+        for actions in actions_by_task_id.values()
+        for action in actions
+        if (deck_id := _action_learning_deck_id(action)) is not None
+    }
+    if not deck_ids:
+        return {}
+    rows = (
+        db.query(LearningDeck, LearningDeckRun)
+        .join(LearningDeckRun, LearningDeck.latest_run_id == LearningDeckRun.id)
+        .filter(
+            LearningDeck.id.in_(deck_ids),
+            LearningDeck.user_id == user_id,
+            LearningDeck.deleted_at.is_(None),
+            LearningDeckRun.user_id == user_id,
+        )
+        .all()
+    )
+    return {
+        int(deck.id): (deck, run)
+        for deck, run in rows
+        if deck.id is not None and run.id is not None
+    }
+
+
+def _build_task_submission_response(
+    task: LlmTask,
+    *,
+    actions: list[LlmTaskAction],
+    content_by_id: dict[int, Content],
+    deck_targets_by_id: dict[int, tuple[LearningDeck, LearningDeckRun]],
+) -> SubmissionStatusResponse | None:
     try:
-        metadata = metadata_view(content.content_metadata or {})
-        raw_content_type = content.content_type
-        raw_status = content.status
-        if raw_content_type is None or raw_status is None:
-            raise ValueError("Submission row is missing required fields")
-        detected_feed = _build_detected_feed(metadata.detected_feed())
-        feed_subscription = _build_feed_subscription(
-            _dict_or_none(metadata.processing_flag("feed_subscription"))
-        )
-        submission_kind: SubmissionKind = (
-            SubmissionKind.FEED_SUBSCRIPTION
-            if _is_feed_subscription_submission(metadata, feed_subscription, detected_feed)
-            else SubmissionKind.CONTENT
-        )
-        outcome = _resolve_submission_outcome(
-            status=ContentStatus(raw_status),
-            submission_kind=submission_kind,
-            feed_subscription=feed_subscription,
-        )
-        return SubmissionStatusResponse(
-            id=_require_content_id(content.id),
-            content_type=ContentType(raw_content_type),
-            url=str(content.url),
-            source_url=content.source_url,
-            title=content.title,
-            status=ContentStatus(raw_status),
-            error_message=content.error_message,
-            created_at=content.created_at.isoformat() if content.created_at else "",
-            processed_at=content.processed_at.isoformat() if content.processed_at else None,
-            submitted_via=metadata.processing_flag("submitted_via"),
-            is_self_submission=True,
-            submission_kind=submission_kind,
-            outcome=outcome,
-            detected_feed=detected_feed,
-            feed_subscription=feed_subscription,
-        )
+        action = _primary_action(actions)
+        content_id = _action_content_id(action) if action else None
+        if content_id is not None and content_id in content_by_id:
+            return _build_content_target_submission_response(
+                task,
+                action=action,
+                content=content_by_id[content_id],
+            )
+
+        deck_id = _action_learning_deck_id(action) if action else None
+        if deck_id is not None and deck_id in deck_targets_by_id:
+            deck, run = deck_targets_by_id[deck_id]
+            return _build_learning_deck_submission_response(task, deck, run)
+
+        return _build_llm_task_submission_response(task, action=action)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "Skipping submission %s due to validation error: %s",
-            content.id,
+            "Skipping Share Action submission %s due to validation error: %s",
+            task.id,
             exc,
             extra={
                 "component": "submission_status",
-                "operation": "list_submissions",
-                "item_id": content.id,
-                "context_data": {"content_id": content.id},
+                "operation": "list_share_action_submissions",
+                "item_id": task.id,
+                "context_data": {"llm_task_id": task.id},
             },
         )
         return None
+
+
+def _primary_action(actions: list[LlmTaskAction]) -> LlmTaskAction | None:
+    applied_actions = [
+        action for action in actions if action.action_status == LlmTaskActionStatus.APPLIED.value
+    ]
+    if applied_actions:
+        return applied_actions[-1]
+    return actions[-1] if actions else None
+
+
+def _action_content_id(action: LlmTaskAction) -> int | None:
+    action_result = action.action_result if isinstance(action.action_result, dict) else {}
+    return _int_or_none(action_result.get("content_id"))
+
+
+def _action_learning_deck_id(action: LlmTaskAction) -> int | None:
+    action_result = action.action_result if isinstance(action.action_result, dict) else {}
+    return _int_or_none(action_result.get("learning_deck_id"))
+
+
+def _build_content_target_submission_response(
+    task: LlmTask,
+    *,
+    action: LlmTaskAction | None,
+    content: Content,
+) -> SubmissionStatusResponse:
+    metadata = metadata_view(content.content_metadata or {})
+    raw_content_type = content.content_type
+    raw_status = content.status
+    if raw_content_type is None or raw_status is None:
+        raise ValueError("Submission content target is missing required fields")
+    detected_feed = _build_detected_feed(metadata.detected_feed())
+    feed_subscription = _build_feed_subscription(
+        _dict_or_none(metadata.processing_flag("feed_subscription"))
+    )
+    submission_kind: SubmissionKind = (
+        SubmissionKind.FEED_SUBSCRIPTION
+        if _is_feed_subscription_submission(metadata, feed_subscription, detected_feed)
+        else SubmissionKind.CONTENT
+    )
+    status = ContentStatus(raw_status)
+    return SubmissionStatusResponse(
+        id=_require_task_id(task.id),
+        content_type=ContentType(raw_content_type),
+        url=str(content.url),
+        source_url=content.source_url,
+        title=content.title,
+        status=status,
+        error_message=content.error_message or _action_error_message(action) or task.error_message,
+        created_at=_require_datetime(task.created_at, "Share Action created_at").isoformat(),
+        processed_at=_target_processed_at(content.processed_at, action, task),
+        submitted_via="share_action",
+        is_self_submission=True,
+        submission_kind=submission_kind,
+        outcome=_resolve_submission_outcome(
+            status=status,
+            submission_kind=submission_kind,
+            feed_subscription=feed_subscription,
+        ),
+        detected_feed=detected_feed,
+        feed_subscription=feed_subscription,
+    )
+
+
+def _build_llm_task_submission_response(
+    task: LlmTask,
+    *,
+    action: LlmTaskAction | None,
+) -> SubmissionStatusResponse:
+    task_status = LlmTaskStatus(str(task.status))
+    content_status = _llm_task_content_status(task_status)
+    return SubmissionStatusResponse(
+        id=_require_task_id(task.id),
+        content_type=_task_content_type(task),
+        url=_task_url(task, action),
+        source_url=_task_source_url(task, action),
+        title=_task_title(task, action),
+        status=content_status,
+        error_message=_action_error_message(action) or task.error_message,
+        created_at=_require_datetime(task.created_at, "Share Action created_at").isoformat(),
+        processed_at=task.completed_at.isoformat() if task.completed_at else None,
+        submitted_via="share_action",
+        is_self_submission=True,
+        submission_kind=_task_submission_kind(task, action),
+        outcome=_llm_task_outcome(task_status),
+        detected_feed=None,
+        feed_subscription=None,
+    )
+
+
+def _build_learning_deck_submission_response(
+    task: LlmTask,
+    deck: LearningDeck,
+    run: LearningDeckRun,
+) -> SubmissionStatusResponse:
+    raw_status = run.status
+    if raw_status is None:
+        raise ValueError("Learning Deck run is missing status")
+    deck_status = LearningDeckRunStatus(raw_status)
+    content_status = _learning_deck_content_status(deck_status)
+    title = _clean_string(deck.source_title) or _clean_string(deck.title)
+    source_url = _clean_string(deck.source_url)
+    return SubmissionStatusResponse(
+        id=_require_task_id(task.id),
+        content_type=ContentType.UNKNOWN,
+        url=source_url or _task_url(task, None),
+        source_url=source_url,
+        title=title or "Learning Deck",
+        status=content_status,
+        error_message=run.error_message or task.error_message,
+        created_at=_require_datetime(task.created_at, "Share Action created_at").isoformat(),
+        processed_at=_target_processed_at(run.completed_at, None, task),
+        submitted_via="share_action",
+        is_self_submission=True,
+        submission_kind=SubmissionKind.LEARNING_DECK,
+        outcome=_learning_deck_outcome(deck_status),
+        detected_feed=None,
+        feed_subscription=None,
+    )
 
 
 def _require_content_id(content_id: int | None) -> int:
     if content_id is None:
         raise ValueError("Content is missing an id")
     return content_id
+
+
+def _require_task_id(task_id: int | None) -> int:
+    if task_id is None:
+        raise ValueError("Share Action task is missing an id")
+    return int(task_id)
+
+
+def _require_datetime(value: datetime | None, label: str) -> datetime:
+    if value is None:
+        raise ValueError(f"{label} is missing")
+    return value
+
+
+def _target_processed_at(
+    target_processed_at: datetime | None,
+    action: LlmTaskAction | None,
+    task: LlmTask,
+) -> str | None:
+    if target_processed_at is not None:
+        return target_processed_at.isoformat()
+    if action is not None and action.completed_at is not None:
+        return action.completed_at.isoformat()
+    if task.completed_at is not None:
+        return task.completed_at.isoformat()
+    return None
+
+
+def _action_error_message(action: LlmTaskAction | None) -> str | None:
+    if action is None:
+        return None
+    return _clean_string(action.error_message)
+
+
+def _task_submission_kind(
+    task: LlmTask,
+    action: LlmTaskAction | None,
+) -> SubmissionKind:
+    mode = str(task.mode)
+    action_name = str(action.action_name) if action is not None else ""
+    if mode == LlmTaskMode.PRESENTATION.value or action_name == "create_learning_deck":
+        return SubmissionKind.LEARNING_DECK
+    if mode == LlmTaskMode.ADD_FEED.value or action_name == "subscribe_to_feed":
+        return SubmissionKind.FEED_SUBSCRIPTION
+    return SubmissionKind.CONTENT
+
+
+def _task_content_type(task: LlmTask) -> ContentType:
+    value = _clean_string(_task_output(task).get("content_type"))
+    if value is None:
+        return ContentType.UNKNOWN
+    try:
+        return ContentType(value)
+    except ValueError:
+        return ContentType.UNKNOWN
+
+
+def _task_url(task: LlmTask, action: LlmTaskAction | None) -> str:
+    action_input = _action_input(action)
+    action_result = _action_result(action)
+    for value in (
+        _task_input(task).get("url"),
+        action_input.get("source_url"),
+        action_input.get("url"),
+        _task_output(task).get("primary_url"),
+        action_result.get("source_url"),
+    ):
+        url = _clean_string(value)
+        if url:
+            return url
+    return f"newsly://share-actions/{_require_task_id(task.id)}"
+
+
+def _task_source_url(task: LlmTask, action: LlmTaskAction | None) -> str | None:
+    url = _task_url(task, action)
+    if url.startswith("newsly://"):
+        return None
+    return url
+
+
+def _task_title(task: LlmTask, action: LlmTaskAction | None) -> str | None:
+    action_input = _action_input(action)
+    output_json = _task_output(task)
+    presentation = _dict_or_none(output_json.get("presentation")) or {}
+    for value in (
+        action_input.get("title"),
+        output_json.get("title"),
+        presentation.get("title"),
+    ):
+        title = _clean_string(value)
+        if title:
+            return title
+    return None
+
+
+def _task_input(task: LlmTask) -> dict[str, Any]:
+    return task.input_json if isinstance(task.input_json, dict) else {}
+
+
+def _task_output(task: LlmTask) -> dict[str, Any]:
+    return task.output_json if isinstance(task.output_json, dict) else {}
+
+
+def _action_input(action: LlmTaskAction | None) -> dict[str, Any]:
+    if action is None or not isinstance(action.action_input, dict):
+        return {}
+    return action.action_input
+
+
+def _action_result(action: LlmTaskAction | None) -> dict[str, Any]:
+    if action is None or not isinstance(action.action_result, dict):
+        return {}
+    return action.action_result
 
 
 def _build_detected_feed(raw_feed: dict[str, Any] | None) -> DetectedFeed | None:
@@ -273,6 +587,54 @@ def _content_status_outcome(status: ContentStatus) -> SubmissionOutcome:
     if status == ContentStatus.COMPLETED:
         return SubmissionOutcome.COMPLETED
     if status == ContentStatus.SKIPPED:
+        return SubmissionOutcome.SKIPPED
+    return SubmissionOutcome.FAILED
+
+
+def _learning_deck_content_status(status: LearningDeckRunStatus) -> ContentStatus:
+    if status == LearningDeckRunStatus.QUEUED:
+        return ContentStatus.PENDING
+    if status in LEARNING_DECK_ACTIVE_STATUSES:
+        return ContentStatus.PROCESSING
+    if status == LearningDeckRunStatus.COMPLETED:
+        return ContentStatus.COMPLETED
+    if status == LearningDeckRunStatus.CANCELLED:
+        return ContentStatus.SKIPPED
+    return ContentStatus.FAILED
+
+
+def _learning_deck_outcome(status: LearningDeckRunStatus) -> SubmissionOutcome:
+    if status == LearningDeckRunStatus.QUEUED:
+        return SubmissionOutcome.QUEUED
+    if status in LEARNING_DECK_ACTIVE_STATUSES:
+        return SubmissionOutcome.PROCESSING
+    if status == LearningDeckRunStatus.COMPLETED:
+        return SubmissionOutcome.COMPLETED
+    if status == LearningDeckRunStatus.CANCELLED:
+        return SubmissionOutcome.SKIPPED
+    return SubmissionOutcome.FAILED
+
+
+def _llm_task_content_status(status: LlmTaskStatus) -> ContentStatus:
+    if status in {LlmTaskStatus.QUEUED, LlmTaskStatus.PREPARING}:
+        return ContentStatus.PENDING
+    if status in LLM_TASK_ACTIVE_STATUSES:
+        return ContentStatus.PROCESSING
+    if status == LlmTaskStatus.COMPLETED:
+        return ContentStatus.COMPLETED
+    if status == LlmTaskStatus.CANCELLED:
+        return ContentStatus.SKIPPED
+    return ContentStatus.FAILED
+
+
+def _llm_task_outcome(status: LlmTaskStatus) -> SubmissionOutcome:
+    if status in {LlmTaskStatus.QUEUED, LlmTaskStatus.PREPARING}:
+        return SubmissionOutcome.QUEUED
+    if status in LLM_TASK_ACTIVE_STATUSES:
+        return SubmissionOutcome.PROCESSING
+    if status == LlmTaskStatus.COMPLETED:
+        return SubmissionOutcome.COMPLETED
+    if status == LlmTaskStatus.CANCELLED:
         return SubmissionOutcome.SKIPPED
     return SubmissionOutcome.FAILED
 

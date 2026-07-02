@@ -215,6 +215,7 @@ class SubmissionKind(StrEnum):
 
     CONTENT = "content"
     FEED_SUBSCRIPTION = "feed_subscription"
+    LEARNING_DECK = "learning_deck"
 
 
 class SubmissionOutcome(StrEnum):

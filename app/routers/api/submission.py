@@ -53,10 +53,10 @@ def submit_content(
 @router.get(
     "/submissions/list",
     response_model=SubmissionStatusListResponse,
-    summary="List user-submitted content still processing or failed",
+    summary="List ShareSheet submissions",
     description=(
-        "Returns self-submitted content items that are not yet completed, including "
-        "processing, failed, and skipped statuses."
+        "Returns ShareSheet submissions anchored on Share Action tasks, enriched with "
+        "downstream content, feed, or Learning Deck target status."
     ),
 )
 def list_submission_statuses(
