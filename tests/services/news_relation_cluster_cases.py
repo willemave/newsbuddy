@@ -6,6 +6,17 @@ from __future__ import annotations
 
 PRODUCTION_CLUSTER_CASES = [
     {
+        "case_id": "batch_008_c1",
+        "label": "Anthropic Fable 5 export controls lifted",
+        "titles": [
+            "Commerce lifts export controls on Claude Fable 5 and Mythos 5",
+            "Department of Commerce has lifted export controls on Claude Fable 5 and Mythos 5",
+            "Trump administration plans to lift export restrictions on Anthropic's Fable 5",
+            "Sources: the Trump administration plans to lift export restrictions on Anthropic's Fable 5 as early as Tuesday evening, making it available to all general users",
+            "Anthropic says the US Department of Commerce has lifted export controls on Claude Fable 5 and Mythos 5 and that it will begin restoring access on Wednesday",
+        ],
+    },
+    {
         "case_id": "batch_004_c6",
         "label": "Pentagon pressures Anthropic / supply chain risk dispute",
         "titles": [
