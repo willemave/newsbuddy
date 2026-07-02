@@ -367,6 +367,7 @@ enum APINarrationTargetType: String, Codable, CaseIterable {
 enum APISubmissionKind: String, Codable, CaseIterable {
     case content = "content"
     case feed_subscription = "feed_subscription"
+    case learning_deck = "learning_deck"
 }
 
 enum APISubmissionOutcome: Codable, Equatable, Hashable {

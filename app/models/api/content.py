@@ -275,7 +275,11 @@ class SubmissionStatusListResponse(BaseModel):
     """Response for user submission status list."""
 
     submissions: list[SubmissionStatusResponse] = Field(
-        ..., description="List of user-submitted items still processing or failed"
+        ...,
+        description=(
+            "List of ShareSheet submissions projected from Share Action tasks "
+            "and downstream targets"
+        ),
     )
     meta: PaginationMetadata = Field(..., description="Pagination metadata for the response")
 
@@ -321,6 +325,36 @@ class MixedSearchResponse(BaseModel):
     content: list[ContentSummaryResponse] = Field(default_factory=list)
     feeds: list[MixedSearchFeedResultResponse] = Field(default_factory=list)
     podcasts: list[PodcastEpisodeSearchResultResponse] = Field(default_factory=list)
+
+
+class ContentSummaryBulletPoint(BaseModel):
+    """One flattened bullet point surfaced on ContentDetailResponse.bullet_points.
+
+    Normalized from several summary-kind-specific shapes by
+    ``ContentData.bullet_points`` (app/models/domain/content.py) and
+    ``_string_map_list`` (app/presenters/content_responses.py), which drops
+    empty/falsy values and requires ``text``. ``category`` is absent for the
+    long_interleaved v2 summary kind, so it stays optional.
+    """
+
+    text: str
+    category: str | None = None
+
+
+class ContentSummaryQuote(BaseModel):
+    """One flattened quote surfaced on ContentDetailResponse.quotes.
+
+    Normalized the same way as ``ContentSummaryBulletPoint``. Most summary
+    kinds rename an underlying "attribution" key to "context" before this
+    point, but the long_structured and long_interleaved-v2 kinds pass the
+    underlying quote dict through unchanged, so both keys can appear on the
+    wire (app/models/domain/content.py:214-220, ContentQuote in
+    app/models/metadata/summaries.py).
+    """
+
+    text: str
+    context: str | None = None
+    attribution: str | None = None
 
 
 class ContentDetailResponse(BaseModel):
@@ -382,11 +416,11 @@ class ContentDetailResponse(BaseModel):
     reason_to_read: str | None = Field(
         None, description="Feed-preview reason explaining why the item is worth opening"
     )
-    bullet_points: list[dict[str, str]] = lenient_field(
+    bullet_points: list[ContentSummaryBulletPoint] = lenient_field(
         default_factory=list,
         description="Bullet points from structured summary",
     )
-    quotes: list[dict[str, str]] = lenient_field(
+    quotes: list[ContentSummaryQuote] = lenient_field(
         default_factory=list,
         description="Quotes from structured summary",
     )

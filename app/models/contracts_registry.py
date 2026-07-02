@@ -8,7 +8,6 @@ from enum import Enum, Flag, auto
 from pydantic import BaseModel
 
 from app.models.api.agent import (
-    AgentLibraryDocumentResponse,
     AgentLibraryFileResponse,
     AgentLibraryManifestResponse,
     AgentOnboardingCompleteRequest,
@@ -16,7 +15,6 @@ from app.models.api.agent import (
     AgentOnboardingStartResponse,
     AgentSearchRequest,
     AgentSearchResponse,
-    AgentSearchResultResponse,
 )
 from app.models.api.analytics import (
     RecordContentInteractionRequest,
@@ -29,13 +27,10 @@ from app.models.api.audio_episodes import (
 )
 from app.models.api.auth import AccessTokenResponse, RefreshTokenRequest, TokenResponse
 from app.models.api.chat import (
-    AssistantScreenContextDto,
     AssistantTurnRequest,
     AssistantTurnResponse,
-    ChatMessageDto,
     ChatSessionDetailDto,
     ChatSessionListResponse,
-    ChatSessionSummaryDto,
     CreateChatSessionRequest,
     CreateChatSessionResponse,
     MessageStatusResponse,
@@ -54,17 +49,10 @@ from app.models.api.content import (
     ContentBodyResponse,
     ContentDetailResponse,
     ContentListResponse,
-    ContentSummaryResponse,
-    DetectedFeed,
-    MixedSearchFeedResultResponse,
     MixedSearchResponse,
     NarrationResponse,
     PodcastEpisodeSearchResponse,
-    PodcastEpisodeSearchResultResponse,
-    SubmissionFeedInitialDownloadResponse,
-    SubmissionFeedSubscriptionResponse,
     SubmissionStatusListResponse,
-    SubmissionStatusResponse,
 )
 from app.models.api.content_actions import (
     BadgeStatsResponse,
@@ -78,18 +66,11 @@ from app.models.api.content_actions import (
     LongFormStatsResponse,
     MarkReadResponse,
     MarkUnreadResponse,
-    ProcessingCountResponse,
-    TweetSuggestion,
     TweetSuggestionsRequest,
     TweetSuggestionsResponse,
-    UnreadCountsResponse,
 )
 from app.models.api.content_discussions import (
     ContentDiscussionResponse,
-    DiscussionCommentResponse,
-    DiscussionGroupResponse,
-    DiscussionItemResponse,
-    DiscussionLinkResponse,
 )
 from app.models.api.discovery import (
     DiscoveryAddItemRequest,
@@ -98,10 +79,8 @@ from app.models.api.discovery import (
     DiscoveryDismissResponse,
     DiscoveryHistoryResponse,
     DiscoveryRefreshResponse,
-    DiscoveryRunSuggestions,
     DiscoverySubscribeRequest,
     DiscoverySubscribeResponse,
-    DiscoverySuggestionResponse,
     DiscoverySuggestionsResponse,
 )
 from app.models.api.feedback import SubmitFeedbackRequest, SubmitFeedbackResponse
@@ -120,10 +99,7 @@ from app.models.api.jobs import JobStatusResponse
 from app.models.api.learning_decks import (
     LearningDeckCreateRequest,
     LearningDeckListResponse,
-    LearningDeckResponse,
-    LearningDeckRunResponse,
     LearningDeckShareResponse,
-    LearningDeckTimelineEntry,
     LearningDeckUrlResponse,
 )
 from app.models.api.news import ConvertNewsItemResponse
@@ -132,28 +108,21 @@ from app.models.api.onboarding import (
     OnboardingAudioDiscoverResponse,
     OnboardingCompleteRequest,
     OnboardingCompleteResponse,
-    OnboardingDiscoveryLaneStatus,
     OnboardingDiscoveryStatusResponse,
     OnboardingFastDiscoverRequest,
-    OnboardingFastDiscoverResponse,
     OnboardingProfileRequest,
     OnboardingProfileResponse,
-    OnboardingSelectedAggregator,
-    OnboardingSelectedSource,
-    OnboardingSuggestion,
     OnboardingTutorialResponse,
     OnboardingVoiceParseRequest,
     OnboardingVoiceParseResponse,
 )
 from app.models.api.openai import AudioTranscriptionHealthResponse, AudioTranscriptionResponse
-from app.models.api.pagination import PaginationMetadata
 from app.models.api.scraper_configs import (
     ScraperConfigResponse,
-    ScraperConfigStatsResponse,
     SubscribeToFeedRequest,
 )
 from app.models.api.submissions import ContentSubmissionResponse, SubmitContentRequest
-from app.models.api.users import UpdateUserProfileRequest, UserResponse
+from app.models.api.users import UpdateUserProfileRequest
 from app.models.contracts import (
     AgentLibraryDocumentVariant,
     AgentSearchResultKind,
@@ -193,8 +162,6 @@ from app.models.contracts import (
     TweetLength,
     UserLlmProvider,
 )
-from app.models.domain.chat_render import AssistantFeedOption, CouncilCandidate
-from app.models.domain.user_profile import CouncilPersonaConfig
 
 
 class Target(Flag):
@@ -294,6 +261,7 @@ CONTRACT_UNTYPED_FIELD_ALLOWLIST_BY_CATEGORY: dict[str, frozenset[str]] = {
     "intentional_escape_hatches": frozenset(
         {
             "AgentOnboardingStartRequest.preferences",
+            "ContentDiscussionResponse.stats",
             "CreateUserScraperConfig.config",
             "JobStatusResponse.payload",
             "LearningDeckResponse.source_metadata",
@@ -305,12 +273,7 @@ CONTRACT_UNTYPED_FIELD_ALLOWLIST_BY_CATEGORY: dict[str, frozenset[str]] = {
             "UpdateUserScraperConfig.config",
         }
     ),
-    "should_shrink": frozenset(
-        {
-            "ContentDiscussionResponse.stats",
-            "ContentDiscussionResponse.summary",
-        }
-    ),
+    "should_shrink": frozenset(),
 }
 
 CONTRACT_UNTYPED_FIELD_ALLOWLIST: frozenset[str] = frozenset(
@@ -321,20 +284,12 @@ CONTRACT_UNTYPED_FIELD_ALLOWLIST: frozenset[str] = frozenset(
 
 
 CONTRACT_MODELS: list[ModelSpec] = [
-    ModelSpec(PaginationMetadata, targets=Target.IOS | Target.CLI),
-    ModelSpec(ContentSummaryResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(ContentListResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(ContentDetailResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(ContentBodyResponse, targets=Target.IOS),
-    ModelSpec(DetectedFeed, targets=Target.IOS | Target.CLI),
     ModelSpec(NarrationResponse, targets=Target.IOS),
-    ModelSpec(SubmissionFeedInitialDownloadResponse, targets=Target.IOS | Target.CLI),
-    ModelSpec(SubmissionFeedSubscriptionResponse, targets=Target.IOS | Target.CLI),
-    ModelSpec(SubmissionStatusResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(SubmissionStatusListResponse, targets=Target.IOS | Target.CLI),
-    ModelSpec(PodcastEpisodeSearchResultResponse, targets=Target.IOS),
     ModelSpec(PodcastEpisodeSearchResponse, targets=Target.IOS),
-    ModelSpec(MixedSearchFeedResultResponse, targets=Target.IOS),
     ModelSpec(MixedSearchResponse, targets=Target.IOS),
     ModelSpec(DownloadMoreRequest, targets=Target.IOS),
     ModelSpec(DownloadMoreResponse, targets=Target.IOS),
@@ -345,28 +300,16 @@ CONTRACT_MODELS: list[ModelSpec] = [
     ModelSpec(KnowledgeMutationResponse, targets=Target.IOS),
     ModelSpec(ChatGPTUrlResponse, targets=Target.IOS),
     ModelSpec(ConvertNewsResponse, targets=Target.IOS),
-    ModelSpec(UnreadCountsResponse, targets=Target.IOS),
-    ModelSpec(ProcessingCountResponse, targets=Target.IOS),
     ModelSpec(BadgeStatsResponse, targets=Target.IOS),
     ModelSpec(LongFormStatsResponse, targets=Target.IOS),
-    ModelSpec(TweetSuggestion, targets=Target.IOS),
     ModelSpec(TweetSuggestionsRequest, targets=Target.IOS),
     ModelSpec(TweetSuggestionsResponse, targets=Target.IOS),
-    ModelSpec(DiscussionCommentResponse, targets=Target.IOS),
-    ModelSpec(DiscussionItemResponse, targets=Target.IOS),
-    ModelSpec(DiscussionGroupResponse, targets=Target.IOS),
-    ModelSpec(DiscussionLinkResponse, targets=Target.IOS),
     ModelSpec(ContentDiscussionResponse, targets=Target.IOS),
-    ModelSpec(AssistantFeedOption, targets=Target.IOS),
-    ModelSpec(CouncilCandidate, targets=Target.IOS),
-    ModelSpec(AssistantScreenContextDto, targets=Target.IOS),
     ModelSpec(RecordContentInteractionRequest, targets=Target.IOS),
     ModelSpec(RecordContentInteractionResponse, targets=Target.IOS),
     ModelSpec(CreateChatSessionRequest, targets=Target.IOS),
     ModelSpec(UpdateChatSessionRequest, targets=Target.IOS),
     ModelSpec(SendChatMessageRequest, targets=Target.IOS),
-    ModelSpec(ChatMessageDto, targets=Target.IOS),
-    ModelSpec(ChatSessionSummaryDto, targets=Target.IOS),
     ModelSpec(ChatSessionDetailDto, targets=Target.IOS),
     ModelSpec(ChatSessionListResponse, targets=Target.IOS),
     ModelSpec(SendMessageResponse, targets=Target.IOS),
@@ -378,12 +321,9 @@ CONTRACT_MODELS: list[ModelSpec] = [
     ModelSpec(CustomNarrationCreateRequest, targets=Target.IOS),
     ModelSpec(AudioEpisodeResponse, targets=Target.IOS),
     ModelSpec(AudioEpisodeShareResponse, targets=Target.IOS),
-    ModelSpec(ScraperConfigStatsResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(ScraperConfigResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(SubscribeToFeedRequest, targets=Target.IOS | Target.CLI),
-    ModelSpec(DiscoverySuggestionResponse, targets=Target.IOS),
     ModelSpec(DiscoverySuggestionsResponse, targets=Target.IOS),
-    ModelSpec(DiscoveryRunSuggestions, targets=Target.IOS),
     ModelSpec(DiscoveryHistoryResponse, targets=Target.IOS),
     ModelSpec(DiscoveryRefreshResponse, targets=Target.IOS),
     ModelSpec(DiscoverySubscribeRequest, targets=Target.IOS),
@@ -405,37 +345,26 @@ CONTRACT_MODELS: list[ModelSpec] = [
     ModelSpec(OnboardingProfileResponse, targets=Target.IOS),
     ModelSpec(OnboardingVoiceParseRequest, targets=Target.IOS),
     ModelSpec(OnboardingVoiceParseResponse, targets=Target.IOS),
-    ModelSpec(OnboardingDiscoveryLaneStatus, targets=Target.IOS | Target.CLI),
-    ModelSpec(OnboardingSuggestion, targets=Target.IOS | Target.CLI),
-    ModelSpec(OnboardingSelectedSource, targets=Target.IOS),
-    ModelSpec(OnboardingSelectedAggregator, targets=Target.IOS | Target.CLI),
     ModelSpec(OnboardingAudioDiscoverRequest, targets=Target.IOS),
     ModelSpec(OnboardingAudioDiscoverResponse, targets=Target.IOS),
     ModelSpec(OnboardingFastDiscoverRequest, targets=Target.IOS),
-    ModelSpec(OnboardingFastDiscoverResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(OnboardingDiscoveryStatusResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(OnboardingCompleteRequest, targets=Target.IOS),
     ModelSpec(OnboardingCompleteResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(OnboardingTutorialResponse, targets=Target.IOS),
     ModelSpec(LearningDeckCreateRequest, targets=Target.IOS),
-    ModelSpec(LearningDeckTimelineEntry, targets=Target.IOS),
-    ModelSpec(LearningDeckRunResponse, targets=Target.IOS),
-    ModelSpec(LearningDeckResponse, targets=Target.IOS),
     ModelSpec(LearningDeckListResponse, targets=Target.IOS),
     ModelSpec(LearningDeckUrlResponse, targets=Target.IOS),
     ModelSpec(LearningDeckShareResponse, targets=Target.IOS),
     ModelSpec(AudioTranscriptionResponse, targets=Target.IOS),
     ModelSpec(AudioTranscriptionHealthResponse, targets=Target.IOS),
-    ModelSpec(CouncilPersonaConfig, targets=Target.IOS),
     ModelSpec(TokenResponse, targets=Target.IOS),
     ModelSpec(RefreshTokenRequest, targets=Target.IOS),
     ModelSpec(AccessTokenResponse, targets=Target.IOS),
-    ModelSpec(UserResponse, targets=Target.IOS),
     ModelSpec(UpdateUserProfileRequest, targets=Target.IOS),
     ModelSpec(SubmitFeedbackRequest, targets=Target.IOS),
     ModelSpec(SubmitFeedbackResponse, targets=Target.IOS),
     ModelSpec(AgentSearchRequest, targets=Target.CLI),
-    ModelSpec(AgentSearchResultResponse, targets=Target.CLI),
     ModelSpec(AgentSearchResponse, targets=Target.CLI),
     ModelSpec(AgentOnboardingStartRequest, targets=Target.CLI),
     ModelSpec(AgentOnboardingStartResponse, targets=Target.CLI),
@@ -445,7 +374,6 @@ CONTRACT_MODELS: list[ModelSpec] = [
     ModelSpec(CliLinkApproveRequest, targets=Target.IOS | Target.CLI),
     ModelSpec(CliLinkApproveResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(CliLinkPollResponse, targets=Target.CLI),
-    ModelSpec(AgentLibraryDocumentResponse, targets=Target.CLI),
     ModelSpec(AgentLibraryManifestResponse, targets=Target.CLI),
     ModelSpec(AgentLibraryFileResponse, targets=Target.CLI),
     ModelSpec(SubmitContentRequest, targets=Target.IOS | Target.CLI),

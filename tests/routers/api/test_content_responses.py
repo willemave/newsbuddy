@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
+from app.models.api.content import ContentSummaryQuote
 from app.models.contracts import ContentStatus, ContentType
 from app.presenters.content_responses import (
     build_content_detail_response,
@@ -226,7 +227,9 @@ class TestContentDetailResponse:
         )
 
         assert response.quotes == [
-            {"text": "The source of the data matters a lot while the teacher matters less."}
+            ContentSummaryQuote(
+                text="The source of the data matters a lot while the teacher matters less."
+            )
         ]
 
 

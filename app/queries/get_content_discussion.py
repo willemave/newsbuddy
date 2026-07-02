@@ -13,6 +13,7 @@ from app.models.api.content_discussions import (
     DiscussionGroupResponse,
     DiscussionItemResponse,
     DiscussionLinkResponse,
+    DiscussionSummaryResponse,
 )
 from app.models.contracts import DiscussionMode
 from app.models.db import Content, ContentDiscussion
@@ -190,7 +191,11 @@ def build_discussion_response(
     raw_stats = data.get("stats")
     stats: dict[str, Any] = raw_stats if isinstance(raw_stats, dict) else {}
     raw_summary = data.get("summary")
-    summary: dict[str, Any] | None = raw_summary if isinstance(raw_summary, dict) else None
+    summary = (
+        DiscussionSummaryResponse.model_validate(raw_summary)
+        if isinstance(raw_summary, dict)
+        else None
+    )
     return ContentDiscussionResponse(
         content_id=content_id,
         status=resolved_status,

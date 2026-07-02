@@ -25,7 +25,11 @@ Default behavior is strict.
 
 - Backend DTO datetime fields must use `UTCDateTime`, which serializes one UTC RFC3339 shape.
 - Go generated contracts map `UTCDateTime` to `time.Time`.
-- Swift generated contracts deliberately map `UTCDateTime` to `String` in this phase. iOS domain and presentation code must parse those fields through `ServerDate.parse` rather than adding per-model date parsers. Moving generated Swift fields to `Date` needs a generated decoder path that uses the canonical parser and preserves the current fractional-second tolerance.
+- Swift generated contracts map `UTCDateTime` to `Date`. Parsing and formatting live in generated `init(from:)`/`encode(to:)`, not in `JSONDecoder` date strategies, so every decoder path gets the same behavior regardless of how it was constructed.
+  - Decode uses the canonical parser (`ServerDate.parse`, a 4-format tolerance chain). Required fields and present-but-value optional fields throw `DecodingError.dataCorruptedError` on an unparseable string; a missing optional key decodes to `nil`. Lenient fields fall back to their default on a missing key *or* an unparseable value.
+  - Encode uses `ServerDate.format`, which emits ISO8601 UTC with fractional seconds and a `Z` suffix (matching backend `serialize_utc_datetime`). Optional datetime fields are omitted when `nil`, matching Swift's default `encodeIfPresent` behavior for other optional fields.
+  - `list[UTCDateTime]` and `dict[str, UTCDateTime]` are not supported by the generator; it raises rather than half-supporting nested datetime containers. No registered model currently needs this shape.
+  - `ServerDate.parse` remains available for hand-written decode paths that are not generated fields — chiefly untyped metadata dictionaries (`ArticleMetadata`, `PodcastMetadata`, `SourceMetadata`) and presentation-facing string date fields whose backing DTO field is a plain `str` rather than `UTCDateTime` (e.g. `ContentSummary`/`ContentDetail` timestamps, pending migration in a future batch). New generated `Date` fields must not reintroduce per-use-site `ServerDate.parse` calls.
 
 ## Enums
 
@@ -82,11 +86,6 @@ Closed enums reject unknown values and require a coordinated client/backend chan
 - Removing a field requires one released app version where no generated client consumes it.
 - Tightening a nullable field to required requires a fixture proving all backend paths send it.
 - Free-form `dict[str, Any]` fields require an allowlist entry and a named owner.
-
-## Known Follow-Ups
-
-- `ContentSummary` and `ContentDetail` still keep some presentation-facing fields, including `contentType` and `status`, as raw strings while rebuilding generated enums at use sites. Migrate these in an explicit follow-up batch instead of adding new raw-string enum projections.
-- Shared AnyCodable dictionary decoding helpers in iOS presentation models should be consolidated when the next ContentSummary/ContentDetail cleanup touches those files.
 
 ## Endpoint Definition of Done
 

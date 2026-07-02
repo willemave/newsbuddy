@@ -16,6 +16,7 @@ from scripts.contracts_codegen.introspect import (
     ContractTypeResolver,
     FieldIR,
     TypeIR,
+    expand_contract_models,
     introspect_models,
     validate_contract_models,
 )
@@ -50,8 +51,9 @@ def build_go_contracts(
     enum_specs: list[EnumSpec] | None = None,
 ) -> str:
     """Build the generated Go CLI model and enum source."""
-    specs = CONTRACT_MODELS if model_specs is None else model_specs
+    base_specs = CONTRACT_MODELS if model_specs is None else model_specs
     enums = CONTRACT_ENUMS if enum_specs is None else enum_specs
+    specs = expand_contract_models(base_specs, enums)
     validate_contract_models(
         specs,
         enums,

@@ -191,11 +191,12 @@ type SubmissionKind string
 const (
 	SubmissionKindContent SubmissionKind = "content"
 	SubmissionKindFeedSubscription SubmissionKind = "feed_subscription"
+	SubmissionKindLearningDeck SubmissionKind = "learning_deck"
 )
 
 func (v SubmissionKind) Known() bool {
 	switch v {
-	case SubmissionKindContent, SubmissionKindFeedSubscription:
+	case SubmissionKindContent, SubmissionKindFeedSubscription, SubmissionKindLearningDeck:
 		return true
 	default:
 		return false
@@ -294,48 +295,6 @@ func (v OnboardingSuggestionType) Known() bool {
 	}
 }
 
-type PaginationMetadata struct {
-	NextCursor *string `json:"next_cursor,omitempty"`
-	HasMore *bool `json:"has_more,omitempty"`
-	PageSize int `json:"page_size"`
-	Total *int `json:"total,omitempty"`
-}
-
-type ContentSummaryResponse struct {
-	ID int `json:"id"`
-	ContentType ContentType `json:"content_type"`
-	URL string `json:"url"`
-	SourceURL *string `json:"source_url,omitempty"`
-	DiscussionURL *string `json:"discussion_url,omitempty"`
-	Title *string `json:"title,omitempty"`
-	Source *string `json:"source,omitempty"`
-	Platform *string `json:"platform,omitempty"`
-	Status ContentStatus `json:"status"`
-	ShortSummary *string `json:"short_summary,omitempty"`
-	CreatedAt string `json:"created_at"`
-	ProcessedAt *string `json:"processed_at,omitempty"`
-	Classification *ContentClassification `json:"classification,omitempty"`
-	PublicationDate *string `json:"publication_date,omitempty"`
-	IsRead *bool `json:"is_read,omitempty"`
-	IsSavedToKnowledge *bool `json:"is_saved_to_knowledge,omitempty"`
-	NewsArticleURL *string `json:"news_article_url,omitempty"`
-	NewsDiscussionURL *string `json:"news_discussion_url,omitempty"`
-	NewsKeyPoints []string `json:"news_key_points,omitempty"`
-	NewsSummary *string `json:"news_summary,omitempty"`
-	UserStatus *string `json:"user_status,omitempty"`
-	ImageURL *string `json:"image_url,omitempty"`
-	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
-	PrimaryTopic *string `json:"primary_topic,omitempty"`
-	TopComment map[string]string `json:"top_comment,omitempty"`
-	CommentCount *int `json:"comment_count,omitempty"`
-	FeedPreview json.RawMessage `json:"feed_preview,omitempty"`
-	ArtifactType *string `json:"artifact_type,omitempty"`
-	PreviewBullets []string `json:"preview_bullets,omitempty"`
-	ReasonToRead *string `json:"reason_to_read,omitempty"`
-	KeyTakeaway *string `json:"key_takeaway,omitempty"`
-	SavedSource *SavedSource `json:"saved_source,omitempty"`
-}
-
 type ContentListResponse struct {
 	Contents []ContentSummaryResponse `json:"contents"`
 	AvailableDates []string `json:"available_dates"`
@@ -374,8 +333,8 @@ type ContentDetailResponse struct {
 	ArtifactType *string `json:"artifact_type,omitempty"`
 	PreviewBullets []string `json:"preview_bullets,omitempty"`
 	ReasonToRead *string `json:"reason_to_read,omitempty"`
-	BulletPoints []map[string]string `json:"bullet_points,omitempty"`
-	Quotes []map[string]string `json:"quotes,omitempty"`
+	BulletPoints []ContentSummaryBulletPoint `json:"bullet_points,omitempty"`
+	Quotes []ContentSummaryQuote `json:"quotes,omitempty"`
 	Topics []string `json:"topics,omitempty"`
 	FullMarkdown *string `json:"full_markdown,omitempty"`
 	BodyAvailable *bool `json:"body_available,omitempty"`
@@ -389,55 +348,6 @@ type ContentDetailResponse struct {
 	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
 	DetectedFeed *DetectedFeed `json:"detected_feed,omitempty"`
 	CanSubscribe *bool `json:"can_subscribe,omitempty"`
-}
-
-type DetectedFeed struct {
-	URL string `json:"url"`
-	Type string `json:"type"`
-	Title *string `json:"title,omitempty"`
-	Format *string `json:"format,omitempty"`
-}
-
-type SubmissionFeedInitialDownloadResponse struct {
-	RequestedCount *int `json:"requested_count,omitempty"`
-	Ran *bool `json:"ran,omitempty"`
-	Status *string `json:"status,omitempty"`
-	Reason *string `json:"reason,omitempty"`
-	Error *string `json:"error,omitempty"`
-	ConfigID *int `json:"config_id,omitempty"`
-	BaseLimit *int `json:"base_limit,omitempty"`
-	TargetLimit *int `json:"target_limit,omitempty"`
-	Scraped *int `json:"scraped,omitempty"`
-	Saved *int `json:"saved,omitempty"`
-	Duplicates *int `json:"duplicates,omitempty"`
-	Errors *int `json:"errors,omitempty"`
-}
-
-type SubmissionFeedSubscriptionResponse struct {
-	Status string `json:"status"`
-	FeedURL *string `json:"feed_url,omitempty"`
-	FeedType *string `json:"feed_type,omitempty"`
-	Created *bool `json:"created,omitempty"`
-	ConfigID *int `json:"config_id,omitempty"`
-	InitialDownload *SubmissionFeedInitialDownloadResponse `json:"initial_download,omitempty"`
-}
-
-type SubmissionStatusResponse struct {
-	ID int `json:"id"`
-	ContentType ContentType `json:"content_type"`
-	URL string `json:"url"`
-	SourceURL *string `json:"source_url,omitempty"`
-	Title *string `json:"title,omitempty"`
-	Status ContentStatus `json:"status"`
-	ErrorMessage *string `json:"error_message,omitempty"`
-	CreatedAt string `json:"created_at"`
-	ProcessedAt *string `json:"processed_at,omitempty"`
-	SubmittedVia *string `json:"submitted_via,omitempty"`
-	IsSelfSubmission *bool `json:"is_self_submission,omitempty"`
-	SubmissionKind *SubmissionKind `json:"submission_kind,omitempty"`
-	Outcome *SubmissionOutcome `json:"outcome,omitempty"`
-	DetectedFeed *DetectedFeed `json:"detected_feed,omitempty"`
-	FeedSubscription *SubmissionFeedSubscriptionResponse `json:"feed_subscription,omitempty"`
 }
 
 type SubmissionStatusListResponse struct {
@@ -470,18 +380,6 @@ type JobStatusResponse struct {
 	ErrorMessage *string `json:"error_message,omitempty"`
 }
 
-type ScraperConfigStatsResponse struct {
-	TotalCount int `json:"total_count"`
-	CompletedCount int `json:"completed_count"`
-	UnreadCount int `json:"unread_count"`
-	ProcessingCount int `json:"processing_count"`
-	LatestProcessedAt *time.Time `json:"latest_processed_at,omitempty"`
-	LatestPublicationAt *time.Time `json:"latest_publication_at,omitempty"`
-	NextExpectedAt *time.Time `json:"next_expected_at,omitempty"`
-	AverageIntervalHours *float64 `json:"average_interval_hours,omitempty"`
-	IntervalSampleSize *int `json:"interval_sample_size,omitempty"`
-}
-
 type ScraperConfigResponse struct {
 	ID int `json:"id"`
 	ScraperType string `json:"scraper_type"`
@@ -498,36 +396,6 @@ type SubscribeToFeedRequest struct {
 	FeedURL string `json:"feed_url"`
 	FeedType string `json:"feed_type"`
 	DisplayName *string `json:"display_name,omitempty"`
-}
-
-type OnboardingDiscoveryLaneStatus struct {
-	Name string `json:"name"`
-	Status string `json:"status"`
-	CompletedQueries *int `json:"completed_queries,omitempty"`
-	QueryCount *int `json:"query_count,omitempty"`
-}
-
-type OnboardingSuggestion struct {
-	SuggestionType OnboardingSuggestionType `json:"suggestion_type"`
-	Title *string `json:"title,omitempty"`
-	SiteURL *string `json:"site_url,omitempty"`
-	FeedURL *string `json:"feed_url,omitempty"`
-	Subreddit *string `json:"subreddit,omitempty"`
-	Rationale *string `json:"rationale,omitempty"`
-	Score *float64 `json:"score,omitempty"`
-	IsDefault *bool `json:"is_default,omitempty"`
-}
-
-type OnboardingSelectedAggregator struct {
-	Key string `json:"key"`
-	Title *string `json:"title,omitempty"`
-	Topics []string `json:"topics,omitempty"`
-}
-
-type OnboardingFastDiscoverResponse struct {
-	RecommendedPods []OnboardingSuggestion `json:"recommended_pods,omitempty"`
-	RecommendedSubstacks []OnboardingSuggestion `json:"recommended_substacks,omitempty"`
-	RecommendedSubreddits []OnboardingSuggestion `json:"recommended_subreddits,omitempty"`
 }
 
 type OnboardingDiscoveryStatusResponse struct {
@@ -554,18 +422,6 @@ type AgentSearchRequest struct {
 	Query string `json:"query"`
 	Limit *int `json:"limit,omitempty"`
 	IncludePodcasts *bool `json:"include_podcasts,omitempty"`
-}
-
-type AgentSearchResultResponse struct {
-	Kind AgentSearchResultKind `json:"kind"`
-	Title string `json:"title"`
-	URL string `json:"url"`
-	Snippet *string `json:"snippet,omitempty"`
-	Source *string `json:"source,omitempty"`
-	Provider *string `json:"provider,omitempty"`
-	FeedURL *string `json:"feed_url,omitempty"`
-	PublishedAt *string `json:"published_at,omitempty"`
-	Score *float64 `json:"score,omitempty"`
 }
 
 type AgentSearchResponse struct {
@@ -625,15 +481,6 @@ type CliLinkPollResponse struct {
 	KeyPrefix *string `json:"key_prefix,omitempty"`
 }
 
-type AgentLibraryDocumentResponse struct {
-	RelativePath string `json:"relative_path"`
-	ContentID int `json:"content_id"`
-	Variant AgentLibraryDocumentVariant `json:"variant"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
-	SizeBytes int `json:"size_bytes"`
-	ChecksumSHA256 string `json:"checksum_sha256"`
-}
-
 type AgentLibraryManifestResponse struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	IncludeSource *bool `json:"include_source,omitempty"`
@@ -679,4 +526,169 @@ type ConvertNewsItemResponse struct {
 	NewContentID int `json:"new_content_id"`
 	AlreadyExists bool `json:"already_exists"`
 	Message string `json:"message"`
+}
+
+type ContentSummaryResponse struct {
+	ID int `json:"id"`
+	ContentType ContentType `json:"content_type"`
+	URL string `json:"url"`
+	SourceURL *string `json:"source_url,omitempty"`
+	DiscussionURL *string `json:"discussion_url,omitempty"`
+	Title *string `json:"title,omitempty"`
+	Source *string `json:"source,omitempty"`
+	Platform *string `json:"platform,omitempty"`
+	Status ContentStatus `json:"status"`
+	ShortSummary *string `json:"short_summary,omitempty"`
+	CreatedAt string `json:"created_at"`
+	ProcessedAt *string `json:"processed_at,omitempty"`
+	Classification *ContentClassification `json:"classification,omitempty"`
+	PublicationDate *string `json:"publication_date,omitempty"`
+	IsRead *bool `json:"is_read,omitempty"`
+	IsSavedToKnowledge *bool `json:"is_saved_to_knowledge,omitempty"`
+	NewsArticleURL *string `json:"news_article_url,omitempty"`
+	NewsDiscussionURL *string `json:"news_discussion_url,omitempty"`
+	NewsKeyPoints []string `json:"news_key_points,omitempty"`
+	NewsSummary *string `json:"news_summary,omitempty"`
+	UserStatus *string `json:"user_status,omitempty"`
+	ImageURL *string `json:"image_url,omitempty"`
+	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
+	PrimaryTopic *string `json:"primary_topic,omitempty"`
+	TopComment map[string]string `json:"top_comment,omitempty"`
+	CommentCount *int `json:"comment_count,omitempty"`
+	FeedPreview json.RawMessage `json:"feed_preview,omitempty"`
+	ArtifactType *string `json:"artifact_type,omitempty"`
+	PreviewBullets []string `json:"preview_bullets,omitempty"`
+	ReasonToRead *string `json:"reason_to_read,omitempty"`
+	KeyTakeaway *string `json:"key_takeaway,omitempty"`
+	SavedSource *SavedSource `json:"saved_source,omitempty"`
+}
+
+type PaginationMetadata struct {
+	NextCursor *string `json:"next_cursor,omitempty"`
+	HasMore *bool `json:"has_more,omitempty"`
+	PageSize int `json:"page_size"`
+	Total *int `json:"total,omitempty"`
+}
+
+type ContentSummaryBulletPoint struct {
+	Text string `json:"text"`
+	Category *string `json:"category,omitempty"`
+}
+
+type ContentSummaryQuote struct {
+	Text string `json:"text"`
+	Context *string `json:"context,omitempty"`
+	Attribution *string `json:"attribution,omitempty"`
+}
+
+type DetectedFeed struct {
+	URL string `json:"url"`
+	Type string `json:"type"`
+	Title *string `json:"title,omitempty"`
+	Format *string `json:"format,omitempty"`
+}
+
+type SubmissionStatusResponse struct {
+	ID int `json:"id"`
+	ContentType ContentType `json:"content_type"`
+	URL string `json:"url"`
+	SourceURL *string `json:"source_url,omitempty"`
+	Title *string `json:"title,omitempty"`
+	Status ContentStatus `json:"status"`
+	ErrorMessage *string `json:"error_message,omitempty"`
+	CreatedAt string `json:"created_at"`
+	ProcessedAt *string `json:"processed_at,omitempty"`
+	SubmittedVia *string `json:"submitted_via,omitempty"`
+	IsSelfSubmission *bool `json:"is_self_submission,omitempty"`
+	SubmissionKind *SubmissionKind `json:"submission_kind,omitempty"`
+	Outcome *SubmissionOutcome `json:"outcome,omitempty"`
+	DetectedFeed *DetectedFeed `json:"detected_feed,omitempty"`
+	FeedSubscription *SubmissionFeedSubscriptionResponse `json:"feed_subscription,omitempty"`
+}
+
+type ScraperConfigStatsResponse struct {
+	TotalCount int `json:"total_count"`
+	CompletedCount int `json:"completed_count"`
+	UnreadCount int `json:"unread_count"`
+	ProcessingCount int `json:"processing_count"`
+	LatestProcessedAt *time.Time `json:"latest_processed_at,omitempty"`
+	LatestPublicationAt *time.Time `json:"latest_publication_at,omitempty"`
+	NextExpectedAt *time.Time `json:"next_expected_at,omitempty"`
+	AverageIntervalHours *float64 `json:"average_interval_hours,omitempty"`
+	IntervalSampleSize *int `json:"interval_sample_size,omitempty"`
+}
+
+type OnboardingDiscoveryLaneStatus struct {
+	Name string `json:"name"`
+	Status string `json:"status"`
+	CompletedQueries *int `json:"completed_queries,omitempty"`
+	QueryCount *int `json:"query_count,omitempty"`
+}
+
+type OnboardingFastDiscoverResponse struct {
+	RecommendedPods []OnboardingSuggestion `json:"recommended_pods,omitempty"`
+	RecommendedSubstacks []OnboardingSuggestion `json:"recommended_substacks,omitempty"`
+	RecommendedSubreddits []OnboardingSuggestion `json:"recommended_subreddits,omitempty"`
+}
+
+type OnboardingSelectedAggregator struct {
+	Key string `json:"key"`
+	Title *string `json:"title,omitempty"`
+	Topics []string `json:"topics,omitempty"`
+}
+
+type AgentSearchResultResponse struct {
+	Kind AgentSearchResultKind `json:"kind"`
+	Title string `json:"title"`
+	URL string `json:"url"`
+	Snippet *string `json:"snippet,omitempty"`
+	Source *string `json:"source,omitempty"`
+	Provider *string `json:"provider,omitempty"`
+	FeedURL *string `json:"feed_url,omitempty"`
+	PublishedAt *string `json:"published_at,omitempty"`
+	Score *float64 `json:"score,omitempty"`
+}
+
+type AgentLibraryDocumentResponse struct {
+	RelativePath string `json:"relative_path"`
+	ContentID int `json:"content_id"`
+	Variant AgentLibraryDocumentVariant `json:"variant"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	SizeBytes int `json:"size_bytes"`
+	ChecksumSHA256 string `json:"checksum_sha256"`
+}
+
+type SubmissionFeedSubscriptionResponse struct {
+	Status string `json:"status"`
+	FeedURL *string `json:"feed_url,omitempty"`
+	FeedType *string `json:"feed_type,omitempty"`
+	Created *bool `json:"created,omitempty"`
+	ConfigID *int `json:"config_id,omitempty"`
+	InitialDownload *SubmissionFeedInitialDownloadResponse `json:"initial_download,omitempty"`
+}
+
+type OnboardingSuggestion struct {
+	SuggestionType OnboardingSuggestionType `json:"suggestion_type"`
+	Title *string `json:"title,omitempty"`
+	SiteURL *string `json:"site_url,omitempty"`
+	FeedURL *string `json:"feed_url,omitempty"`
+	Subreddit *string `json:"subreddit,omitempty"`
+	Rationale *string `json:"rationale,omitempty"`
+	Score *float64 `json:"score,omitempty"`
+	IsDefault *bool `json:"is_default,omitempty"`
+}
+
+type SubmissionFeedInitialDownloadResponse struct {
+	RequestedCount *int `json:"requested_count,omitempty"`
+	Ran *bool `json:"ran,omitempty"`
+	Status *string `json:"status,omitempty"`
+	Reason *string `json:"reason,omitempty"`
+	Error *string `json:"error,omitempty"`
+	ConfigID *int `json:"config_id,omitempty"`
+	BaseLimit *int `json:"base_limit,omitempty"`
+	TargetLimit *int `json:"target_limit,omitempty"`
+	Scraped *int `json:"scraped,omitempty"`
+	Saved *int `json:"saved,omitempty"`
+	Duplicates *int `json:"duplicates,omitempty"`
+	Errors *int `json:"errors,omitempty"`
 }

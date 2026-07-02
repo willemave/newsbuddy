@@ -1600,10 +1600,7 @@
             },
             "description": "Bullet points from structured summary",
             "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
+              "$ref": "#/components/schemas/ContentSummaryBulletPoint"
             },
             "title": "Bullet Points",
             "type": "array"
@@ -1760,10 +1757,7 @@
             },
             "description": "Quotes from structured summary",
             "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
+              "$ref": "#/components/schemas/ContentSummaryQuote"
             },
             "title": "Quotes",
             "type": "array"
@@ -1944,10 +1938,8 @@
             "type": "string"
           },
           "summary": {
-            "additionalProperties": true,
-            "nullable": true,
-            "title": "Summary",
-            "type": "object"
+            "$ref": "#/components/schemas/DiscussionSummaryResponse",
+            "nullable": true
           }
         },
         "required": [
@@ -2115,6 +2107,49 @@
           "message"
         ],
         "title": "ContentSubmissionResponse",
+        "type": "object"
+      },
+      "ContentSummaryBulletPoint": {
+        "description": "One flattened bullet point surfaced on ContentDetailResponse.bullet_points.\n\nNormalized from several summary-kind-specific shapes by\n``ContentData.bullet_points`` (app/models/domain/content.py) and\n``_string_map_list`` (app/presenters/content_responses.py), which drops\nempty/falsy values and requires ``text``. ``category`` is absent for the\nlong_interleaved v2 summary kind, so it stays optional.",
+        "properties": {
+          "category": {
+            "nullable": true,
+            "title": "Category",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ContentSummaryBulletPoint",
+        "type": "object"
+      },
+      "ContentSummaryQuote": {
+        "description": "One flattened quote surfaced on ContentDetailResponse.quotes.\n\nNormalized the same way as ``ContentSummaryBulletPoint``. Most summary\nkinds rename an underlying \"attribution\" key to \"context\" before this\npoint, but the long_structured and long_interleaved-v2 kinds pass the\nunderlying quote dict through unchanged, so both keys can appear on the\nwire (app/models/domain/content.py:214-220, ContentQuote in\napp/models/metadata/summaries.py).",
+        "properties": {
+          "attribution": {
+            "nullable": true,
+            "title": "Attribution",
+            "type": "string"
+          },
+          "context": {
+            "nullable": true,
+            "title": "Context",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ContentSummaryQuote",
         "type": "object"
       },
       "ContentSummaryResponse": {
@@ -3260,6 +3295,133 @@
         ],
         "title": "DiscussionMode",
         "type": "string"
+      },
+      "DiscussionSummaryCommentResponse": {
+        "description": "Representative comment selected by the discussion summarizer.",
+        "properties": {
+          "author": {
+            "nullable": true,
+            "title": "Author",
+            "type": "string"
+          },
+          "comment_id": {
+            "nullable": true,
+            "title": "Comment Id",
+            "type": "string"
+          },
+          "reason": {
+            "nullable": true,
+            "title": "Reason",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "DiscussionSummaryCommentResponse",
+        "type": "object"
+      },
+      "DiscussionSummaryLinkResponse": {
+        "description": "Interesting link surfaced by a discussion summary.",
+        "properties": {
+          "reason": {
+            "nullable": true,
+            "title": "Reason",
+            "type": "string"
+          },
+          "source_comment_id": {
+            "nullable": true,
+            "title": "Source Comment Id",
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "DiscussionSummaryLinkResponse",
+        "type": "object"
+      },
+      "DiscussionSummaryResponse": {
+        "description": "Structured summary of a content item's external discussion.\n\nMirrors ``app.models.metadata.summaries.DiscussionSummary``, which both\ndiscussion-payload producers (`get_content_discussion`,\n`get_news_item_discussion`) serialize via ``model_dump(mode=\"json\")``.",
+        "properties": {
+          "external_discussion_url": {
+            "nullable": true,
+            "title": "External Discussion Url",
+            "type": "string"
+          },
+          "generated_at": {
+            "nullable": true,
+            "title": "Generated At",
+            "type": "string"
+          },
+          "notable_links": {
+            "items": {
+              "$ref": "#/components/schemas/DiscussionSummaryLinkResponse"
+            },
+            "title": "Notable Links",
+            "type": "array"
+          },
+          "overview": {
+            "title": "Overview",
+            "type": "string"
+          },
+          "representative_comments": {
+            "items": {
+              "$ref": "#/components/schemas/DiscussionSummaryCommentResponse"
+            },
+            "title": "Representative Comments",
+            "type": "array"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/DiscussionSummaryTopicResponse"
+            },
+            "title": "Topics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "overview"
+        ],
+        "title": "DiscussionSummaryResponse",
+        "type": "object"
+      },
+      "DiscussionSummaryTopicResponse": {
+        "description": "One high-signal theme surfaced by the discussion summarizer.",
+        "properties": {
+          "stance": {
+            "nullable": true,
+            "title": "Stance",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "summary"
+        ],
+        "title": "DiscussionSummaryTopicResponse",
+        "type": "object"
       },
       "DownloadMoreRequest": {
         "description": "Request to download older items from the same feed series.",
@@ -5496,7 +5658,8 @@
         "description": "Semantic kind for a user-visible submission status row.",
         "enum": [
           "content",
-          "feed_subscription"
+          "feed_subscription",
+          "learning_deck"
         ],
         "title": "SubmissionKind",
         "type": "string"
@@ -5526,7 +5689,7 @@
             "description": "Pagination metadata for the response"
           },
           "submissions": {
-            "description": "List of user-submitted items still processing or failed",
+            "description": "List of ShareSheet submissions projected from Share Action tasks and downstream targets",
             "items": {
               "$ref": "#/components/schemas/SubmissionStatusResponse"
             },
@@ -7027,7 +7190,7 @@
     },
     "/api/content/submissions/list": {
       "get": {
-        "description": "Returns self-submitted content items that are not yet completed, including processing, failed, and skipped statuses.",
+        "description": "Returns ShareSheet submissions anchored on Share Action tasks, enriched with downstream content, feed, or Learning Deck target status.",
         "operationId": "listContentSubmissionStatuses",
         "parameters": [
           {
@@ -7087,7 +7250,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List user-submitted content still processing or failed",
+        "summary": "List ShareSheet submissions",
         "tags": [
           "content"
         ]

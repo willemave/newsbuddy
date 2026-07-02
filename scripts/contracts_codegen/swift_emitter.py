@@ -17,6 +17,7 @@ from scripts.contracts_codegen.introspect import (
     ContractTypeResolver,
     FieldIR,
     TypeIR,
+    expand_contract_models,
     introspect_models,
     validate_contract_models,
 )
@@ -32,7 +33,7 @@ import Foundation
 def build_swift_contracts(enum_specs: list[EnumSpec] | None = None) -> str:
     """Build the generated Swift enum source."""
     validate_contract_models(
-        CONTRACT_MODELS,
+        expand_contract_models(CONTRACT_MODELS, CONTRACT_ENUMS),
         CONTRACT_ENUMS,
         untyped_field_allowlist=CONTRACT_UNTYPED_FIELD_ALLOWLIST,
     )
@@ -62,8 +63,9 @@ def build_swift_models(
     enum_specs: list[EnumSpec] | None = None,
 ) -> str:
     """Build the generated Swift model source."""
-    specs = CONTRACT_MODELS if model_specs is None else model_specs
+    base_specs = CONTRACT_MODELS if model_specs is None else model_specs
     enums = CONTRACT_ENUMS if enum_specs is None else enum_specs
+    specs = expand_contract_models(base_specs, enums)
     validate_contract_models(
         specs,
         enums,
@@ -175,7 +177,7 @@ class _SwiftTypeContext:
 
     def _swift_non_optional_type(self, type_ir: TypeIR) -> str:
         if type_ir.kind == "datetime":
-            return "String"
+            return "Date"
         if type_ir.kind == "scalar":
             if type_ir.scalar == "string":
                 return "String"
@@ -190,11 +192,31 @@ class _SwiftTypeContext:
         if type_ir.kind in {"enum", "model"} and type_ir.name is not None:
             return type_ir.name
         if type_ir.kind == "list" and type_ir.item_type is not None:
+            if _contains_datetime(type_ir.item_type):
+                raise ValueError(
+                    "Unsupported Swift TypeIR: list[UTCDateTime] is not supported by the "
+                    "generator; nested datetime containers need dedicated codec support"
+                )
             return f"[{self.swift_type(type_ir.item_type)[0]}]"
         if type_ir.kind == "dict" and type_ir.value_type is not None:
+            if _contains_datetime(type_ir.value_type):
+                raise ValueError(
+                    "Unsupported Swift TypeIR: dict[str, UTCDateTime] is not supported by the "
+                    "generator; nested datetime containers need dedicated codec support"
+                )
             return f"[String: {self.swift_type(type_ir.value_type)[0]}]"
 
         raise ValueError(f"Unsupported Swift TypeIR: {type_ir!r}")
+
+
+def _contains_datetime(type_ir: TypeIR) -> bool:
+    if type_ir.kind == "datetime":
+        return True
+    if type_ir.kind == "list" and type_ir.item_type is not None:
+        return _contains_datetime(type_ir.item_type)
+    if type_ir.kind == "dict" and type_ir.value_type is not None:
+        return _contains_datetime(type_ir.value_type)
+    return False
 
 
 def _swift_model_struct(name: str, fields: tuple[FieldIR, ...], context: _SwiftTypeContext) -> str:
@@ -206,6 +228,7 @@ def _swift_model_struct(name: str, fields: tuple[FieldIR, ...], context: _SwiftT
             type_name=context.swift_type(field.type_ir)[0],
             decode_type=context.swift_type(field.type_ir)[1],
             optional=context.swift_type(field.type_ir)[2],
+            is_datetime=field.type_ir.kind == "datetime",
         )
         for field in fields
     ]
@@ -222,6 +245,8 @@ def _swift_model_struct(name: str, fields: tuple[FieldIR, ...], context: _SwiftT
     lines.append("    }")
     lines.append("")
     lines.extend(_swift_decoder_init(typed_fields))
+    lines.append("")
+    lines.extend(_swift_encoder(typed_fields))
     lines.append("}")
     lines.append("")
     return "\n".join(lines)
@@ -237,6 +262,7 @@ class _SwiftField:
         type_name: str,
         decode_type: str,
         optional: bool,
+        is_datetime: bool = False,
     ) -> None:
         self.source = source
         self.name = name
@@ -244,6 +270,7 @@ class _SwiftField:
         self.type_name = type_name
         self.decode_type = decode_type
         self.optional = optional
+        self.is_datetime = is_datetime
 
     @property
     def is_lenient(self) -> bool:
@@ -253,6 +280,14 @@ class _SwiftField:
     def default_expr(self) -> str | None:
         if self.optional:
             return "nil"
+        if self.is_datetime:
+            if self.source.default is not None or self.source.default_factory is not None:
+                raise ValueError(
+                    f"{self.source.python_name}: datetime fields do not support literal "
+                    "defaults in the generator; add a dedicated default expression before "
+                    "registering one"
+                )
+            return None
         if self.source.default_factory in {"list", "set"}:
             return "[]"
         if self.source.default_factory == "dict":
@@ -297,7 +332,9 @@ def _swift_decoder_init(fields: list[_SwiftField]) -> list[str]:
         "        let container = try decoder.container(keyedBy: CodingKeys.self)",
     ]
     for field in fields:
-        if field.is_lenient:
+        if field.is_datetime:
+            lines.extend(_swift_datetime_decode(field))
+        elif field.is_lenient:
             default_expr = field.default_expr
             if default_expr is None:
                 raise ValueError(
@@ -317,6 +354,80 @@ def _swift_decoder_init(fields: list[_SwiftField]) -> list[str]:
                 f"        {field.name} = try container.decode("
                 f"{field.decode_type}.self, forKey: .{field.name})"
             )
+    lines.append("    }")
+    return lines
+
+
+def _swift_data_corrupted_error(field_name: str) -> str:
+    return (
+        f"DecodingError.dataCorruptedError(forKey: .{field_name}, in: container, "
+        f'debugDescription: "Unparseable date for {field_name}")'
+    )
+
+
+def _swift_datetime_decode(field: _SwiftField) -> list[str]:
+    raw_var = f"{field.name}Raw"
+    date_var = f"{field.name}Parsed"
+    data_corrupted_error = _swift_data_corrupted_error(field.name)
+    if field.is_lenient:
+        default_expr = field.default_expr
+        if default_expr is None:
+            raise ValueError(
+                f"{field.source.python_name}: lenient fields need a Swift default expression"
+            )
+        return [
+            f"        if let {raw_var} = try container.decodeIfPresent("
+            f"String.self, forKey: .{field.name}), "
+            f"let {date_var} = ServerDate.parse({raw_var}) {{",
+            f"            {field.name} = {date_var}",
+            "        } else {",
+            f"            {field.name} = {default_expr}",
+            "        }",
+        ]
+    if field.optional:
+        return [
+            f"        if let {raw_var} = try container.decodeIfPresent("
+            f"String.self, forKey: .{field.name}) {{",
+            f"            guard let {date_var} = ServerDate.parse({raw_var}) else {{",
+            f"                throw {data_corrupted_error}",
+            "            }",
+            f"            {field.name} = {date_var}",
+            "        } else {",
+            f"            {field.name} = nil",
+            "        }",
+        ]
+    return [
+        f"        let {raw_var} = try container.decode(String.self, forKey: .{field.name})",
+        f"        guard let {date_var} = ServerDate.parse({raw_var}) else {{",
+        f"            throw {data_corrupted_error}",
+        "        }",
+        f"        {field.name} = {date_var}",
+    ]
+
+
+def _swift_encoder(fields: list[_SwiftField]) -> list[str]:
+    lines = [
+        "    func encode(to encoder: Encoder) throws {",
+        "        var container = encoder.container(keyedBy: CodingKeys.self)",
+    ]
+    for field in fields:
+        if field.is_datetime:
+            if field.optional:
+                lines.append(
+                    f"        try container.encodeIfPresent({field.name}.map(ServerDate.format), "
+                    f"forKey: .{field.name})"
+                )
+            else:
+                lines.append(
+                    f"        try container.encode(ServerDate.format({field.name}), "
+                    f"forKey: .{field.name})"
+                )
+        elif field.optional:
+            lines.append(
+                f"        try container.encodeIfPresent({field.name}, forKey: .{field.name})"
+            )
+        else:
+            lines.append(f"        try container.encode({field.name}, forKey: .{field.name})")
     lines.append("    }")
     return lines
 

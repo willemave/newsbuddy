@@ -403,7 +403,9 @@ def test_content_summary_response_contract(
                 "preview_bullets": None,
                 "reason_to_read": None,
                 "bullet_points": [{"text": "First point", "category": "finding"}],
-                "quotes": [{"text": "Important quote", "context": "Interview"}],
+                "quotes": [
+                    {"text": "Important quote", "context": "Interview", "attribution": None}
+                ],
                 "topics": ["AI", "Media"],
                 "full_markdown": "# Long Read\n\nBody",
                 "body_available": True,

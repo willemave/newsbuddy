@@ -70,6 +70,7 @@
 				Models/AnyCodable.swift,
 				Models/Generated/APIContracts.generated.swift,
 				Models/Generated/APIModels.generated.swift,
+				Models/ServerDate.swift,
 				Services/APIClient.swift,
 				Services/AppSettings.swift,
 				Services/KeychainManager.swift,

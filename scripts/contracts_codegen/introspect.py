@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
 from types import UnionType
@@ -75,6 +76,7 @@ class ContractTypeResolver:
     untyped_field_allowlist: frozenset[str]
     require_registry: bool = True
     enforce_untyped_allowlist: bool = True
+    on_model_reference: Callable[[type[BaseModel]], None] | None = None
 
     @classmethod
     def from_specs(
@@ -93,7 +95,11 @@ class ContractTypeResolver:
         )
 
     @classmethod
-    def unchecked(cls) -> ContractTypeResolver:
+    def unchecked(
+        cls,
+        *,
+        on_model_reference: Callable[[type[BaseModel]], None] | None = None,
+    ) -> ContractTypeResolver:
         return cls(
             model_specs={},
             enum_specs={},
@@ -101,6 +107,7 @@ class ContractTypeResolver:
             untyped_field_allowlist=frozenset(),
             require_registry=False,
             enforce_untyped_allowlist=False,
+            on_model_reference=on_model_reference,
         )
 
     def resolved_model_name(self, model: type[BaseModel]) -> str:
@@ -124,6 +131,8 @@ class ContractTypeResolver:
         return enum.__name__
 
     def validate_model_reference(self, model: type[BaseModel], *, field_path: str) -> None:
+        if self.on_model_reference is not None:
+            self.on_model_reference(model)
         spec = self.model_specs.get(model)
         if spec is None:
             if self.require_registry:
@@ -225,6 +234,70 @@ def introspect_models(
 ) -> list[ModelIR]:
     """Convert multiple Pydantic model classes into IR in input order."""
     return [introspect_model(model, resolver=resolver) for model in models]
+
+
+def expand_contract_models(
+    specs: list[ModelSpec],
+    enum_specs: list[EnumSpec],
+) -> list[ModelSpec]:
+    """Synthesize `ModelSpec` entries for nested, unregistered `BaseModel` references.
+
+    Walks every explicit spec's fields (and, transitively, every synthesized spec's
+    fields) looking for nested Pydantic models that are not already registered. Each
+    newly discovered model gets a synthesized spec whose targets are the union of the
+    targets of every spec that references it, propagated to a fixpoint so nested
+    models of nested models pick up their transitive referencers' targets too.
+
+    Explicit specs always win: they are never mutated, and a model that already has
+    an explicit spec is never re-synthesized even if a referencer needs wider targets
+    (that stays a hard validation error surfaced by `validate_contract_models`).
+
+    Output order is deterministic: explicit specs first in registry order, then
+    synthesized specs in first-discovery order (registry order, then field order).
+    """
+    explicit_by_model: dict[type[BaseModel], ModelSpec] = {spec.model: spec for spec in specs}
+    synthesized_targets: dict[type[BaseModel], Target] = {}
+    discovery_order: list[type[BaseModel]] = []
+    references_by_model: dict[type[BaseModel], list[type[BaseModel]]] = {}
+
+    def resolved_targets(model: type[BaseModel]) -> Target:
+        explicit = explicit_by_model.get(model)
+        return explicit.targets if explicit is not None else synthesized_targets[model]
+
+    def references_of(model: type[BaseModel]) -> list[type[BaseModel]]:
+        cached = references_by_model.get(model)
+        if cached is not None:
+            return cached
+        references: list[type[BaseModel]] = []
+        resolver = ContractTypeResolver.unchecked(on_model_reference=references.append)
+        introspect_model(model, resolver=resolver)
+        references_by_model[model] = references
+        return references
+
+    # Fixpoint: re-walk every known model until no synthesized target set changes.
+    # Bounded by the number of distinct models reachable from the registry, so this
+    # terminates even on deeply nested or mutually referencing model graphs.
+    changed = True
+    while changed:
+        changed = False
+        known_models = [spec.model for spec in specs] + list(discovery_order)
+        for model in known_models:
+            referencer_targets = resolved_targets(model)
+            for referenced in references_of(model):
+                if referenced in explicit_by_model:
+                    continue
+                current = synthesized_targets.get(referenced)
+                if current is None:
+                    synthesized_targets[referenced] = referencer_targets
+                    discovery_order.append(referenced)
+                    changed = True
+                elif referencer_targets & ~current:
+                    synthesized_targets[referenced] = current | referencer_targets
+                    changed = True
+
+    return list(specs) + [
+        ModelSpec(model, targets=synthesized_targets[model]) for model in discovery_order
+    ]
 
 
 def validate_contract_models(

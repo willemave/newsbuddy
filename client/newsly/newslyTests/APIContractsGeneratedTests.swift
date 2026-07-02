@@ -99,7 +99,7 @@ final class APIContractsGeneratedTests: XCTestCase {
         XCTAssertEqual(summary.savedSource, .knowledge)
 
         let appSummary = try decodeFixture(ContentSummary.self, "content_summary_article.json")
-        XCTAssertEqual(appSummary.contentType, "article")
+        XCTAssertEqual(appSummary.contentType, .article)
         XCTAssertEqual(appSummary.isSavedToKnowledge, true)
 
         let detail = try decodeFixture(ContentDetail.self, "content_detail_long_read.json")
@@ -116,14 +116,178 @@ final class APIContractsGeneratedTests: XCTestCase {
         XCTAssertFalse(APIContentStatus.knownCases.contains(future.status))
 
         let appFuture = try decodeFixture(ContentSummary.self, "content_summary_unknown_enum.json")
-        XCTAssertEqual(appFuture.contentType, "future_content_type")
-        XCTAssertEqual(appFuture.status, "future_status")
+        XCTAssertEqual(appFuture.contentType.rawValue, "future_content_type")
+        XCTAssertEqual(appFuture.status.rawValue, "future_status")
+        XCTAssertFalse(APIContentType.knownCases.contains(appFuture.contentType))
+        XCTAssertFalse(APIContentStatus.knownCases.contains(appFuture.status))
 
         let detail = try decodeFixture(APIContentDetailResponse.self, "content_detail_null_optionals.json")
         XCTAssertNil(detail.summaryKind)
         XCTAssertNil(detail.summaryVersion)
         XCTAssertEqual(detail.detectedFeed?.url, "https://newsletter.example.com/feed")
         XCTAssertEqual(detail.canSubscribe, true)
+    }
+
+    func testRequiredDatetimeFieldThrowsOnUnparseableValue() {
+        let json = """
+        {
+            "id": 1,
+            "scraper_type": "rss",
+            "display_name": "Example Feed",
+            "config": {},
+            "feed_url": "https://example.com/feed.xml",
+            "limit": null,
+            "is_active": true,
+            "created_at": "not-a-date",
+            "stats": null
+        }
+        """
+        let data = Data(json.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(APIScraperConfigResponse.self, from: data)) { error in
+            guard case DecodingError.dataCorrupted = error else {
+                return XCTFail("Expected DecodingError.dataCorrupted, got \(error)")
+            }
+        }
+    }
+
+    func testOptionalDatetimeFieldThrowsOnUnparseablePresentValue() {
+        let json = """
+        {
+            "provider": "x",
+            "connected": true,
+            "is_active": true,
+            "provider_user_id": null,
+            "provider_username": null,
+            "scopes": [],
+            "last_synced_at": "not-a-date",
+            "last_status": null,
+            "last_error": null,
+            "twitter_username": null
+        }
+        """
+        let data = Data(json.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(APIXConnectionResponse.self, from: data)) { error in
+            guard case DecodingError.dataCorrupted = error else {
+                return XCTFail("Expected DecodingError.dataCorrupted, got \(error)")
+            }
+        }
+    }
+
+    func testOptionalDatetimeFieldDefaultsToNilWhenMissing() throws {
+        let json = """
+        {
+            "provider": "x",
+            "connected": false,
+            "is_active": false,
+            "provider_user_id": null,
+            "provider_username": null,
+            "scopes": [],
+            "last_status": null,
+            "last_error": null,
+            "twitter_username": null
+        }
+        """
+        let data = Data(json.utf8)
+
+        let decoded = try JSONDecoder().decode(APIXConnectionResponse.self, from: data)
+        XCTAssertNil(decoded.lastSyncedAt)
+    }
+
+    func testCanonicalDatetimeFixtureDecodesToExpectedDate() throws {
+        let json = """
+        {
+            "id": 1,
+            "scraper_type": "rss",
+            "display_name": "Example Feed",
+            "config": {},
+            "feed_url": "https://example.com/feed.xml",
+            "limit": null,
+            "is_active": true,
+            "created_at": "2026-04-27T12:00:00Z",
+            "stats": null
+        }
+        """
+        let data = Data(json.utf8)
+
+        let decoded = try JSONDecoder().decode(APIScraperConfigResponse.self, from: data)
+        let expected = try XCTUnwrap(ServerDate.parse("2026-04-27T12:00:00Z"))
+        XCTAssertEqual(decoded.createdAt, expected)
+    }
+
+    func testDatetimeFieldEncodeDecodeRoundTripPreservesValue() throws {
+        let original = APIScraperConfigResponse(
+            id: 42,
+            scraperType: "rss",
+            displayName: "Round Trip Feed",
+            config: [:],
+            feedUrl: "https://example.com/feed.xml",
+            limit: nil,
+            isActive: true,
+            createdAt: try XCTUnwrap(ServerDate.parse("2026-04-27T12:00:00.123456Z")),
+            stats: nil
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertTrue((json["created_at"] as? String)?.hasSuffix("Z") == true)
+
+        let roundTripped = try JSONDecoder().decode(APIScraperConfigResponse.self, from: data)
+        XCTAssertEqual(roundTripped.createdAt, original.createdAt)
+    }
+
+    // Domain models that decode through generated wire models must also encode their
+    // Date fields as canonical server strings; synthesized Encodable would silently
+    // emit numeric timestamps instead.
+    func testChatMessageEncodesTimestampAsServerDateString() throws {
+        let message = ChatMessage(
+            id: 7,
+            role: .user,
+            timestamp: try XCTUnwrap(ServerDate.parse("2026-07-02T08:30:00.250Z")),
+            content: "hello"
+        )
+
+        let data = try JSONEncoder().encode(message)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let timestamp = try XCTUnwrap(json["timestamp"] as? String)
+        XCTAssertEqual(ServerDate.parse(timestamp), message.timestamp)
+    }
+
+    func testChatSessionSummaryEncodesDatesAsServerDateStrings() throws {
+        let summary = ChatSessionSummary(
+            id: 3,
+            contentId: nil,
+            title: "Session",
+            sessionType: nil,
+            topic: nil,
+            llmProvider: "anthropic",
+            llmModel: "claude",
+            createdAt: try XCTUnwrap(ServerDate.parse("2026-07-01T10:00:00.000Z")),
+            updatedAt: nil,
+            lastMessageAt: try XCTUnwrap(ServerDate.parse("2026-07-02T11:15:30.500Z")),
+            articleTitle: nil,
+            articleUrl: nil,
+            articleSummary: nil,
+            articleSource: nil,
+            hasPendingMessage: nil,
+            isSavedToKnowledge: nil,
+            hasMessages: nil,
+            lastMessagePreview: nil,
+            lastMessageRole: nil
+        )
+
+        let data = try JSONEncoder().encode(summary)
+        let json = try XCTAssertUnwrapJSONObject(data)
+        let createdAt = try XCTUnwrap(json["created_at"] as? String)
+        let lastMessageAt = try XCTUnwrap(json["last_message_at"] as? String)
+        XCTAssertEqual(ServerDate.parse(createdAt), summary.createdAt)
+        XCTAssertEqual(ServerDate.parse(lastMessageAt), summary.lastMessageAt)
+        XCTAssertNil(json["updated_at"], "nil optional dates must stay omitted")
+    }
+
+    private func XCTAssertUnwrapJSONObject(_ data: Data) throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
     private func assertUnknown<T: OpenContractEnum>(

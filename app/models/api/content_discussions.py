@@ -56,6 +56,48 @@ class DiscussionGroupResponse(BaseModel):
     items: list[DiscussionItemResponse] = Field(default_factory=list)
 
 
+class DiscussionSummaryTopicResponse(BaseModel):
+    """One high-signal theme surfaced by the discussion summarizer."""
+
+    title: str
+    summary: str
+    stance: str | None = None
+
+
+class DiscussionSummaryLinkResponse(BaseModel):
+    """Interesting link surfaced by a discussion summary."""
+
+    url: str
+    title: str | None = None
+    reason: str | None = None
+    source_comment_id: str | None = None
+
+
+class DiscussionSummaryCommentResponse(BaseModel):
+    """Representative comment selected by the discussion summarizer."""
+
+    comment_id: str | None = None
+    author: str | None = None
+    text: str
+    reason: str | None = None
+
+
+class DiscussionSummaryResponse(BaseModel):
+    """Structured summary of a content item's external discussion.
+
+    Mirrors ``app.models.metadata.summaries.DiscussionSummary``, which both
+    discussion-payload producers (`get_content_discussion`,
+    `get_news_item_discussion`) serialize via ``model_dump(mode="json")``.
+    """
+
+    overview: str
+    topics: list[DiscussionSummaryTopicResponse] = Field(default_factory=list)
+    notable_links: list[DiscussionSummaryLinkResponse] = Field(default_factory=list)
+    representative_comments: list[DiscussionSummaryCommentResponse] = Field(default_factory=list)
+    external_discussion_url: str | None = None
+    generated_at: str | None = None
+
+
 class ContentDiscussionResponse(BaseModel):
     """Discussion payload for a content item."""
 
@@ -70,6 +112,13 @@ class ContentDiscussionResponse(BaseModel):
     comments: list[DiscussionCommentResponse] = Field(default_factory=list)
     discussion_groups: list[DiscussionGroupResponse] = Field(default_factory=list)
     links: list[DiscussionLinkResponse] = Field(default_factory=list)
-    summary: dict[str, Any] | None = None
+    summary: DiscussionSummaryResponse | None = None
     comment_count: int | None = None
+    # Per-platform/per-mode fetch stats: Techmeme emits group_count/item_count;
+    # Hacker News and Reddit emit cap/fetched_count/cap_reached/total_seen/
+    # declared_comment_count (partial subsets on early exit); news-item discussions
+    # emit a 9-key shape (comment_count, summary_status, summary_version, etc). No
+    # iOS code reads a key out of this dict today. Genuinely heterogeneous across
+    # producers, not just under-typed — kept as an intentional escape hatch rather
+    # than a synthetic union type (see contracts_registry.py).
     stats: dict[str, Any] = Field(default_factory=dict)

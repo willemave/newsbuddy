@@ -2,7 +2,13 @@
 
 from typing import Any
 
-from app.models.api.content import ContentDetailResponse, ContentSummaryResponse, DetectedFeed
+from app.models.api.content import (
+    ContentDetailResponse,
+    ContentSummaryBulletPoint,
+    ContentSummaryQuote,
+    ContentSummaryResponse,
+    DetectedFeed,
+)
 from app.models.contracts import ContentClassification, ContentStatus, ContentType, SavedSource
 from app.models.db import Content
 from app.models.domain.content import ContentData
@@ -39,6 +45,16 @@ def _string_map_list(
         if required_key in mapped:
             normalized.append(mapped)
     return normalized
+
+
+def _content_summary_bullet_points(
+    items: list[dict[str, str]],
+) -> list[ContentSummaryBulletPoint]:
+    return [ContentSummaryBulletPoint(**item) for item in items]
+
+
+def _content_summary_quotes(items: list[dict[str, str]]) -> list[ContentSummaryQuote]:
+    return [ContentSummaryQuote(**item) for item in items]
 
 
 def _clean_string(value: Any) -> str | None:
@@ -459,8 +475,8 @@ def build_content_detail_response(
         artifact_type=artifact_fields["artifact_type"],
         preview_bullets=artifact_fields["preview_bullets"],
         reason_to_read=artifact_fields["reason_to_read"],
-        bullet_points=bullet_points,
-        quotes=quotes,
+        bullet_points=_content_summary_bullet_points(bullet_points),
+        quotes=_content_summary_quotes(quotes),
         topics=topics,
         full_markdown=full_markdown,
         body_available=body_available,

@@ -7,7 +7,11 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.content_discussions import ContentDiscussionResponse, DiscussionLinkResponse
+from app.models.api.content_discussions import (
+    ContentDiscussionResponse,
+    DiscussionLinkResponse,
+    DiscussionSummaryResponse,
+)
 from app.models.contracts import DiscussionMode
 from app.models.db import ContentDiscussion, NewsItem, NewsItemDiscussion
 from app.queries.get_content_discussion import build_discussion_response
@@ -30,30 +34,25 @@ def _status_for_discussion_row(row: NewsItemDiscussion) -> str:
     return "not_ready"
 
 
-def _links_from_summary(summary: dict[str, object] | None) -> list[DiscussionLinkResponse]:
-    if not isinstance(summary, dict):
-        return []
-    raw_links = summary.get("notable_links")
-    if not isinstance(raw_links, list):
+def _links_from_summary(
+    summary: DiscussionSummaryResponse | None,
+) -> list[DiscussionLinkResponse]:
+    if summary is None:
         return []
 
     links: list[DiscussionLinkResponse] = []
     seen: set[str] = set()
-    for raw_link in raw_links:
-        if not isinstance(raw_link, dict):
-            continue
-        url = raw_link.get("url")
-        if not isinstance(url, str) or not url.strip() or url in seen:
+    for raw_link in summary.notable_links:
+        url = raw_link.url
+        if not url.strip() or url in seen:
             continue
         seen.add(url)
-        title = raw_link.get("title") or raw_link.get("reason")
-        source_comment_id = raw_link.get("source_comment_id")
         links.append(
             DiscussionLinkResponse(
                 url=url,
                 source="summary",
-                comment_id=source_comment_id if isinstance(source_comment_id, str) else None,
-                title=title if isinstance(title, str) else None,
+                comment_id=raw_link.source_comment_id,
+                title=raw_link.title or raw_link.reason,
             )
         )
     return links
@@ -64,7 +63,11 @@ def _build_response_from_news_item_discussion(
     news_item_id: int,
     row: NewsItemDiscussion,
 ) -> ContentDiscussionResponse:
-    summary = row.summary if isinstance(row.summary, dict) else None
+    summary = (
+        DiscussionSummaryResponse.model_validate(row.summary)
+        if isinstance(row.summary, dict)
+        else None
+    )
     status = _status_for_discussion_row(row)
     return ContentDiscussionResponse(
         content_id=news_item_id,

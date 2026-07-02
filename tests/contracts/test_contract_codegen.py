@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, get_args, get_type_hints
@@ -7,7 +8,7 @@ from typing import Any, Literal, get_args, get_type_hints
 import pytest
 from pydantic import BaseModel
 
-from app.models.api.base import lenient_field
+from app.models.api.base import UTCDateTime, lenient_field
 from app.models.api.chat import ChatMessageDto
 from app.models.api.content import ContentDetailResponse, ContentSummaryResponse
 from app.models.api.content_actions import BulkMarkReadResponse
@@ -29,6 +30,7 @@ from app.models.contracts_registry import (
 from scripts.contracts_codegen.go_emitter import build_go_contracts
 from scripts.contracts_codegen.introspect import (
     UnsupportedContractTypeError,
+    expand_contract_models,
     introspect_model,
     validate_contract_models,
 )
@@ -49,6 +51,19 @@ class LenientPolicyModel(BaseModel):
         default_factory=list,
         json_schema_extra={"contract": {"owner": "test"}, "x-test": True},
     )
+
+
+class DatetimeFieldsModel(BaseModel):
+    required_at: UTCDateTime
+    optional_at: UTCDateTime | None = None
+
+
+class ListOfDatetimesModel(BaseModel):
+    occurred_at: list[UTCDateTime]
+
+
+class DictOfDatetimesModel(BaseModel):
+    occurred_at: dict[str, UTCDateTime]
 
 
 def test_swift_enum_emitter_matches_checked_in_artifact() -> None:
@@ -113,6 +128,104 @@ def test_swift_model_emitter_outputs_lenient_decode_fallback() -> None:
     assert "let items: [String]" in output
     assert 'case items = "items"' in output
     assert "items = try container.decodeIfPresent([String].self, forKey: .items) ?? []" in output
+
+
+def test_swift_model_emitter_maps_datetime_to_date() -> None:
+    """UTCDateTime fields should map to Swift Date, not String."""
+    output = build_swift_models([ModelSpec(DatetimeFieldsModel, targets=Target.IOS)])
+
+    assert "struct APIDatetimeFieldsModel: Codable {" in output
+    assert "let requiredAt: Date" in output
+    assert "let optionalAt: Date?" in output
+
+
+def test_swift_model_emitter_required_datetime_throws_on_unparseable() -> None:
+    """Required datetime fields decode strictly and guard-throw on unparseable values."""
+    output = build_swift_models([ModelSpec(DatetimeFieldsModel, targets=Target.IOS)])
+
+    assert "let requiredAtRaw = try container.decode(String.self, forKey: .requiredAt)" in output
+    assert "guard let requiredAtParsed = ServerDate.parse(requiredAtRaw) else {" in output
+    assert (
+        "throw DecodingError.dataCorruptedError(forKey: .requiredAt, in: container, "
+        'debugDescription: "Unparseable date for requiredAt")' in output
+    )
+    assert "requiredAt = requiredAtParsed" in output
+
+
+def test_swift_model_emitter_optional_datetime_throws_when_present_but_unparseable() -> None:
+    """Optional-but-present datetime values are strict; only a missing key defaults to nil."""
+    output = build_swift_models([ModelSpec(DatetimeFieldsModel, targets=Target.IOS)])
+
+    assert (
+        "if let optionalAtRaw = try container.decodeIfPresent(String.self, forKey: .optionalAt) {"
+        in output
+    )
+    assert "guard let optionalAtParsed = ServerDate.parse(optionalAtRaw) else {" in output
+    assert "optionalAt = optionalAtParsed" in output
+    assert "optionalAt = nil" in output
+
+
+def test_swift_model_emitter_encodes_datetime_via_server_date_format() -> None:
+    """Generated encode(to:) must format Date fields through ServerDate, not synthesize them."""
+    output = build_swift_models([ModelSpec(DatetimeFieldsModel, targets=Target.IOS)])
+
+    assert "func encode(to encoder: Encoder) throws {" in output
+    assert "try container.encode(ServerDate.format(requiredAt), forKey: .requiredAt)" in output
+    assert (
+        "try container.encodeIfPresent(optionalAt.map(ServerDate.format), forKey: .optionalAt)"
+        in output
+    )
+
+
+def test_swift_model_emitter_lenient_datetime_with_literal_default_fails_loudly() -> None:
+    """A lenient datetime field cannot carry a Python literal default: no Swift literal exists
+    for an arbitrary datetime, so the generator must fail loudly instead of guessing."""
+
+    class LenientDatetimeModel(BaseModel):
+        occurred_at: UTCDateTime = lenient_field(
+            default_factory=lambda: datetime(2000, 1, 1),
+            json_schema_extra={"contract": {"owner": "test"}},
+        )
+
+    with pytest.raises(ValueError, match="datetime fields do not support literal defaults"):
+        build_swift_models([ModelSpec(LenientDatetimeModel, targets=Target.IOS)])
+
+
+def test_swift_model_emitter_optional_lenient_datetime_defaults_on_missing_or_unparseable() -> None:
+    """An optional lenient datetime field falls back to nil on missing OR unparseable values."""
+
+    class OptionalLenientDatetimeModel(BaseModel):
+        occurred_at: UTCDateTime | None = lenient_field(
+            default=None,
+            json_schema_extra={"contract": {"owner": "test"}},
+        )
+
+    output = build_swift_models([ModelSpec(OptionalLenientDatetimeModel, targets=Target.IOS)])
+
+    assert "let occurredAt: Date?" in output
+    assert (
+        "if let occurredAtRaw = try container.decodeIfPresent(String.self, forKey: .occurredAt), "
+        "let occurredAtParsed = ServerDate.parse(occurredAtRaw) {" in output
+    )
+    assert "occurredAt = occurredAtParsed" in output
+    assert "occurredAt = nil" in output
+
+
+def test_swift_model_emitter_rejects_list_of_datetimes() -> None:
+    """list[UTCDateTime] is not supported; the emitter should fail loudly, not half-support it."""
+    with pytest.raises(ValueError, match="list\\[UTCDateTime\\] is not supported"):
+        build_swift_models([ModelSpec(ListOfDatetimesModel, targets=Target.IOS)])
+
+
+def test_swift_model_emitter_rejects_dict_of_datetimes() -> None:
+    """dict[str, UTCDateTime] is not supported; the emitter should fail loudly."""
+    with pytest.raises(ValueError, match="dict\\[str, UTCDateTime\\] is not supported"):
+        build_swift_models([ModelSpec(DictOfDatetimesModel, targets=Target.IOS)])
+
+
+def test_no_registered_model_uses_nested_datetime_containers() -> None:
+    """Guard the emitter's unsupported-shape error stays untriggered by real registry models."""
+    build_swift_models()
 
 
 def test_swift_open_enum_emits_non_failing_unknown_case() -> None:
@@ -195,18 +308,23 @@ def test_contract_registry_seeds_ios_and_cli_surfaces() -> None:
 def test_contract_registry_models_use_supported_types() -> None:
     """Every registered model field should fit the generator's supported type table."""
     validate_contract_models(
-        CONTRACT_MODELS,
+        expand_contract_models(CONTRACT_MODELS, CONTRACT_ENUMS),
         CONTRACT_ENUMS,
         untyped_field_allowlist=CONTRACT_UNTYPED_FIELD_ALLOWLIST,
     )
 
 
-def test_contract_model_registry_contains_nested_pydantic_dependencies() -> None:
-    """Registered models should not depend on unreviewed nested Pydantic models."""
-    registered = {spec.model for spec in CONTRACT_MODELS}
+def test_contract_model_registry_expansion_covers_nested_pydantic_dependencies() -> None:
+    """Every nested Pydantic model reachable from the registry must resolve, either
+    through an explicit spec or transitive-closure expansion. Registration for
+    reachable nested models is intentionally *not* required directly on
+    CONTRACT_MODELS (see `expand_contract_models`); this test guards the invariant
+    that expansion never leaves a nested model unresolved."""
+    expanded = expand_contract_models(CONTRACT_MODELS, CONTRACT_ENUMS)
+    registered = {spec.model for spec in expanded}
     missing: set[type[BaseModel]] = set()
 
-    for spec in CONTRACT_MODELS:
+    for spec in expanded:
         type_hints = get_type_hints(spec.model, include_extras=True)
         for field_name, annotation in type_hints.items():
             if field_name in spec.model.model_fields:

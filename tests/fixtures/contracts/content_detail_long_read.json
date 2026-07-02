@@ -60,7 +60,8 @@
   "quotes": [
     {
       "text": "Important quote",
-      "context": "Interview"
+      "context": "Interview",
+      "attribution": null
     }
   ],
   "topics": [
