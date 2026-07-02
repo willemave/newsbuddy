@@ -662,16 +662,6 @@ def _emit_decision_trace(trace: dict[str, Any] | None) -> None:
     _decision_trace_sink(trace)
 
 
-def find_related_representative(
-    db: Session,
-    *,
-    item: NewsItem,
-) -> NewsItem | None:
-    """Find the best existing representative that should absorb the given item."""
-    accepted = find_related_representatives(db, item=item)
-    return accepted[0] if accepted else None
-
-
 def find_related_representatives(
     db: Session,
     *,
