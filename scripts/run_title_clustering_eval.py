@@ -15,11 +15,18 @@ from typing import Any, cast
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import numpy as np
+
+import app.services.news_relations as news_relations
 from app.core.db import get_session_factory
 from app.core.logging import setup_logging
 from app.core.settings import get_settings
 from app.models.db import NewsItem
-from app.services.news_relations import reconcile_news_item_relation
+from app.services.news_embeddings import encode_news_texts
+from app.services.news_relations import (
+    reconcile_news_item_relation,
+    set_relation_decision_trace_sink,
+)
 from app.services.news_reranker import clear_news_reranker_cache
 from tests.services.news_relation_cluster_cases import (
     NEGATIVE_PRODUCTION_CLUSTER_CASES,
@@ -71,7 +78,39 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Emit JSON instead of text",
     )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Optional file path for the JSON payload (keeps stdout logs separate)",
+    )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Attach per-decision matcher traces to failed cases",
+    )
+    parser.add_argument(
+        "--no-embedding-cache",
+        action="store_true",
+        help="Disable the in-process embedding cache (slower, identical results)",
+    )
     return parser.parse_args()
+
+
+def _install_embedding_cache() -> None:
+    """Memoize text embeddings so threshold sweeps do not re-encode titles."""
+    cache: dict[str, np.ndarray] = {}
+
+    def cached_encode(texts: list[str]) -> np.ndarray:
+        missing = list(dict.fromkeys(text for text in texts if text not in cache))
+        if missing:
+            vectors = encode_news_texts(missing)
+            if vectors.size == 0:
+                return vectors
+            for text, vector in zip(missing, vectors, strict=True):
+                cache[text] = vector
+        return np.stack([cache[text] for text in texts])
+
+    news_relations.encode_news_texts = cached_encode
 
 
 def _make_item(
@@ -236,7 +275,7 @@ def _aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _evaluate_case(db, case: dict[str, Any]) -> dict[str, Any]:  # noqa: ANN001
+def _evaluate_case(db, case: dict[str, Any], *, collect_traces: bool = False) -> dict[str, Any]:  # noqa: ANN001
     created_ids: list[int] = []
     gold_labels_by_id: dict[int, str] = {}
     base_time = datetime.now(UTC).replace(tzinfo=None)
@@ -244,24 +283,32 @@ def _evaluate_case(db, case: dict[str, Any]) -> dict[str, Any]:  # noqa: ANN001
     groups = _case_groups(case)
     case_id = str(case["case_id"])
 
+    traces: list[dict[str, Any]] = []
+    if collect_traces:
+        set_relation_decision_trace_sink(traces.append)
+
     idx = 0
-    for group_index, group in enumerate(groups, start=1):
-        for title in group:
-            item = _make_item(
-                idx=idx,
-                title=title,
-                case_id=case_id,
-                ingested_at=base_time + timedelta(seconds=idx),
-            )
-            db.add(item)
-            db.flush()
-            item_id = item.id
-            if item_id is None:
-                raise ValueError("Persisted news item missing id")
-            reconcile_news_item_relation(db, news_item_id=item_id)
-            created_ids.append(item_id)
-            gold_labels_by_id[item_id] = f"gold:{group_index}"
-            idx += 1
+    try:
+        for group_index, group in enumerate(groups, start=1):
+            for title in group:
+                item = _make_item(
+                    idx=idx,
+                    title=title,
+                    case_id=case_id,
+                    ingested_at=base_time + timedelta(seconds=idx),
+                )
+                db.add(item)
+                db.flush()
+                item_id = item.id
+                if item_id is None:
+                    raise ValueError("Persisted news item missing id")
+                reconcile_news_item_relation(db, news_item_id=item_id)
+                created_ids.append(item_id)
+                gold_labels_by_id[item_id] = f"gold:{group_index}"
+                idx += 1
+    finally:
+        if collect_traces:
+            set_relation_decision_trace_sink(None)
 
     predicted_labels_by_id: dict[int, str] = {}
     predicted_groups: dict[int, list[dict[str, Any]]] = defaultdict(list)
@@ -299,7 +346,8 @@ def _evaluate_case(db, case: dict[str, Any]) -> dict[str, Any]:  # noqa: ANN001
             cast(int, group["representative_id"]),
         ),
     )
-    return {
+    passed = gold_pairs == predicted_pairs
+    result = {
         "case_id": case_id,
         "label": label,
         "expected_member_count": len(created_ids),
@@ -308,9 +356,12 @@ def _evaluate_case(db, case: dict[str, Any]) -> dict[str, Any]:  # noqa: ANN001
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        "passed": gold_pairs == predicted_pairs,
+        "passed": passed,
         "groups": representative_groups,
     }
+    if collect_traces and not passed:
+        result["trace"] = traces
+    return result
 
 
 def _print_text(summaries: list[dict[str, Any]], *, failures_only: bool) -> None:
@@ -344,6 +395,27 @@ def _print_text(summaries: list[dict[str, Any]], *, failures_only: bool) -> None
                     f"  rep={group['representative_id']} members={group['member_count']} "
                     f"{group['titles'][0]}"
                 )
+            for trace in result.get("trace", []):
+                accepted = ",".join(str(value) for value in trace["accepted_ids"]) or "-"
+                print(
+                    f"  trace item={trace['item_id']} path={trace['path']} "
+                    f"accepted=[{accepted}] {str(trace['item_title'])[:70]}"
+                )
+                for decision in trace["decisions"]:
+                    views = decision.get("views", {})
+                    view_text = " ".join(
+                        f"{label[:4]}={score:.3f}"
+                        for label, score in views.items()
+                        if score is not None
+                    )
+                    combined = decision.get("combined")
+                    combined_text = f"combined={combined:.3f} " if combined is not None else ""
+                    rerank = decision.get("rerank_score")
+                    rerank_text = f"rerank={rerank:.3f} " if rerank is not None else ""
+                    print(
+                        f"    cand={decision['candidate_id']} {combined_text}{rerank_text}"
+                        f"{view_text} outcome={decision.get('outcome', '-')}"
+                    )
 
 
 def main() -> int:
@@ -352,6 +424,8 @@ def main() -> int:
     case_ids = set(args.case_ids or [])
     cases = _select_cases(case_ids or None)
     thresholds = _parse_thresholds(args.thresholds, use_reranker=args.use_reranker)
+    if not args.no_embedding_cache:
+        _install_embedding_cache()
     session_factory = get_session_factory()
     runs: list[dict[str, Any]] = []
 
@@ -367,7 +441,7 @@ def main() -> int:
         ):
             for case in cases:
                 with session_factory() as db:
-                    results.append(_evaluate_case(db, case))
+                    results.append(_evaluate_case(db, case, collect_traces=args.trace))
                     db.rollback()
         runs.append(
             {
@@ -377,8 +451,12 @@ def main() -> int:
             }
         )
 
+    if args.output:
+        with open(args.output, "w") as handle:
+            handle.write(json.dumps({"runs": runs}, indent=2))
     if args.json:
-        print(json.dumps({"runs": runs}, indent=2))
+        if not args.output:
+            print(json.dumps({"runs": runs}, indent=2))
     else:
         _print_text(runs, failures_only=args.failures_only)
 

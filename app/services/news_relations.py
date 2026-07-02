@@ -63,6 +63,24 @@ CLUSTER_RELATED_TITLE_LIMIT = 6
 DOMINANT_RERANK_VARIANT_GAP = 0.35
 DOMINANT_RERANK_MIN_TITLE_SIMILARITY = 0.55
 
+# Dotted release numbers ("5.3", "2.5.1") and compact model/quarter tokens
+# ("s26", "q2", "17e"). Plain integers, prices, and years are deliberately
+# excluded: same-story titles routinely disagree on those.
+VERSION_DETAIL_PATTERN = re.compile(r"\b\d+(?:\.\d+)+\b")
+MODEL_DETAIL_PATTERN = re.compile(r"\b(?:[a-z]{1,6}\d{1,4}[a-z]{0,2}|\d{1,4}[a-z]{1,3})\b")
+# Magnitude/ordinal/multiplier suffixes make digit-letter tokens too noisy to
+# compare ("16k jobs" vs "16,000 jobs", "$1b" vs "$1.1b", "4th", "2x faster").
+NON_DISTINCTIVE_DIGIT_SUFFIXES = {"k", "m", "b", "bn", "t", "tn", "st", "nd", "rd", "th", "s", "x"}
+
+DecisionTraceSink = Callable[[dict[str, Any]], None]
+_decision_trace_sink: DecisionTraceSink | None = None
+
+
+def set_relation_decision_trace_sink(sink: DecisionTraceSink | None) -> None:
+    """Install an optional per-decision trace consumer (used by evals)."""
+    global _decision_trace_sink
+    _decision_trace_sink = sink
+
 
 def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
@@ -313,6 +331,39 @@ def match_tokens_for_text(text: str) -> set[str]:
         if normalized and normalized not in MATCH_STOPWORDS:
             tokens.add(normalized)
     return tokens
+
+
+def distinctive_detail_tokens(titles: list[str]) -> tuple[set[str], set[str]]:
+    """Extract (version, model) detail tokens across a set of title variants."""
+    versions: set[str] = set()
+    models: set[str] = set()
+    for title in titles:
+        lowered = title.casefold()
+        versions.update(VERSION_DETAIL_PATTERN.findall(lowered))
+        for token in MODEL_DETAIL_PATTERN.findall(lowered):
+            suffix_match = re.search(r"[a-z]+$", token)
+            if (
+                suffix_match
+                and token[: suffix_match.start()].isdigit()
+                and suffix_match.group() in NON_DISTINCTIVE_DIGIT_SUFFIXES
+            ):
+                continue
+            models.add(token)
+    return versions, models
+
+
+def distinctive_details_conflict(left_titles: list[str], right_titles: list[str]) -> bool:
+    """True when both sides carry version/model details that disagree.
+
+    Targets same-entity/different-event pairs ("GPT-5.3" vs "GPT-5.4",
+    "S26" vs "17e") that embed too close together for thresholds to separate.
+    Sides with no distinctive details never conflict.
+    """
+    left_versions, left_models = distinctive_detail_tokens(left_titles)
+    right_versions, right_models = distinctive_detail_tokens(right_titles)
+    if left_versions and right_versions and not (left_versions & right_versions):
+        return True
+    return bool(left_models and right_models and not (left_models & right_models))
 
 
 def relaxed_lexical_guard(
@@ -605,12 +656,31 @@ def recompute_representative_enrichment(
     return representative
 
 
+def _emit_decision_trace(trace: dict[str, Any] | None) -> None:
+    if trace is None or _decision_trace_sink is None:
+        return
+    _decision_trace_sink(trace)
+
+
 def find_related_representative(
     db: Session,
     *,
     item: NewsItem,
 ) -> NewsItem | None:
-    """Find an existing visible representative that should absorb the given item."""
+    """Find the best existing representative that should absorb the given item."""
+    accepted = find_related_representatives(db, item=item)
+    return accepted[0] if accepted else None
+
+
+def find_related_representatives(
+    db: Session,
+    *,
+    item: NewsItem,
+) -> list[NewsItem]:
+    """Find all representatives the item matches, ordered best-first.
+
+    More than one entry means the item bridges clusters that should merge.
+    """
     settings = get_settings()
     query = (
         db.query(NewsItem)
@@ -632,37 +702,54 @@ def find_related_representative(
         .limit(settings.news_list_max_related_candidates)
         .all()
     )
+    trace: dict[str, Any] | None = None
+    if _decision_trace_sink is not None:
+        trace = {
+            "item_id": _require_news_item_id(item),
+            "item_title": _relation_primary_title(item),
+            "candidate_count": len(candidates),
+            "path": "no_candidates",
+            "decisions": [],
+            "accepted_ids": [],
+        }
     if not candidates:
-        return None
+        _emit_decision_trace(trace)
+        return []
 
     exact_key = exact_relation_key(item)
     if exact_key is not None:
         for candidate in candidates:
             if exact_relation_key(candidate) == exact_key:
-                return candidate
+                if trace is not None:
+                    trace["path"] = "exact"
+                    trace["accepted_ids"] = [_require_news_item_id(candidate)]
+                    _emit_decision_trace(trace)
+                return [candidate]
 
     semantic_candidates, candidate_tokens_by_id, item_tokens = _semantic_prefilter_candidates(
         item,
         candidates,
     )
     if not semantic_candidates:
-        return None
+        if trace is not None:
+            trace["path"] = "prefilter_empty"
+            _emit_decision_trace(trace)
+        return []
 
-    similarity_scores = _combine_view_scores(
-        view_scores={
-            "title": _candidate_title_similarity_scores(item, semantic_candidates),
-            "content": _view_similarity_scores(
-                item,
-                semantic_candidates,
-                item_view_builder=content_matching_text,
-            ),
-            "provenance": _view_similarity_scores(
-                item,
-                semantic_candidates,
-                item_view_builder=provenance_matching_text,
-            ),
-        },
-    )
+    view_scores: dict[str, list[float | None]] = {
+        "title": _candidate_title_similarity_scores(item, semantic_candidates),
+        "content": _view_similarity_scores(
+            item,
+            semantic_candidates,
+            item_view_builder=content_matching_text,
+        ),
+        "provenance": _view_similarity_scores(
+            item,
+            semantic_candidates,
+            item_view_builder=provenance_matching_text,
+        ),
+    }
+    similarity_scores = _combine_view_scores(view_scores=view_scores)
     ranked_indexes = sorted(
         range(len(semantic_candidates)),
         key=lambda index: float(similarity_scores[index]),
@@ -694,35 +781,84 @@ def find_related_representative(
                     continue
                 best_rerank_index = local_index
                 best_rerank_score = numeric_score
+            accepted_rerank: list[NewsItem] = []
             if (
                 best_rerank_index is not None
                 and best_rerank_score >= settings.news_list_reranker_similarity_threshold
             ):
-                return rerank_candidates[best_rerank_index]
-            return None
+                accepted_rerank = [rerank_candidates[best_rerank_index]]
+            if trace is not None:
+                trace["path"] = "reranker"
+                trace["decisions"] = [
+                    {
+                        "candidate_id": _require_news_item_id(candidate),
+                        "candidate_title": _relation_primary_title(candidate),
+                        "rerank_score": float(score),
+                    }
+                    for candidate, score in zip(rerank_candidates, rerank_scores, strict=True)
+                ]
+                trace["accepted_ids"] = [
+                    _require_news_item_id(candidate) for candidate in accepted_rerank
+                ]
+                _emit_decision_trace(trace)
+            return accepted_rerank
 
-    best_candidate: NewsItem | None = None
-    best_score = -1.0
+    item_title = _relation_primary_title(item)
+    item_title_variants = [item_title] if item_title else []
+    accepted: list[tuple[float, datetime, int, NewsItem]] = []
     for index, candidate in enumerate(semantic_candidates):
         score = float(similarity_scores[index])
-        if score >= settings.news_list_primary_similarity_threshold and score > best_score:
-            best_candidate = candidate
-            best_score = score
-            continue
-        if score < settings.news_list_secondary_similarity_threshold or score <= best_score:
-            continue
+        outcome = "below_secondary"
+        if score >= settings.news_list_primary_similarity_threshold:
+            outcome = "primary_accepted"
+        elif score >= settings.news_list_secondary_similarity_threshold:
+            candidate_tokens = candidate_tokens_by_id[_require_news_item_id(candidate)]
+            if not relaxed_lexical_guard(
+                item,
+                candidate,
+                left_tokens=item_tokens,
+                right_tokens=candidate_tokens,
+            ):
+                outcome = "secondary_guard_rejected"
+            elif distinctive_details_conflict(
+                item_title_variants,
+                _cluster_related_titles(candidate),
+            ):
+                outcome = "secondary_detail_veto"
+            else:
+                outcome = "secondary_accepted"
+        if outcome in {"primary_accepted", "secondary_accepted"}:
+            accepted.append(
+                (
+                    score,
+                    _coerce_utc(candidate.ingested_at) or datetime.min,
+                    _require_news_item_id(candidate),
+                    candidate,
+                )
+            )
+        if trace is not None:
+            trace["decisions"].append(
+                {
+                    "candidate_id": _require_news_item_id(candidate),
+                    "candidate_title": _relation_primary_title(candidate),
+                    "views": {
+                        label: (
+                            float(view_score) if (view_score := scores[index]) is not None else None
+                        )
+                        for label, scores in view_scores.items()
+                    },
+                    "combined": score,
+                    "outcome": outcome,
+                }
+            )
 
-        candidate_tokens = candidate_tokens_by_id[_require_news_item_id(candidate)]
-        if relaxed_lexical_guard(
-            item,
-            candidate,
-            left_tokens=item_tokens,
-            right_tokens=candidate_tokens,
-        ):
-            best_candidate = candidate
-            best_score = score
-
-    return best_candidate
+    accepted.sort(key=lambda entry: (-entry[0], entry[1], entry[2]))
+    ordered = [candidate for _score, _ingested_at, _id, candidate in accepted]
+    if trace is not None:
+        trace["path"] = "embedding"
+        trace["accepted_ids"] = [_require_news_item_id(candidate) for candidate in ordered]
+        _emit_decision_trace(trace)
+    return ordered
 
 
 def reconcile_news_item_relation(
@@ -735,16 +871,42 @@ def reconcile_news_item_relation(
     if item is None:
         raise ValueError(f"News item {news_item_id} not found")
 
-    representative = find_related_representative(db, item=item)
-    if representative is None:
+    accepted = find_related_representatives(db, item=item)
+    if not accepted:
         item.representative_news_item_id = None
         db.flush()
         return recompute_representative_enrichment(
             db, representative_id=_require_news_item_id(item)
         )
 
-    item.representative_news_item_id = _require_news_item_id(representative)
+    representative = accepted[0]
+    representative_id = _require_news_item_id(representative)
+    representative_titles = _cluster_related_titles(representative)
+    merged_ids: list[int] = []
+    for other in accepted[1:]:
+        # The new item matching both clusters is evidence they cover the same
+        # story; fold the smaller match into the best one unless their titles
+        # disagree on a distinctive detail.
+        if distinctive_details_conflict(representative_titles, _cluster_related_titles(other)):
+            continue
+        other_id = _require_news_item_id(other)
+        for member in list_cluster_members(db, representative_id=other_id):
+            member.representative_news_item_id = representative_id
+        merged_ids.append(other_id)
+    if merged_ids:
+        logger.info(
+            "Bridge-merged news clusters into representative",
+            extra={
+                "component": "news_relations",
+                "operation": "bridge_merge",
+                "context_data": {
+                    "news_item_id": news_item_id,
+                    "representative_id": representative_id,
+                    "merged_representative_ids": merged_ids,
+                },
+            },
+        )
+
+    item.representative_news_item_id = representative_id
     db.flush()
-    return recompute_representative_enrichment(
-        db, representative_id=_require_news_item_id(representative)
-    )
+    return recompute_representative_enrichment(db, representative_id=representative_id)

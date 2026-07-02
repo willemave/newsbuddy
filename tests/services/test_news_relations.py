@@ -13,8 +13,11 @@ from app.models.db import NewsItem, NewsItemReadStatus
 from app.services.news_feed import count_unread_news_items
 from app.services.news_relations import (
     SEMANTIC_PREFILTER_MAX_CANDIDATES,
+    distinctive_detail_tokens,
+    distinctive_details_conflict,
     match_tokens_for_text,
     reconcile_news_item_relation,
+    set_relation_decision_trace_sink,
 )
 from tests.services.news_relation_cluster_cases import PRODUCTION_CLUSTER_CASES
 
@@ -780,6 +783,192 @@ def test_reconcile_news_item_relation_skips_embeddings_without_title_overlap(
     db_session.refresh(unrelated)
     assert unrelated.representative_news_item_id is None
     assert calls == []
+
+
+def test_distinctive_detail_tokens_extracts_versions_and_models() -> None:
+    versions, models = distinctive_detail_tokens(
+        ["OpenAI launches GPT-5.3-Codex as Galaxy S26 ships 16k units in Q2, 2x faster, $1,299"]
+    )
+    assert versions == {"5.3"}
+    assert "s26" in models
+    assert "q2" in models
+    # Magnitude/multiplier suffixes and plain/price numbers stay out.
+    assert "16k" not in models
+    assert "2x" not in models
+    assert not any(token.isdigit() for token in models)
+
+
+def test_distinctive_details_conflict_requires_details_on_both_sides() -> None:
+    assert distinctive_details_conflict(
+        ["OpenAI launches GPT-5.3-Codex"],
+        ["OpenAI launches GPT-5.4 with new tools"],
+    )
+    assert not distinctive_details_conflict(
+        ["OpenAI launches GPT-5.3-Codex"],
+        ["OpenAI launches new coding model"],
+    )
+    assert not distinctive_details_conflict(
+        ["OpenAI launches GPT-5.3-Codex"],
+        ["GPT-5.3 rollout expands to all users"],
+    )
+
+
+def test_reconcile_news_item_relation_vetoes_secondary_merge_on_conflicting_details(
+    db_session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.news_relations.encode_news_texts",
+        _uniform_similarity_encode(0.80),
+    )
+
+    representative = _news_item(
+        db_session,
+        ingest_key="veto-rep",
+        source_external_id="900",
+        title="OpenAI launches GPT-5.3-Codex for developers",
+        story_url="https://example.com/story-900",
+    )
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(representative.id))
+
+    successor = _news_item(
+        db_session,
+        ingest_key="veto-successor",
+        source_external_id="901",
+        title="OpenAI launches GPT-5.4 for developers",
+        story_url="https://example.com/story-901",
+    )
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(successor.id))
+    db_session.commit()
+
+    db_session.refresh(representative)
+    db_session.refresh(successor)
+    assert successor.representative_news_item_id is None
+    assert representative.cluster_size == 1
+
+
+def test_reconcile_news_item_relation_allows_secondary_merge_with_matching_details(
+    db_session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.news_relations.encode_news_texts",
+        _uniform_similarity_encode(0.80),
+    )
+
+    representative = _news_item(
+        db_session,
+        ingest_key="veto-match-rep",
+        source_external_id="910",
+        title="OpenAI launches GPT-5.3-Codex for developers",
+        story_url="https://example.com/story-910",
+    )
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(representative.id))
+
+    same_release = _news_item(
+        db_session,
+        ingest_key="veto-match-related",
+        source_external_id="911",
+        title="GPT-5.3 rollout expands to developers worldwide",
+        story_url="https://example.com/story-911",
+    )
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(same_release.id))
+    db_session.commit()
+
+    db_session.refresh(representative)
+    db_session.refresh(same_release)
+    assert same_release.representative_news_item_id == representative.id
+    assert representative.cluster_size == 2
+
+
+def test_reconcile_news_item_relation_bridge_merges_previously_split_clusters(
+    db_session,
+    monkeypatch,
+) -> None:
+    def fake_encode(texts: list[str]) -> np.ndarray:
+        if texts[0].startswith("Title: Wyden"):
+            return _uniform_similarity_encode(0.50)(texts)
+        return _uniform_similarity_encode(0.90)(texts)
+
+    monkeypatch.setattr("app.services.news_relations.encode_news_texts", fake_encode)
+
+    first = _news_item(
+        db_session,
+        ingest_key="bridge-first",
+        source_external_id="920",
+        title="Pentagon flags Anthropic as a supply chain risk",
+        story_url="https://example.com/story-920",
+    )
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(first.id))
+
+    second = _news_item(
+        db_session,
+        ingest_key="bridge-second",
+        source_external_id="921",
+        title="Wyden vows fight over Pentagon Anthropic supply chain move",
+        story_url="https://example.com/story-921",
+    )
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(second.id))
+    db_session.refresh(second)
+    assert second.representative_news_item_id is None
+
+    bridge = _news_item(
+        db_session,
+        ingest_key="bridge-item",
+        source_external_id="922",
+        title="Pentagon Anthropic supply chain risk fight draws Wyden response",
+        story_url="https://example.com/story-922",
+    )
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(bridge.id))
+    db_session.commit()
+
+    db_session.refresh(first)
+    db_session.refresh(second)
+    db_session.refresh(bridge)
+    assert second.representative_news_item_id == first.id
+    assert bridge.representative_news_item_id == first.id
+    assert first.cluster_size == 3
+
+
+def test_relation_decision_trace_sink_captures_decisions(
+    db_session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.news_relations.encode_news_texts",
+        _high_similarity_encode,
+    )
+    events: list[dict[str, object]] = []
+    set_relation_decision_trace_sink(events.append)
+
+    try:
+        representative = _news_item(
+            db_session,
+            ingest_key="trace-rep",
+            source_external_id="930",
+            title="OpenAI ships new coding agent",
+            story_url="https://example.com/story-930",
+        )
+        reconcile_news_item_relation(db_session, news_item_id=_require_id(representative.id))
+
+        related = _news_item(
+            db_session,
+            ingest_key="trace-related",
+            source_external_id="931",
+            title="OpenAI coding agent launch details",
+            story_url="https://example.com/story-931",
+        )
+        reconcile_news_item_relation(db_session, news_item_id=_require_id(related.id))
+    finally:
+        set_relation_decision_trace_sink(None)
+
+    assert len(events) == 2
+    first_event, second_event = events
+    assert first_event["path"] == "no_candidates"
+    assert second_event["path"] == "embedding"
+    assert second_event["accepted_ids"] == [_require_id(representative.id)]
+    decisions = cast(list[dict[str, object]], second_event["decisions"])
+    assert decisions[0]["outcome"] == "primary_accepted"
 
 
 def test_reconcile_news_item_relation_caps_semantic_prefilter_candidates(
