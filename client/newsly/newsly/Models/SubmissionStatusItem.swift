@@ -7,7 +7,45 @@
 
 import Foundation
 
-struct SubmissionFeedInitialDownload: Codable {
+/// Domain-level view of a feed subscription outcome attached to a submission status row.
+/// Wire decoding lives on the generated `APISubmissionFeedSubscriptionResponse`; this type
+/// mirrors it 1:1 today but keeps the domain layer decoupled from the generated name.
+struct SubmissionFeedSubscription {
+    let status: String
+    let feedUrl: String?
+    let feedType: String?
+    let created: Bool?
+    let configId: Int?
+    let initialDownload: SubmissionFeedInitialDownload?
+
+    init(api response: APISubmissionFeedSubscriptionResponse) {
+        status = response.status
+        feedUrl = response.feedUrl
+        feedType = response.feedType
+        created = response.created
+        configId = response.configId
+        initialDownload = response.initialDownload.map(SubmissionFeedInitialDownload.init(api:))
+    }
+
+    init(
+        status: String,
+        feedUrl: String? = nil,
+        feedType: String? = nil,
+        created: Bool? = nil,
+        configId: Int? = nil,
+        initialDownload: SubmissionFeedInitialDownload? = nil
+    ) {
+        self.status = status
+        self.feedUrl = feedUrl
+        self.feedType = feedType
+        self.created = created
+        self.configId = configId
+        self.initialDownload = initialDownload
+    }
+}
+
+/// Domain-level view of the initial download result for a newly subscribed feed.
+struct SubmissionFeedInitialDownload {
     let requestedCount: Int?
     let ran: Bool?
     let status: String?
@@ -21,19 +59,19 @@ struct SubmissionFeedInitialDownload: Codable {
     let duplicates: Int?
     let errors: Int?
 
-    enum CodingKeys: String, CodingKey {
-        case requestedCount = "requested_count"
-        case ran
-        case status
-        case reason
-        case error
-        case configId = "config_id"
-        case baseLimit = "base_limit"
-        case targetLimit = "target_limit"
-        case scraped
-        case saved
-        case duplicates
-        case errors
+    init(api response: APISubmissionFeedInitialDownloadResponse) {
+        requestedCount = response.requestedCount
+        ran = response.ran
+        status = response.status
+        reason = response.reason
+        error = response.error
+        configId = response.configId
+        baseLimit = response.baseLimit
+        targetLimit = response.targetLimit
+        scraped = response.scraped
+        saved = response.saved
+        duplicates = response.duplicates
+        errors = response.errors
     }
 
     init(
@@ -65,89 +103,62 @@ struct SubmissionFeedInitialDownload: Codable {
     }
 }
 
-struct SubmissionFeedSubscription: Codable {
-    let status: String
-    let feedUrl: String?
-    let feedType: String?
-    let created: Bool?
-    let configId: Int?
-    let initialDownload: SubmissionFeedInitialDownload?
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case feedUrl = "feed_url"
-        case feedType = "feed_type"
-        case created
-        case configId = "config_id"
-        case initialDownload = "initial_download"
-    }
-
-    init(
-        status: String,
-        feedUrl: String? = nil,
-        feedType: String? = nil,
-        created: Bool? = nil,
-        configId: Int? = nil,
-        initialDownload: SubmissionFeedInitialDownload? = nil
-    ) {
-        self.status = status
-        self.feedUrl = feedUrl
-        self.feedType = feedType
-        self.created = created
-        self.configId = configId
-        self.initialDownload = initialDownload
-    }
-}
-
-struct SubmissionStatusItem: Codable, Identifiable {
+/// Domain-level view of a user-submitted content item's processing status, built from
+/// the generated `APISubmissionStatusResponse` wire model (mirrors the `ContentDetail`
+/// wire/domain split). `createdAt`/`processedAt` stay `String` because the backend DTO
+/// fields are plain `str`, not `UTCDateTime` (see `SubmissionStatusResponse` in
+/// `app/models/api/content.py`) — there is no generated `Date` field to adopt here.
+struct SubmissionStatusItem: Identifiable {
     let id: Int
-    let contentType: String
+    let contentType: APIContentType
     let url: String
     let sourceUrl: String?
     let title: String?
-    let status: String
+    let status: APIContentStatus
     let errorMessage: String?
     let createdAt: String
     let processedAt: String?
     let submittedVia: String?
     let isSelfSubmission: Bool
-    let submissionKind: String?
-    let outcome: String?
+    let submissionKind: APISubmissionKind
+    let outcome: APISubmissionOutcome
     let detectedFeed: DetectedFeed?
     let feedSubscription: SubmissionFeedSubscription?
 
-    enum CodingKeys: String, CodingKey {
-        case id
-        case contentType = "content_type"
-        case url
-        case sourceUrl = "source_url"
-        case title
-        case status
-        case errorMessage = "error_message"
-        case createdAt = "created_at"
-        case processedAt = "processed_at"
-        case submittedVia = "submitted_via"
-        case isSelfSubmission = "is_self_submission"
-        case submissionKind = "submission_kind"
-        case outcome
-        case detectedFeed = "detected_feed"
-        case feedSubscription = "feed_subscription"
+    init(api response: APISubmissionStatusResponse) {
+        id = response.id
+        contentType = response.contentType
+        url = response.url
+        sourceUrl = response.sourceUrl
+        title = response.title
+        status = response.status
+        errorMessage = response.errorMessage
+        createdAt = response.createdAt
+        processedAt = response.processedAt
+        submittedVia = response.submittedVia
+        isSelfSubmission = response.isSelfSubmission
+        submissionKind = response.submissionKind
+        outcome = response.outcome
+        detectedFeed = response.detectedFeed.map {
+            DetectedFeed(url: $0.url, type: $0.type, title: $0.title, format: $0.format)
+        }
+        feedSubscription = response.feedSubscription.map(SubmissionFeedSubscription.init(api:))
     }
 
     init(
         id: Int,
-        contentType: String,
+        contentType: APIContentType,
         url: String,
         sourceUrl: String?,
         title: String?,
-        status: String,
+        status: APIContentStatus,
         errorMessage: String?,
         createdAt: String,
         processedAt: String?,
         submittedVia: String?,
         isSelfSubmission: Bool,
-        submissionKind: String? = nil,
-        outcome: String? = nil,
+        submissionKind: APISubmissionKind = .content,
+        outcome: APISubmissionOutcome = .processing,
         detectedFeed: DetectedFeed? = nil,
         feedSubscription: SubmissionFeedSubscription? = nil
     ) {
@@ -189,36 +200,34 @@ struct SubmissionStatusItem: Codable, Identifiable {
 
     var statusLabel: String {
         switch effectiveOutcome {
-        case "new", "pending":
+        case .queued:
             return "Queued"
-        case "queued":
-            return "Queued"
-        case "processing":
+        case .processing:
             return "Processing"
-        case "completed":
+        case .completed:
             return "Completed"
-        case "failed":
+        case .failed:
             return "Failed"
-        case "skipped":
+        case .skipped:
             return "Skipped"
-        case "subscribed":
+        case .subscribed:
             return "Subscribed"
-        case "already_subscribed":
+        case .already_subscribed:
             return "Already subscribed"
-        case "feed_not_found":
+        case .feed_not_found:
             return "Feed not found"
-        case "feed_fetch_failed":
+        case .feed_fetch_failed:
             return "Couldn't check feed"
-        case "feed_subscription_failed":
+        case .feed_subscription_failed:
             return "Couldn't add feed"
-        default:
-            return effectiveOutcome.replacingOccurrences(of: "_", with: " ").capitalized
+        case .unknown(let rawValue):
+            return rawValue.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 
     var isError: Bool {
         switch effectiveOutcome {
-        case "failed", "skipped", "feed_not_found", "feed_fetch_failed", "feed_subscription_failed":
+        case .failed, .skipped, .feed_not_found, .feed_fetch_failed, .feed_subscription_failed:
             return true
         default:
             return false
@@ -231,13 +240,13 @@ struct SubmissionStatusItem: Codable, Identifiable {
             return errorMessage
         }
         switch effectiveOutcome {
-        case "skipped":
+        case .skipped:
             return "Processing was skipped."
-        case "feed_not_found":
+        case .feed_not_found:
             return "No RSS or Atom feed was found for this URL."
-        case "feed_fetch_failed":
+        case .feed_fetch_failed:
             return "The page could not be checked for feeds."
-        case "feed_subscription_failed":
+        case .feed_subscription_failed:
             return "The feed could not be added."
         default:
             return "Processing failed."
@@ -248,9 +257,21 @@ struct SubmissionStatusItem: Codable, Identifiable {
         if let errorDisplayText {
             return errorDisplayText
         }
+        if isLearningDeck {
+            switch effectiveOutcome {
+            case .completed:
+                return "Learning Deck is ready."
+            case .processing:
+                return "Learning Deck is being created."
+            case .queued:
+                return "Learning Deck is queued."
+            default:
+                return nil
+            }
+        }
         guard isFeedSubscription else { return nil }
         switch effectiveOutcome {
-        case "subscribed":
+        case .subscribed:
             if feedSubscription?.initialDownload?.status?.lowercased() == "failed" {
                 return "Feed added, but recent items could not be downloaded."
             }
@@ -258,7 +279,7 @@ struct SubmissionStatusItem: Codable, Identifiable {
                 return "Feed added; \(saved) recent item\(saved == 1 ? "" : "s") saved."
             }
             return "Feed added."
-        case "already_subscribed":
+        case .already_subscribed:
             return "This feed was already in your sources."
         default:
             return nil
@@ -266,22 +287,32 @@ struct SubmissionStatusItem: Codable, Identifiable {
     }
 
     var isFeedSubscription: Bool {
-        if submissionKind?.lowercased() == "feed_subscription" {
+        if submissionKind == .feed_subscription {
             return true
         }
         return detectedFeed != nil || feedSubscription != nil
     }
 
-    var effectiveOutcome: String {
-        if let outcome, !outcome.isEmpty {
-            return outcome.lowercased()
+    var isLearningDeck: Bool {
+        submissionKind == .learning_deck
+    }
+
+    var typeDisplay: String {
+        if isLearningDeck {
+            return "Learning Deck"
         }
-        switch status.lowercased() {
-        case "new", "pending":
-            return "queued"
-        default:
-            return status.lowercased()
+        if isFeedSubscription {
+            return "Feed Subscription"
         }
+        return contentType.displayName
+    }
+
+    /// The submission outcome to drive display logic from. The wire model's `outcome`
+    /// field is required and always populated by the backend (default `.processing`),
+    /// so this is a straight passthrough — kept as a computed property to preserve the
+    /// call-site name used throughout the view layer.
+    var effectiveOutcome: APISubmissionOutcome {
+        outcome
     }
 
     var statusDateDisplay: String? {
@@ -304,13 +335,17 @@ struct SubmissionStatusItem: Codable, Identifiable {
     }
 }
 
-struct SubmissionStatusListResponse: Codable {
+/// A page of submission status rows, mapped from the generated
+/// `APISubmissionStatusListResponse`. Named distinctly from the generated type (rather
+/// than mirroring it as `SubmissionStatusListResponse`) so it does not re-introduce a
+/// hand-rolled-name collision on the contracts allowlist.
+struct SubmissionStatusFeed {
     let submissions: [SubmissionStatusItem]
     let meta: PaginationMetadata
 
-    enum CodingKeys: String, CodingKey {
-        case submissions
-        case meta
+    init(api response: APISubmissionStatusListResponse) {
+        submissions = response.submissions.map(SubmissionStatusItem.init(api:))
+        meta = response.meta
     }
 
     var nextCursor: String? { meta.nextCursor }

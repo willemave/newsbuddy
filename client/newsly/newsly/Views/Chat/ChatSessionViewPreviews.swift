@@ -16,7 +16,7 @@ import SwiftUI
             topic: nil,
             llmProvider: "openai",
             llmModel: "openai:gpt-5.5",
-            createdAt: "2025-11-28T12:00:00Z",
+            createdAt: ServerDate.parse("2025-11-28T12:00:00Z")!,
             updatedAt: nil,
             lastMessageAt: nil,
             articleTitle: nil,

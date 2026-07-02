@@ -13,7 +13,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             id: 1_000_000_042,
             displayKey: displayKey,
             role: .assistant,
-            timestamp: "2026-04-01T10:00:02Z",
+            timestamp: ServerDate.parse("2026-04-01T10:00:02Z")!,
             content: "Status endpoint answer"
         )
         let detailMessage = message(
@@ -21,7 +21,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             sourceMessageId: 42,
             displayKey: displayKey,
             role: .assistant,
-            timestamp: "2026-04-01T10:00:02Z",
+            timestamp: ServerDate.parse("2026-04-01T10:00:02Z")!,
             content: "Session detail answer"
         )
 
@@ -34,7 +34,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             localId: localId,
             text: "What matters here?",
             messageId: 42,
-            createdAt: "2026-04-01T10:00:00Z"
+            createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!
         )
         let localItem = ChatTimelineItem(
             id: .local(localId),
@@ -81,7 +81,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
                 id: 1,
                 sourceMessageId: 42,
                 role: .user,
-                timestamp: "2026-04-01T10:00:00Z",
+                timestamp: ServerDate.parse("2026-04-01T10:00:00Z")!,
                 content: "What matters here?"
             )
         ])
@@ -102,21 +102,21 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             localId: localId,
             text: "Compare the views",
             messageId: 99,
-            createdAt: "2026-04-01T10:00:00Z"
+            createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!
         )
         let detail = detail(messages: [
             message(
                 id: 1,
                 sourceMessageId: 99,
                 role: .user,
-                timestamp: "2026-04-01T10:00:00Z",
+                timestamp: ServerDate.parse("2026-04-01T10:00:00Z")!,
                 content: "Compare the views"
             ),
             message(
                 id: 1_000_000_099,
                 sourceMessageId: 99,
                 role: .assistant,
-                timestamp: "2026-04-01T10:00:01Z",
+                timestamp: ServerDate.parse("2026-04-01T10:00:01Z")!,
                 content: "Working on it",
                 status: .processing
             )
@@ -158,20 +158,20 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             message(
                 id: 1,
                 role: .user,
-                timestamp: "2026-04-01T10:00:00Z",
+                timestamp: ServerDate.parse("2026-04-01T10:00:00Z")!,
                 content: "Start council"
             ),
             message(
                 id: 2,
                 role: .tool,
-                timestamp: "2026-04-01T10:00:01Z",
+                timestamp: ServerDate.parse("2026-04-01T10:00:01Z")!,
                 content: "Thinking",
                 displayType: .process_summary
             ),
             message(
                 id: 3,
                 role: .assistant,
-                timestamp: "2026-04-01T10:00:02Z",
+                timestamp: ServerDate.parse("2026-04-01T10:00:02Z")!,
                 content: "",
                 councilCandidates: councilCandidates,
                 activeCouncilChildSessionId: 201
@@ -191,7 +191,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
     }
 
     func testReconcileOrdersSameTimestampTurnAsUserSummaryThenAssistant() {
-        let timestamp = "2026-04-01T10:00:00Z"
+        let timestamp = ServerDate.parse("2026-04-01T10:00:00Z")!
         let detail = detail(messages: [
             message(
                 id: 3,
@@ -236,7 +236,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             message: message(
                 id: 44,
                 role: .user,
-                timestamp: "2026-04-01T10:00:00Z",
+                timestamp: ServerDate.parse("2026-04-01T10:00:00Z")!,
                 content: "Try this again",
                 status: .failed,
                 error: "Network unavailable"
@@ -263,13 +263,13 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             localId: firstLocalId,
             text: "First",
             messageId: 101,
-            createdAt: "2026-04-01T10:00:00Z"
+            createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!
         )
         let secondPending = PendingSend(
             localId: secondLocalId,
             text: "Second",
             messageId: 102,
-            createdAt: "2026-04-01T10:00:01Z"
+            createdAt: ServerDate.parse("2026-04-01T10:00:01Z")!
         )
         let detail = detail(messages: [
             message(
@@ -318,7 +318,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
             topic: nil,
             llmProvider: "openai",
             llmModel: "openai:gpt-5.5",
-            createdAt: "2026-04-01T10:00:00Z",
+            createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!,
             updatedAt: nil,
             lastMessageAt: nil,
             articleTitle: nil,
@@ -338,7 +338,7 @@ final class ChatTimelineReconcilerTests: XCTestCase {
         sourceMessageId: Int? = nil,
         displayKey: String? = nil,
         role: APIChatMessageRole,
-        timestamp: String,
+        timestamp: Date,
         content: String,
         displayType: APIChatMessageDisplayType = .message,
         status: APIMessageProcessingStatus? = .completed,

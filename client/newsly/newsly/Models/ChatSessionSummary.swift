@@ -24,9 +24,9 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     let topic: String?
     let llmProvider: String
     let llmModel: String
-    let createdAt: String
-    let updatedAt: String?
-    let lastMessageAt: String?
+    let createdAt: Date
+    let updatedAt: Date?
+    let lastMessageAt: Date?
     let articleTitle: String?
     let articleUrl: String?
     let articleSummary: String?
@@ -74,9 +74,9 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         topic: String?,
         llmProvider: String,
         llmModel: String,
-        createdAt: String,
-        updatedAt: String?,
-        lastMessageAt: String?,
+        createdAt: Date,
+        updatedAt: Date?,
+        lastMessageAt: Date?,
         articleTitle: String?,
         articleUrl: String?,
         articleSummary: String?,
@@ -111,7 +111,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         self.lastMessageRole = lastMessageRole
         self.councilMode = councilMode
         self.activeChildSessionId = activeChildSessionId
-        self.cachedLastActivityDate = Self.parseDate(lastMessageAt ?? createdAt)
+        self.cachedLastActivityDate = lastMessageAt ?? createdAt
     }
 
     init(api response: APIChatSessionSummary) {
@@ -143,6 +143,35 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
 
     init(from decoder: Decoder) throws {
         self.init(api: try APIChatSessionSummary(from: decoder))
+    }
+
+    // Decoding goes through the generated APIChatSessionSummary, which parses wire
+    // date strings into Date. Encode must stay symmetric (dates back to canonical
+    // strings) — synthesized Encodable would emit numeric timestamps instead.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(contentId, forKey: .contentId)
+        try container.encodeIfPresent(newsItemId, forKey: .newsItemId)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(sessionType, forKey: .sessionType)
+        try container.encodeIfPresent(topic, forKey: .topic)
+        try container.encode(llmProvider, forKey: .llmProvider)
+        try container.encode(llmModel, forKey: .llmModel)
+        try container.encode(ServerDate.format(createdAt), forKey: .createdAt)
+        try container.encodeIfPresent(updatedAt.map(ServerDate.format), forKey: .updatedAt)
+        try container.encodeIfPresent(lastMessageAt.map(ServerDate.format), forKey: .lastMessageAt)
+        try container.encodeIfPresent(articleTitle, forKey: .articleTitle)
+        try container.encodeIfPresent(articleUrl, forKey: .articleUrl)
+        try container.encodeIfPresent(articleSummary, forKey: .articleSummary)
+        try container.encodeIfPresent(articleSource, forKey: .articleSource)
+        try container.encodeIfPresent(hasPendingMessage, forKey: .hasPendingMessage)
+        try container.encodeIfPresent(savedToKnowledgeValue, forKey: .savedToKnowledgeValue)
+        try container.encodeIfPresent(hasMessages, forKey: .hasMessages)
+        try container.encodeIfPresent(lastMessagePreview, forKey: .lastMessagePreview)
+        try container.encodeIfPresent(lastMessageRole, forKey: .lastMessageRole)
+        try container.encodeIfPresent(councilMode, forKey: .councilMode)
+        try container.encodeIfPresent(activeChildSessionId, forKey: .activeChildSessionId)
     }
 
     private static let displayDateFormatter: DateFormatter = {
@@ -323,9 +352,6 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         }
     }
 
-    private static func parseDate(_ dateString: String) -> Date? {
-        ServerDate.parse(dateString)
-    }
 }
 
 struct ChatSessionListResponse: Codable {

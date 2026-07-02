@@ -115,7 +115,7 @@ struct ContentCard: View {
     }
 
     private var contentTypeIcon: String {
-        switch content.apiContentType {
+        switch content.contentType {
         case .article:
             return "doc.text"
         case .podcast:

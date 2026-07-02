@@ -171,7 +171,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     let sourceMessageId: Int?
     let displayKey: String?
     let role: APIChatMessageRole
-    let timestamp: String
+    let timestamp: Date
     let content: String
     let displayType: APIChatMessageDisplayType
     let processLabel: String?
@@ -186,7 +186,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         sourceMessageId: Int? = nil,
         displayKey: String? = nil,
         role: APIChatMessageRole,
-        timestamp: String,
+        timestamp: Date,
         content: String,
         displayType: APIChatMessageDisplayType = .message,
         processLabel: String? = nil,
@@ -231,6 +231,26 @@ struct ChatMessage: Codable, Identifiable, Equatable {
 
     init(from decoder: Decoder) throws {
         self.init(api: try APIChatMessage(from: decoder))
+    }
+
+    // Decoding goes through the generated APIChatMessage, which parses the wire
+    // timestamp string into Date. Encode must stay symmetric (Date back to the
+    // canonical string) — synthesized Encodable would emit a numeric timestamp.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(sourceMessageId, forKey: .sourceMessageId)
+        try container.encodeIfPresent(displayKey, forKey: .displayKey)
+        try container.encode(role, forKey: .role)
+        try container.encode(ServerDate.format(timestamp), forKey: .timestamp)
+        try container.encode(content, forKey: .content)
+        try container.encode(displayType, forKey: .displayType)
+        try container.encodeIfPresent(processLabel, forKey: .processLabel)
+        try container.encodeIfPresent(status, forKey: .status)
+        try container.encodeIfPresent(error, forKey: .error)
+        try container.encode(feedOptions, forKey: .feedOptions)
+        try container.encode(councilCandidates, forKey: .councilCandidates)
+        try container.encodeIfPresent(activeCouncilChildSessionId, forKey: .activeCouncilChildSessionId)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -296,8 +316,7 @@ private enum ChatMessageTimestampFormatter {
         return formatter
     }()
 
-    static func formattedTime(from timestamp: String) -> String {
-        guard let date = ServerDate.parse(timestamp) else { return "" }
-        return displayFormatter.string(from: date)
+    static func formattedTime(from timestamp: Date) -> String {
+        displayFormatter.string(from: timestamp)
     }
 }

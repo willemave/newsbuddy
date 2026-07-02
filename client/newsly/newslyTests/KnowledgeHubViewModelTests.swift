@@ -82,7 +82,7 @@ final class KnowledgeHubViewModelTests: XCTestCase {
 
         XCTAssertEqual(route?.sessionId, 91)
         XCTAssertEqual(route?.initialUserMessageText, "Prompt")
-        XCTAssertEqual(route?.initialUserMessageTimestamp, "2026-03-21T18:00:00Z")
+        XCTAssertEqual(route?.initialUserMessageTimestamp, ServerDate.parse("2026-03-21T18:00:00Z"))
         XCTAssertEqual(route?.pendingMessageId, 291)
         XCTAssertEqual(chatService.receivedMessages, ["What changed this week?"])
         XCTAssertEqual(chatService.receivedSessionIds, [nil])
@@ -270,7 +270,7 @@ final class KnowledgeHubViewModelTests: XCTestCase {
             userMessage: ChatMessage(
                 id: 100 + sessionId,
                 role: .user,
-                timestamp: "2026-03-21T18:00:00Z",
+                timestamp: ServerDate.parse("2026-03-21T18:00:00Z")!,
                 content: "Prompt",
                 status: .processing
             ),
@@ -304,7 +304,7 @@ final class KnowledgeHubViewModelTests: XCTestCase {
             topic: nil,
             llmProvider: "anthropic",
             llmModel: "anthropic:claude-sonnet-4-5",
-            createdAt: "2026-03-21T18:00:00Z",
+            createdAt: ServerDate.parse("2026-03-21T18:00:00Z")!,
             updatedAt: nil,
             lastMessageAt: nil,
             articleTitle: nil,

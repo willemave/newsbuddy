@@ -52,7 +52,7 @@ struct LearningDeckContentCreateSheet: View {
         for content: ContentDetail,
         interestsPrompt: String?
     ) async throws -> LearningDeck {
-        if content.apiContentType == .news {
+        if content.contentType == .news {
             return try await LearningDeckService.shared.createDeck(
                 newsItemId: content.id,
                 interestsPrompt: interestsPrompt

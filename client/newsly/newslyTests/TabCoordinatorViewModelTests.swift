@@ -17,8 +17,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             readRepository: FakeReadStatusRepository(),
             unreadCountService: .shared
         )
-        shortViewModel.replaceItems([makeSummary(id: 1, contentType: "news")])
-        longViewModel.replaceItems([makeSummary(id: 2, contentType: "article")])
+        shortViewModel.replaceItems([makeSummary(id: 1, contentType: .news)])
+        longViewModel.replaceItems([makeSummary(id: 2, contentType: .article)])
 
         let coordinator = TabCoordinatorViewModel(
             shortNewsVM: shortViewModel,
@@ -48,8 +48,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             readRepository: FakeReadStatusRepository(),
             unreadCountService: .shared
         )
-        shortViewModel.replaceItems([makeSummary(id: 1, contentType: "news")])
-        longViewModel.replaceItems([makeSummary(id: 2, contentType: "article")])
+        shortViewModel.replaceItems([makeSummary(id: 1, contentType: .news)])
+        longViewModel.replaceItems([makeSummary(id: 2, contentType: .article)])
 
         let coordinator = TabCoordinatorViewModel(
             shortNewsVM: shortViewModel,
@@ -71,7 +71,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             readRepository: FakeReadStatusRepository(),
             unreadCountService: .shared
         )
-        viewModel.replaceItems([makeSummary(id: 7, contentType: "article")])
+        viewModel.replaceItems([makeSummary(id: 7, contentType: .article)])
 
         viewModel.ensureUnreadFeedLoaded()
 
@@ -80,7 +80,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
 
     func testEnsureUnreadFeedLoadedRefreshesWhenListIsEmpty() async {
         let repository = FakeContentRepository(
-            responseContents: [makeSummary(id: 7, contentType: "article")]
+            responseContents: [makeSummary(id: 7, contentType: .article)]
         )
         let viewModel = LongContentListViewModel(
             repository: repository,
@@ -96,14 +96,14 @@ final class TabCoordinatorViewModelTests: XCTestCase {
 
     func testRefreshUnreadFeedForcesReloadWhenItemsAlreadyPresent() async {
         let repository = FakeContentRepository(
-            responseContents: [makeSummary(id: 9, contentType: "article")]
+            responseContents: [makeSummary(id: 9, contentType: .article)]
         )
         let viewModel = LongContentListViewModel(
             repository: repository,
             readRepository: FakeReadStatusRepository(),
             unreadCountService: .shared
         )
-        viewModel.replaceItems([makeSummary(id: 1, contentType: "article")])
+        viewModel.replaceItems([makeSummary(id: 1, contentType: .article)])
 
         viewModel.refreshUnreadFeed()
 
@@ -143,14 +143,14 @@ final class TabCoordinatorViewModelTests: XCTestCase {
 
     func testUnreadRefreshDoesNotReintroduceLocallyReadLongFormItem() async {
         let repository = FakeContentRepository(
-            responseContents: [makeSummary(id: 11, contentType: "article")]
+            responseContents: [makeSummary(id: 11, contentType: .article)]
         )
         let viewModel = LongContentListViewModel(
             repository: repository,
             readRepository: FakeReadStatusRepository(),
             unreadCountService: .shared
         )
-        viewModel.replaceItems([makeSummary(id: 11, contentType: "article")])
+        viewModel.replaceItems([makeSummary(id: 11, contentType: .article)])
 
         viewModel.markAsRead(11)
         viewModel.refreshUnreadFeed()
@@ -167,8 +167,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             unreadCountService: .shared
         )
         viewModel.replaceItems([
-            makeSummary(id: 11, contentType: "news"),
-            makeSummary(id: 12, contentType: "news"),
+            makeSummary(id: 11, contentType: .news),
+            makeSummary(id: 12, contentType: .news),
         ])
 
         viewModel.markAllVisibleAsRead()
@@ -187,8 +187,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             unreadCountService: .shared
         )
         viewModel.replaceItems([
-            makeSummary(id: 11, contentType: "news"),
-            makeSummary(id: 12, contentType: "news"),
+            makeSummary(id: 11, contentType: .news),
+            makeSummary(id: 12, contentType: .news),
         ])
 
         viewModel.itemsScrolledPastTop(ids: [11])
@@ -209,8 +209,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             unreadCountService: .shared
         )
         viewModel.replaceItems([
-            makeSummary(id: 11, contentType: "news"),
-            makeSummary(id: 12, contentType: "news"),
+            makeSummary(id: 11, contentType: .news),
+            makeSummary(id: 12, contentType: .news),
         ])
 
         NotificationCenter.default.post(
@@ -235,8 +235,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         )
         viewModel.newsGroups = [
             NewsGroup(items: [
-                makeSummary(id: 21, contentType: "news"),
-                makeSummary(id: 22, contentType: "news"),
+                makeSummary(id: 21, contentType: .news),
+                makeSummary(id: 22, contentType: .news),
             ])
         ]
 
@@ -248,7 +248,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
 
     func testGroupedShortNewsLoadUsesUnreadNewsFilter() async {
         let repository = FakeContentRepository(
-            responseContents: [makeSummary(id: 31, contentType: "news")]
+            responseContents: [makeSummary(id: 31, contentType: .news)]
         )
         let viewModel = NewsGroupViewModel(
             repository: repository,
@@ -268,9 +268,9 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         // must keep their on-screen order with the new item surfaced on top.
         let repository = FakeContentRepository(
             responseContents: [
-                makeSummary(id: 3, contentType: "news"),
-                makeSummary(id: 1, contentType: "news"),
-                makeSummary(id: 2, contentType: "news"),
+                makeSummary(id: 3, contentType: .news),
+                makeSummary(id: 1, contentType: .news),
+                makeSummary(id: 2, contentType: .news),
             ]
         )
         let viewModel = ShortNewsListViewModel(
@@ -279,8 +279,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             unreadCountService: .shared
         )
         viewModel.replaceItems([
-            makeSummary(id: 2, contentType: "news"),
-            makeSummary(id: 1, contentType: "news"),
+            makeSummary(id: 2, contentType: .news),
+            makeSummary(id: 1, contentType: .news),
         ])
 
         await viewModel.refreshInBackgroundAndWait()
@@ -290,7 +290,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
 
     func testBackgroundRefreshDropsItemsMissingFromServerPage() async {
         let repository = FakeContentRepository(
-            responseContents: [makeSummary(id: 1, contentType: "news")]
+            responseContents: [makeSummary(id: 1, contentType: .news)]
         )
         let viewModel = ShortNewsListViewModel(
             repository: repository,
@@ -298,8 +298,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             unreadCountService: .shared
         )
         viewModel.replaceItems([
-            makeSummary(id: 1, contentType: "news"),
-            makeSummary(id: 99, contentType: "news"),
+            makeSummary(id: 1, contentType: .news),
+            makeSummary(id: 99, contentType: .news),
         ])
 
         await viewModel.refreshInBackgroundAndWait()
@@ -328,7 +328,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         await fulfillment(of: [resumed], timeout: 2.0)
     }
 
-    private func makeSummary(id: Int, contentType: String) -> ContentSummary {
+    private func makeSummary(id: Int, contentType: APIContentType) -> ContentSummary {
         ContentSummary(
             id: id,
             contentType: contentType,
@@ -336,7 +336,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             title: "Item \(id)",
             source: "Example",
             platform: "Example",
-            status: "completed",
+            status: .completed,
             shortSummary: "Summary",
             createdAt: "2026-03-18T05:00:00Z",
             processedAt: "2026-03-18T06:00:00Z",

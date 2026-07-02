@@ -54,4 +54,10 @@ enum ServerDate {
 
         return utcSecondsFormatter.date(from: rawValue)
     }
+
+    /// Canonical encoder: ISO8601 UTC with fractional seconds and a `Z` suffix.
+    /// Matches the backend's `serialize_utc_datetime` (isoformat + `Z`).
+    static func format(_ date: Date) -> String {
+        iso8601WithFractionalFormatter.string(from: date)
+    }
 }

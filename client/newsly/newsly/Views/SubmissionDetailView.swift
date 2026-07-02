@@ -53,7 +53,7 @@ struct SubmissionDetailView: View {
                 HStack {
                     Text("Type")
                     Spacer()
-                    Text(submission.contentType.capitalized)
+                    Text(submission.typeDisplay)
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
 
@@ -113,9 +113,9 @@ struct SubmissionDetailView: View {
 
     private var statusColor: Color {
         switch submission.effectiveOutcome {
-        case "failed", "skipped", "feed_not_found", "feed_fetch_failed", "feed_subscription_failed":
+        case .failed, .skipped, .feed_not_found, .feed_fetch_failed, .feed_subscription_failed:
             return .statusDestructive
-        case "subscribed", "already_subscribed", "completed":
+        case .subscribed, .already_subscribed, .completed:
             return .statusActive
         default:
             return .onSurfaceSecondary
@@ -150,11 +150,11 @@ struct SubmissionDetailView: View {
         SubmissionDetailView(
             submission: SubmissionStatusItem(
                 id: 1,
-                contentType: "podcast",
+                contentType: .podcast,
                 url: "https://example.com/episode",
                 sourceUrl: "https://example.com/source",
                 title: "Example Episode",
-                status: "failed",
+                status: .failed,
                 errorMessage: "No audio URL found",
                 createdAt: "2025-01-01T12:00:00Z",
                 processedAt: "2025-01-01T12:05:00Z",

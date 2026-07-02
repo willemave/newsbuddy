@@ -10,15 +10,15 @@ typealias ScraperConfig = APIScraperConfigResponse
 
 extension APIScraperConfigStatsResponse {
     var latestProcessedDate: Date? {
-        Self.parseISODate(latestProcessedAt)
+        latestProcessedAt
     }
 
     var latestPublicationDate: Date? {
-        Self.parseISODate(latestPublicationAt)
+        latestPublicationAt
     }
 
     var nextExpectedDate: Date? {
-        Self.parseISODate(nextExpectedAt)
+        nextExpectedAt
     }
 
     var compactCountSummary: String? {
@@ -74,10 +74,6 @@ extension APIScraperConfigStatsResponse {
         formatter.unitsStyle = .short
         return formatter
     }()
-
-    private static func parseISODate(_ value: String?) -> Date? {
-        ServerDate.parse(value)
-    }
 }
 
 extension APIScraperConfigResponse: Identifiable {}

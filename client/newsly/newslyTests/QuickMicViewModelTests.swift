@@ -203,7 +203,7 @@ final class QuickMicViewModelTests: XCTestCase {
                 topic: nil,
                 llmProvider: "anthropic",
                 llmModel: "anthropic:claude-sonnet-4-5",
-                createdAt: "2026-03-13T19:00:00Z",
+                createdAt: ServerDate.parse("2026-03-13T19:00:00Z")!,
                 updatedAt: nil,
                 lastMessageAt: nil,
                 articleTitle: nil,
@@ -219,7 +219,7 @@ final class QuickMicViewModelTests: XCTestCase {
             userMessage: ChatMessage(
                 id: userMessageId,
                 role: .user,
-                timestamp: "2026-03-13T19:00:00Z",
+                timestamp: ServerDate.parse("2026-03-13T19:00:00Z")!,
                 content: content,
                 status: .processing
             ),
@@ -232,7 +232,7 @@ final class QuickMicViewModelTests: XCTestCase {
         ChatMessage(
             id: id,
             role: .assistant,
-            timestamp: "2026-03-13T19:00:02Z",
+            timestamp: ServerDate.parse("2026-03-13T19:00:02Z")!,
             content: content,
             status: .completed
         )

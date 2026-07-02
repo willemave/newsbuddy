@@ -9,7 +9,7 @@ struct PendingSend: Equatable {
     let localId: UUID
     let text: String
     var messageId: Int?
-    let createdAt: String
+    let createdAt: Date
 
     var placeholderMessage: ChatMessage {
         ChatMessage(

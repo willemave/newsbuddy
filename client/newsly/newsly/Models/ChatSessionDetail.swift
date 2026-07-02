@@ -170,7 +170,7 @@ struct InitialSuggestionsResponse: Codable {
     let sessionId: Int
     let role: APIChatMessageRole
     let content: String
-    let timestamp: String
+    let timestamp: Date
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -178,6 +178,32 @@ struct InitialSuggestionsResponse: Codable {
         case role
         case content
         case timestamp
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        sessionId = try container.decode(Int.self, forKey: .sessionId)
+        role = try container.decode(APIChatMessageRole.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        let timestampRaw = try container.decode(String.self, forKey: .timestamp)
+        guard let timestampParsed = ServerDate.parse(timestampRaw) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .timestamp,
+                in: container,
+                debugDescription: "Unparseable date for timestamp"
+            )
+        }
+        timestamp = timestampParsed
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encode(role, forKey: .role)
+        try container.encode(content, forKey: .content)
+        try container.encode(ServerDate.format(timestamp), forKey: .timestamp)
     }
 }
 

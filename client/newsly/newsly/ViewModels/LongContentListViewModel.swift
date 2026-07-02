@@ -128,7 +128,7 @@ final class LongContentListViewModel: BaseContentListViewModel {
         guard let markedItem = markedItems.first else { return }
 
         decrementCount(for: markedItem)
-        logger.debug("[LongContentList] Marked locally read | id=\(id) type=\(markedItem.contentType, privacy: .public)")
+        logger.debug("[LongContentList] Marked locally read | id=\(id) type=\(markedItem.contentType.rawValue, privacy: .public)")
 
         readRepository
             .markRead(ids: [id])
@@ -170,7 +170,7 @@ final class LongContentListViewModel: BaseContentListViewModel {
         }
 
         let reductions = markedItems.reduce(into: (articles: 0, podcasts: 0)) { partial, item in
-            switch item.apiContentType {
+            switch item.contentType {
             case .article:
                 partial.articles += 1
             case .podcast:
@@ -257,7 +257,7 @@ final class LongContentListViewModel: BaseContentListViewModel {
     }
 
     private func decrementCount(for item: ContentSummary) {
-        switch item.apiContentType {
+        switch item.contentType {
         case .article:
             unreadCountService.decrementArticleCount()
         case .podcast:
@@ -268,7 +268,7 @@ final class LongContentListViewModel: BaseContentListViewModel {
     }
 
     private func incrementCount(for item: ContentSummary) {
-        switch item.apiContentType {
+        switch item.contentType {
         case .article:
             unreadCountService.incrementArticleCount()
         case .podcast:

@@ -88,7 +88,7 @@ enum FeedDigDeeperAction {
 
         Task { @MainActor in
             do {
-                let isNews = item.apiContentType == .news
+                let isNews = item.contentType == .news
                 let response = try await ChatService.shared.createAssistantTurn(
                     message: "Dig deeper into this selected text from \(item.displayTitle): \"\(trimmed)\"",
                     screenContext: AssistantScreenContext(

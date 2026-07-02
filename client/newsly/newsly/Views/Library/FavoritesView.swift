@@ -112,7 +112,7 @@ struct KnowledgeLibraryView: View {
             ForEach(displayedContents) { content in
                 NavigationLink(destination: ContentDetailView(
                     contentId: content.id,
-                    contentType: content.apiContentType,
+                    contentType: content.contentType,
                     allContentIds: displayedContentIds,
                     navigationSurface: .savedLibrary
                 )) {
@@ -288,6 +288,17 @@ private struct SavedLibraryRow: View {
             ?? content.formattedDate
     }
 
+    private var sourceText: String? {
+        for candidate in [content.source, content.platform] {
+            guard let candidate else { continue }
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Text(dateText)
@@ -298,11 +309,22 @@ private struct SavedLibraryRow: View {
                 .monospacedDigit()
                 .padding(.top, 2)
 
-            Text(content.displayTitle)
-                .font(.terracottaBodyLarge.weight(.semibold))
-                .foregroundStyle(Color.onSurface)
-                .lineLimit(2)
-                .truncationMode(.tail)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(content.displayTitle)
+                    .font(.terracottaBodyLarge.weight(.semibold))
+                    .foregroundStyle(Color.onSurface)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+
+                if let sourceText {
+                    Text(sourceText)
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if content.savedSource == "x_bookmark" {
                 Image(systemName: "bookmark.fill")
@@ -390,11 +412,11 @@ private enum LibraryTypeFilter: String, CaseIterable, Identifiable {
         case .bookmarks:
             return content.savedSource == "x_bookmark"
         case .article:
-            return content.apiContentType == .article
+            return content.contentType == .article
         case .podcast:
-            return content.apiContentType == .podcast
+            return content.contentType == .podcast
         case .news:
-            return content.apiContentType == .news
+            return content.contentType == .news
         }
     }
 }

@@ -97,7 +97,7 @@ final class ContentSummaryTests: XCTestCase {
 
     func testArticleSummaryStillDisplaysAsSecondaryLine() {
         let summary = makeSummary(
-            contentType: "article",
+            contentType: .article,
             createdAt: "2026-03-18T05:00:00Z",
             processedAt: nil,
             publicationDate: nil
@@ -136,7 +136,7 @@ final class ContentSummaryTests: XCTestCase {
     }
 
     private func makeSummary(
-        contentType: String = "news",
+        contentType: APIContentType = .news,
         createdAt: String,
         processedAt: String?,
         publicationDate: String?,
@@ -151,7 +151,7 @@ final class ContentSummaryTests: XCTestCase {
             title: "Example story",
             source: "Example",
             platform: "Hacker News",
-            status: "completed",
+            status: .completed,
             shortSummary: shortSummary,
             createdAt: createdAt,
             processedAt: processedAt,

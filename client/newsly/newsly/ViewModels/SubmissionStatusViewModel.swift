@@ -57,9 +57,9 @@ final class SubmissionStatusViewModel: CursorPaginatedViewModel {
         defer { isLoading = false }
 
         do {
-            let response = try await ContentService.shared.fetchSubmissionStatusList()
-            submissions = response.submissions
-            applyPagination(nextCursor: response.nextCursor, hasMore: response.hasMore)
+            let feed = try await ContentService.shared.fetchSubmissionStatusList()
+            submissions = feed.submissions
+            applyPagination(nextCursor: feed.nextCursor, hasMore: feed.hasMore)
         } catch {
             logger.error("[SubmissionStatusViewModel] load failed | error=\(error.localizedDescription)")
             errorMessage = error.localizedDescription
@@ -72,9 +72,9 @@ final class SubmissionStatusViewModel: CursorPaginatedViewModel {
         defer { isLoadingMore = false }
 
         do {
-            let response = try await ContentService.shared.fetchSubmissionStatusList(cursor: cursor)
-            submissions.append(contentsOf: response.submissions)
-            applyPagination(nextCursor: response.nextCursor, hasMore: response.hasMore)
+            let feed = try await ContentService.shared.fetchSubmissionStatusList(cursor: cursor)
+            submissions.append(contentsOf: feed.submissions)
+            applyPagination(nextCursor: feed.nextCursor, hasMore: feed.hasMore)
         } catch {
             logger.error("[SubmissionStatusViewModel] loadMore failed | error=\(error.localizedDescription)")
         }

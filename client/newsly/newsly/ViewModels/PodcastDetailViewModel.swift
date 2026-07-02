@@ -26,7 +26,7 @@ class PodcastDetailViewModel: ObservableObject {
         
         do {
             let content = try await contentService.fetchContentDetail(id: id)
-            if content.apiContentType == .podcast {
+            if content.contentType == .podcast {
                 self.podcast = content
                 self.podcastMetadata = content.podcastMetadata
                 if content.bodyAvailable {

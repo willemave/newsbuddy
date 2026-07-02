@@ -9,6 +9,7 @@ private enum ChatSessionDesign {
 struct ChatSessionView: View {
     @EnvironmentObject private var authViewModel: AuthenticationViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: ChatSessionViewModel
     let onShowHistory: (() -> Void)?
     @FocusState private var isInputFocused: Bool
@@ -63,11 +64,19 @@ struct ChatSessionView: View {
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(.hidden, for: .tabBar)
             .task(id: route.stableKey) {
+                viewModel.handleAppear()
                 dependencies.activeSessionManager.stopTracking(sessionId: viewModel.sessionId)
                 await viewModel.loadSession()
                 await viewModel.checkAndRefreshVoiceDictation()
                 if route.focusComposerOnAppear {
                     isInputFocused = true
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                viewModel.handleScenePhaseChange(newPhase)
+                guard newPhase == .active else { return }
+                Task {
+                    await viewModel.refreshAfterForegroundIfNeeded()
                 }
             }
             .onDisappear {

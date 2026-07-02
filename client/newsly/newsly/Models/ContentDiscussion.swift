@@ -64,6 +64,47 @@ struct ContentDiscussion: Codable {
         self.stats = stats
     }
 
+    // Decodes through the generated wire model so `summary` picks up the typed,
+    // server-validated shape (APIDiscussionSummaryResponse) instead of hand-parsing
+    // JSON. `stats` stays AnyCodable: its keys vary by discussion platform/mode and
+    // are not consumed by the app (see ContentDiscussionResponse.stats on the
+    // backend, an intentional escape hatch).
+    init(from decoder: Decoder) throws {
+        let response = try APIContentDiscussionResponse(from: decoder)
+        contentId = response.contentId
+        status = response.status
+        mode = response.mode.rawValue
+        platform = response.platform
+        sourceURL = response.sourceUrl
+        discussionURL = response.discussionUrl
+        fetchedAt = response.fetchedAt
+        errorMessage = response.errorMessage
+        comments = response.comments.map(DiscussionComment.init(api:))
+        discussionGroups = response.discussionGroups.map(DiscussionGroup.init(api:))
+        links = response.links.map(DiscussionLink.init(api:))
+        summary = response.summary.map(DiscussionSummary.init(api:))
+        commentCount = response.commentCount
+        stats = response.stats
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(contentId, forKey: .contentId)
+        try container.encode(status, forKey: .status)
+        try container.encode(mode, forKey: .mode)
+        try container.encodeIfPresent(platform, forKey: .platform)
+        try container.encodeIfPresent(sourceURL, forKey: .sourceURL)
+        try container.encodeIfPresent(discussionURL, forKey: .discussionURL)
+        try container.encodeIfPresent(fetchedAt, forKey: .fetchedAt)
+        try container.encodeIfPresent(errorMessage, forKey: .errorMessage)
+        try container.encode(comments, forKey: .comments)
+        try container.encode(discussionGroups, forKey: .discussionGroups)
+        try container.encode(links, forKey: .links)
+        try container.encodeIfPresent(summary, forKey: .summary)
+        try container.encodeIfPresent(commentCount, forKey: .commentCount)
+        try container.encode(stats, forKey: .stats)
+    }
+
     enum CodingKeys: String, CodingKey {
         case contentId = "content_id"
         case status
@@ -143,6 +184,8 @@ struct ContentDiscussion: Codable {
     }
 }
 
+// Domain type. Field names mirror APIDiscussionSummaryResponse; `init(api:)` maps
+// from the generated wire model (see ContentDiscussion.init(from:)).
 struct DiscussionSummary: Codable {
     let overview: String
     let topics: [DiscussionSummaryTopic]
@@ -150,6 +193,31 @@ struct DiscussionSummary: Codable {
     let representativeComments: [DiscussionSummaryComment]
     let externalDiscussionURL: String?
     let generatedAt: String?
+
+    init(
+        overview: String,
+        topics: [DiscussionSummaryTopic],
+        notableLinks: [DiscussionSummaryLink],
+        representativeComments: [DiscussionSummaryComment],
+        externalDiscussionURL: String?,
+        generatedAt: String?
+    ) {
+        self.overview = overview
+        self.topics = topics
+        self.notableLinks = notableLinks
+        self.representativeComments = representativeComments
+        self.externalDiscussionURL = externalDiscussionURL
+        self.generatedAt = generatedAt
+    }
+
+    init(api response: APIDiscussionSummaryResponse) {
+        overview = response.overview
+        topics = response.topics.map(DiscussionSummaryTopic.init(api:))
+        notableLinks = response.notableLinks.map(DiscussionSummaryLink.init(api:))
+        representativeComments = response.representativeComments.map(DiscussionSummaryComment.init(api:))
+        externalDiscussionURL = response.externalDiscussionUrl
+        generatedAt = response.generatedAt
+    }
 
     enum CodingKeys: String, CodingKey {
         case overview
@@ -167,6 +235,18 @@ struct DiscussionSummaryTopic: Codable, Identifiable {
     let stance: String?
 
     var id: String { "\(title)-\(summary)" }
+
+    init(title: String, summary: String, stance: String?) {
+        self.title = title
+        self.summary = summary
+        self.stance = stance
+    }
+
+    init(api response: APIDiscussionSummaryTopicResponse) {
+        title = response.title
+        summary = response.summary
+        stance = response.stance
+    }
 }
 
 struct DiscussionSummaryLink: Codable, Identifiable {
@@ -183,6 +263,20 @@ struct DiscussionSummaryLink: Codable, Identifiable {
     }
 
     var id: String { url }
+
+    init(url: String, title: String?, reason: String?, sourceCommentID: String?) {
+        self.url = url
+        self.title = title
+        self.reason = reason
+        self.sourceCommentID = sourceCommentID
+    }
+
+    init(api response: APIDiscussionSummaryLinkResponse) {
+        url = response.url
+        title = response.title
+        reason = response.reason
+        sourceCommentID = response.sourceCommentId
+    }
 }
 
 struct DiscussionSummaryComment: Codable, Identifiable {
@@ -199,6 +293,20 @@ struct DiscussionSummaryComment: Codable, Identifiable {
     }
 
     var id: String { commentID ?? "\(author ?? "unknown")-\(text)" }
+
+    init(commentID: String?, author: String?, text: String, reason: String?) {
+        self.commentID = commentID
+        self.author = author
+        self.text = text
+        self.reason = reason
+    }
+
+    init(api response: APIDiscussionSummaryCommentResponse) {
+        commentID = response.commentId
+        author = response.author
+        text = response.text
+        reason = response.reason
+    }
 }
 
 struct DiscussionComment: Codable, Identifiable {
@@ -223,6 +331,37 @@ struct DiscussionComment: Codable, Identifiable {
     }
 
     var id: String { commentID }
+
+    init(
+        commentID: String,
+        parentID: String?,
+        author: String?,
+        text: String,
+        compactText: String?,
+        depth: Int,
+        createdAt: String?,
+        sourceURL: String?
+    ) {
+        self.commentID = commentID
+        self.parentID = parentID
+        self.author = author
+        self.text = text
+        self.compactText = compactText
+        self.depth = depth
+        self.createdAt = createdAt
+        self.sourceURL = sourceURL
+    }
+
+    init(api response: APIDiscussionCommentResponse) {
+        commentID = response.commentId
+        parentID = response.parentId
+        author = response.author
+        text = response.text
+        compactText = response.compactText
+        depth = response.depth
+        createdAt = response.createdAt
+        sourceURL = response.sourceUrl
+    }
 }
 
 struct DiscussionGroup: Codable, Identifiable {
@@ -230,6 +369,16 @@ struct DiscussionGroup: Codable, Identifiable {
     let items: [DiscussionItem]
 
     var id: String { label }
+
+    init(label: String, items: [DiscussionItem]) {
+        self.label = label
+        self.items = items
+    }
+
+    init(api response: APIDiscussionGroupResponse) {
+        label = response.label
+        items = response.items.map(DiscussionItem.init(api:))
+    }
 }
 
 struct DiscussionItem: Codable, Identifiable {
@@ -237,6 +386,16 @@ struct DiscussionItem: Codable, Identifiable {
     let url: String
 
     var id: String { url }
+
+    init(title: String, url: String) {
+        self.title = title
+        self.url = url
+    }
+
+    init(api response: APIDiscussionItemResponse) {
+        title = response.title
+        url = response.url
+    }
 }
 
 struct DiscussionLink: Codable, Identifiable {
@@ -255,4 +414,20 @@ struct DiscussionLink: Codable, Identifiable {
     }
 
     var id: String { url }
+
+    init(url: String, source: String, commentID: String?, groupLabel: String?, title: String?) {
+        self.url = url
+        self.source = source
+        self.commentID = commentID
+        self.groupLabel = groupLabel
+        self.title = title
+    }
+
+    init(api response: APIDiscussionLinkResponse) {
+        url = response.url
+        source = response.source
+        commentID = response.commentId
+        groupLabel = response.groupLabel
+        title = response.title
+    }
 }

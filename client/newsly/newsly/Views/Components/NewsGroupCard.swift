@@ -18,7 +18,7 @@ struct NewsGroupCard: View {
                 NavigationLink(
                     destination: ContentDetailView(
                         contentId: item.id,
-                        contentType: item.apiContentType ?? .news,
+                        contentType: item.contentType,
                         allContentIds: group.items.map(\.id),
                         navigationSurface: .newsGroup
                     )

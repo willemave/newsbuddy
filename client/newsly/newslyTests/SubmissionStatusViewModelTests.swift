@@ -7,18 +7,18 @@ final class SubmissionStatusViewModelTests: XCTestCase {
     func testFeedSubscriptionSuccessDisplaysSemanticStatus() {
         let item = SubmissionStatusItem(
             id: 44,
-            contentType: "unknown",
+            contentType: .unknown,
             url: "https://chinai.substack.com/p/example",
             sourceUrl: nil,
             title: nil,
-            status: "skipped",
+            status: .skipped,
             errorMessage: nil,
             createdAt: "2026-05-26T22:09:04Z",
             processedAt: "2026-05-26T22:09:10Z",
             submittedVia: "share_sheet",
             isSelfSubmission: true,
-            submissionKind: "feed_subscription",
-            outcome: "subscribed",
+            submissionKind: .feed_subscription,
+            outcome: .subscribed,
             detectedFeed: DetectedFeed(
                 url: "https://chinai.substack.com/feed",
                 type: "substack",
@@ -52,7 +52,7 @@ final class SubmissionStatusViewModelTests: XCTestCase {
         let item = makeSubmission(
             id: 99,
             createdAt: "2026-05-26T22:09:04Z",
-            status: "skipped"
+            outcome: .skipped
         )
 
         XCTAssertEqual(item.statusLabel, "Skipped")
@@ -63,18 +63,18 @@ final class SubmissionStatusViewModelTests: XCTestCase {
     func testFeedDetectionFailureUsesActionableStatus() {
         let item = SubmissionStatusItem(
             id: 45,
-            contentType: "unknown",
+            contentType: .unknown,
             url: "https://example.com/no-feed",
             sourceUrl: nil,
             title: nil,
-            status: "skipped",
+            status: .skipped,
             errorMessage: nil,
             createdAt: "2026-05-26T22:09:04Z",
             processedAt: "2026-05-26T22:09:10Z",
             submittedVia: "share_sheet",
             isSelfSubmission: true,
-            submissionKind: "feed_subscription",
-            outcome: "feed_not_found",
+            submissionKind: .feed_subscription,
+            outcome: .feed_not_found,
             detectedFeed: nil,
             feedSubscription: SubmissionFeedSubscription(status: "no_feed_found")
         )
@@ -126,20 +126,21 @@ final class SubmissionStatusViewModelTests: XCTestCase {
     private func makeSubmission(
         id: Int,
         createdAt: String,
-        status: String = "processing"
+        outcome: APISubmissionOutcome = .processing
     ) -> SubmissionStatusItem {
         SubmissionStatusItem(
             id: id,
-            contentType: "article",
+            contentType: .article,
             url: "https://example.com/\(id)",
             sourceUrl: nil,
             title: "Submission \(id)",
-            status: status,
+            status: .processing,
             errorMessage: nil,
             createdAt: createdAt,
             processedAt: nil,
             submittedVia: "app",
-            isSelfSubmission: true
+            isSelfSubmission: true,
+            outcome: outcome
         )
     }
 

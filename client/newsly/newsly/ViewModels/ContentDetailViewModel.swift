@@ -108,7 +108,7 @@ class ContentDetailViewModel: ObservableObject {
             }
 
             content = fetched
-            logger.info("[ContentDetail] Content fetched | contentId=\(requestedContentId) type=\(fetched.contentType, privacy: .public) isRead=\(fetched.isRead) title=\(fetched.displayTitle, privacy: .public)")
+            logger.info("[ContentDetail] Content fetched | contentId=\(requestedContentId) type=\(fetched.contentType.rawValue, privacy: .public) isRead=\(fetched.isRead) title=\(fetched.displayTitle, privacy: .public)")
 
             // Capture read state as returned by the server BEFORE any auto-marking
             wasAlreadyReadWhenLoaded = fetched.isRead
@@ -121,7 +121,7 @@ class ContentDetailViewModel: ObservableObject {
                 await self.trackOpenedInteraction(for: fetched)
             }
 
-            if fetched.bodyAvailable && fetched.apiContentType != .news {
+            if fetched.bodyAvailable && fetched.contentType != .news {
                 Task {
                     await self.loadContentBody(for: fetched)
                 }
@@ -146,7 +146,7 @@ class ContentDetailViewModel: ObservableObject {
 
     func canShowReader(for content: ContentDetail) -> Bool {
         guard content.bodyAvailable else { return false }
-        return content.apiContentType == .article || content.apiContentType == .news
+        return content.contentType == .article || content.contentType == .news
     }
 
     func loadReaderBody(for content: ContentDetail, force: Bool = false) async {
@@ -162,7 +162,7 @@ class ContentDetailViewModel: ObservableObject {
             let body = try await fetchReaderBody(for: content)
             guard self.contentId == content.id,
                   self.content?.id == content.id,
-                  self.content?.apiContentType == content.apiContentType else {
+                  self.content?.contentType == content.contentType else {
                 logger.debug("[ContentDetail] Ignoring stale reader body | requestedId=\(content.id) currentId=\(self.contentId)")
                 return
             }
@@ -180,7 +180,7 @@ class ContentDetailViewModel: ObservableObject {
         do {
             let body = try await contentService.fetchContentBody(
                 id: fetched.id,
-                contentType: fetched.apiContentType
+                contentType: fetched.contentType
             )
             guard self.contentId == fetched.id else {
                 logger.debug("[ContentDetail] Ignoring stale content body | requestedId=\(fetched.id) currentId=\(self.contentId)")
@@ -199,7 +199,7 @@ class ContentDetailViewModel: ObservableObject {
             let renderedBody = try await contentService.fetchContentBody(
                 id: content.id,
                 variant: "rendered",
-                contentType: content.apiContentType
+                contentType: content.contentType
             )
             if !renderedBody.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return renderedBody
@@ -213,7 +213,7 @@ class ContentDetailViewModel: ObservableObject {
         return try await contentService.fetchContentBody(
             id: content.id,
             variant: "source",
-            contentType: content.apiContentType
+            contentType: content.contentType
         )
     }
 
@@ -234,8 +234,8 @@ class ContentDetailViewModel: ObservableObject {
         }
 
         do {
-            logger.info("[ContentDetail] Content not read, marking as read | contentId=\(fetched.id) type=\(fetched.contentType, privacy: .public)")
-            try await contentService.markContentAsRead(id: fetched.id, contentType: fetched.apiContentType)
+            logger.info("[ContentDetail] Content not read, marking as read | contentId=\(fetched.id) type=\(fetched.contentType.rawValue, privacy: .public)")
+            try await contentService.markContentAsRead(id: fetched.id, contentType: fetched.contentType)
             logger.info("[ContentDetail] Successfully marked as read | contentId=\(fetched.id)")
 
             guard self.contentId == fetched.id else {
@@ -245,20 +245,20 @@ class ContentDetailViewModel: ObservableObject {
 
             content?.isRead = true
 
-            logger.debug("[ContentDetail] Posting contentMarkedAsRead notification | contentId=\(fetched.id) type=\(fetched.contentType, privacy: .public)")
+            logger.debug("[ContentDetail] Posting contentMarkedAsRead notification | contentId=\(fetched.id) type=\(fetched.contentType.rawValue, privacy: .public)")
             NotificationCenter.default.post(
                 name: .contentMarkedAsRead,
                 object: nil,
                 userInfo: ["contentId": fetched.id, "contentType": fetched.contentType]
             )
 
-            if fetched.apiContentType == .article {
+            if fetched.contentType == .article {
                 logger.debug("[ContentDetail] Decrementing article count | contentId=\(fetched.id)")
                 unreadCountService.decrementArticleCount()
-            } else if fetched.apiContentType == .podcast {
+            } else if fetched.contentType == .podcast {
                 logger.debug("[ContentDetail] Decrementing podcast count | contentId=\(fetched.id)")
                 unreadCountService.decrementPodcastCount()
-            } else if fetched.apiContentType == .news {
+            } else if fetched.contentType == .news {
                 logger.debug("[ContentDetail] Decrementing news count | contentId=\(fetched.id)")
                 unreadCountService.decrementNewsCount()
             }
@@ -271,7 +271,7 @@ class ContentDetailViewModel: ObservableObject {
 
     private func trackOpenedInteraction(for fetched: ContentDetail) async {
         let contextData: [String: Any] = [
-            "content_type": fetched.contentType,
+            "content_type": fetched.contentType.rawValue,
             "was_read_when_loaded": fetched.isRead,
         ]
 
@@ -331,7 +331,7 @@ class ContentDetailViewModel: ObservableObject {
     }
 
     func saveLinkedArticleAsKnowledge() async {
-        guard let currentContent = content, currentContent.apiContentType == .news else {
+        guard let currentContent = content, currentContent.contentType == .news else {
             return
         }
 
@@ -489,7 +489,7 @@ class ContentDetailViewModel: ObservableObject {
     }
 
     private func resolvedShareURLString(for content: ContentDetail) -> String? {
-        if content.apiContentType == .news,
+        if content.contentType == .news,
            let articleURL = content.resolvedNewsArticleURL {
             return articleURL
         }
@@ -511,7 +511,7 @@ class ContentDetailViewModel: ObservableObject {
            let narrative = normalizedText(firstParagraph) {
             return narrative
         }
-        if content.apiContentType == .news {
+        if content.contentType == .news {
             return nil
         }
         if let newsSummary = content.resolvedNewsSummaryText {
@@ -540,7 +540,7 @@ class ContentDetailViewModel: ObservableObject {
         }
         points.append(contentsOf: content.bulletPoints.map(\.text))
 
-        if content.apiContentType == .news {
+        if content.contentType == .news {
             points.append(contentsOf: content.resolvedNewsKeyPoints)
         }
 
@@ -766,12 +766,12 @@ class ContentDetailViewModel: ObservableObject {
 
         // Full content / transcript
         if let contentBody {
-            fullText += content.apiContentType == .podcast ? "## Full Transcript\n\n" : "## Full Article\n\n"
+            fullText += content.contentType == .podcast ? "## Full Transcript\n\n" : "## Full Article\n\n"
             fullText += contentBody.text
-        } else if content.apiContentType == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
+        } else if content.contentType == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
             fullText += "## Full Transcript\n\n" + transcript
         } else if let fullMarkdown = content.fullMarkdown {
-            fullText += (content.apiContentType == .podcast ? "## Transcript\n\n" : "## Full Article\n\n")
+            fullText += (content.contentType == .podcast ? "## Transcript\n\n" : "## Full Article\n\n")
             fullText += fullMarkdown
         }
         return fullText

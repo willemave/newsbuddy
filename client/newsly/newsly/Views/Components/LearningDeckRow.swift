@@ -101,8 +101,8 @@ struct LearningDeckRow: View {
     }
 
     private var updatedText: String? {
-        let rawTimestamp = deck.updatedAt ?? deck.latestRun?.updatedAt ?? deck.createdAt
-        return ContentTimestampFormatter.text(from: rawTimestamp, style: .compactRelative)
+        let timestamp = deck.updatedAt ?? deck.latestRun?.updatedAt ?? deck.createdAt
+        return ContentTimestampFormatter.text(from: timestamp, style: .compactRelative)
     }
 
     var body: some View {

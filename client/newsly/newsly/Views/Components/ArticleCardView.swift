@@ -125,7 +125,7 @@ struct ArticleCardView: View {
         HStack(spacing: 4) {
             Image(systemName: contentTypeIcon)
                 .font(.appCaption)
-            Text(content.contentType.capitalized)
+            Text(content.contentType.displayName)
                 .font(.appCaption)
                 .fontWeight(.medium)
         }
@@ -369,9 +369,9 @@ struct ArticleCardView: View {
 
     private var contentTypeIcon: String {
         switch content.contentType {
-        case "article":
+        case .article:
             return "doc.text"
-        case "podcast":
+        case .podcast:
             return "headphones"
         default:
             return "newspaper"
@@ -396,7 +396,7 @@ struct ArticleCardView: View {
         let topicsCount = topics?.count ?? 0
         let shortSummaryLength = content.shortSummary?.count ?? 0
         cardLogger.info(
-            "[ArticleCardView] preview (\(context)) id=\(content.id) type=\(content.contentType, privacy: .public) loading=\(isLoadingKeyPoints) keyPoints=\(keyPointCount) hookLen=\(hookLength) topics=\(topicsCount) shortSummaryLen=\(shortSummaryLength)"
+            "[ArticleCardView] preview (\(context)) id=\(content.id) type=\(content.contentType.rawValue, privacy: .public) loading=\(isLoadingKeyPoints) keyPoints=\(keyPointCount) hookLen=\(hookLength) topics=\(topicsCount) shortSummaryLen=\(shortSummaryLength)"
         )
     }
 }

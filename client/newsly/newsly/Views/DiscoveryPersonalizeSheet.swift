@@ -40,7 +40,7 @@ struct DiscoveryPersonalizeSheet: View {
             Task { await viewModel.resumeDiscoveryIfNeeded() }
         }
         .onDisappear {
-            viewModel.cancelPersonalization()
+            viewModel.handleDisappear()
         }
     }
 

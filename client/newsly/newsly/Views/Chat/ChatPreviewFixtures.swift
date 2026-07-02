@@ -7,7 +7,7 @@ import Foundation
 
 #if DEBUG
 enum ChatPreviewFixtures {
-    static let timestamp = "2026-04-16T18:30:00Z"
+    static let timestamp = ServerDate.parse("2026-04-16T18:30:00Z")!
 
     static let userMessage = ChatMessage(
         id: 1,

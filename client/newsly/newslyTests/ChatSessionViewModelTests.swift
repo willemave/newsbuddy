@@ -173,7 +173,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             id: 9,
             sourceMessageId: 9,
             role: .assistant,
-            timestamp: "2026-04-01T10:00:00Z",
+            timestamp: ServerDate.parse("2026-04-01T10:00:00Z")!,
             content: "Ben Thompson regenerated.",
             councilCandidates: [
                 CouncilCandidate(
@@ -211,14 +211,38 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.councilCandidates.first?.content, "Ben Thompson regenerated.")
     }
 
-    func testHandleDisappearCancelsOwnedSendTaskWithoutSurfacingError() async {
-        let chatService = MockChatSessionService(sendMessageHandler: { _, _ in
-            try await Task.sleep(nanoseconds: 60_000_000_000)
-            throw CancellationError()
-        })
+    func testHandleDisappearKeepsPreAckSendAliveAndHandsOffAfterServerAck() async {
+        let ackGate = AsyncGate()
+        let chatService = MockChatSessionService(
+            sendMessageHandler: { sessionId, message in
+                await ackGate.wait()
+                return SendChatMessageResponse(
+                    sessionId: sessionId,
+                    userMessage: Self.message(id: 101, role: .user, content: message, status: .processing),
+                    messageId: 501,
+                    status: .processing
+                )
+            },
+            messageStatusHandler: { messageId in
+                MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: 201,
+                        role: .assistant,
+                        content: "Should not poll while inactive",
+                        status: .completed
+                    ),
+                    error: nil
+                )
+            }
+        )
         ActiveChatSessionManager.shared.reset()
         let viewModel = ChatSessionViewModel(
-            route: ChatSessionRoute(sessionId: 42),
+            route: ChatSessionRoute(session: Self.session(
+                contentId: 7,
+                articleTitle: "Tracked Article"
+            )),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
                 chatService: chatService
@@ -227,35 +251,55 @@ final class ChatSessionViewModelTests: XCTestCase {
 
         viewModel.inputText = "Hello"
         viewModel.performSendMessage()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        let didStartSend = await waitUntil {
+            chatService.sentMessages.count == 1 && viewModel.isSending
+        }
 
+        XCTAssertTrue(didStartSend)
         XCTAssertTrue(viewModel.isSending)
         XCTAssertEqual(viewModel.timeline.last?.message.content, "Hello")
 
         viewModel.handleDisappear()
-        try? await Task.sleep(nanoseconds: 50_000_000)
 
+        XCTAssertTrue(viewModel.isSending)
+        XCTAssertNil(ActiveChatSessionManager.shared.getSession(forContentId: 7))
+
+        await ackGate.open()
+        let didHandOff = await waitUntil {
+            ActiveChatSessionManager.shared.getSession(forContentId: 7)?.messageId == 501
+        }
+
+        XCTAssertTrue(didHandOff)
         XCTAssertFalse(viewModel.isSending)
-        XCTAssertFalse(viewModel.isStartingCouncil)
         XCTAssertNil(viewModel.errorMessage)
-        XCTAssertTrue(viewModel.timeline.isEmpty)
+        XCTAssertEqual(viewModel.timeline.last?.message.content, "Hello")
+        XCTAssertEqual(chatService.messageStatusCallCount, 0)
         ActiveChatSessionManager.shared.reset()
     }
 
-    func testHandleDisappearSuppressesCancelledTransportError() async {
-        let chatService = MockChatSessionService(sendMessageHandler: { _, _ in
-            while !Task.isCancelled {
-                do {
+    func testHandleDisappearCancelsAcceptedPollingWithoutFailingMessage() async {
+        let chatService = MockChatSessionService(
+            sendMessageHandler: { sessionId, message in
+                SendChatMessageResponse(
+                    sessionId: sessionId,
+                    userMessage: Self.message(id: 101, role: .user, content: message, status: .processing),
+                    messageId: 501,
+                    status: .processing
+                )
+            },
+            messageStatusHandler: { messageId in
+                while true {
+                    try Task.checkCancellation()
                     try await Task.sleep(nanoseconds: 10_000_000)
-                } catch {
-                    // Some URLSession cancellations surface as transport errors after task cancellation.
                 }
             }
-            throw APIError.networkError(URLError(.networkConnectionLost))
-        })
+        )
         ActiveChatSessionManager.shared.reset()
         let viewModel = ChatSessionViewModel(
-            route: ChatSessionRoute(sessionId: 42),
+            route: ChatSessionRoute(session: Self.session(
+                contentId: 7,
+                articleTitle: "Tracked Article"
+            )),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
                 chatService: chatService
@@ -264,17 +308,23 @@ final class ChatSessionViewModelTests: XCTestCase {
 
         viewModel.inputText = "Hello"
         viewModel.performSendMessage()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        let didStartPolling = await waitUntil {
+            chatService.messageStatusCallCount > 0 && viewModel.isSending
+        }
 
+        XCTAssertTrue(didStartPolling)
         XCTAssertTrue(viewModel.isSending)
         XCTAssertEqual(viewModel.timeline.last?.message.content, "Hello")
 
         viewModel.handleDisappear()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        let didCancelPolling = await waitUntil { !viewModel.isSending }
 
+        XCTAssertTrue(didCancelPolling)
         XCTAssertFalse(viewModel.isSending)
         XCTAssertNil(viewModel.errorMessage)
-        XCTAssertTrue(viewModel.timeline.isEmpty)
+        XCTAssertEqual(viewModel.timeline.last?.message.content, "Hello")
+        XCTAssertFalse(viewModel.timeline.last?.message.hasFailed ?? true)
+        XCTAssertEqual(ActiveChatSessionManager.shared.getSession(forContentId: 7)?.messageId, 501)
         ActiveChatSessionManager.shared.reset()
     }
 
@@ -310,7 +360,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             route: ChatSessionRoute(
                 session: session,
                 initialUserMessageText: "Track this",
-                initialUserMessageTimestamp: "2026-04-01T10:00:00Z",
+                initialUserMessageTimestamp: ServerDate.parse("2026-04-01T10:00:00Z")!,
                 pendingMessageId: 99
             ),
             dependencies: .test(
@@ -328,8 +378,9 @@ final class ChatSessionViewModelTests: XCTestCase {
     }
 
     func testHandleDisappearBeforeServerAckDoesNotTrackLocalPlaceholder() async {
+        let ackGate = AsyncGate()
         let chatService = MockChatSessionService(sendMessageHandler: { _, _ in
-            try await Task.sleep(nanoseconds: 60_000_000_000)
+            await ackGate.wait()
             throw CancellationError()
         })
         ActiveChatSessionManager.shared.reset()
@@ -346,15 +397,19 @@ final class ChatSessionViewModelTests: XCTestCase {
 
         viewModel.inputText = "Track only after backend ack"
         viewModel.performSendMessage()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        let didStartSend = await waitUntil {
+            chatService.sentMessages.count == 1 && viewModel.isSending
+        }
 
+        XCTAssertTrue(didStartSend)
         XCTAssertTrue(viewModel.isSending)
         XCTAssertEqual(viewModel.timeline.last?.message.content, "Track only after backend ack")
 
         viewModel.handleDisappear()
-        try? await Task.sleep(nanoseconds: 50_000_000)
 
         XCTAssertNil(ActiveChatSessionManager.shared.getSession(forContentId: 7))
+        await ackGate.open()
+        _ = await waitUntil { !viewModel.isSending }
         ActiveChatSessionManager.shared.reset()
     }
 
@@ -432,7 +487,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         ChatMessage(
             id: id,
             role: role,
-            timestamp: "2026-04-01T10:00:00Z",
+            timestamp: ServerDate.parse("2026-04-01T10:00:00Z")!,
             content: content,
             status: status
         )
@@ -456,7 +511,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             topic: nil,
             llmProvider: "openai",
             llmModel: "openai:gpt-5.5",
-            createdAt: "2026-04-01T10:00:00Z",
+            createdAt: ServerDate.parse("2026-04-01T10:00:00Z")!,
             updatedAt: nil,
             lastMessageAt: nil,
             articleTitle: articleTitle,
@@ -505,6 +560,7 @@ private final class MockChatSessionService: ChatSessionServicing {
     private let selectCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)?
     private let retryCouncilBranchHandler: ((Int, Int) async throws -> ChatSessionDetail)?
     private(set) var initialSuggestionsCallCount = 0
+    private(set) var messageStatusCallCount = 0
     private(set) var sentMessages: [(sessionId: Int, message: String)] = []
 
     init(
@@ -537,6 +593,7 @@ private final class MockChatSessionService: ChatSessionServicing {
     }
 
     func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse {
+        messageStatusCallCount += 1
         if let messageStatusHandler {
             return try await messageStatusHandler(messageId)
         }
@@ -628,5 +685,28 @@ private final class MockChatSpeechTranscriber: SpeechTranscribing {
         isRecording = false
         isTranscribing = false
         onStateChange?(.idle)
+    }
+}
+
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations {
+            continuation.resume()
+        }
     }
 }

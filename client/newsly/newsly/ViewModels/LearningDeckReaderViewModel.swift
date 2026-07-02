@@ -6,6 +6,10 @@
 import Foundation
 import Observation
 
+private enum LearningDeckForegroundPollingSuspended: Error {
+    case inactive
+}
+
 protocol LearningDeckReaderChatServicing: AnyObject {
     func createAssistantTurn(
         message: String,
@@ -97,6 +101,8 @@ final class LearningDeckReaderViewModel {
     private var sendTask: Task<Void, Never>?
     @ObservationIgnored
     private var viewerTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var isViewActive = true
 
     init(
         deck: LearningDeck,
@@ -188,6 +194,7 @@ final class LearningDeckReaderViewModel {
     // MARK: - Chat
 
     func performSendMessage(text overrideText: String? = nil) {
+        guard !isSending else { return }
         sendTask?.cancel()
         sendTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -196,11 +203,20 @@ final class LearningDeckReaderViewModel {
         }
     }
 
-    func cancelInFlightWork() {
-        sendTask?.cancel()
-        sendTask = nil
-        isSending = false
-        thinkingStartedAt = nil
+    func handleAppear() {
+        isViewActive = true
+        resumeAcceptedSendIfNeeded()
+    }
+
+    func handleDisappear() {
+        isViewActive = false
+
+        if pendingForegroundMessageId != nil {
+            sendTask?.cancel()
+            sendTask = nil
+            isSending = false
+            thinkingStartedAt = nil
+        }
     }
 
     func sendMessage(text overrideText: String? = nil) async {
@@ -220,7 +236,7 @@ final class LearningDeckReaderViewModel {
             message: ChatMessage(
                 id: Self.localMessageId(for: localId),
                 role: .user,
-                timestamp: Self.timestamp(),
+                timestamp: Date(),
                 content: resolvedText,
                 status: .processing
             ),
@@ -249,6 +265,9 @@ final class LearningDeckReaderViewModel {
                     retryText: nil
                 )
             )
+            if !isViewActive {
+                return
+            }
             let assistantMessage = try await pollUntilComplete(messageId: response.messageId)
             upsertTimelineItem(
                 ChatTimelineItem(
@@ -258,8 +277,14 @@ final class LearningDeckReaderViewModel {
                     retryText: nil
                 )
             )
+            clearPendingMessageId(for: .local(localId))
+        } catch is LearningDeckForegroundPollingSuspended {
+            // The backend has accepted the turn. Leave the pending user row in
+            // place so foregrounding can resume status polling.
         } catch where isNetworkCancellation(error) {
-            removeTimelineItem(id: .local(localId))
+            if pendingMessageId(for: .local(localId)) == nil {
+                removeTimelineItem(id: .local(localId))
+            }
         } catch {
             errorMessage = error.localizedDescription
             upsertTimelineItem(
@@ -284,6 +309,9 @@ final class LearningDeckReaderViewModel {
         var attempts = 0
         while attempts < maxPollingAttempts {
             try Task.checkCancellation()
+            if !isViewActive {
+                throw LearningDeckForegroundPollingSuspended.inactive
+            }
             let status = try await chatService.getMessageStatus(messageId: messageId)
             switch status.status {
             case .completed:
@@ -299,6 +327,45 @@ final class LearningDeckReaderViewModel {
             }
         }
         throw ChatServiceError.timeout
+    }
+
+    private func resumeAcceptedSendIfNeeded() {
+        guard sendTask == nil, let messageId = pendingForegroundMessageId else { return }
+
+        isSending = true
+        thinkingStartedAt = Date()
+        sendTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.resumePolling(messageId: messageId)
+            self.sendTask = nil
+        }
+    }
+
+    private func resumePolling(messageId: Int) async {
+        defer {
+            isSending = false
+            thinkingStartedAt = nil
+        }
+
+        do {
+            let assistantMessage = try await pollUntilComplete(messageId: messageId)
+            upsertTimelineItem(
+                ChatTimelineItem(
+                    id: ChatTimelineID.server(for: assistantMessage),
+                    message: assistantMessage,
+                    pendingMessageId: nil,
+                    retryText: nil
+                )
+            )
+            clearPendingMessageId(forPendingMessageId: messageId)
+        } catch is LearningDeckForegroundPollingSuspended {
+            return
+        } catch where isNetworkCancellation(error) {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+            markPendingMessageFailed(messageId: messageId, error: error.localizedDescription)
+        }
     }
 
     private func screenContext() -> AssistantScreenContext {
@@ -354,12 +421,54 @@ final class LearningDeckReaderViewModel {
         timeline.removeAll { $0.id == id }
     }
 
-    private static func localMessageId(for id: UUID) -> Int {
-        Int(id.uuidString.prefix(8), radix: 16) ?? 0
+    private var pendingForegroundMessageId: Int? {
+        timeline.first { $0.pendingMessageId != nil }?.pendingMessageId
     }
 
-    private static func timestamp() -> String {
-        ISO8601DateFormatter().string(from: Date())
+    private func pendingMessageId(for id: ChatTimelineID) -> Int? {
+        timeline.first { $0.id == id }?.pendingMessageId
+    }
+
+    private func clearPendingMessageId(for id: ChatTimelineID) {
+        guard var item = timeline.first(where: { $0.id == id }) else { return }
+        item.pendingMessageId = nil
+        upsertTimelineItem(item)
+    }
+
+    private func clearPendingMessageId(forPendingMessageId messageId: Int) {
+        guard var item = timeline.first(where: { $0.pendingMessageId == messageId }) else { return }
+        item.pendingMessageId = nil
+        upsertTimelineItem(item)
+    }
+
+    private func markPendingMessageFailed(messageId: Int, error: String) {
+        guard let item = timeline.first(where: { $0.pendingMessageId == messageId }) else { return }
+        upsertTimelineItem(
+            ChatTimelineItem(
+                id: item.id,
+                message: ChatMessage(
+                    id: item.message.id,
+                    sourceMessageId: item.message.sourceMessageId,
+                    displayKey: item.message.displayKey,
+                    role: item.message.role,
+                    timestamp: item.message.timestamp,
+                    content: item.message.content,
+                    displayType: item.message.displayType,
+                    processLabel: item.message.processLabel,
+                    status: .failed,
+                    error: error,
+                    feedOptions: item.message.feedOptions,
+                    councilCandidates: item.message.councilCandidates,
+                    activeCouncilChildSessionId: item.message.activeCouncilChildSessionId
+                ),
+                pendingMessageId: nil,
+                retryText: item.retryText ?? item.message.content
+            )
+        )
+    }
+
+    private static func localMessageId(for id: UUID) -> Int {
+        Int(id.uuidString.prefix(8), radix: 16) ?? 0
     }
 
     private static func clipped(_ value: String, maxLength: Int) -> String {

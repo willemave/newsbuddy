@@ -40,7 +40,10 @@ enum ContentTimestampFormatter {
 
     static func detailMetaText(from rawValue: String?, now: Date = AppClock.now) -> String? {
         guard let date = parse(rawValue) else { return nil }
+        return detailMetaText(from: date, now: now)
+    }
 
+    static func detailMetaText(from date: Date, now: Date = AppClock.now) -> String {
         let interval = now.timeIntervalSince(date)
         if interval >= 0, interval < 7 * 24 * 60 * 60 {
             return relativeShortFormatter.localizedString(for: date, relativeTo: now)
@@ -87,6 +90,15 @@ enum ContentTimestampFormatter {
             return detailMetaText(from: rawValue, now: now)
         case .compactRelative:
             return compactRelativeText(from: rawValue, now: now)
+        }
+    }
+
+    static func text(from date: Date, style: ContentTimestampStyle, now: Date = AppClock.now) -> String {
+        switch style {
+        case .detailMeta:
+            return detailMetaText(from: date, now: now)
+        case .compactRelative:
+            return compactRelativeText(from: date, now: now)
         }
     }
 }

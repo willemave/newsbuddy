@@ -60,21 +60,20 @@ private struct ContentDetailDecodedPayloads {
     let structuredSummary: StructuredSummary?
 
     init(
-        contentType: String,
+        contentType: APIContentType,
         metadata: [String: AnyCodable],
         summaryKind: String?,
         summaryVersion: Int?,
         structuredSummaryRaw: [String: AnyCodable]?,
         longformArtifactRaw: [String: AnyCodable]?
     ) {
-        let apiContentType = APIContentType(rawValue: contentType)
-        articleMetadata = apiContentType == .article
+        articleMetadata = contentType == .article
             ? Self.decode(ArticleMetadata.self, from: metadata)
             : nil
-        podcastMetadata = apiContentType == .podcast
+        podcastMetadata = contentType == .podcast
             ? Self.decode(PodcastMetadata.self, from: metadata)
             : nil
-        newsMetadata = apiContentType == .news
+        newsMetadata = contentType == .news
             ? Self.decode(NewsMetadata.self, from: metadata)
             : nil
 
@@ -107,24 +106,18 @@ private struct ContentDetailDecodedPayloads {
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, from raw: [String: AnyCodable]?) -> T? {
-        guard let raw else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let data = try? JSONSerialization.data(withJSONObject: raw.mapValues(\.value)) else {
-            return nil
-        }
-        return try? decoder.decode(type, from: data)
+        AnyCodableDecoding.decodeLenient(type, from: raw)
     }
 }
 
 struct ContentDetail: Codable, Identifiable {
     let id: Int
-    let contentType: String
+    let contentType: APIContentType
     let url: String
     let title: String?
     let displayTitle: String
     let source: String?
-    let status: String
+    let status: APIContentStatus
     let errorMessage: String?
     let retryCount: Int
     let metadata: [String: AnyCodable]
@@ -212,7 +205,7 @@ struct ContentDetail: Codable, Identifiable {
 
     init(api response: APIContentDetailResponse) throws {
         id = response.id
-        contentType = response.contentType.rawValue
+        contentType = response.contentType
         url = response.url
         title = response.title
         displayTitle = Self.resolveDisplayTitle(
@@ -221,7 +214,7 @@ struct ContentDetail: Codable, Identifiable {
             url: response.url
         )
         source = response.source
-        status = response.status.rawValue
+        status = response.status
         errorMessage = response.errorMessage
         retryCount = response.retryCount
         metadata = response.metadata
@@ -243,8 +236,12 @@ struct ContentDetail: Codable, Identifiable {
         artifactType = response.artifactType
         previewBullets = response.previewBullets
         reasonToRead = response.reasonToRead
-        bulletPoints = try Self.decodeList([BulletPoint].self, from: response.bulletPoints)
-        quotes = try Self.decodeList([Quote].self, from: response.quotes)
+        bulletPoints = response.bulletPoints.map {
+            BulletPoint(text: $0.text, category: $0.category)
+        }
+        quotes = response.quotes.map {
+            Quote(text: $0.text, context: $0.context, attribution: $0.attribution)
+        }
         topics = response.topics
         fullMarkdown = response.fullMarkdown
         bodyAvailable = response.bodyAvailable
@@ -262,7 +259,7 @@ struct ContentDetail: Codable, Identifiable {
         canSubscribe = response.canSubscribe
 
         decodedPayloads = ContentDetailDecodedPayloads(
-            contentType: response.contentType.rawValue,
+            contentType: response.contentType,
             metadata: response.metadata,
             summaryKind: response.summaryKind?.rawValue,
             summaryVersion: response.summaryVersion?.rawValue,
@@ -293,27 +290,7 @@ struct ContentDetail: Codable, Identifiable {
         _ type: T.Type,
         from raw: [String: AnyCodable]?
     ) throws -> T? {
-        guard let raw else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let data = try JSONSerialization.data(withJSONObject: raw.mapValues(\.value))
-        return try decoder.decode(type, from: data)
-    }
-
-    private static func decodeList<T: Decodable>(
-        _ type: [T].Type,
-        from raw: [[String: String]]
-    ) throws -> [T] {
-        let data = try JSONSerialization.data(withJSONObject: raw)
-        return try JSONDecoder().decode(type, from: data)
-    }
-    
-    var apiContentType: APIContentType? {
-        APIContentType(rawValue: contentType)
-    }
-
-    var apiStatus: APIContentStatus? {
-        APIContentStatus(rawValue: status)
+        try AnyCodableDecoding.decode(type, from: raw)
     }
 
     var apiSummaryKind: APISummaryKind? {
@@ -330,12 +307,12 @@ struct ContentDetail: Codable, Identifiable {
     }
 
     var detailTypeLabel: String {
-        if apiContentType == .news,
+        if contentType == .news,
            let name = newsMetadata?.aggregator?.name,
            !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return name
         }
-        return apiContentType?.displayName ?? "Article"
+        return contentType.displayName
     }
     
     var articleMetadata: ArticleMetadata? {
@@ -416,7 +393,7 @@ struct ContentDetail: Codable, Identifiable {
     }
 
     var newsRelevantLinks: [RelevantLink] {
-        guard apiContentType == .news,
+        guard contentType == .news,
               let rawLinks = metadata["relevant_links"]?.value as? [[String: Any]] else {
             return []
         }
@@ -443,7 +420,7 @@ struct ContentDetail: Codable, Identifiable {
     }
 
     var relevantLinks: [RelevantLink] {
-        if apiContentType == .news {
+        if contentType == .news {
             return newsRelevantLinks
         }
         return interestingExternalLinks

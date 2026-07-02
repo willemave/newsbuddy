@@ -38,7 +38,7 @@ struct ContentDetailRoute: Hashable, Codable {
         navigationSurface: ContentDetailNavigationSurface = .direct
     ) {
         self.contentId = summary.id
-        self.contentType = summary.apiContentType ?? .article
+        self.contentType = summary.contentType
         self.allContentIds = allContentIds
         self.navigationSurface = navigationSurface
     }

@@ -150,6 +150,12 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
         errorMessage = nil
     }
 
+    func handleDisappear() {
+        stopAudioCapture()
+        pollingTask?.cancel()
+        pollingTask = nil
+    }
+
     // MARK: - Discovery
 
     private func beginDiscovery(transcript: String) async {

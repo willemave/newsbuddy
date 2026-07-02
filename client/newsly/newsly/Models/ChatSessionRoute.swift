@@ -13,7 +13,7 @@ struct ChatSessionRoute: Hashable {
     let contentId: Int?
     let newsItemId: Int?
     let initialUserMessageText: String?
-    let initialUserMessageTimestamp: String?
+    let initialUserMessageTimestamp: Date?
     let pendingMessageId: Int?
     let pendingCouncilPrompt: String?
     let focusComposerOnAppear: Bool
@@ -23,7 +23,7 @@ struct ChatSessionRoute: Hashable {
             String(contentId ?? -1),
             String(newsItemId ?? -1),
             initialUserMessageText ?? "",
-            initialUserMessageTimestamp ?? "",
+            initialUserMessageTimestamp.map(ServerDate.format) ?? "",
             pendingMessageId.map(String.init) ?? "",
             pendingCouncilPrompt ?? "",
             String(focusComposerOnAppear)
@@ -36,7 +36,7 @@ struct ChatSessionRoute: Hashable {
         contentId: Int? = nil,
         newsItemId: Int? = nil,
         initialUserMessageText: String? = nil,
-        initialUserMessageTimestamp: String? = nil,
+        initialUserMessageTimestamp: Date? = nil,
         pendingMessageId: Int? = nil,
         pendingCouncilPrompt: String? = nil,
         focusComposerOnAppear: Bool = false
@@ -55,7 +55,7 @@ struct ChatSessionRoute: Hashable {
     init(
         session: ChatSessionSummary,
         initialUserMessageText: String? = nil,
-        initialUserMessageTimestamp: String? = nil,
+        initialUserMessageTimestamp: Date? = nil,
         pendingMessageId: Int? = nil,
         pendingCouncilPrompt: String? = nil,
         focusComposerOnAppear: Bool = false

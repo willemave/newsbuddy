@@ -57,10 +57,11 @@ struct LearningDeckReaderView: View {
             .background(Color.surfacePrimary.ignoresSafeArea())
         }
         .task {
+            viewModel.handleAppear()
             viewModel.prepareViewer(initialURL: viewerURL)
         }
         .onDisappear {
-            viewModel.cancelInFlightWork()
+            viewModel.handleDisappear()
             viewModel.cancelViewerResolution()
         }
         .sheet(isPresented: $showLandscapeChat) {

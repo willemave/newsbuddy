@@ -105,7 +105,7 @@ struct SearchView: View {
                         navigationSurface: .search
                     )) {
                         HStack(spacing: 12) {
-                            Image(systemName: item.apiContentType == .podcast ? "waveform" : "doc.text")
+                            Image(systemName: item.contentType == .podcast ? "waveform" : "doc.text")
                                 .foregroundStyle(Color.onSurfaceSecondary)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.displayTitle)
@@ -123,7 +123,7 @@ struct SearchView: View {
                                             .font(.listCaption)
                                             .foregroundStyle(Color.onSurfaceSecondary)
                                     }
-                                    Text(item.contentType.capitalized)
+                                    Text(item.contentType.displayName)
                                         .font(.chipLabel)
                                         .foregroundStyle(Color.onSurfaceSecondary)
                                 }

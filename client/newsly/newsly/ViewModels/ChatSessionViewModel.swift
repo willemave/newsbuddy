@@ -13,6 +13,10 @@ import os
 private let logger = Logger(subsystem: "com.newsly", category: "ChatSessionViewModel")
 private let chatPerfSignposter = OSSignposter(subsystem: "com.newsly.chat", category: "perf")
 
+private enum ChatForegroundPollingSuspended: Error {
+    case inactive
+}
+
 /// Owns the visible chat transcript, local pending sends, polling, council selection, and voice state.
 ///
 /// Streaming readiness: the timeline reconciler is intentionally isolated so a future SSE
@@ -75,6 +79,10 @@ final class ChatSessionViewModel {
     private var voiceActionTask: Task<Void, Never>?
     @ObservationIgnored
     private var voiceRecordingStartedAt: Date?
+    @ObservationIgnored
+    private var isViewActive = true
+    @ObservationIgnored
+    private var needsForegroundTranscriptRefresh = false
 
     init(
         route: ChatSessionRoute,
@@ -102,6 +110,10 @@ final class ChatSessionViewModel {
         voiceActionTask?.cancel()
         selectCouncilTask?.cancel()
         selectCouncilDeadlineTask?.cancel()
+    }
+
+    func handleAppear() {
+        isViewActive = true
     }
 
     func performSendMessage(text overrideText: String? = nil) {
@@ -229,6 +241,8 @@ final class ChatSessionViewModel {
             // Use the polling sendMessage which handles the polling loop
             _ = try await pollUntilComplete(messageId: messageId)
             try await refreshTranscriptAfterPolling()
+        } catch is ChatForegroundPollingSuspended {
+            logger.debug("[ViewModel] pollForMessageCompletion suspended while inactive | sessionId=\(self.sessionId)")
         } catch where isCancelledOperation(error) {
             logger.debug("[ViewModel] pollForMessageCompletion cancelled | sessionId=\(self.sessionId)")
         } catch {
@@ -250,6 +264,9 @@ final class ChatSessionViewModel {
 
         while attempts < maxAttempts {
             try Task.checkCancellation()
+            if suspendForegroundPollingIfInactive(messageId: messageId) {
+                throw ChatForegroundPollingSuspended.inactive
+            }
 
             let status = try await chatService.getMessageStatus(messageId: messageId)
 
@@ -294,7 +311,7 @@ final class ChatSessionViewModel {
             localId: localId,
             text: resolvedText,
             messageId: nil,
-            createdAt: ISO8601DateFormatter().string(from: Date())
+            createdAt: Date()
         )
         pendingSends[localId] = pending
         upsertPendingSend(pending)
@@ -313,12 +330,25 @@ final class ChatSessionViewModel {
             acknowledgedPending.messageId = response.messageId
             pendingSends[localId] = acknowledgedPending
             upsertSentUserMessage(response.userMessage, localId: localId, messageId: response.messageId)
+            if suspendAcceptedSendIfInactive(localId: localId, messageId: response.messageId) {
+                return
+            }
             _ = try await pollUntilComplete(messageId: response.messageId)
             try await refreshTranscriptAfterPolling()
             pendingSends.removeValue(forKey: localId)
+        } catch is ChatForegroundPollingSuspended {
+            pendingSends.removeValue(forKey: localId)
+            needsForegroundTranscriptRefresh = true
+            logger.debug("[ViewModel] sendMessage polling suspended while inactive | sessionId=\(self.sessionId)")
         } catch where isCancelledOperation(error) {
-            discardPendingSend(localId: localId)
-            logger.debug("[ViewModel] sendMessage cancelled | sessionId=\(self.sessionId)")
+            if pendingSends[localId]?.messageId != nil {
+                pendingSends.removeValue(forKey: localId)
+                needsForegroundTranscriptRefresh = true
+                logger.debug("[ViewModel] sendMessage polling cancelled after server acknowledgement | sessionId=\(self.sessionId)")
+            } else {
+                discardPendingSend(localId: localId)
+                logger.debug("[ViewModel] sendMessage cancelled before server acknowledgement | sessionId=\(self.sessionId)")
+            }
         } catch {
             errorMessage = error.localizedDescription
             markPendingSendFailed(localId: localId, error: error.localizedDescription)
@@ -358,9 +388,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     }
 
     func handleDisappear() {
-        handOffBackgroundPollingIfNeeded()
-        sendTask?.cancel()
-        sendTask = nil
+        prepareForInactiveView()
         startCouncilTask?.cancel()
         startCouncilTask = nil
         retryCouncilTask?.cancel()
@@ -378,14 +406,45 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         retryingCouncilChildSessionId = nil
         councilSelectionTimedOut = false
         isLoading = false
-        isSending = false
         isStartingCouncil = false
-        stopThinkingTimer()
+        if sendTask == nil {
+            isSending = false
+            stopThinkingTimer()
+        }
         transcriptionService.reset()
         isRecording = false
         isTranscribing = false
         isVoiceActionInFlight = false
         pendingVoiceTranscript = nil
+    }
+
+    func handleScenePhaseChange(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            handleAppear()
+        case .inactive, .background:
+            prepareForInactiveView()
+        @unknown default:
+            break
+        }
+    }
+
+    func refreshAfterForegroundIfNeeded() async {
+        guard needsForegroundTranscriptRefresh else { return }
+        needsForegroundTranscriptRefresh = false
+        activeSessionManager.stopTracking(sessionId: sessionId)
+        await loadSession()
+    }
+
+    private func prepareForInactiveView() {
+        isViewActive = false
+
+        if backgroundTrackingMessageId != nil {
+            handOffBackgroundPollingIfNeeded()
+            sendTask?.cancel()
+            sendTask = nil
+            needsForegroundTranscriptRefresh = true
+        }
     }
 
     private func handOffBackgroundPollingIfNeeded() {
@@ -414,6 +473,27 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         return nil
     }
 
+    private func suspendForegroundPollingIfInactive(messageId: Int) -> Bool {
+        guard !isViewActive else { return false }
+        needsForegroundTranscriptRefresh = true
+        handOffBackgroundPollingIfNeeded()
+        logger.debug(
+            "[ViewModel] foreground polling suspended while inactive | sessionId=\(self.sessionId) messageId=\(messageId)"
+        )
+        return true
+    }
+
+    private func suspendAcceptedSendIfInactive(localId: UUID, messageId: Int) -> Bool {
+        guard !isViewActive else { return false }
+
+        pendingSends.removeValue(forKey: localId)
+        _ = suspendForegroundPollingIfInactive(messageId: messageId)
+        logger.debug(
+            "[ViewModel] sendMessage accepted while inactive; foreground polling suspended | sessionId=\(self.sessionId) messageId=\(messageId)"
+        )
+        return true
+    }
+
     private static func initialPendingUserMessage(from route: ChatSessionRoute) -> ChatMessage? {
         guard
             let text = route.initialUserMessageText,
@@ -426,7 +506,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
             id: route.pendingMessageId ?? route.sessionId,
             sourceMessageId: route.pendingMessageId,
             role: .user,
-            timestamp: route.initialUserMessageTimestamp ?? ISO8601DateFormatter().string(from: Date()),
+            timestamp: route.initialUserMessageTimestamp ?? Date(),
             content: text,
             status: .processing
         )

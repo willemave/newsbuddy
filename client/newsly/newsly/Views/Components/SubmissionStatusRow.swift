@@ -47,6 +47,10 @@ struct SubmissionStatusRow: View {
                     HStack(spacing: 6) {
                         TextBadge(text: submission.statusLabel, color: statusColor)
 
+                        if submission.isLearningDeck {
+                            TextBadge(text: "Learning Deck", color: .brandPrimary, style: .outlined)
+                        }
+
                         if submission.isSelfSubmission {
                             TextBadge(text: "Submitted", color: .terracottaPrimary, style: .outlined)
                         }
@@ -86,31 +90,46 @@ struct SubmissionStatusRow: View {
     private var statusIconName: String {
         if submission.isFeedSubscription {
             switch submission.effectiveOutcome {
-            case "subscribed":
+            case .subscribed:
                 return "checkmark.circle.fill"
-            case "already_subscribed":
+            case .already_subscribed:
                 return "checkmark.circle"
-            case "feed_not_found", "feed_fetch_failed", "feed_subscription_failed", "failed":
+            case .feed_not_found, .feed_fetch_failed, .feed_subscription_failed, .failed:
                 return "exclamationmark.triangle.fill"
-            case "processing":
+            case .processing:
                 return "arrow.triangle.2.circlepath"
-            case "queued":
+            case .queued:
                 return "clock.fill"
             default:
                 return submission.detectedFeed?.systemIcon ?? "antenna.radiowaves.left.and.right"
             }
         }
 
+        if submission.isLearningDeck {
+            switch submission.effectiveOutcome {
+            case .completed:
+                return "rectangle.stack.fill"
+            case .failed:
+                return "exclamationmark.triangle.fill"
+            case .processing:
+                return "arrow.triangle.2.circlepath"
+            case .queued:
+                return "clock.fill"
+            default:
+                return "rectangle.stack"
+            }
+        }
+
         switch submission.effectiveOutcome {
-        case "failed":
+        case .failed:
             return "exclamationmark.triangle.fill"
-        case "skipped":
+        case .skipped:
             return "forward.fill"
-        case "processing":
+        case .processing:
             return "arrow.triangle.2.circlepath"
-        case "completed":
+        case .completed:
             return "checkmark.circle.fill"
-        case "new", "pending":
+        case .queued:
             return "clock.fill"
         default:
             return "questionmark.circle.fill"
@@ -119,15 +138,15 @@ struct SubmissionStatusRow: View {
 
     private var statusColor: Color {
         switch submission.effectiveOutcome {
-        case "failed", "feed_not_found", "feed_fetch_failed", "feed_subscription_failed":
+        case .failed, .feed_not_found, .feed_fetch_failed, .feed_subscription_failed:
             return .statusDestructive.opacity(0.9)
-        case "skipped":
+        case .skipped:
             return .onSurfaceSecondary.opacity(0.9)
-        case "subscribed", "already_subscribed", "completed":
+        case .subscribed, .already_subscribed, .completed:
             return .statusActive
-        case "processing":
+        case .processing:
             return .terracottaPrimary
-        case "queued", "new", "pending":
+        case .queued:
             return .onSurfaceSecondary
         default:
             return .onSurfaceSecondary
@@ -140,11 +159,11 @@ struct SubmissionStatusRow: View {
     SubmissionStatusRow(
         submission: SubmissionStatusItem(
             id: 1,
-            contentType: "article",
+            contentType: .article,
             url: "https://example.com",
             sourceUrl: nil,
             title: "Example submission",
-            status: "processing",
+            status: .processing,
             errorMessage: nil,
             createdAt: "2025-01-01T12:00:00Z",
             processedAt: nil,

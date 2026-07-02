@@ -70,7 +70,7 @@ struct ShortFormView: View {
                         Button {
                             let route = ContentDetailRoute(
                                 contentId: item.id,
-                                contentType: item.apiContentType ?? .news,
+                                contentType: item.contentType,
                                 allContentIds: items.map(\.id),
                                 navigationSurface: .fastNews
                             )
@@ -178,7 +178,6 @@ struct ShortFormView: View {
         .onDisappear {
             fastNewsAudioTask?.cancel()
             fastNewsAudioTask = nil
-            quickActionTask?.cancel()
             quickActionTask = nil
         }
         .alert(

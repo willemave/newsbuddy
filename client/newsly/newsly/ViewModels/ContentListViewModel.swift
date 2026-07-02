@@ -175,7 +175,7 @@ class ContentListViewModel: CursorPaginatedViewModel {
     func markAsRead(_ contentId: Int) async {
         do {
             guard let initialIndex = contents.firstIndex(where: { $0.id == contentId }) else { return }
-            let initialContentType = contents[initialIndex].apiContentType
+            let initialContentType = contents[initialIndex].contentType
             try await contentService.markContentAsRead(id: contentId, contentType: initialContentType)
 
             // Re-resolve the index by id: `contents` may have been reordered or
@@ -187,12 +187,12 @@ class ContentListViewModel: CursorPaginatedViewModel {
             contents[index] = current.updating(isRead: true)
 
             if shouldDecrementUnreadCount {
-                switch current.apiContentType {
-                case .article?:
+                switch current.contentType {
+                case .article:
                     unreadCountService.decrementArticleCount()
-                case .podcast?:
+                case .podcast:
                     unreadCountService.decrementPodcastCount()
-                case .news?:
+                case .news:
                     unreadCountService.decrementNewsCount()
                 default:
                     break
@@ -339,11 +339,11 @@ class ContentListViewModel: CursorPaginatedViewModel {
                 for item in unreadItems {
                     if markedSet.contains(item.id) {
                         switch item.contentType {
-                        case "article":
+                        case .article:
                             articleCount += 1
-                        case "podcast":
+                        case .podcast:
                             podcastCount += 1
-                        case "news":
+                        case .news:
                             newsCount += 1
                         default:
                             break

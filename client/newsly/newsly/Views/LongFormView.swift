@@ -273,8 +273,7 @@ struct LongFormView: View {
     }
 
     private func supportsAudioDiscussion(for content: ContentSummary) -> Bool {
-        guard let type = content.apiContentType else { return false }
-        return type == .article || type == .podcast
+        content.contentType == .article || content.contentType == .podcast
     }
 
     private func audioTarget(for content: ContentSummary) -> NarrationTarget? {
@@ -315,7 +314,7 @@ struct LongFormView: View {
         guard !isAudioPreparing(for: content) else { return }
         let startedAt = Date()
         longFormAudioLogger.info(
-            "Long-form audio flow started | contentId=\(content.id) type=\(content.contentType, privacy: .public)"
+            "Long-form audio flow started | contentId=\(content.id) type=\(content.contentType.rawValue, privacy: .public)"
         )
 
         if isAudioCurrent(for: content),

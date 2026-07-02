@@ -295,7 +295,7 @@ struct LongFormCard: View {
     }
 
     private var summaryText: String? {
-        guard content.apiContentType != .news else { return nil }
+        guard content.contentType != .news else { return nil }
         return content.keyTakeawayDisplayText
     }
 
@@ -306,10 +306,7 @@ struct LongFormCard: View {
         if let platform = content.platform, !platform.isEmpty {
             return platform.uppercased()
         }
-        if let typeName = content.apiContentType?.displayName {
-            return typeName.uppercased()
-        }
-        return "NEWSLY"
+        return content.contentType.displayName.uppercased()
     }
 
     private var footerMetadata: String {
@@ -321,7 +318,7 @@ struct LongFormCard: View {
     }
 
     private var contentTypeIcon: String {
-        switch content.apiContentType {
+        switch content.contentType {
         case .article:
             return "doc.text"
         case .podcast:
@@ -332,7 +329,7 @@ struct LongFormCard: View {
     }
 
     private var contentTypeLabel: String {
-        switch content.apiContentType {
+        switch content.contentType {
         case .article:
             return "Article"
         case .podcast:

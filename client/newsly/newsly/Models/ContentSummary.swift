@@ -14,12 +14,12 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     }
 
     let id: Int
-    let contentType: String
+    let contentType: APIContentType
     let url: String
     let title: String?
     let source: String?
     let platform: String?
-    let status: String
+    let status: APIContentStatus
     let shortSummary: String?
     let createdAt: String
     let processedAt: String?
@@ -102,13 +102,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, from raw: [String: AnyCodable]?) -> T? {
-        guard let raw else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let data = try? JSONSerialization.data(withJSONObject: raw.mapValues(\.value)) else {
-            return nil
-        }
-        return try? decoder.decode(type, from: data)
+        AnyCodableDecoding.decodeLenient(type, from: raw)
     }
 
     private static func topComment(from raw: [String: String]?) -> TopComment? {
@@ -118,12 +112,12 @@ struct ContentSummary: Codable, Identifiable, Equatable {
 
     init(
         id: Int,
-        contentType: String,
+        contentType: APIContentType,
         url: String,
         title: String?,
         source: String?,
         platform: String?,
-        status: String,
+        status: APIContentStatus,
         shortSummary: String?,
         createdAt: String,
         processedAt: String?,
@@ -184,12 +178,12 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     init(api response: APIContentSummaryResponse) {
         self.init(
             id: response.id,
-            contentType: response.contentType.rawValue,
+            contentType: response.contentType,
             url: response.url,
             title: response.title,
             source: response.source,
             platform: response.platform,
-            status: response.status.rawValue,
+            status: response.status,
             shortSummary: response.shortSummary,
             createdAt: response.createdAt,
             processedAt: response.processedAt,
@@ -252,14 +246,6 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         publicationDate ?? processedAt ?? createdAt
     }
 
-    var apiContentType: APIContentType? {
-        APIContentType(rawValue: contentType)
-    }
-
-    var apiStatus: APIContentStatus? {
-        APIContentStatus(rawValue: status)
-    }
-
     var displayTitle: String {
         title ?? "Untitled"
     }
@@ -271,7 +257,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     }
 
     var summaryDisplayText: String? {
-        guard apiContentType != .news else { return nil }
+        guard contentType != .news else { return nil }
         return Self.normalizedText(shortSummary)
     }
 
@@ -280,7 +266,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     }
 
     var keyTakeawayDisplayText: String? {
-        guard apiContentType != .news else { return nil }
+        guard contentType != .news else { return nil }
         return Self.normalizedText(keyTakeaway)
     }
 

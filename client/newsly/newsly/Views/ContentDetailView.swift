@@ -264,7 +264,7 @@ struct ContentDetailView: View {
                                     summary: structuredSummary,
                                     contentId: content.id,
                                     startTopicSession: { topic in
-                                        if content.apiContentType == .news {
+                                        if content.contentType == .news {
                                             return try await ChatService.shared.startNewsTopicChat(
                                                 newsItemId: content.id,
                                                 topic: topic
@@ -298,13 +298,13 @@ struct ContentDetailView: View {
                             }
 
                             let relevantLinks = content.relevantLinks
-                            if content.apiContentType != .news, !relevantLinks.isEmpty {
+                            if content.contentType != .news, !relevantLinks.isEmpty {
                                 relevantLinksSection(links: relevantLinks)
                                     .padding(.horizontal, DetailDesign.horizontalPadding)
                                     .padding(.top, DetailDesign.sectionSpacing)
                             }
 
-                            if content.apiContentType == .news {
+                            if content.contentType == .news {
                                 if content.newsMetadata != nil {
                                     modernSectionPlain(isPadded: false) {
                                         NewsItemDetailView(
@@ -333,24 +333,24 @@ struct ContentDetailView: View {
                                     .padding(.top, 16)
                             }
 
-                            if content.apiContentType == .news, !relevantLinks.isEmpty {
+                            if content.contentType == .news, !relevantLinks.isEmpty {
                                 relevantLinksSection(links: relevantLinks)
                                     .padding(.horizontal, DetailDesign.horizontalPadding)
                                     .padding(.top, DetailDesign.sectionSpacing)
                             }
 
                             // Full Content Section (collapsible, modern style)
-                            if content.apiContentType != .news, let bodyText = viewModel.contentBody?.text {
+                            if content.contentType != .news, let bodyText = viewModel.contentBody?.text {
                                 modernExpandableSection(
-                                    title: content.apiContentType == .podcast ? "Transcript" : "Full Article",
-                                    icon: content.apiContentType == .podcast ? "text.alignleft" : "doc.text",
+                                    title: content.contentType == .podcast ? "Transcript" : "Full Article",
+                                    icon: content.contentType == .podcast ? "text.alignleft" : "doc.text",
                                     isExpanded: $isTranscriptExpanded
                                 ) {
                                     detailMarkdownBody(bodyText, content: content)
                                 }
                                 .padding(.horizontal, DetailDesign.horizontalPadding)
                                 .padding(.top, DetailDesign.sectionSpacing)
-                            } else if content.apiContentType == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
+                            } else if content.contentType == .podcast, let podcastMetadata = content.podcastMetadata, let transcript = podcastMetadata.transcript {
                                 modernExpandableSection(
                                     title: "Transcript",
                                     icon: "text.alignleft",
@@ -362,7 +362,7 @@ struct ContentDetailView: View {
                                 .padding(.top, DetailDesign.sectionSpacing)
                             } else if let fullMarkdown = content.fullMarkdown {
                                 modernExpandableSection(
-                                    title: content.apiContentType == .podcast ? "Transcript" : "Full Article",
+                                    title: content.contentType == .podcast ? "Transcript" : "Full Article",
                                     icon: "doc.text",
                                     isExpanded: $isTranscriptExpanded
                                 ) {
@@ -428,11 +428,9 @@ struct ContentDetailView: View {
                 return
             }
             resetDiscussionState(fallbackURL: discussionURL(for: content))
-            if let type = content.apiContentType {
-                readingStateStore.setCurrent(contentId: id, type: type)
-            }
+            readingStateStore.setCurrent(contentId: id, type: content.contentType)
             logSummarySnapshot(content: content, context: "content_change")
-            if content.apiContentType == .news {
+            if content.contentType == .news {
                 Task { await prefetchStoredDiscussion(for: content) }
             }
         }
@@ -442,7 +440,7 @@ struct ContentDetailView: View {
         // no onChange, so the cascade would otherwise stall on the first read item.
         .onChange(of: viewModel.content?.id) { _, newId in
             guard newId != nil else { return }
-            guard didTriggerNavigation, viewModel.content?.apiContentType == .podcast else { return }
+            guard didTriggerNavigation, viewModel.content?.contentType == .podcast else { return }
             if viewModel.wasAlreadyReadWhenLoaded {
                 let nextIndex = currentIndex + navigationDirection
                 guard nextIndex >= 0 && nextIndex < allContentIds.count else {
@@ -585,7 +583,7 @@ struct ContentDetailView: View {
         chatError = nil
 
         do {
-            if content.apiContentType == .news {
+            if content.contentType == .news {
                 if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     let response = try await ChatService.shared.createAssistantTurn(
                         message: prompt,
@@ -606,25 +604,25 @@ struct ContentDetailView: View {
                     )
                 }
             } else {
-                let session = try await ChatService.shared.startArticleChat(
-                    contentId: content.id,
-                    provider: provider
-                )
-                var pendingResponse: SendChatMessageResponse?
                 if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    pendingResponse = try await ChatService.shared.sendMessageAsync(
+                    let response = try await ChatService.shared.createAssistantTurn(
+                        message: prompt,
+                        screenContext: articleScreenContext(for: content)
+                    )
+                    activeSheet = nil
+                    ChatNavigationCoordinator.shared.openAssistantTurn(response)
+                } else {
+                    let session = try await ChatService.shared.startArticleChat(
+                        contentId: content.id,
+                        provider: provider
+                    )
+                    activeSheet = nil
+                    openChatSession(
                         sessionId: session.id,
-                        message: prompt
+                        content: content,
+                        focusComposerOnAppear: true
                     )
                 }
-                activeSheet = nil
-                openChatSession(
-                    sessionId: session.id,
-                    content: content,
-                    initialUserMessage: pendingResponse?.userMessage,
-                    pendingMessageId: pendingResponse?.messageId,
-                    focusComposerOnAppear: pendingResponse == nil
-                )
             }
         } catch where isNetworkCancellation(error) {
             return
@@ -633,6 +631,17 @@ struct ContentDetailView: View {
         }
 
         isStartingChat = false
+    }
+
+    private func articleScreenContext(for content: ContentDetail) -> AssistantScreenContext {
+        AssistantScreenContext(
+            screenType: "content_detail",
+            screenTitle: content.displayTitle,
+            contentId: content.id,
+            visibleContentIds: allContentIds,
+            selectedTopic: content.displayTitle,
+            note: "The user is viewing an article or podcast detail. Use the linked content and reader context as primary context."
+        )
     }
 
     private func startCouncilWithPrompt(
@@ -647,7 +656,7 @@ struct ContentDetailView: View {
 
         do {
             let session: ChatSessionSummary
-            if content.apiContentType == .news {
+            if content.contentType == .news {
                 if let existingSession = try await ChatService.shared.getSessionForNewsItem(
                     newsItemId: content.id
                 ) {
@@ -695,7 +704,7 @@ struct ContentDetailView: View {
 
         Task { @MainActor in
             do {
-                let isNews = content.apiContentType == .news
+                let isNews = content.contentType == .news
                 let response = try await ChatService.shared.createAssistantTurn(
                     message: "Dig deeper into this selected text from \(content.displayTitle): \"\(trimmed)\"",
                     screenContext: AssistantScreenContext(
@@ -734,7 +743,7 @@ struct ContentDetailView: View {
         chatError = nil
 
         do {
-            let isNews = content.apiContentType == .news
+            let isNews = content.contentType == .news
             let session = try await ChatService.shared.startDeepResearch(
                 contentId: isNews ? nil : content.id,
                 newsItemId: isNews ? content.id : nil
@@ -772,7 +781,7 @@ struct ContentDetailView: View {
     }
 
     private func activeChatSession(for content: ContentDetail) -> ActiveChatSession? {
-        if content.apiContentType == .news {
+        if content.contentType == .news {
             return chatSessionManager.getSession(forNewsItemId: content.id)
         }
         return chatSessionManager.getSession(forContentId: content.id)
@@ -787,7 +796,7 @@ struct ContentDetailView: View {
         pendingCouncilPrompt: String? = nil,
         focusComposerOnAppear: Bool = false
     ) {
-        let isNews = content.apiContentType == .news
+        let isNews = content.contentType == .news
         openChatSession(
             sessionId: sessionId,
             contentId: isNews ? nil : content.id,
@@ -882,8 +891,7 @@ struct ContentDetailView: View {
     }
 
     private func supportsPodcastAudio(for content: ContentDetail) -> Bool {
-        guard let type = content.apiContentType else { return false }
-        return type == .article || type == .news || type == .podcast
+        content.contentType == .article || content.contentType == .news || content.contentType == .podcast
     }
 
     private func podcastAudioTarget(for content: ContentDetail) -> NarrationTarget? {
@@ -973,7 +981,7 @@ struct ContentDetailView: View {
         guard supportsPodcastAudio(for: content) else { return }
         guard !isPodcastAudioLoading(for: content) else { return }
         detailLogger.info(
-            "[PodcastAudio] flow started | contentId=\(content.id) type=\(content.contentType, privacy: .public) rate=\(playbackRate)"
+            "[PodcastAudio] flow started | contentId=\(content.id) type=\(content.contentType.rawValue, privacy: .public) rate=\(playbackRate)"
         )
 
         loadingAudioEpisodeContentIds.insert(content.id)
@@ -1019,7 +1027,7 @@ struct ContentDetailView: View {
     }
 
     private func createPodcastAudioEpisode(for content: ContentDetail) async throws -> AudioEpisode {
-        switch content.apiContentType {
+        switch content.contentType {
         case .article, .podcast, .insight_report, .unknown, .unknownRaw:
             return try await AudioEpisodeService.shared.createContentCouncilEpisode(
                 contentId: content.id,
@@ -1029,12 +1037,6 @@ struct ContentDetailView: View {
             return try await AudioEpisodeService.shared.createNewsItemDiscussionEpisode(
                 newsItemId: content.id,
                 delivery: .inline
-            )
-        case .none:
-            throw NSError(
-                domain: "ContentDetailView",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "This item does not support podcast audio."]
             )
         }
     }
@@ -1059,7 +1061,7 @@ struct ContentDetailView: View {
         guard let content = viewModel.content,
               let imageUrlString = content.imageUrl,
               !imageUrlString.isEmpty,
-              content.apiContentType != .news,
+              content.contentType != .news,
               buildImageURL(from: imageUrlString) != nil else {
             return false
         }
@@ -1070,7 +1072,7 @@ struct ContentDetailView: View {
     private func heroHeader(content: ContentDetail) -> some View {
         if let imageUrlString = content.imageUrl,
            !imageUrlString.isEmpty,
-           content.apiContentType != .news,
+           content.contentType != .news,
            let imageUrl = buildImageURL(from: imageUrlString) {
             // Parallax hero with overlaid title + action bar
             let thumbnailUrl = content.thumbnailUrl.flatMap { buildImageURL(from: $0) }
@@ -1259,7 +1261,7 @@ struct ContentDetailView: View {
     }
 
     private func textOnlyHeaderTopSpacer(for content: ContentDetail) -> CGFloat {
-        content.apiContentType == .news
+        content.contentType == .news
             ? DetailDesign.textOnlyNewsHeaderTopSpacer
             : DetailDesign.textOnlyStandardHeaderTopSpacer
     }
@@ -1348,11 +1350,11 @@ struct ContentDetailView: View {
     }
 
     private func contentTypeIcon(for content: ContentDetail) -> String {
-        switch content.apiContentType {
+        switch content.contentType {
         case .article: return "doc.text"
         case .podcast: return "headphones"
         case .news: return "newspaper"
-        case .insight_report, .unknown, .unknownRaw, .none: return "doc.text"
+        case .insight_report, .unknown, .unknownRaw: return "doc.text"
         }
     }
 
@@ -1398,7 +1400,7 @@ struct ContentDetailView: View {
             }
 
             // Download more from series (article/podcast only)
-            if content.apiContentType == .article || content.apiContentType == .podcast {
+            if content.contentType == .article || content.contentType == .podcast {
                 Button { activeSheet = .download } label: {
                     minimalActionIcon("tray.and.arrow.down", overlaid: overlaid)
                 }
@@ -1408,7 +1410,7 @@ struct ContentDetailView: View {
             }
 
             // Save linked article (news only)
-            if content.apiContentType == .news {
+            if content.contentType == .news {
                 Button(action: {
                     Task {
                         isConverting = true
@@ -1430,7 +1432,7 @@ struct ContentDetailView: View {
                 .accessibilityLabel("Save linked article to Knowledge")
             }
 
-            if content.apiContentType != .news {
+            if content.contentType != .news {
                 Button(action: {
                     Task { await viewModel.toggleKnowledgeSave() }
                 }) {
@@ -1988,12 +1990,12 @@ struct ContentDetailView: View {
             if refresh {
                 discussion = try await ContentService.shared.refreshContentDiscussion(
                     id: content.id,
-                    contentType: content.apiContentType
+                    contentType: content.contentType
                 )
             } else {
                 discussion = try await ContentService.shared.fetchContentDiscussion(
                     id: content.id,
-                    contentType: content.apiContentType
+                    contentType: content.contentType
                 )
             }
 
@@ -2013,7 +2015,7 @@ struct ContentDetailView: View {
 
     @MainActor
     private func prefetchStoredDiscussion(for content: ContentDetail) async {
-        guard content.apiContentType == .news,
+        guard content.contentType == .news,
               discussionURL(for: content) != nil else {
             return
         }
@@ -2024,7 +2026,7 @@ struct ContentDetailView: View {
         do {
             let discussion = try await ContentService.shared.fetchContentDiscussion(
                 id: content.id,
-                contentType: content.apiContentType
+                contentType: content.contentType
             )
             guard discussionRequestToken == requestToken,
                   viewModel.content?.id == content.id,
@@ -3035,25 +3037,25 @@ struct ContentDetailView: View {
     private var statusIcon: String {
         guard let content = viewModel.content else { return "circle" }
         switch content.status {
-        case "completed":
+        case .completed:
             return "checkmark.circle.fill"
-        case "failed":
+        case .failed:
             return "xmark.circle.fill"
-        case "processing":
+        case .processing:
             return "arrow.clockwise.circle.fill"
         default:
             return "circle"
         }
     }
-    
+
     private var statusColor: Color {
         guard let content = viewModel.content else { return .secondary }
         switch content.status {
-        case "completed":
+        case .completed:
             return .statusActive
-        case "failed":
+        case .failed:
             return .statusDestructive
-        case "processing":
+        case .processing:
             return .terracottaPrimary
         default:
             return .secondary
@@ -3067,7 +3069,7 @@ struct ContentDetailView: View {
         let bulletedCount = content.bulletedSummary?.points.count ?? 0
         let editorialCount = content.editorialSummary?.keyPoints.count ?? 0
         detailLogger.info(
-            "[ContentDetailView] summary snapshot (\(context)) id=\(content.id) type=\(content.contentType, privacy: .public) editorial_v1=\(content.editorialSummary != nil) bulleted_v1=\(content.bulletedSummary != nil) structured=\(content.structuredSummary != nil) interleaved_v1=\(content.interleavedSummary != nil) interleaved_v2=\(content.interleavedSummaryV2 != nil) editorial_key_points=\(editorialCount) bulleted_points=\(bulletedCount) structured_points=\(structuredCount) interleaved_insights=\(interleavedV1Count) interleaved_key_points=\(interleavedV2Count) raw_bullets=\(content.bulletPoints.count)"
+            "[ContentDetailView] summary snapshot (\(context)) id=\(content.id) type=\(content.contentType.rawValue, privacy: .public) editorial_v1=\(content.editorialSummary != nil) bulleted_v1=\(content.bulletedSummary != nil) structured=\(content.structuredSummary != nil) interleaved_v1=\(content.interleavedSummary != nil) interleaved_v2=\(content.interleavedSummaryV2 != nil) editorial_key_points=\(editorialCount) bulleted_points=\(bulletedCount) structured_points=\(structuredCount) interleaved_insights=\(interleavedV1Count) interleaved_key_points=\(interleavedV2Count) raw_bullets=\(content.bulletPoints.count)"
         )
     }
 
@@ -3078,7 +3080,7 @@ struct ContentDetailView: View {
         insightCount: Int
     ) {
         detailLogger.info(
-            "[ContentDetailView] summary section (\(section)) id=\(content.id) type=\(content.contentType, privacy: .public) points=\(bulletPointCount) insights=\(insightCount)"
+            "[ContentDetailView] summary section (\(section)) id=\(content.id) type=\(content.contentType.rawValue, privacy: .public) points=\(bulletPointCount) insights=\(insightCount)"
         )
     }
 
