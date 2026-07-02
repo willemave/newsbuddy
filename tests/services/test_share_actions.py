@@ -15,6 +15,7 @@ from app.models.db import (
     Content,
     ContentKnowledgeSave,
     ContentReadStatus,
+    LearningDeck,
     LlmTask,
     LlmTaskAction,
     ProcessingTask,
@@ -230,6 +231,58 @@ def test_run_share_action_chat_saves_content_to_knowledge(db_session, test_user)
         .one_or_none()
         is not None
     )
+
+
+def test_run_share_action_presentation_marks_learning_deck_submission(
+    db_session,
+    test_user,
+) -> None:
+    blob_url = "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf"
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url=blob_url,
+            mode=LlmTaskMode.PRESENTATION,
+            interests_prompt="Focus on proof strategy.",
+        ),
+    )
+
+    run_share_action_task(
+        db_session,
+        llm_task_id=response.task_id,
+        agent_runner=_fake_agent_result(
+            _agent_result(
+                action="presentation",
+                primary_url=blob_url,
+                title="DSpark paper",
+                confidence=0.9,
+            )
+        ),
+    )
+
+    deck = db_session.query(LearningDeck).one()
+    assert deck.source_url == blob_url
+    assert deck.source_content_id is None
+    assert deck.source_title == "deepseek-ai/DeepSpec: DSpark_paper.pdf"
+    linked_artifact = (deck.source_metadata or {}).get("linked_artifact")
+    assert isinstance(linked_artifact, dict)
+    assert linked_artifact["raw_url"] == (
+        "https://raw.githubusercontent.com/deepseek-ai/DeepSpec/main/DSpark_paper.pdf"
+    )
+    submission_metadata = (deck.source_metadata or {}).get("submission")
+    assert submission_metadata == {
+        "submitted_via": "share_action",
+        "share_action_task_id": response.task_id,
+    }
+    learning_deck_task = db_session.query(LlmTask).filter_by(task_kind="learning_deck").one()
+    source_snapshot = learning_deck_task.input_json["source"]
+    assert source_snapshot["source_kind"] == "github_repo"
+    assert source_snapshot["source_content_id"] is None
+    assert source_snapshot["source_metadata"]["linked_artifact"]["path"] == "DSpark_paper.pdf"
+    assert db_session.query(Content).count() == 0
+    action = db_session.query(LlmTaskAction).filter_by(llm_task_id=response.task_id).one()
+    assert action.action_result["learning_deck_id"] == deck.id
 
 
 def test_run_share_action_waits_for_approval_when_policy_requires_it(

@@ -137,3 +137,31 @@ def test_agent_prompt_requires_design_brief_verification() -> None:
     assert "Design brief: input/deck-design-brief.md" in prompt
     assert "Daylight house classes" in prompt
     assert "source-specific graphics" in prompt
+
+
+def test_agent_prompt_treats_github_blob_as_repo_plus_raw_artifact() -> None:
+    prompt = _build_agent_prompt(
+        {
+            "source_kind": "github_repo",
+            "source_url": "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf",
+            "source_title": "deepseek-ai/DeepSpec: DSpark_paper.pdf",
+            "source_metadata": {
+                "owner": "deepseek-ai",
+                "repo": "DeepSpec",
+                "linked_artifact": {
+                    "path": "DSpark_paper.pdf",
+                    "ref": "main",
+                    "raw_url": (
+                        "https://raw.githubusercontent.com/deepseek-ai/DeepSpec/main/"
+                        "DSpark_paper.pdf"
+                    ),
+                },
+            },
+        },
+        interests_prompt=None,
+    )
+
+    assert "treat the request as research over the repository" in prompt
+    assert "download/read the raw linked artifact" in prompt
+    assert "Do not treat the GitHub HTML blob page" in prompt
+    assert "Linked artifact path: DSpark_paper.pdf" in prompt

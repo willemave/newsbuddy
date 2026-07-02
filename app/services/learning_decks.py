@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy import desc, func, select
@@ -129,6 +130,8 @@ def create_or_rerun_learning_deck(
     news_item_id: int | None = None,
     url: str | None = None,
     interests_prompt: str | None = None,
+    submitted_via: str | None = None,
+    share_action_task_id: int | None = None,
 ) -> LearningDeck:
     """Create or rerun a Learning Deck and enqueue generation in one transaction."""
     user_id = require_user_id(current_user)
@@ -139,6 +142,11 @@ def create_or_rerun_learning_deck(
         content_id=content_id,
         news_item_id=news_item_id,
         url=url,
+    )
+    source = _with_submission_metadata(
+        source,
+        submitted_via=submitted_via,
+        share_action_task_id=share_action_task_id,
     )
 
     try:
@@ -397,6 +405,26 @@ def _create_queued_run(
     return run
 
 
+def _with_submission_metadata(
+    source: LearningDeckSource,
+    *,
+    submitted_via: str | None,
+    share_action_task_id: int | None,
+) -> LearningDeckSource:
+    submission_channel = clean_optional_text(submitted_via)
+    if submission_channel is None:
+        return source
+
+    metadata = dict(source.source_metadata or {})
+    raw_submission = metadata.get("submission")
+    submission_metadata = dict(raw_submission) if isinstance(raw_submission, dict) else {}
+    submission_metadata["submitted_via"] = submission_channel
+    if share_action_task_id is not None:
+        submission_metadata["share_action_task_id"] = int(share_action_task_id)
+    metadata["submission"] = submission_metadata
+    return replace(source, source_metadata=metadata)
+
+
 def _get_or_create_deck(
     db: Session,
     *,
@@ -433,12 +461,29 @@ def _get_or_create_deck(
     deck.source_url = source.source_url
     deck.source_content_id = source.source_content_id
     deck.source_title = source.source_title
-    deck.source_metadata = source.source_metadata
+    deck.source_metadata = _merged_source_metadata(
+        existing=deck.source_metadata,
+        incoming=source.source_metadata,
+    )
     if not usable_learning_deck_title(deck.title):
         deck.title = source.source_title
     deck.updated_at = utcnow()
     db.flush()
     return deck
+
+
+def _merged_source_metadata(
+    *,
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any] | None,
+) -> dict[str, Any]:
+    metadata = dict(incoming or {})
+    if "submission" in metadata:
+        return metadata
+    existing_submission = (existing or {}).get("submission") if isinstance(existing, dict) else None
+    if isinstance(existing_submission, dict):
+        metadata["submission"] = dict(existing_submission)
+    return metadata
 
 
 def _enqueue_generation_task(db: Session, *, run_id: int, user_id: int) -> int:

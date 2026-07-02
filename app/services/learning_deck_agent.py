@@ -285,20 +285,48 @@ def _build_agent_prompt(source_snapshot: dict[str, Any], interests_prompt: str |
     source_kind = source_snapshot.get("source_kind")
     source_title = source_snapshot.get("source_title") or source_snapshot.get("source_url")
     interests = interests_prompt.strip() if interests_prompt else "No additional interests given."
-    github_guidance = ""
-    if source_kind == "github_repo":
-        github_guidance = (
-            "\nFor this GitHub repository, clone or inspect the public repo, resolve the default "
-            "branch and current commit SHA, inspect the architecture with bash/code tools, and "
-            "write those details in source notes and output/source-metadata.json."
-        )
     return render_prompt(
         "learning_decks/agent#user",
         source_title=source_title,
         source_kind=source_kind,
         interests=interests,
-        github_guidance=github_guidance,
+        github_guidance=_build_github_guidance(source_snapshot),
     )
+
+
+def _build_github_guidance(source_snapshot: dict[str, Any]) -> str:
+    if source_snapshot.get("source_kind") != "github_repo":
+        return ""
+
+    source_metadata = source_snapshot.get("source_metadata")
+    metadata = source_metadata if isinstance(source_metadata, dict) else {}
+    linked_artifact = metadata.get("linked_artifact")
+    artifact = linked_artifact if isinstance(linked_artifact, dict) else {}
+    artifact_path = artifact.get("path")
+    artifact_ref = artifact.get("ref")
+    artifact_raw_url = artifact.get("raw_url")
+    artifact_blob_url = artifact.get("url")
+
+    guidance = (
+        "\nFor this GitHub source, treat the request as research over the repository, not as "
+        "normal URL ingestion. Clone or inspect the public repo, resolve the default branch and "
+        "current commit SHA, inspect the README/docs/source tree with bash/code tools, and write "
+        "the inspected files, branch, commit, and rationale in source notes and "
+        "output/source-metadata.json."
+    )
+    if artifact_path or artifact_raw_url or artifact_blob_url:
+        guidance += (
+            " The shared URL points at a specific GitHub file/blob; inspect the repository and "
+            "also download/read the raw linked artifact. Do not treat the GitHub HTML blob page "
+            "as the artifact contents."
+        )
+    if artifact_path:
+        guidance += f" Linked artifact path: {artifact_path}."
+    if artifact_ref:
+        guidance += f" Linked artifact ref: {artifact_ref}."
+    if artifact_raw_url:
+        guidance += f" Raw artifact URL: {artifact_raw_url}."
+    return guidance
 
 
 def _build_runtime_model_settings(base_model_settings: ModelSettings | None) -> ModelSettings:

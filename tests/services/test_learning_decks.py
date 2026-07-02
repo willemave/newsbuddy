@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.contracts import ContentType, LlmTaskKind, LlmTaskMode, LlmTaskStatus, TaskType
+from app.models.contracts import (
+    ContentType,
+    LearningDeckSourceKind,
+    LlmTaskKind,
+    LlmTaskMode,
+    LlmTaskStatus,
+    TaskType,
+)
 from app.models.db import LearningDeck, LearningDeckRun, LlmTask, ProcessingTask
 from app.services.learning_deck_viewer import with_learning_deck_navigation_controls
 from app.services.learning_decks import (
@@ -62,6 +69,30 @@ def test_normalize_github_repository_source() -> None:
     assert source.source_identity == "github:openai/codex"
     assert source.source_url == "https://github.com/OpenAI/codex"
     assert source.source_metadata == {"owner": "OpenAI", "repo": "codex"}
+
+
+def test_normalize_github_blob_pdf_source_preserves_linked_artifact() -> None:
+    source = normalize_github_repository_source(
+        "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf"
+    )
+
+    assert source is not None
+    assert source.source_kind == LearningDeckSourceKind.GITHUB_REPO
+    assert source.source_identity == "github:deepseek-ai/deepspec:file:main/DSpark_paper.pdf"
+    assert source.source_url == (
+        "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf"
+    )
+    assert source.source_title == "deepseek-ai/DeepSpec: DSpark_paper.pdf"
+    assert source.source_content_id is None
+    assert source.source_metadata["repo_url"] == "https://github.com/deepseek-ai/DeepSpec"
+    assert source.source_metadata["linked_artifact"] == {
+        "url": "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf",
+        "raw_url": ("https://raw.githubusercontent.com/deepseek-ai/DeepSpec/main/DSpark_paper.pdf"),
+        "path": "DSpark_paper.pdf",
+        "filename": "DSpark_paper.pdf",
+        "ref": "main",
+        "content_type": "pdf",
+    }
 
 
 def test_create_learning_deck_from_content_enqueues_generation(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from typing import Any
 from urllib.parse import urlparse
 
@@ -17,6 +18,7 @@ from app.models.contracts import ContentStatus, LearningDeckSourceKind
 from app.models.db import Content, LearningDeck, LearningDeckRun, User
 from app.repositories.content_detail_repository import get_visible_content
 from app.services.content_bodies import get_content_body_resolver
+from app.services.github_urls import GitHubFileUrl, parse_github_file_url
 from app.services.learning_deck_common import (
     LearningDeckError,
     LearningDeckSource,
@@ -93,6 +95,10 @@ def resolve_learning_deck_create_source(
 
 def normalize_github_repository_source(url: str) -> LearningDeckSource | None:
     """Return a GitHub repo source for public GitHub URLs, otherwise None."""
+    github_file = parse_github_file_url(url)
+    if github_file is not None:
+        return _github_file_learning_deck_source(github_file)
+
     parsed = urlparse(url.strip())
     if parsed.scheme not in {"http", "https"}:
         return None
@@ -115,6 +121,43 @@ def normalize_github_repository_source(url: str) -> LearningDeckSource | None:
         source_title=f"{owner}/{repo}",
         source_metadata={"owner": owner, "repo": repo},
     )
+
+
+def _github_file_learning_deck_source(github_file: GitHubFileUrl) -> LearningDeckSource:
+    title = f"{github_file.repo_full_name}: {github_file.filename}"
+    artifact = {
+        "url": github_file.canonical_blob_url,
+        "raw_url": github_file.raw_url,
+        "path": github_file.path,
+        "filename": github_file.filename,
+        "ref": github_file.ref,
+        "content_type": "pdf" if github_file.is_pdf else None,
+    }
+    return LearningDeckSource(
+        source_kind=LearningDeckSourceKind.GITHUB_REPO,
+        source_identity=_github_file_source_identity(github_file),
+        source_url=github_file.canonical_blob_url,
+        source_content_id=None,
+        source_title=title,
+        source_metadata={
+            "owner": github_file.owner,
+            "repo": github_file.repo,
+            "repo_url": github_file.repo_url,
+            "title": title,
+            "linked_artifact": artifact,
+        },
+    )
+
+
+def _github_file_source_identity(github_file: GitHubFileUrl) -> str:
+    identity = (
+        f"github:{github_file.owner.lower()}/{github_file.repo.lower()}:"
+        f"file:{github_file.ref}/{github_file.path}"
+    )
+    if len(identity) <= 512:
+        return identity
+    digest = sha256(identity.encode("utf-8")).hexdigest()
+    return f"github:{github_file.owner.lower()}/{github_file.repo.lower()}:file:{digest}"
 
 
 def content_learning_deck_source(content: Content) -> LearningDeckSource:

@@ -5,6 +5,7 @@ import pytest
 
 from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.pdf_strategy import PdfProcessorStrategy
+from app.services.http import NonRetryableError
 
 # Sample PDF content (minimal valid PDF structure for testing purposes)
 # This is a very simple, tiny, valid PDF.
@@ -40,6 +41,12 @@ def test_can_handle_url_pdf_extension(pdf_strategy: PdfProcessorStrategy):
     assert pdf_strategy.can_handle_url("http://example.com/document.pdf", None) is True
 
 
+def test_can_handle_github_blob_pdf_url(pdf_strategy: PdfProcessorStrategy):
+    url = "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf?raw=1"
+
+    assert pdf_strategy.can_handle_url(url, None) is True
+
+
 def test_can_handle_url_excludes_arxiv(pdf_strategy: PdfProcessorStrategy):
     """Test can_handle_url excludes arXiv URLs (handled by ArxivProcessorStrategy)."""
     assert pdf_strategy.can_handle_url("https://arxiv.org/pdf/1234.5678", None) is False
@@ -71,6 +78,48 @@ def test_download_content(pdf_strategy: PdfProcessorStrategy, mock_http_client: 
 
     mock_http_client.get.assert_called_once_with(url)
     assert content == SAMPLE_PDF_BYTES
+
+
+def test_preprocess_url_normalizes_github_blob_pdf(
+    pdf_strategy: PdfProcessorStrategy,
+) -> None:
+    url = "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf"
+
+    assert pdf_strategy.preprocess_url(url) == (
+        "https://raw.githubusercontent.com/deepseek-ai/DeepSpec/main/DSpark_paper.pdf"
+    )
+
+
+def test_download_content_normalizes_github_blob_and_requires_pdf_bytes(
+    pdf_strategy: PdfProcessorStrategy,
+    mock_http_client: MagicMock,
+) -> None:
+    url = "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf"
+    raw_url = "https://raw.githubusercontent.com/deepseek-ai/DeepSpec/main/DSpark_paper.pdf"
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.content = SAMPLE_PDF_BYTES
+    mock_response.url = raw_url
+    mock_http_client.get.return_value = mock_response
+
+    content = pdf_strategy.download_content(url)
+
+    mock_http_client.get.assert_called_once_with(raw_url)
+    assert content == SAMPLE_PDF_BYTES
+
+
+def test_download_content_rejects_non_pdf_body(
+    pdf_strategy: PdfProcessorStrategy,
+    mock_http_client: MagicMock,
+) -> None:
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.content = b"<html>GitHub blob page</html>"
+    mock_response.url = "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf"
+    mock_http_client.get.return_value = mock_response
+
+    with pytest.raises(NonRetryableError, match="not a PDF"):
+        pdf_strategy.download_content(
+            "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf"
+        )
 
 
 def test_extract_data_successful(pdf_strategy: PdfProcessorStrategy, mocker):
@@ -128,6 +177,14 @@ def test_extract_data_returns_failure_when_all_pdf_extraction_paths_fail(
 
     assert extracted_data["title"] == "PDF Extraction Failed"
     assert extracted_data["text_content"] == ""
+
+
+def test_extract_data_rejects_non_pdf_before_gemini(pdf_strategy: PdfProcessorStrategy) -> None:
+    with pytest.raises(NonRetryableError, match="not a PDF"):
+        pdf_strategy.extract_data(
+            b"<html>GitHub blob page</html>",
+            "https://github.com/deepseek-ai/DeepSpec/blob/main/DSpark_paper.pdf",
+        )
 
 
 def test_prepare_for_llm(pdf_strategy: PdfProcessorStrategy):

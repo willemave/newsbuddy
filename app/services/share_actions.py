@@ -364,7 +364,7 @@ def _apply_enqueue_chat_action(
 
 def _apply_create_learning_deck_action(
     db: Session,
-    _task: LlmTask,
+    task: LlmTask,
     user: User,
     action_input: ShareActionInput,
 ) -> dict[str, Any]:
@@ -375,6 +375,8 @@ def _apply_create_learning_deck_action(
         current_user=user,
         url=action_input.source_url,
         interests_prompt=_clean_optional_text(action_input.interests_prompt),
+        submitted_via="share_action",
+        share_action_task_id=require_llm_task_id(task),
     )
     return {"learning_deck_id": deck.id, "source_url": action_input.source_url}
 

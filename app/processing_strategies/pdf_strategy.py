@@ -9,6 +9,7 @@ from app.core.model_defaults import CHEAP_GOOGLE_MODEL_NAME
 from app.core.settings import get_settings
 from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
+from app.services.github_urls import normalize_github_file_url_to_raw, parse_github_file_url
 from app.services.http import NonRetryableError
 from app.services.langfuse_tracing import (
     extract_google_usage_details,
@@ -19,6 +20,8 @@ from app.services.prompt_library import load_prompt
 
 logger = get_logger(__name__)
 settings = get_settings()
+
+PDF_MAGIC = b"%PDF-"
 
 
 class PdfProcessorStrategy(UrlProcessorStrategy):
@@ -38,6 +41,10 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
         if "arxiv.org" in url.lower():
             return False
 
+        github_file = parse_github_file_url(url)
+        if github_file is not None:
+            return github_file.is_pdf
+
         # Check URL extension
         if url.lower().endswith(".pdf"):
             return True
@@ -51,24 +58,34 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
 
     def preprocess_url(self, url: str) -> str:
         """Preprocess PDF URLs."""
-        # No special preprocessing needed for general PDFs
-        # Arxiv URLs are handled by ArxivProcessorStrategy
-        return url
+        return normalize_github_file_url_to_raw(url) or url
 
     def download_content(self, url: str) -> bytes:
         """Download PDF content from the given URL."""
-        logger.info(f"PdfStrategy: Downloading PDF content from {url}")
+        download_url = self.preprocess_url(url)
+        logger.info(f"PdfStrategy: Downloading PDF content from {download_url}")
         try:
-            response = self.http_client.get(url)
+            response = self.http_client.get(download_url)
             logger.info(
-                f"PdfStrategy: Successfully downloaded PDF from {url}. Final URL: {response.url}"
+                "PdfStrategy: Successfully downloaded PDF from %s. Final URL: %s",
+                download_url,
+                response.url,
             )
-            return response.content  # Returns PDF as bytes
+            content = response.content
+            if not _looks_like_pdf(content):
+                raise NonRetryableError(
+                    f"Downloaded content is not a PDF: {response.url or download_url}"
+                )
+            return content  # Returns PDF as bytes
         except httpx.HTTPStatusError as e:
             status_code = e.response.status_code
             # 4xx client errors are non-retryable (403 Forbidden, 404 Not Found, etc.)
             if 400 <= status_code < 500:
-                logger.warning(f"PdfStrategy: HTTP {status_code} for {url} - marking as failed")
+                logger.warning(
+                    "PdfStrategy: HTTP %s for %s - marking as failed",
+                    status_code,
+                    download_url,
+                )
                 raise NonRetryableError(f"HTTP {status_code}: {e}") from e
             raise
 
@@ -81,6 +98,8 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
         """Extract text from PDF content using Google Gemini API."""
         del context
         logger.info(f"PdfStrategy: Extracting text from PDF content for URL: {url}")
+        if not _looks_like_pdf(content):
+            raise NonRetryableError(f"Downloaded content is not a PDF: {url}")
 
         try:
             if not self.model_name:
@@ -169,3 +188,8 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
             "content_type": "pdf",
             "final_url_after_redirects": url,
         }
+
+
+def _looks_like_pdf(content: bytes) -> bool:
+    """Return true when downloaded bytes have a PDF header near the start."""
+    return content[:1024].lstrip().startswith(PDF_MAGIC)
