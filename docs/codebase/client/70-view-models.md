@@ -15,6 +15,7 @@ Observable view-state layer that coordinates services, repositories, navigation 
 |---|---|---|
 | Auth and root navigation | `AuthenticationViewModel.swift`, `TabCoordinatorViewModel.swift` | Login/profile state and tab routing. |
 | Lists and pagination | `BaseContentListViewModel.swift`, `CursorPaginatedViewModel.swift`, `ContentListViewModel.swift`, `LongContentListViewModel.swift`, `ShortNewsListViewModel.swift`, `NewsGroupViewModel.swift` | Content/news list state and pagination. |
+| Briefing | `BriefingViewModel.swift`, `BriefingDigViewModel.swift` | Briefing index/lens cache, ETag refresh, lazy neighbor prefetch, read batching, narration episode state, and two-stage dig-deeper state. |
 | Details and readers | `ArticleDetailViewModel.swift`, `ContentDetailViewModel.swift`, `PodcastDetailViewModel.swift`, `CardStackKeyPointsLoader.swift`, `TweetSuggestionsViewModel.swift` | Detail screens, cards, podcast state, and tweet suggestions. |
 | Chat | `ChatSessionViewModel.swift`, `ChatSessionsViewModel.swift`, `ChatTimelineReconciler.swift` | Chat session/message lifecycle and render timeline reconciliation. |
 | Knowledge/search/discovery | `KnowledgeHubViewModel.swift`, `SearchViewModel.swift`, `DiscoveryViewModel.swift`, `DiscoveryPersonalizeViewModel.swift` | Knowledge hub, search, and discovery state. |

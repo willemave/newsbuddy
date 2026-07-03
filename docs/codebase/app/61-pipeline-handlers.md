@@ -17,6 +17,7 @@ Concrete queue task handlers that translate normalized task envelopes into servi
 |---|---|
 | `analyze_url.py` | URL analysis handler with feed subscription, tweet resolution, instruction cleanup, and fanout flows. |
 | `backfill_feeds.py` | Feed backfill task handler. |
+| `briefing_refresh.py` | Briefing append/sweep/full refresh task handler. |
 | `dig_deeper.py` | Chat/dig-deeper message processing. |
 | `discover_feeds.py` | Feed discovery task handler. |
 | `download_audio.py`, `transcribe.py`, `process_podcast_media.py` | Podcast/audio media pipeline handlers. |

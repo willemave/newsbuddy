@@ -18,6 +18,7 @@ User-facing and machine-facing JSON API modules for content, news, chat, discove
 |---|---|
 | `agent.py` | Machine/CLI APIs for jobs, search, onboarding, CLI link, and personal markdown library. |
 | `audio_episodes.py` | Audio episode create/list/share/playback routes. |
+| `briefing.py` | Briefing index/lens/read-mark/refresh/dig/narration routes. |
 | `chat.py` | Chat session/message lifecycle and initial suggestions. |
 | `content_actions.py` | Convert, download-more, tweet suggestions, and related content actions. |
 | `content_detail.py` | Content detail, discussion, body/chat URL reads. |

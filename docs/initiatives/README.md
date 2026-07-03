@@ -11,6 +11,7 @@ Change-oriented docs that used to live under `docs/plans/`, `docs/specs/`, and `
 - `agentic-feed-discovery/`
 - `atom-scraper-2025-10/`
 - `authentication-2025-10/`
+- `briefing-tab-2026-07/` - shipped native Briefing surface; keep follow-up specs here until moved to stable feature docs.
 - `cli-rewrite-2026-03/`
 - `codebase-hardening-2026-03/`
 - `codebase-refactoring/`

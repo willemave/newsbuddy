@@ -243,6 +243,7 @@ Most orchestration logic lives here. Major service families:
 - feed detection and feed discovery
 - onboarding flows
 - chat and deep research
+- briefing generation, live dig-deeper, and unread-edition refresh
 - X integration and sync
 - content interactions, Knowledge saves, read state
 - narration, transcription, and audio episodes
@@ -356,6 +357,10 @@ SQLAlchemy tables live under `app/models/db/`. API DTOs, domain objects, metadat
 | `news_item_discussions` | Canonical short-form discussion payloads | Latest raw-comment storage pointer, structured summary, refresh status and lease |
 | `news_item_read_status` | Per-user read marks for `news_items` | Separate from `content_read_status` |
 | `audio_episodes` | On-demand podcast-style episode state | Fast Reads brief, long-form council, and news-item discussion episodes |
+| `briefing_states` | Per-user Briefing masthead/version state | Versioned ETag source for the Briefing index |
+| `briefing_lenses` | Per-user Briefing lenses | Fixed podcast/article lenses plus dynamic news category lenses |
+| `briefing_segments` | Immutable composed Briefing documents | Typed passage/figure/pullquote blocks over frozen unread source sets |
+| `briefing_pending_sources` | Unread sources waiting for Briefing composition | Event-driven and bootstrap source queue for append refresh |
 | `user_scraper_configs` | User-managed feed subscriptions | Substack, Atom, podcast RSS, YouTube, Reddit, aggregator subscriptions |
 | `feed_discovery_runs` | Discovery run metadata | Seed Knowledge items, token/timing usage, status |
 | `feed_discovery_suggestions` | Discovery recommendations | Feed/podcast/YouTube suggestions with score/rationale |
@@ -590,6 +595,24 @@ Endpoints:
 - `POST /api/news/items/{news_item_id}/convert-to-article`
 - `POST /api/news/items/{news_item_id}/audio-episodes/discussion`
 
+### 8.3.1 Briefing API
+
+Prefix: `/api/briefing`
+
+The Briefing API exposes the user's unread edition: an ETag-backed index, lazy lens payloads,
+batched read marks, manual refresh, live dig-deeper, and audio narration creation. It is mounted
+under `/api` and uses the same bearer auth/current-user dependency as the content and news APIs.
+
+Endpoints:
+
+- `GET /api/briefing`
+- `GET /api/briefing/lenses/{lens_key}`
+- `POST /api/briefing/read-marks`
+- `POST /api/briefing/refresh`
+- `POST /api/briefing/dig/search`
+- `POST /api/briefing/dig/summarize`
+- `POST /api/briefing/narration`
+
 ### 8.4 Discovery
 
 Prefix: `/api/discovery/...`
@@ -774,6 +797,7 @@ used by `app/services/queue.py`:
 | `generate_audio_episode` | `audio_episode` |
 | `generate_learning_deck` | `learning` |
 | `run_llm_task` | `llm` |
+| `briefing_refresh` | `llm` |
 
 ### 9.3 Queue semantics
 
@@ -1270,6 +1294,7 @@ The client has dedicated flows for:
 - content lists and search
 - content detail
 - short-form news
+- Briefing reading experience, including lens paging, source modals, live dig-deeper, and narration
 - audio episodes and narration playback
 - chat session history, async message polling, and council flows
 - discovery and onboarding, including aggregator selection and resumable voice discovery

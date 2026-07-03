@@ -19,7 +19,7 @@ Developer, operator, generation, evaluation, data maintenance, and local smoke-t
 | Contracts | `export_openapi_schema.py`, `generate_ios_contracts.py`, `generate_go_contracts.py`, `generate_agent_cli_artifacts.sh`, `regenerate_public_contracts.sh` | Regenerate checked-in API contract artifacts. |
 | CLI smoke | `test_agent_cli_local_e2e.py`, `test_auth_flow.sh` | Exercise local machine-facing workflows. |
 | Evals and reports | `run_news_eval.py`, `run_summary_evals.py`, `generate_eval_html_report.py`, `build_prompt_debug_report.py` | Build eval datasets and reports. |
-| Data fixtures | `generate_test_data.py`, `fixture_discussions.py`, `export_news_items_raw_snapshot.py` | Create local/test data snapshots. |
+| Data fixtures | `generate_test_data.py`, `fixture_discussions.py`, `export_news_items_raw_snapshot.py` | Create local/test data snapshots; `generate_test_data.py --briefing` also builds a deterministic Briefing edition and verifies append refresh. |
 | Guardrails | `architecture_guard.sh`, `check_module_size_guardrails.py`, `check_public_contracts.sh`, `check_duplicate_tests.py` | Keep structure, contracts, and tests in bounds. |
 
 ## Integration points

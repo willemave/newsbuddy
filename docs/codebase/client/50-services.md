@@ -18,6 +18,7 @@ App service layer for network transport, auth, content/news APIs, chat, discover
 | Transport and endpoints | `APIClient.swift`, `APIEndpoints.swift` | HTTP transport, auth handling, endpoint construction, streaming. |
 | Auth and local storage | `AuthenticationService.swift`, `KeychainManager.swift`, `AppSettings.swift`, `OnboardingE2EFixtureStore.swift` | Sign-in, tokens, preferences, and E2E onboarding fixture state. |
 | Content/news/source APIs | `ContentService.swift`, `ScraperConfigService.swift`, `ProcessingCountService.swift`, `UnreadCountService.swift`, `ContentImagePrefetcher.swift` | Content/news lists/details/actions, source config, counts, and image prefetching. |
+| Briefing | `BriefingService.swift` | ETag-backed Briefing index, lazy lens fetches, read marks, manual refresh, dig-deeper calls, and narration creation. |
 | Chat | `ChatService.swift`, `ActiveChatSessionManager.swift`, `ChatNavigationCoordinator.swift`, `ChatGPTDeepLinkService.swift` | Chat sessions/messages, background active-session state, navigation, and ChatGPT deep links. |
 | Discovery/onboarding | `DiscoveryService.swift`, `OnboardingService.swift` | Discovery suggestions/history/actions and onboarding API calls. |
 | Learning and audio | `LearningDeckService.swift`, `AudioEpisodeService.swift`, `NarrationPlaybackService.swift` | Learning Deck CRUD/share/viewer URLs, audio episode APIs, and local narration playback. |
