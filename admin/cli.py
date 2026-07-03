@@ -145,6 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     _build_db_parser(subparsers)
     _build_logs_parser(subparsers)
     _build_usage_parser(subparsers)
+    _build_briefing_parser(subparsers)
     _build_fix_parser(subparsers)
     _build_events_parser(subparsers)
     _build_health_parser(subparsers)
@@ -161,6 +162,8 @@ def dispatch(args: argparse.Namespace, *, config: AdminConfig) -> CommandResult:
         return _handle_logs(args, config=config)
     if args.group == "usage":
         return _handle_usage(args, config=config)
+    if args.group == "briefing":
+        return _handle_briefing(args, config=config)
     if args.group == "fix":
         return _handle_fix(args, config=config)
     if args.group == "events":
@@ -256,6 +259,27 @@ def _handle_usage(args: argparse.Namespace, *, config: AdminConfig) -> CommandRe
         action = "usage.content"
     else:
         raise AdminCLIError(f"Unsupported usage command: {args.usage_command}")
+
+    return CommandResult(data=_invoke_remote(action, config=config, payload=payload), warnings=[])
+
+
+def _handle_briefing(args: argparse.Namespace, *, config: AdminConfig) -> CommandResult:
+    payload: dict[str, Any] = {"unsafe_raw": bool(args.unsafe_raw)}
+    if args.briefing_command == "status":
+        payload["user_id"] = args.user_id
+        action = "briefing.status"
+    elif args.briefing_command == "refresh":
+        payload["user_id"] = args.user_id
+        payload["mode"] = "full" if args.full else "append"
+        payload["use_llm"] = not bool(args.no_llm)
+        action = "briefing.refresh"
+    elif args.briefing_command == "costs":
+        payload["user_id"] = args.user_id
+        payload["since"] = args.since
+        payload["until"] = args.until
+        action = "briefing.costs"
+    else:
+        raise AdminCLIError(f"Unsupported briefing command: {args.briefing_command}")
 
     return CommandResult(data=_invoke_remote(action, config=config, payload=payload), warnings=[])
 
@@ -543,6 +567,7 @@ def _command_name(args: argparse.Namespace) -> str:
         "db_command",
         "logs_command",
         "usage_command",
+        "briefing_command",
         "fix_command",
         "events_command",
         "health_command",
@@ -686,6 +711,35 @@ def _build_usage_parser(subparsers: argparse._SubParsersAction[AdminArgumentPars
     )
     content_parser.add_argument("--content-id", required=True, type=int)
     content_parser.add_argument("--limit", type=int, default=200)
+
+
+def _build_briefing_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:
+    briefing_parser = subparsers.add_parser(
+        "briefing",
+        help="Inspect and refresh briefing editions",
+        description="Inspect briefing state, run a refresh, or summarize briefing usage costs.",
+    )
+    briefing_subparsers = briefing_parser.add_subparsers(
+        dest="briefing_command",
+        required=True,
+    )
+
+    status_parser = briefing_subparsers.add_parser("status", help="Show briefing health")
+    status_parser.add_argument("--user-id", required=True, type=int)
+
+    refresh_parser = briefing_subparsers.add_parser("refresh", help="Run a briefing refresh")
+    refresh_parser.add_argument("--user-id", required=True, type=int)
+    refresh_parser.add_argument("--full", action="store_true", help="Rebuild from unread backlog")
+    refresh_parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Use deterministic fallback generation for local verification",
+    )
+
+    costs_parser = briefing_subparsers.add_parser("costs", help="Summarize briefing LLM usage")
+    costs_parser.add_argument("--user-id", type=int, default=None)
+    costs_parser.add_argument("--since", default=None)
+    costs_parser.add_argument("--until", default=None)
 
 
 def _build_fix_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser]) -> None:

@@ -11,6 +11,9 @@ from typing import Any
 
 from admin.remote_ops import (
     RemoteContext,
+    briefing_costs,
+    briefing_refresh,
+    briefing_status,
     db_explain,
     db_query,
     db_schema,
@@ -132,6 +135,22 @@ def _dispatch(action: str, *, context: RemoteContext, payload: dict[str, Any]) -
             content_id=int(payload["content_id"]),
             limit=int(payload.get("limit", 200)),
             unsafe_raw=bool(payload.get("unsafe_raw")),
+        )
+    if action == "briefing.status":
+        return briefing_status(context, user_id=int(payload["user_id"]))
+    if action == "briefing.refresh":
+        return briefing_refresh(
+            context,
+            user_id=int(payload["user_id"]),
+            mode=str(payload.get("mode", "append")),
+            use_llm=bool(payload.get("use_llm", True)),
+        )
+    if action == "briefing.costs":
+        return briefing_costs(
+            context,
+            user_id=int(payload["user_id"]) if payload.get("user_id") is not None else None,
+            since=_parse_datetime(payload.get("since")),
+            until=_parse_datetime(payload.get("until")),
         )
     if action == "events.list":
         return events_list(

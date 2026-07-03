@@ -22,10 +22,20 @@ from admin.log_parsing import (
 from admin.sql_guard import validate_readonly_sql
 from app.core.redaction import redact_value
 from app.core.settings import get_settings
-from app.models.db import Content, ContentStatusEntry, ProcessingTask, VendorUsageRecord
+from app.models.db import (
+    BriefingLens,
+    BriefingPendingSource,
+    BriefingSegment,
+    BriefingState,
+    Content,
+    ContentStatusEntry,
+    ProcessingTask,
+    VendorUsageRecord,
+)
 from app.models.db.users import User
 from app.models.domain.content_mapper import content_to_domain
 from app.queries.queue_health import get_queue_health_snapshot
+from app.services.briefing.refresh import RefreshMode, run_briefing_refresh, status_counts
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.image_generation import ImageGenerationService, get_image_generation_service
 from app.services.long_form_images import (
@@ -225,6 +235,144 @@ def usage_by_content(
                 "totals": _summarize_usage_rows(rows),
                 "rows": [_serialize_usage_row(row, unsafe_raw=unsafe_raw) for row in rows],
                 "redacted": not unsafe_raw,
+            }
+    finally:
+        engine.dispose()
+
+
+def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
+    """Return briefing edition health for one user."""
+
+    engine = create_engine(context.database_url, pool_pre_ping=True)
+    session_factory = sessionmaker(bind=engine)
+    try:
+        with session_factory() as session:
+            state = session.query(BriefingState).filter(BriefingState.user_id == user_id).first()
+            lenses = (
+                session.query(BriefingLens)
+                .filter(BriefingLens.user_id == user_id)
+                .order_by(BriefingLens.position.asc(), BriefingLens.id.asc())
+                .all()
+            )
+            lens_rows = []
+            for lens in lenses:
+                active_segments = int(
+                    session.query(func.count(BriefingSegment.id))
+                    .filter(BriefingSegment.lens_id == lens.id)
+                    .filter(BriefingSegment.status.in_(("active", "degraded")))
+                    .scalar()
+                    or 0
+                )
+                pending_sources = int(
+                    session.query(func.count(BriefingPendingSource.id))
+                    .filter(BriefingPendingSource.user_id == user_id)
+                    .filter(BriefingPendingSource.lens_key == lens.key)
+                    .scalar()
+                    or 0
+                )
+                lens_rows.append(
+                    {
+                        "key": lens.key,
+                        "tier": lens.tier,
+                        "title": lens.title,
+                        "status": lens.status,
+                        "position": lens.position,
+                        "active_segments": active_segments,
+                        "pending_sources": pending_sources,
+                        "updated_at": lens.updated_at,
+                    }
+                )
+            return {
+                "user_id": user_id,
+                "state": {
+                    "version": int(state.version or 0) if state is not None else 0,
+                    "masthead_title": state.masthead_title if state is not None else None,
+                    "masthead_deck": state.masthead_deck if state is not None else None,
+                    "last_append_at": state.last_append_at if state is not None else None,
+                    "last_sweep_at": state.last_sweep_at if state is not None else None,
+                },
+                "counts": status_counts(session, user_id=user_id),
+                "lenses": lens_rows,
+            }
+    finally:
+        engine.dispose()
+
+
+def briefing_refresh(
+    context: RemoteContext,
+    *,
+    user_id: int,
+    mode: str = "append",
+    use_llm: bool = True,
+) -> dict[str, Any]:
+    """Run a briefing refresh directly against the runtime database."""
+
+    refresh_mode: RefreshMode
+    if mode == "append":
+        refresh_mode = "append"
+    elif mode == "sweep":
+        refresh_mode = "sweep"
+    elif mode == "full":
+        refresh_mode = "full"
+    else:
+        raise ValueError(f"Unsupported briefing refresh mode: {mode}")
+    engine = create_engine(context.database_url, pool_pre_ping=True)
+    session_factory = sessionmaker(bind=engine)
+    try:
+        with session_factory() as session:
+            result = run_briefing_refresh(
+                session,
+                user_id=user_id,
+                mode=refresh_mode,
+                use_llm=use_llm,
+            )
+            session.commit()
+            return {
+                "result": {
+                    "user_id": result.user_id,
+                    "version": result.version,
+                    "appended_segments": result.appended_segments,
+                    "retired_segments": result.retired_segments,
+                    "compacted_segments": result.compacted_segments,
+                    "pending_added": result.pending_added,
+                    "sweep_enqueued": result.sweep_enqueued,
+                },
+                "counts": status_counts(session, user_id=user_id),
+            }
+    finally:
+        engine.dispose()
+
+
+def briefing_costs(
+    context: RemoteContext,
+    *,
+    user_id: int | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> dict[str, Any]:
+    """Return usage rollups for briefing feature calls."""
+
+    engine = create_engine(context.database_url, pool_pre_ping=True)
+    session_factory = sessionmaker(bind=engine)
+    try:
+        with session_factory() as session:
+            query = session.query(VendorUsageRecord).filter(
+                VendorUsageRecord.feature.like("briefing_%")
+            )
+            if user_id is not None:
+                query = query.filter(VendorUsageRecord.user_id == user_id)
+            rows = _apply_usage_window(query, since=since, until=until).all()
+            grouped: dict[str, dict[str, Any]] = defaultdict(lambda: _usage_totals())
+            for row in rows:
+                key = f"{row.feature or 'unknown'}:{row.model or 'unknown'}"
+                _accumulate_usage(grouped[key], row)
+            return {
+                "user_id": user_id,
+                "totals": _summarize_usage_rows(rows),
+                "groups": [
+                    {"key": key, **grouped[key]}
+                    for key in sorted(grouped.keys(), key=lambda value: value.lower())
+                ],
             }
     finally:
         engine.dispose()

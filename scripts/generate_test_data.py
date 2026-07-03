@@ -40,6 +40,7 @@ import os
 import random
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 # Add parent directory so we can import from app
@@ -69,6 +70,7 @@ from app.constants import (
     SUMMARY_VERSION_V2,
 )
 from app.core.db import get_db, init_db
+from app.core.settings import get_settings
 from app.models.contracts import ContentStatus, ContentType, NewsItemStatus, NewsItemVisibilityScope
 from app.models.db import (
     Content,
@@ -101,6 +103,12 @@ from app.models.metadata.summaries import (
     SummaryBulletPoint,
     SummaryPayload,
     SummaryTextBullet,
+)
+from app.services.briefing.presentation import get_briefing_index
+from app.services.briefing.refresh import (
+    enqueue_ready_source,
+    run_briefing_refresh,
+    status_counts,
 )
 from app.services.news_ingestion import backfill_news_items_from_contents
 from scripts.fixture_discussions import (
@@ -176,6 +184,33 @@ NEWS_HEADLINES = [
     "Signal Protocol Adopted as Industry Standard for E2E Encryption",
     "NVIDIA H200 GPU Shortage Drives Cloud Compute Prices Up 40%",
 ]
+
+NEWS_TOPICS_BY_HEADLINE = {
+    "OpenAI Announces GPT-5 with Enhanced Reasoning Capabilities": "AI Research",
+    "Google DeepMind Achieves Breakthrough in Protein Folding": "AI Research",
+    "Major Tech Company Acquires AI Startup for $2B": "Startups & Funding",
+    "YC-Backed Startup Raises $500M for Open Source LLM Training": "Startups & Funding",
+    "Tesla Robotaxi Fleet Launches in Three US Cities": "Startups & Funding",
+    "Apple Unveils Next-Generation M5 Chip Architecture": "Chips & Compute",
+    "NVIDIA H200 GPU Shortage Drives Cloud Compute Prices Up 40%": "Chips & Compute",
+    "New Breakthrough in Quantum Computing Stability": "Chips & Compute",
+    "Security Flaw Discovered in Popular Open Source Library": "Security & Privacy",
+    "Cloudflare Reports Record DDoS Attack Mitigated at 5 Tbps": "Security & Privacy",
+    "Signal Protocol Adopted as Industry Standard for E2E Encryption": "Security & Privacy",
+    "EU Passes Comprehensive AI Regulation Framework": "Policy & Markets",
+    "Federal Reserve Announces Interest Rate Decision": "Policy & Markets",
+    "Rust Overtakes Go in Cloud Infrastructure Adoption": "Engineering",
+    "GitHub Copilot Now Generates Full Pull Requests Autonomously": "Engineering",
+}
+
+PLACEHOLDER_IMAGE_COLORS = [
+    (44, 42, 39),
+    (58, 55, 51),
+    (74, 69, 63),
+    (87, 81, 74),
+    (109, 106, 97),
+]
+PLACEHOLDER_IMAGE_ACCENT = (193, 95, 60)
 
 SUMMARY_FORMATS = [
     "longform_artifact",
@@ -1364,6 +1399,123 @@ def _scope_generated_news_items(
             item.status = NewsItemStatus.READY.value
 
 
+def _assign_generated_news_topics(session: Session, *, content_ids: list[int]) -> None:
+    """Give generated news items aggregator topics so briefing category lenses form."""
+    if not content_ids:
+        return
+    title_by_content_id = {
+        row.id: row.title
+        for row in session.query(Content.id, Content.title)
+        .filter(Content.id.in_(content_ids))
+        .all()
+    }
+    fallback_topics = sorted(set(NEWS_TOPICS_BY_HEADLINE.values()))
+    news_items = session.query(NewsItem).filter(NewsItem.legacy_content_id.in_(content_ids)).all()
+    for index, item in enumerate(news_items):
+        title = title_by_content_id.get(item.legacy_content_id) or ""
+        topic = NEWS_TOPICS_BY_HEADLINE.get(title) or fallback_topics[index % len(fallback_topics)]
+        raw_metadata = dict(item.raw_metadata or {})
+        aggregator = dict(raw_metadata.get("aggregator") or {})
+        aggregator["topic"] = topic
+        raw_metadata["aggregator"] = aggregator
+        item.raw_metadata = raw_metadata
+
+
+def _write_placeholder_image(path: Path, *, size: tuple[int, int], seed: int) -> None:
+    from PIL import Image, ImageDraw
+
+    base = PLACEHOLDER_IMAGE_COLORS[seed % len(PLACEHOLDER_IMAGE_COLORS)]
+    image = Image.new("RGB", size, base)
+    draw = ImageDraw.Draw(image)
+    width, height = size
+    radius = int(min(width, height) * 0.42)
+    center_x = int(width * (0.3 + 0.12 * (seed % 5)))
+    center_y = int(height * 0.55)
+    accent = tuple(
+        int(component * 0.85 + base_component * 0.15)
+        for component, base_component in zip(PLACEHOLDER_IMAGE_ACCENT, base, strict=True)
+    )
+    draw.ellipse(
+        [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
+        fill=accent,
+    )
+    highlight_radius = radius // 3
+    highlight_x = center_x + radius
+    highlight_y = int(height * 0.25)
+    draw.ellipse(
+        [
+            highlight_x - highlight_radius,
+            highlight_y - highlight_radius,
+            highlight_x + highlight_radius,
+            highlight_y + highlight_radius,
+        ],
+        fill=(236, 232, 220),
+    )
+    band_height = max(6, height // 26)
+    draw.rectangle([0, height - band_height, width, height], fill=PLACEHOLDER_IMAGE_ACCENT)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path, format="PNG")
+
+
+def _write_placeholder_images(session: Session, *, content_ids: list[int]) -> None:
+    """Ensure every generated article/podcast (and news thumb) has an image on disk."""
+    if not content_ids:
+        return
+    base_dir = Path(get_settings().images_base_dir)
+    rows = session.query(Content.id, Content.content_type).filter(Content.id.in_(content_ids)).all()
+    for row in rows:
+        if row.content_type not in (ContentType.ARTICLE.value, ContentType.PODCAST.value):
+            continue
+        content_id = int(row.id)
+        _write_placeholder_image(
+            base_dir / "content" / f"{content_id}.png", size=(1200, 675), seed=content_id
+        )
+        _write_placeholder_image(
+            base_dir / "thumbnails" / f"{content_id}.png", size=(200, 200), seed=content_id
+        )
+    # News items intentionally have no images: production only attaches a thumbnail
+    # when the image pipeline generates one, and the briefing source gates on that.
+
+
+def _backfill_briefing_segment_images(session: Session, *, user_ids: list[int]) -> int:
+    """Give every source referenced by a rendered briefing segment a placeholder image.
+
+    The briefing is append-only, so segments composed across earlier reseeds still
+    reference content whose generated image was never written (or was overwritten by a
+    later id reuse). Without this, those figures render as broken images in the client.
+    """
+    if not user_ids:
+        return 0
+    from app.models.db.briefing import BriefingSegment
+
+    key_rows = (
+        session.query(BriefingSegment.source_keys)
+        .filter(BriefingSegment.user_id.in_(user_ids))
+        .filter(BriefingSegment.status == "active")
+        .all()
+    )
+    # News sources stay imageless (no figure is composed for them), so only
+    # article/podcast content needs backfilled placeholder images.
+    content_ids: set[int] = set()
+    for (keys,) in key_rows:
+        for key in keys or []:
+            kind, _, raw_id = str(key).partition(":")
+            if kind == "content" and raw_id.isdigit():
+                content_ids.add(int(raw_id))
+
+    base_dir = Path(get_settings().images_base_dir)
+    written = 0
+    for content_id in sorted(content_ids):
+        content_path = base_dir / "content" / f"{content_id}.png"
+        if not content_path.exists():
+            _write_placeholder_image(content_path, size=(1200, 675), seed=content_id)
+            written += 1
+        thumb_path = base_dir / "thumbnails" / f"{content_id}.png"
+        if not thumb_path.exists():
+            _write_placeholder_image(thumb_path, size=(200, 200), seed=content_id)
+    return written
+
+
 def insert_test_data(
     session: Session,
     data: list[dict[str, Any]],
@@ -1470,7 +1622,10 @@ def insert_test_data(
             content_ids=inserted_news_content_ids,
             user_ids=user_ids,
         )
+        _assign_generated_news_topics(session, content_ids=inserted_news_content_ids)
         insert_news_item_discussions(session, content_ids=inserted_news_content_ids)
+
+    _write_placeholder_images(session, content_ids=inserted_ids)
 
     session.commit()
     return inserted_ids
@@ -1524,6 +1679,148 @@ def resolve_target_user_ids(
     if resolved_user_id is None:
         raise ValueError("Could not resolve a logged-in user ID from the database.")
     return [resolved_user_id]
+
+
+def _resolve_briefing_user_ids(session: Session, user_ids: list[int] | None) -> list[int]:
+    """Pick concrete users for generated briefing verification."""
+    if user_ids:
+        return user_ids
+    logged_in_user_id = _resolve_logged_in_user_id(session)
+    if logged_in_user_id is not None:
+        return [logged_in_user_id]
+    return _fetch_user_ids(session)[:1]
+
+
+def run_generated_briefing_verification(
+    session: Session,
+    *,
+    user_ids: list[int],
+    use_llm: bool,
+) -> dict[int, dict[str, Any]]:
+    """Build a deterministic briefing and then verify an incremental append."""
+    results: dict[int, dict[str, Any]] = {}
+    if not user_ids:
+        return results
+
+    settings = get_settings().model_copy(
+        update={
+            "briefing_enabled_user_ids": user_ids,
+            "briefing_window_min": 1,
+            "briefing_debounce_seconds": 0,
+            "briefing_pending_max_age_seconds": 60,
+        }
+    )
+
+    for user_id in user_ids:
+        full_result = run_briefing_refresh(
+            session,
+            user_id=user_id,
+            mode="full",
+            use_llm=use_llm,
+            settings=settings,
+        )
+        session.commit()
+        full_counts = status_counts(session, user_id=user_id)
+
+        incremental_data = generate_test_data(
+            num_articles=1,
+            num_podcasts=0,
+            num_news=1,
+            include_pending=False,
+            article_summary_format="longform_artifact",
+            podcast_summary_format="longform_artifact",
+            news_days_back=1,
+            target_user_ids=[user_id],
+        )
+        incremental_ids = insert_test_data(session, incremental_data, user_ids=[user_id])
+        pending_enqueued = _enqueue_incremental_briefing_sources(
+            session,
+            user_id=user_id,
+            content_ids=incremental_ids,
+            settings=settings,
+        )
+        append_result = run_briefing_refresh(
+            session,
+            user_id=user_id,
+            mode="append",
+            use_llm=use_llm,
+            settings=settings,
+        )
+        session.commit()
+        append_counts = status_counts(session, user_id=user_id)
+        index = get_briefing_index(session, user_id=user_id)
+        results[user_id] = {
+            "full": full_result,
+            "full_counts": full_counts,
+            "incremental_ids": incremental_ids,
+            "pending_enqueued": pending_enqueued,
+            "append": append_result,
+            "append_counts": append_counts,
+            "index_lenses": len(index.lenses),
+            "index_version": index.version,
+        }
+
+    return results
+
+
+def _enqueue_incremental_briefing_sources(
+    session: Session,
+    *,
+    user_id: int,
+    content_ids: list[int],
+    settings: Any,
+) -> int:
+    """Mirror ready-event hooks for generated rows before append verification."""
+    enqueued = 0
+    contents = session.query(Content).filter(Content.id.in_(content_ids)).all()
+    for content in contents:
+        if content.id is None:
+            continue
+        content_id = int(content.id)
+        if content.content_type == ContentType.ARTICLE.value:
+            enqueued += int(
+                enqueue_ready_source(
+                    session,
+                    user_id=user_id,
+                    source_kind="content",
+                    source_id=content_id,
+                    lens_key="articles",
+                    delay_seconds=0,
+                    settings=settings,
+                )
+            )
+            continue
+        if content.content_type == ContentType.PODCAST.value:
+            enqueued += int(
+                enqueue_ready_source(
+                    session,
+                    user_id=user_id,
+                    source_kind="content",
+                    source_id=content_id,
+                    lens_key="podcasts",
+                    delay_seconds=0,
+                    settings=settings,
+                )
+            )
+            continue
+        if content.content_type != ContentType.NEWS.value:
+            continue
+        news_item = session.query(NewsItem).filter(NewsItem.legacy_content_id == content_id).first()
+        if news_item is None or news_item.id is None:
+            continue
+        enqueued += int(
+            enqueue_ready_source(
+                session,
+                user_id=user_id,
+                source_kind="news",
+                source_id=int(news_item.id),
+                lens_key=None,
+                delay_seconds=0,
+                settings=settings,
+            )
+        )
+    session.flush()
+    return enqueued
 
 
 def main():
@@ -1585,6 +1882,19 @@ def main():
             "Target only the inferred logged-in user (most recently updated active non-admin user)"
         ),
     )
+    parser.add_argument(
+        "--briefing",
+        action="store_true",
+        help=(
+            "After inserting content, build a deterministic briefing and verify an "
+            "incremental append"
+        ),
+    )
+    parser.add_argument(
+        "--briefing-use-llm",
+        action="store_true",
+        help="Use the configured briefing LLM during generated-data verification",
+    )
 
     args = parser.parse_args()
 
@@ -1633,6 +1943,23 @@ def main():
         print("\nInserting data into database...")
         inserted_ids = insert_test_data(session, data, user_ids=user_ids)
 
+        briefing_results: dict[int, dict[str, Any]] = {}
+        if args.briefing:
+            briefing_user_ids = _resolve_briefing_user_ids(session, user_ids)
+            print(
+                "\nBuilding generated briefing data for user ID(s): "
+                + ", ".join(map(str, briefing_user_ids))
+            )
+            briefing_results = run_generated_briefing_verification(
+                session,
+                user_ids=briefing_user_ids,
+                use_llm=args.briefing_use_llm,
+            )
+            backfilled = _backfill_briefing_segment_images(session, user_ids=briefing_user_ids)
+            session.commit()
+            if backfilled:
+                print(f"  Backfilled placeholder images for {backfilled} briefing source(s).")
+
     print(f"\nSuccessfully inserted {len(inserted_ids)} items")
     print(f"  IDs: {min(inserted_ids)} - {max(inserted_ids)}")
 
@@ -1645,6 +1972,22 @@ def main():
     print(f"  Articles: {articles}")
     print(f"  Podcasts: {podcasts}")
     print(f"  News: {news}")
+
+    if briefing_results:
+        print("\nBriefing verification:")
+        for user_id, result in briefing_results.items():
+            full = result["full"]
+            append = result["append"]
+            print(
+                "  User "
+                f"{user_id}: full appended={full.appended_segments} "
+                f"pending={full.pending_added} version={full.version}; "
+                f"incremental IDs={result['incremental_ids']}; "
+                f"append appended={append.appended_segments} "
+                f"pending={append.pending_added} version={append.version}; "
+                f"counts={result['append_counts']}; index lenses={result['index_lenses']} "
+                f"index version={result['index_version']}"
+            )
 
 
 if __name__ == "__main__":

@@ -225,6 +225,11 @@ for service in "${SERVICES[@]}"; do
                 echo -e "${RED}CONTENT_WORKER_PROCS must be a positive integer${NC}"
                 exit 1
             fi
+            llm_worker_procs="${LLM_WORKER_PROCS:-1}"
+            if ! [[ "$llm_worker_procs" =~ ^[0-9]+$ ]] || [ "$llm_worker_procs" -lt 1 ]; then
+                echo -e "${RED}LLM_WORKER_PROCS must be a positive integer${NC}"
+                exit 1
+            fi
             for slot in $(seq 1 "$content_worker_procs"); do
                 start_service "workers-content-$slot" "python scripts/run_workers.py --queue content --worker-slot $slot --stats-interval 60"
             done
@@ -237,6 +242,9 @@ for service in "${SERVICES[@]}"; do
             start_service "workers-twitter" "python scripts/run_workers.py --queue twitter --worker-slot 1 --stats-interval 60"
             start_service "workers-chat" "python scripts/run_workers.py --queue chat --worker-slot 1 --stats-interval 60"
             start_service "workers-learning" "python scripts/run_workers.py --queue learning --worker-slot 1 --stats-interval 60"
+            for slot in $(seq 1 "$llm_worker_procs"); do
+                start_service "workers-llm-$slot" "python scripts/run_workers.py --queue llm --worker-slot $slot --stats-interval 60"
+            done
             ;;
         scrapers)
             start_service "scrapers" "python scripts/run_scrapers.py"
