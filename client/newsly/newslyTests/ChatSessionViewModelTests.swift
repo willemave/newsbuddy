@@ -131,8 +131,11 @@ final class ChatSessionViewModelTests: XCTestCase {
 
         await viewModel.startVoiceRecording()
         await transcriptionService.simulateSilenceAutoStop()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        let didSendTranscript = await waitUntil {
+            chatService.sentMessages.map { $0.message } == ["Auto transcript"]
+        }
 
+        XCTAssertTrue(didSendTranscript)
         XCTAssertEqual(chatService.sentMessages.map { $0.message }, ["Auto transcript"])
         XCTAssertEqual(viewModel.inputText, "")
         XCTAssertFalse(viewModel.isRecording)
@@ -237,7 +240,7 @@ final class ChatSessionViewModelTests: XCTestCase {
                 )
             }
         )
-        ActiveChatSessionManager.shared.reset()
+        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
         let viewModel = ChatSessionViewModel(
             route: ChatSessionRoute(session: Self.session(
                 contentId: 7,
@@ -245,7 +248,8 @@ final class ChatSessionViewModelTests: XCTestCase {
             )),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
-                chatService: chatService
+                chatService: chatService,
+                activeSessionManager: activeSessionManager
             )
         )
 
@@ -262,11 +266,11 @@ final class ChatSessionViewModelTests: XCTestCase {
         viewModel.handleDisappear()
 
         XCTAssertTrue(viewModel.isSending)
-        XCTAssertNil(ActiveChatSessionManager.shared.getSession(forContentId: 7))
+        XCTAssertNil(activeSessionManager.getSession(forContentId: 7))
 
         await ackGate.open()
         let didHandOff = await waitUntil {
-            ActiveChatSessionManager.shared.getSession(forContentId: 7)?.messageId == 501
+            activeSessionManager.getSession(forContentId: 7)?.messageId == 501
         }
 
         XCTAssertTrue(didHandOff)
@@ -274,7 +278,6 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.timeline.last?.message.content, "Hello")
         XCTAssertEqual(chatService.messageStatusCallCount, 0)
-        ActiveChatSessionManager.shared.reset()
     }
 
     func testHandleDisappearCancelsAcceptedPollingWithoutFailingMessage() async {
@@ -294,7 +297,7 @@ final class ChatSessionViewModelTests: XCTestCase {
                 }
             }
         )
-        ActiveChatSessionManager.shared.reset()
+        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
         let viewModel = ChatSessionViewModel(
             route: ChatSessionRoute(session: Self.session(
                 contentId: 7,
@@ -302,7 +305,8 @@ final class ChatSessionViewModelTests: XCTestCase {
             )),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
-                chatService: chatService
+                chatService: chatService,
+                activeSessionManager: activeSessionManager
             )
         )
 
@@ -324,8 +328,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.timeline.last?.message.content, "Hello")
         XCTAssertFalse(viewModel.timeline.last?.message.hasFailed ?? true)
-        XCTAssertEqual(ActiveChatSessionManager.shared.getSession(forContentId: 7)?.messageId, 501)
-        ActiveChatSessionManager.shared.reset()
+        XCTAssertEqual(activeSessionManager.getSession(forContentId: 7)?.messageId, 501)
     }
 
     func testSendMessageSurfacesTransportErrorWhenNotCancelled() async {
@@ -355,7 +358,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             articleTitle: "Tracked Article",
             hasPendingMessage: true
         )
-        ActiveChatSessionManager.shared.reset()
+        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
         let viewModel = ChatSessionViewModel(
             route: ChatSessionRoute(
                 session: session,
@@ -364,17 +367,17 @@ final class ChatSessionViewModelTests: XCTestCase {
                 pendingMessageId: 99
             ),
             dependencies: .test(
-                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored")
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                activeSessionManager: activeSessionManager
             )
         )
 
         viewModel.handleDisappear()
 
-        let tracked = ActiveChatSessionManager.shared.getSession(forContentId: 7)
+        let tracked = activeSessionManager.getSession(forContentId: 7)
         XCTAssertEqual(tracked?.id, 42)
         XCTAssertEqual(tracked?.messageId, 99)
         XCTAssertEqual(tracked?.contentTitle, "Tracked Article")
-        ActiveChatSessionManager.shared.reset()
     }
 
     func testHandleDisappearBeforeServerAckDoesNotTrackLocalPlaceholder() async {
@@ -383,7 +386,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             await ackGate.wait()
             throw CancellationError()
         })
-        ActiveChatSessionManager.shared.reset()
+        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
         let viewModel = ChatSessionViewModel(
             route: ChatSessionRoute(session: Self.session(
                 contentId: 7,
@@ -391,7 +394,8 @@ final class ChatSessionViewModelTests: XCTestCase {
             )),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
-                chatService: chatService
+                chatService: chatService,
+                activeSessionManager: activeSessionManager
             )
         )
 
@@ -407,10 +411,9 @@ final class ChatSessionViewModelTests: XCTestCase {
 
         viewModel.handleDisappear()
 
-        XCTAssertNil(ActiveChatSessionManager.shared.getSession(forContentId: 7))
+        XCTAssertNil(activeSessionManager.getSession(forContentId: 7))
         await ackGate.open()
         _ = await waitUntil { !viewModel.isSending }
-        ActiveChatSessionManager.shared.reset()
     }
 
     func testEmptyContextualSessionDoesNotAutoGenerateInitialSuggestions() async {
@@ -543,12 +546,13 @@ final class ChatSessionViewModelTests: XCTestCase {
 private extension ChatDependencies {
     static func test(
         transcriptionService: any SpeechTranscribing,
-        chatService: any ChatSessionServicing = MockChatSessionService()
+        chatService: any ChatSessionServicing = MockChatSessionService(),
+        activeSessionManager: ActiveChatSessionManager? = nil
     ) -> ChatDependencies {
         ChatDependencies(
             chatService: chatService,
             transcriptionService: transcriptionService,
-            activeSessionManager: .shared
+            activeSessionManager: activeSessionManager ?? .shared
         )
     }
 }

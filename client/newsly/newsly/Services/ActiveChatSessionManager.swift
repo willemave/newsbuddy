@@ -48,8 +48,9 @@ class ActiveChatSessionManager: ObservableObject {
     /// Completed sessions that haven't been viewed yet, keyed by session ID
     @Published private(set) var completedSessions: [Int: ActiveChatSession] = [:]  // sessionId -> session
 
-    private let chatService = ChatService.shared
+    private let chatService: any ChatSessionServicing
     private let notificationService = LocalNotificationService.shared
+    private let startsPolling: Bool
 
     /// Polling interval (500ms)
     private let pollingInterval: UInt64 = 500_000_000
@@ -61,7 +62,12 @@ class ActiveChatSessionManager: ObservableObject {
     private var sessionIdsByItemKey: [String: [Int]] = [:]  // item key -> newest-first session IDs
     private var authDidLogOutObserver: NSObjectProtocol?
 
-    private init() {
+    init(
+        chatService: any ChatSessionServicing = ChatService.shared,
+        startsPolling: Bool = true
+    ) {
+        self.chatService = chatService
+        self.startsPolling = startsPolling
         authDidLogOutObserver = NotificationCenter.default.addObserver(
             forName: .authDidLogOut,
             object: nil,
@@ -101,6 +107,8 @@ class ActiveChatSessionManager: ObservableObject {
         activeSessions[session.id] = activeSession
         insertSessionReference(sessionId: session.id, itemKey: activeSession.itemKey)
         logger.info("Started tracking session \(session.id)")
+
+        guard startsPolling else { return }
 
         // Start background polling
         let task = Task {
