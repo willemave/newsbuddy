@@ -142,5 +142,7 @@ jobs:
             -scheme newsly \
             -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17' \
             -derivedDataPath build/DerivedData \
+            -parallel-testing-enabled NO \
+            -maximum-parallel-testing-workers 1 \
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO
