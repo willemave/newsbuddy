@@ -1890,6 +1890,594 @@ struct APIAudioEpisodeShareResponse: Codable {
     }
 }
 
+struct APIBriefingIndexResponse: Codable {
+    let version: Int
+    let mastheadTitle: String
+    let mastheadDeck: String
+    let generatedAt: Date?
+    let lenses: [APIBriefingLensSummary]
+
+    init(
+        version: Int,
+        mastheadTitle: String,
+        mastheadDeck: String,
+        generatedAt: Date? = nil,
+        lenses: [APIBriefingLensSummary] = []
+    ) {
+        self.version = version
+        self.mastheadTitle = mastheadTitle
+        self.mastheadDeck = mastheadDeck
+        self.generatedAt = generatedAt
+        self.lenses = lenses
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case version = "version"
+        case mastheadTitle = "masthead_title"
+        case mastheadDeck = "masthead_deck"
+        case generatedAt = "generated_at"
+        case lenses = "lenses"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        mastheadTitle = try container.decode(String.self, forKey: .mastheadTitle)
+        mastheadDeck = try container.decode(String.self, forKey: .mastheadDeck)
+        if let generatedAtRaw = try container.decodeIfPresent(String.self, forKey: .generatedAt) {
+            guard let generatedAtParsed = ServerDate.parse(generatedAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .generatedAt, in: container, debugDescription: "Unparseable date for generatedAt")
+            }
+            generatedAt = generatedAtParsed
+        } else {
+            generatedAt = nil
+        }
+        lenses = try container.decode([APIBriefingLensSummary].self, forKey: .lenses)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(version, forKey: .version)
+        try container.encode(mastheadTitle, forKey: .mastheadTitle)
+        try container.encode(mastheadDeck, forKey: .mastheadDeck)
+        try container.encodeIfPresent(generatedAt.map(ServerDate.format), forKey: .generatedAt)
+        try container.encode(lenses, forKey: .lenses)
+    }
+}
+
+struct APIBriefingLensSummary: Codable {
+    let key: String
+    let tier: APIBriefingTier
+    let title: String
+    let deck: String
+    let position: Int
+    let segmentCount: Int
+    let unreadSourceCount: Int
+
+    init(
+        key: String,
+        tier: APIBriefingTier,
+        title: String,
+        deck: String,
+        position: Int,
+        segmentCount: Int,
+        unreadSourceCount: Int
+    ) {
+        self.key = key
+        self.tier = tier
+        self.title = title
+        self.deck = deck
+        self.position = position
+        self.segmentCount = segmentCount
+        self.unreadSourceCount = unreadSourceCount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case key = "key"
+        case tier = "tier"
+        case title = "title"
+        case deck = "deck"
+        case position = "position"
+        case segmentCount = "segment_count"
+        case unreadSourceCount = "unread_source_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decode(String.self, forKey: .key)
+        tier = try container.decode(APIBriefingTier.self, forKey: .tier)
+        title = try container.decode(String.self, forKey: .title)
+        deck = try container.decode(String.self, forKey: .deck)
+        position = try container.decode(Int.self, forKey: .position)
+        segmentCount = try container.decode(Int.self, forKey: .segmentCount)
+        unreadSourceCount = try container.decode(Int.self, forKey: .unreadSourceCount)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(key, forKey: .key)
+        try container.encode(tier, forKey: .tier)
+        try container.encode(title, forKey: .title)
+        try container.encode(deck, forKey: .deck)
+        try container.encode(position, forKey: .position)
+        try container.encode(segmentCount, forKey: .segmentCount)
+        try container.encode(unreadSourceCount, forKey: .unreadSourceCount)
+    }
+}
+
+struct APIBriefingLensResponse: Codable {
+    let version: Int
+    let lens: APIBriefingLensSummary
+    let segments: [APIBriefingSegment]
+    let sources: [APIBriefingSource]
+
+    init(
+        version: Int,
+        lens: APIBriefingLensSummary,
+        segments: [APIBriefingSegment] = [],
+        sources: [APIBriefingSource] = []
+    ) {
+        self.version = version
+        self.lens = lens
+        self.segments = segments
+        self.sources = sources
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case version = "version"
+        case lens = "lens"
+        case segments = "segments"
+        case sources = "sources"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        lens = try container.decode(APIBriefingLensSummary.self, forKey: .lens)
+        segments = try container.decode([APIBriefingSegment].self, forKey: .segments)
+        sources = try container.decode([APIBriefingSource].self, forKey: .sources)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(version, forKey: .version)
+        try container.encode(lens, forKey: .lens)
+        try container.encode(segments, forKey: .segments)
+        try container.encode(sources, forKey: .sources)
+    }
+}
+
+struct APIBriefingSegment: Codable {
+    let id: Int
+    let createdAt: Date
+    let status: String
+    let narrationText: String
+    let blocks: [APIBriefingBlock]
+    let sourceKeys: [String]
+
+    init(
+        id: Int,
+        createdAt: Date,
+        status: String,
+        narrationText: String,
+        blocks: [APIBriefingBlock] = [],
+        sourceKeys: [String] = []
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.status = status
+        self.narrationText = narrationText
+        self.blocks = blocks
+        self.sourceKeys = sourceKeys
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case createdAt = "created_at"
+        case status = "status"
+        case narrationText = "narration_text"
+        case blocks = "blocks"
+        case sourceKeys = "source_keys"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        let createdAtRaw = try container.decode(String.self, forKey: .createdAt)
+        guard let createdAtParsed = ServerDate.parse(createdAtRaw) else {
+            throw DecodingError.dataCorruptedError(forKey: .createdAt, in: container, debugDescription: "Unparseable date for createdAt")
+        }
+        createdAt = createdAtParsed
+        status = try container.decode(String.self, forKey: .status)
+        narrationText = try container.decode(String.self, forKey: .narrationText)
+        blocks = try container.decode([APIBriefingBlock].self, forKey: .blocks)
+        sourceKeys = try container.decode([String].self, forKey: .sourceKeys)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(ServerDate.format(createdAt), forKey: .createdAt)
+        try container.encode(status, forKey: .status)
+        try container.encode(narrationText, forKey: .narrationText)
+        try container.encode(blocks, forKey: .blocks)
+        try container.encode(sourceKeys, forKey: .sourceKeys)
+    }
+}
+
+struct APIBriefingSource: Codable {
+    let sourceKey: String
+    let kind: String
+    let id: Int
+    let title: String
+    let summary: String?
+    let keyPoints: [String]?
+    let url: String?
+    let imageUrl: String?
+    let thumbnailUrl: String?
+    let publishedAt: Date?
+    let contentType: APIContentType?
+    let read: Bool
+
+    init(
+        sourceKey: String,
+        kind: String,
+        id: Int,
+        title: String,
+        summary: String? = nil,
+        keyPoints: [String]? = nil,
+        url: String? = nil,
+        imageUrl: String? = nil,
+        thumbnailUrl: String? = nil,
+        publishedAt: Date? = nil,
+        contentType: APIContentType? = nil,
+        read: Bool = false
+    ) {
+        self.sourceKey = sourceKey
+        self.kind = kind
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.keyPoints = keyPoints
+        self.url = url
+        self.imageUrl = imageUrl
+        self.thumbnailUrl = thumbnailUrl
+        self.publishedAt = publishedAt
+        self.contentType = contentType
+        self.read = read
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sourceKey = "source_key"
+        case kind = "kind"
+        case id = "id"
+        case title = "title"
+        case summary = "summary"
+        case keyPoints = "key_points"
+        case url = "url"
+        case imageUrl = "image_url"
+        case thumbnailUrl = "thumbnail_url"
+        case publishedAt = "published_at"
+        case contentType = "content_type"
+        case read = "read"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceKey = try container.decode(String.self, forKey: .sourceKey)
+        kind = try container.decode(String.self, forKey: .kind)
+        id = try container.decode(Int.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        keyPoints = try container.decodeIfPresent([String].self, forKey: .keyPoints)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        imageUrl = try container.decodeIfPresent(String.self, forKey: .imageUrl)
+        thumbnailUrl = try container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
+        if let publishedAtRaw = try container.decodeIfPresent(String.self, forKey: .publishedAt) {
+            guard let publishedAtParsed = ServerDate.parse(publishedAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .publishedAt, in: container, debugDescription: "Unparseable date for publishedAt")
+            }
+            publishedAt = publishedAtParsed
+        } else {
+            publishedAt = nil
+        }
+        contentType = try container.decodeIfPresent(APIContentType.self, forKey: .contentType)
+        read = try container.decode(Bool.self, forKey: .read)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sourceKey, forKey: .sourceKey)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(summary, forKey: .summary)
+        try container.encodeIfPresent(keyPoints, forKey: .keyPoints)
+        try container.encodeIfPresent(url, forKey: .url)
+        try container.encodeIfPresent(imageUrl, forKey: .imageUrl)
+        try container.encodeIfPresent(thumbnailUrl, forKey: .thumbnailUrl)
+        try container.encodeIfPresent(publishedAt.map(ServerDate.format), forKey: .publishedAt)
+        try container.encodeIfPresent(contentType, forKey: .contentType)
+        try container.encode(read, forKey: .read)
+    }
+}
+
+struct APIBriefingReadMarkRequest: Codable {
+    let sourceKeys: [String]
+
+    init(
+        sourceKeys: [String]
+    ) {
+        self.sourceKeys = sourceKeys
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sourceKeys = "source_keys"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceKeys = try container.decode([String].self, forKey: .sourceKeys)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sourceKeys, forKey: .sourceKeys)
+    }
+}
+
+struct APIBriefingReadMarkResponse: Codable {
+    let marked: Int
+    let version: Int
+
+    init(
+        marked: Int,
+        version: Int
+    ) {
+        self.marked = marked
+        self.version = version
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case marked = "marked"
+        case version = "version"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        marked = try container.decode(Int.self, forKey: .marked)
+        version = try container.decode(Int.self, forKey: .version)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(marked, forKey: .marked)
+        try container.encode(version, forKey: .version)
+    }
+}
+
+struct APIBriefingDigSearchRequest: Codable {
+    let fragment: String
+
+    init(
+        fragment: String
+    ) {
+        self.fragment = fragment
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case fragment = "fragment"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fragment = try container.decode(String.self, forKey: .fragment)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fragment, forKey: .fragment)
+    }
+}
+
+struct APIBriefingDigSearchResponse: Codable {
+    let results: [APIBriefingDigSearchResult]
+    let elapsedMs: Int
+
+    init(
+        results: [APIBriefingDigSearchResult] = [],
+        elapsedMs: Int
+    ) {
+        self.results = results
+        self.elapsedMs = elapsedMs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case results = "results"
+        case elapsedMs = "elapsed_ms"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        results = try container.decode([APIBriefingDigSearchResult].self, forKey: .results)
+        elapsedMs = try container.decode(Int.self, forKey: .elapsedMs)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(results, forKey: .results)
+        try container.encode(elapsedMs, forKey: .elapsedMs)
+    }
+}
+
+struct APIBriefingDigSearchResult: Codable {
+    let title: String
+    let url: String
+    let snippet: String?
+    let publishedDate: String?
+
+    init(
+        title: String,
+        url: String,
+        snippet: String? = nil,
+        publishedDate: String? = nil
+    ) {
+        self.title = title
+        self.url = url
+        self.snippet = snippet
+        self.publishedDate = publishedDate
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title = "title"
+        case url = "url"
+        case snippet = "snippet"
+        case publishedDate = "published_date"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        url = try container.decode(String.self, forKey: .url)
+        snippet = try container.decodeIfPresent(String.self, forKey: .snippet)
+        publishedDate = try container.decodeIfPresent(String.self, forKey: .publishedDate)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(title, forKey: .title)
+        try container.encode(url, forKey: .url)
+        try container.encodeIfPresent(snippet, forKey: .snippet)
+        try container.encodeIfPresent(publishedDate, forKey: .publishedDate)
+    }
+}
+
+struct APIBriefingDigSummarizeRequest: Codable {
+    let fragment: String
+    let passageContext: String
+    let results: [APIBriefingDigSearchResult]
+
+    init(
+        fragment: String,
+        passageContext: String,
+        results: [APIBriefingDigSearchResult] = []
+    ) {
+        self.fragment = fragment
+        self.passageContext = passageContext
+        self.results = results
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case fragment = "fragment"
+        case passageContext = "passage_context"
+        case results = "results"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fragment = try container.decode(String.self, forKey: .fragment)
+        passageContext = try container.decode(String.self, forKey: .passageContext)
+        results = try container.decode([APIBriefingDigSearchResult].self, forKey: .results)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fragment, forKey: .fragment)
+        try container.encode(passageContext, forKey: .passageContext)
+        try container.encode(results, forKey: .results)
+    }
+}
+
+struct APIBriefingDigSummarizeResponse: Codable {
+    let summary: String
+    let model: String
+    let elapsedMs: Int
+
+    init(
+        summary: String,
+        model: String,
+        elapsedMs: Int
+    ) {
+        self.summary = summary
+        self.model = model
+        self.elapsedMs = elapsedMs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case summary = "summary"
+        case model = "model"
+        case elapsedMs = "elapsed_ms"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        summary = try container.decode(String.self, forKey: .summary)
+        model = try container.decode(String.self, forKey: .model)
+        elapsedMs = try container.decode(Int.self, forKey: .elapsedMs)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(model, forKey: .model)
+        try container.encode(elapsedMs, forKey: .elapsedMs)
+    }
+}
+
+struct APIBriefingNarrationRequest: Codable {
+    let lensKey: String
+
+    init(
+        lensKey: String
+    ) {
+        self.lensKey = lensKey
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case lensKey = "lens_key"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        lensKey = try container.decode(String.self, forKey: .lensKey)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(lensKey, forKey: .lensKey)
+    }
+}
+
+struct APIBriefingRefreshResponse: Codable {
+    let enqueued: Bool
+    let version: Int
+
+    init(
+        enqueued: Bool,
+        version: Int
+    ) {
+        self.enqueued = enqueued
+        self.version = version
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case enqueued = "enqueued"
+        case version = "version"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enqueued = try container.decode(Bool.self, forKey: .enqueued)
+        version = try container.decode(Int.self, forKey: .version)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enqueued, forKey: .enqueued)
+        try container.encode(version, forKey: .version)
+    }
+}
+
 struct APIScraperConfigResponse: Codable {
     let id: Int
     let scraperType: String
@@ -4983,6 +5571,78 @@ struct APIAssistantScreenContext: Codable {
     }
 }
 
+struct APIBriefingBlock: Codable {
+    let type: APIBriefingBlockType
+    let weight: String?
+    let paragraphs: [APIBriefingParagraph]?
+    let sourceKey: String?
+    let imageUrl: String?
+    let thumbnailUrl: String?
+    let caption: String?
+    let placement: String?
+    let text: String?
+
+    init(
+        type: APIBriefingBlockType,
+        weight: String? = nil,
+        paragraphs: [APIBriefingParagraph]? = nil,
+        sourceKey: String? = nil,
+        imageUrl: String? = nil,
+        thumbnailUrl: String? = nil,
+        caption: String? = nil,
+        placement: String? = nil,
+        text: String? = nil
+    ) {
+        self.type = type
+        self.weight = weight
+        self.paragraphs = paragraphs
+        self.sourceKey = sourceKey
+        self.imageUrl = imageUrl
+        self.thumbnailUrl = thumbnailUrl
+        self.caption = caption
+        self.placement = placement
+        self.text = text
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type = "type"
+        case weight = "weight"
+        case paragraphs = "paragraphs"
+        case sourceKey = "source_key"
+        case imageUrl = "image_url"
+        case thumbnailUrl = "thumbnail_url"
+        case caption = "caption"
+        case placement = "placement"
+        case text = "text"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(APIBriefingBlockType.self, forKey: .type)
+        weight = try container.decodeIfPresent(String.self, forKey: .weight)
+        paragraphs = try container.decodeIfPresent([APIBriefingParagraph].self, forKey: .paragraphs)
+        sourceKey = try container.decodeIfPresent(String.self, forKey: .sourceKey)
+        imageUrl = try container.decodeIfPresent(String.self, forKey: .imageUrl)
+        thumbnailUrl = try container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
+        caption = try container.decodeIfPresent(String.self, forKey: .caption)
+        placement = try container.decodeIfPresent(String.self, forKey: .placement)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encodeIfPresent(weight, forKey: .weight)
+        try container.encodeIfPresent(paragraphs, forKey: .paragraphs)
+        try container.encodeIfPresent(sourceKey, forKey: .sourceKey)
+        try container.encodeIfPresent(imageUrl, forKey: .imageUrl)
+        try container.encodeIfPresent(thumbnailUrl, forKey: .thumbnailUrl)
+        try container.encodeIfPresent(caption, forKey: .caption)
+        try container.encodeIfPresent(placement, forKey: .placement)
+        try container.encodeIfPresent(text, forKey: .text)
+    }
+}
+
 struct APIScraperConfigStatsResponse: Codable {
     let totalCount: Int
     let completedCount: Int
@@ -5983,6 +6643,30 @@ struct APICouncilCandidate: Codable {
     }
 }
 
+struct APIBriefingParagraph: Codable {
+    let runs: [APIBriefingRun]
+
+    init(
+        runs: [APIBriefingRun] = []
+    ) {
+        self.runs = runs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case runs = "runs"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        runs = try container.decode([APIBriefingRun].self, forKey: .runs)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(runs, forKey: .runs)
+    }
+}
+
 struct APIOnboardingSuggestion: Codable {
     let suggestionType: APIOnboardingSuggestionType
     let title: String?
@@ -6233,6 +6917,54 @@ struct APISubmissionFeedInitialDownloadResponse: Codable {
         try container.encodeIfPresent(saved, forKey: .saved)
         try container.encodeIfPresent(duplicates, forKey: .duplicates)
         try container.encodeIfPresent(errors, forKey: .errors)
+    }
+}
+
+struct APIBriefingRun: Codable {
+    let kind: APIBriefingRunKind
+    let text: String
+    let sourceKey: String?
+    let insightId: String?
+    let bold: Bool
+
+    init(
+        kind: APIBriefingRunKind,
+        text: String,
+        sourceKey: String? = nil,
+        insightId: String? = nil,
+        bold: Bool = false
+    ) {
+        self.kind = kind
+        self.text = text
+        self.sourceKey = sourceKey
+        self.insightId = insightId
+        self.bold = bold
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case text = "text"
+        case sourceKey = "source_key"
+        case insightId = "insight_id"
+        case bold = "bold"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(APIBriefingRunKind.self, forKey: .kind)
+        text = try container.decode(String.self, forKey: .text)
+        sourceKey = try container.decodeIfPresent(String.self, forKey: .sourceKey)
+        insightId = try container.decodeIfPresent(String.self, forKey: .insightId)
+        bold = try container.decode(Bool.self, forKey: .bold)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(text, forKey: .text)
+        try container.encodeIfPresent(sourceKey, forKey: .sourceKey)
+        try container.encodeIfPresent(insightId, forKey: .insightId)
+        try container.encode(bold, forKey: .bold)
     }
 }
 

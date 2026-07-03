@@ -89,11 +89,12 @@ const (
 	TaskTypeGenerateAudioEpisode TaskType = "generate_audio_episode"
 	TaskTypeGenerateLearningDeck TaskType = "generate_learning_deck"
 	TaskTypeRunLLMTask TaskType = "run_llm_task"
+	TaskTypeBriefingRefresh TaskType = "briefing_refresh"
 )
 
 func (v TaskType) Known() bool {
 	switch v {
-	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadAudio, TaskTypeTranscribe, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateInsightReport, TaskTypeGenerateAudioEpisode, TaskTypeGenerateLearningDeck, TaskTypeRunLLMTask:
+	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadAudio, TaskTypeTranscribe, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateInsightReport, TaskTypeGenerateAudioEpisode, TaskTypeGenerateLearningDeck, TaskTypeRunLLMTask, TaskTypeBriefingRefresh:
 		return true
 	default:
 		return false
@@ -221,6 +222,57 @@ const (
 func (v SubmissionOutcome) Known() bool {
 	switch v {
 	case SubmissionOutcomeQueued, SubmissionOutcomeProcessing, SubmissionOutcomeCompleted, SubmissionOutcomeFailed, SubmissionOutcomeSkipped, SubmissionOutcomeSubscribed, SubmissionOutcomeAlreadySubscribed, SubmissionOutcomeFeedNotFound, SubmissionOutcomeFeedFetchFailed, SubmissionOutcomeFeedSubscriptionFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+type BriefingTier string
+
+const (
+	BriefingTierAudio BriefingTier = "audio"
+	BriefingTierLongform BriefingTier = "longform"
+	BriefingTierNews BriefingTier = "news"
+)
+
+func (v BriefingTier) Known() bool {
+	switch v {
+	case BriefingTierAudio, BriefingTierLongform, BriefingTierNews:
+		return true
+	default:
+		return false
+	}
+}
+
+type BriefingBlockType string
+
+const (
+	BriefingBlockTypePassage BriefingBlockType = "passage"
+	BriefingBlockTypeFigure BriefingBlockType = "figure"
+	BriefingBlockTypePullquote BriefingBlockType = "pullquote"
+)
+
+func (v BriefingBlockType) Known() bool {
+	switch v {
+	case BriefingBlockTypePassage, BriefingBlockTypeFigure, BriefingBlockTypePullquote:
+		return true
+	default:
+		return false
+	}
+}
+
+type BriefingRunKind string
+
+const (
+	BriefingRunKindText BriefingRunKind = "text"
+	BriefingRunKindSourceLink BriefingRunKind = "source_link"
+	BriefingRunKindInsight BriefingRunKind = "insight"
+)
+
+func (v BriefingRunKind) Known() bool {
+	switch v {
+	case BriefingRunKindText, BriefingRunKindSourceLink, BriefingRunKindInsight:
 		return true
 	default:
 		return false
@@ -378,6 +430,69 @@ type JobStatusResponse struct {
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	ErrorMessage *string `json:"error_message,omitempty"`
+}
+
+type BriefingIndexResponse struct {
+	Version int `json:"version"`
+	MastheadTitle string `json:"masthead_title"`
+	MastheadDeck string `json:"masthead_deck"`
+	GeneratedAt *time.Time `json:"generated_at,omitempty"`
+	Lenses []BriefingLensSummary `json:"lenses,omitempty"`
+}
+
+type BriefingLensSummary struct {
+	Key string `json:"key"`
+	Tier BriefingTier `json:"tier"`
+	Title string `json:"title"`
+	Deck string `json:"deck"`
+	Position int `json:"position"`
+	SegmentCount int `json:"segment_count"`
+	UnreadSourceCount int `json:"unread_source_count"`
+}
+
+type BriefingLensResponse struct {
+	Version int `json:"version"`
+	Lens BriefingLensSummary `json:"lens"`
+	Segments []BriefingSegment `json:"segments,omitempty"`
+	Sources []BriefingSource `json:"sources,omitempty"`
+}
+
+type BriefingSegment struct {
+	ID int `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	Status string `json:"status"`
+	NarrationText string `json:"narration_text"`
+	Blocks []BriefingBlock `json:"blocks,omitempty"`
+	SourceKeys []string `json:"source_keys,omitempty"`
+}
+
+type BriefingSource struct {
+	SourceKey string `json:"source_key"`
+	Kind string `json:"kind"`
+	ID int `json:"id"`
+	Title string `json:"title"`
+	Summary *string `json:"summary,omitempty"`
+	KeyPoints []string `json:"key_points,omitempty"`
+	URL *string `json:"url,omitempty"`
+	ImageURL *string `json:"image_url,omitempty"`
+	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
+	ContentType *ContentType `json:"content_type,omitempty"`
+	Read *bool `json:"read,omitempty"`
+}
+
+type BriefingReadMarkRequest struct {
+	SourceKeys []string `json:"source_keys"`
+}
+
+type BriefingReadMarkResponse struct {
+	Marked int `json:"marked"`
+	Version int `json:"version"`
+}
+
+type BriefingRefreshResponse struct {
+	Enqueued bool `json:"enqueued"`
+	Version int `json:"version"`
 }
 
 type ScraperConfigResponse struct {
@@ -606,6 +721,18 @@ type SubmissionStatusResponse struct {
 	FeedSubscription *SubmissionFeedSubscriptionResponse `json:"feed_subscription,omitempty"`
 }
 
+type BriefingBlock struct {
+	Type BriefingBlockType `json:"type"`
+	Weight *string `json:"weight,omitempty"`
+	Paragraphs []BriefingParagraph `json:"paragraphs,omitempty"`
+	SourceKey *string `json:"source_key,omitempty"`
+	ImageURL *string `json:"image_url,omitempty"`
+	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
+	Caption *string `json:"caption,omitempty"`
+	Placement *string `json:"placement,omitempty"`
+	Text *string `json:"text,omitempty"`
+}
+
 type ScraperConfigStatsResponse struct {
 	TotalCount int `json:"total_count"`
 	CompletedCount int `json:"completed_count"`
@@ -667,6 +794,10 @@ type SubmissionFeedSubscriptionResponse struct {
 	InitialDownload *SubmissionFeedInitialDownloadResponse `json:"initial_download,omitempty"`
 }
 
+type BriefingParagraph struct {
+	Runs []BriefingRun `json:"runs,omitempty"`
+}
+
 type OnboardingSuggestion struct {
 	SuggestionType OnboardingSuggestionType `json:"suggestion_type"`
 	Title *string `json:"title,omitempty"`
@@ -691,4 +822,12 @@ type SubmissionFeedInitialDownloadResponse struct {
 	Saved *int `json:"saved,omitempty"`
 	Duplicates *int `json:"duplicates,omitempty"`
 	Errors *int `json:"errors,omitempty"`
+}
+
+type BriefingRun struct {
+	Kind BriefingRunKind `json:"kind"`
+	Text string `json:"text"`
+	SourceKey *string `json:"source_key,omitempty"`
+	InsightID *string `json:"insight_id,omitempty"`
+	Bold *bool `json:"bold,omitempty"`
 }

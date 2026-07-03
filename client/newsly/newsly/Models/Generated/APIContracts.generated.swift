@@ -138,6 +138,7 @@ enum APITaskType: Codable, Equatable, Hashable {
     case generate_audio_episode
     case generate_learning_deck
     case run_llm_task
+    case briefing_refresh
     case unknown(String)
 
     static let knownCases: [APITaskType] = [
@@ -164,6 +165,7 @@ enum APITaskType: Codable, Equatable, Hashable {
         .generate_audio_episode,
         .generate_learning_deck,
         .run_llm_task,
+        .briefing_refresh,
     ]
 
     var rawValue: String {
@@ -191,6 +193,7 @@ enum APITaskType: Codable, Equatable, Hashable {
         case .generate_audio_episode: "generate_audio_episode"
         case .generate_learning_deck: "generate_learning_deck"
         case .run_llm_task: "run_llm_task"
+        case .briefing_refresh: "briefing_refresh"
         case .unknown(let rawValue): rawValue
         }
     }
@@ -220,6 +223,7 @@ enum APITaskType: Codable, Equatable, Hashable {
         case "generate_audio_episode": self = .generate_audio_episode
         case "generate_learning_deck": self = .generate_learning_deck
         case "run_llm_task": self = .run_llm_task
+        case "briefing_refresh": self = .briefing_refresh
         default: self = .unknown(rawValue)
         }
     }
@@ -528,6 +532,7 @@ enum APIAudioEpisodeKind: Codable, Equatable, Hashable {
     case content_council_discussion
     case news_item_discussion
     case custom_narration
+    case briefing_narration
     case unknown(String)
 
     static let knownCases: [APIAudioEpisodeKind] = [
@@ -535,6 +540,7 @@ enum APIAudioEpisodeKind: Codable, Equatable, Hashable {
         .content_council_discussion,
         .news_item_discussion,
         .custom_narration,
+        .briefing_narration,
     ]
 
     var rawValue: String {
@@ -543,6 +549,7 @@ enum APIAudioEpisodeKind: Codable, Equatable, Hashable {
         case .content_council_discussion: "content_council_discussion"
         case .news_item_discussion: "news_item_discussion"
         case .custom_narration: "custom_narration"
+        case .briefing_narration: "briefing_narration"
         case .unknown(let rawValue): rawValue
         }
     }
@@ -553,6 +560,7 @@ enum APIAudioEpisodeKind: Codable, Equatable, Hashable {
         case "content_council_discussion": self = .content_council_discussion
         case "news_item_discussion": self = .news_item_discussion
         case "custom_narration": self = .custom_narration
+        case "briefing_narration": self = .briefing_narration
         default: self = .unknown(rawValue)
         }
     }
@@ -611,6 +619,24 @@ enum APIAudioEpisodeStatus: Codable, Equatable, Hashable {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
     }
+}
+
+enum APIBriefingTier: String, Codable, CaseIterable {
+    case audio = "audio"
+    case longform = "longform"
+    case news = "news"
+}
+
+enum APIBriefingBlockType: String, Codable, CaseIterable {
+    case passage = "passage"
+    case figure = "figure"
+    case pullquote = "pullquote"
+}
+
+enum APIBriefingRunKind: String, Codable, CaseIterable {
+    case text = "text"
+    case source_link = "source_link"
+    case insight = "insight"
 }
 
 enum APICliLinkStatus: Codable, Equatable, Hashable {

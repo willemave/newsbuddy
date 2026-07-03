@@ -58,6 +58,9 @@ final class APIContractsGeneratedTests: XCTestCase {
         XCTAssertThrowsError(try decode(APIContentClassification.self, rawValue: "future_class"))
         XCTAssertThrowsError(try decode(APIChatMessageRole.self, rawValue: "future_role"))
         XCTAssertThrowsError(try decode(APILLMProvider.self, rawValue: "future_provider"))
+        XCTAssertThrowsError(try decode(APIBriefingTier.self, rawValue: "future_tier"))
+        XCTAssertThrowsError(try decode(APIBriefingBlockType.self, rawValue: "future_block"))
+        XCTAssertThrowsError(try decode(APIBriefingRunKind.self, rawValue: "future_run"))
     }
 
     func testSubmitContentRequestEncodesContractKeys() throws {

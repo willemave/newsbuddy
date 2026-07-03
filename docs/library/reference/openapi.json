@@ -787,7 +787,8 @@
           "fast_news_digest",
           "content_council_discussion",
           "news_item_discussion",
-          "custom_narration"
+          "custom_narration",
+          "briefing_narration"
         ],
         "title": "AudioEpisodeKind",
         "type": "string"
@@ -1093,6 +1094,661 @@
         ],
         "title": "Body_transcribeOpenaiTranscriptionsAudio",
         "type": "object"
+      },
+      "BriefingBlockDto": {
+        "properties": {
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "paragraphs": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BriefingParagraphDto"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paragraphs"
+          },
+          "placement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement"
+          },
+          "source_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Key"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
+          "type": {
+            "$ref": "#/components/schemas/BriefingBlockType"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "BriefingBlockDto",
+        "type": "object"
+      },
+      "BriefingBlockType": {
+        "description": "Briefing document block kinds.",
+        "enum": [
+          "passage",
+          "figure",
+          "pullquote"
+        ],
+        "title": "BriefingBlockType",
+        "type": "string"
+      },
+      "BriefingDigSearchRequest": {
+        "properties": {
+          "fragment": {
+            "maxLength": 300,
+            "minLength": 3,
+            "title": "Fragment",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fragment"
+        ],
+        "title": "BriefingDigSearchRequest",
+        "type": "object"
+      },
+      "BriefingDigSearchResponse": {
+        "properties": {
+          "elapsed_ms": {
+            "minimum": 0.0,
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/BriefingDigSearchResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elapsed_ms"
+        ],
+        "title": "BriefingDigSearchResponse",
+        "type": "object"
+      },
+      "BriefingDigSearchResult": {
+        "properties": {
+          "published_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Date"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "BriefingDigSearchResult",
+        "type": "object"
+      },
+      "BriefingDigSummarizeRequest": {
+        "properties": {
+          "fragment": {
+            "maxLength": 300,
+            "minLength": 3,
+            "title": "Fragment",
+            "type": "string"
+          },
+          "passage_context": {
+            "maxLength": 2000,
+            "title": "Passage Context",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/BriefingDigSearchResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fragment",
+          "passage_context"
+        ],
+        "title": "BriefingDigSummarizeRequest",
+        "type": "object"
+      },
+      "BriefingDigSummarizeResponse": {
+        "properties": {
+          "elapsed_ms": {
+            "minimum": 0.0,
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "model",
+          "elapsed_ms"
+        ],
+        "title": "BriefingDigSummarizeResponse",
+        "type": "object"
+      },
+      "BriefingIndexResponse": {
+        "properties": {
+          "generated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated At"
+          },
+          "lenses": {
+            "items": {
+              "$ref": "#/components/schemas/BriefingLensSummary"
+            },
+            "title": "Lenses",
+            "type": "array"
+          },
+          "masthead_deck": {
+            "title": "Masthead Deck",
+            "type": "string"
+          },
+          "masthead_title": {
+            "title": "Masthead Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "masthead_title",
+          "masthead_deck"
+        ],
+        "title": "BriefingIndexResponse",
+        "type": "object"
+      },
+      "BriefingLensResponse": {
+        "properties": {
+          "lens": {
+            "$ref": "#/components/schemas/BriefingLensSummary"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/BriefingSegmentDto"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/BriefingSourceDto"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "lens"
+        ],
+        "title": "BriefingLensResponse",
+        "type": "object"
+      },
+      "BriefingLensSummary": {
+        "properties": {
+          "deck": {
+            "title": "Deck",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "segment_count": {
+            "title": "Segment Count",
+            "type": "integer"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/BriefingTier"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unread_source_count": {
+            "title": "Unread Source Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "tier",
+          "title",
+          "deck",
+          "position",
+          "segment_count",
+          "unread_source_count"
+        ],
+        "title": "BriefingLensSummary",
+        "type": "object"
+      },
+      "BriefingNarrationRequest": {
+        "properties": {
+          "lens_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Lens Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lens_key"
+        ],
+        "title": "BriefingNarrationRequest",
+        "type": "object"
+      },
+      "BriefingParagraphDto": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/BriefingRunDto"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "title": "BriefingParagraphDto",
+        "type": "object"
+      },
+      "BriefingReadMarkRequest": {
+        "properties": {
+          "source_keys": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Source Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_keys"
+        ],
+        "title": "BriefingReadMarkRequest",
+        "type": "object"
+      },
+      "BriefingReadMarkResponse": {
+        "properties": {
+          "marked": {
+            "minimum": 0.0,
+            "title": "Marked",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "marked",
+          "version"
+        ],
+        "title": "BriefingReadMarkResponse",
+        "type": "object"
+      },
+      "BriefingRefreshResponse": {
+        "properties": {
+          "enqueued": {
+            "title": "Enqueued",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enqueued",
+          "version"
+        ],
+        "title": "BriefingRefreshResponse",
+        "type": "object"
+      },
+      "BriefingRunDto": {
+        "properties": {
+          "bold": {
+            "default": false,
+            "title": "Bold",
+            "type": "boolean"
+          },
+          "insight_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insight Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BriefingRunKind"
+          },
+          "source_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Key"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "BriefingRunDto",
+        "type": "object"
+      },
+      "BriefingRunKind": {
+        "description": "Inline run kinds inside server-normalized briefing prose.",
+        "enum": [
+          "text",
+          "source_link",
+          "insight"
+        ],
+        "title": "BriefingRunKind",
+        "type": "string"
+      },
+      "BriefingSegmentDto": {
+        "properties": {
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/BriefingBlockDto"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "narration_text": {
+            "title": "Narration Text",
+            "type": "string"
+          },
+          "source_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Keys",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "status",
+          "narration_text"
+        ],
+        "title": "BriefingSegmentDto",
+        "type": "object"
+      },
+      "BriefingSourceDto": {
+        "properties": {
+          "content_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "key_points": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Points"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "read": {
+            "default": false,
+            "title": "Read",
+            "type": "boolean"
+          },
+          "source_key": {
+            "title": "Source Key",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "source_key",
+          "kind",
+          "id",
+          "title"
+        ],
+        "title": "BriefingSourceDto",
+        "type": "object"
+      },
+      "BriefingTier": {
+        "description": "Top-level briefing lens tier.",
+        "enum": [
+          "audio",
+          "longform",
+          "news"
+        ],
+        "title": "BriefingTier",
+        "type": "string"
       },
       "BulkMarkReadRequest": {
         "description": "Request to mark multiple content items as read.",
@@ -9595,6 +10251,334 @@
           }
         ],
         "summary": "Record content interaction"
+      }
+    },
+    "/api/briefing": {
+      "get": {
+        "operationId": "getBriefingIndex",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingIndexResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Index",
+        "tags": [
+          "briefing"
+        ]
+      }
+    },
+    "/api/briefing/dig/search": {
+      "post": {
+        "operationId": "digBriefingSearch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BriefingDigSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingDigSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Dig Search",
+        "tags": [
+          "briefing"
+        ]
+      }
+    },
+    "/api/briefing/dig/summarize": {
+      "post": {
+        "operationId": "digBriefingSummarize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BriefingDigSummarizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingDigSummarizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Dig Summarize",
+        "tags": [
+          "briefing"
+        ]
+      }
+    },
+    "/api/briefing/lenses/{lens_key}": {
+      "get": {
+        "operationId": "getBriefingLensesLens",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lens_key",
+            "required": true,
+            "schema": {
+              "title": "Lens Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingLensResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Lens",
+        "tags": [
+          "briefing"
+        ]
+      }
+    },
+    "/api/briefing/narration": {
+      "post": {
+        "operationId": "narrationBriefing",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "delivery",
+            "required": false,
+            "schema": {
+              "default": "background",
+              "enum": [
+                "background",
+                "stream",
+                "inline"
+              ],
+              "title": "Delivery",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BriefingNarrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEpisodeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Narration",
+        "tags": [
+          "briefing"
+        ]
+      }
+    },
+    "/api/briefing/read-marks": {
+      "post": {
+        "operationId": "markBriefingRead",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BriefingReadMarkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingReadMarkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Read",
+        "tags": [
+          "briefing"
+        ]
+      }
+    },
+    "/api/briefing/refresh": {
+      "post": {
+        "operationId": "refreshBriefing",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingRefreshResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Refresh",
+        "tags": [
+          "briefing"
+        ]
       }
     },
     "/api/content/": {
