@@ -95,8 +95,15 @@ def assign_pending_lenses(
         elif source.kind == "news":
             unassigned_news.append((row, source))
 
-    changed += _assign_by_centroid(
+    changed += _assign_stale_misc_lens(
         db, user_id=user_id, pending_sources=unassigned_news, settings=settings
+    )
+    remaining = [(row, source) for row, source in unassigned_news if row.lens_key is None]
+    changed += _assign_by_centroid(
+        db,
+        user_id=user_id,
+        pending_sources=remaining,
+        settings=settings,
     )
     remaining = [(row, source) for row, source in unassigned_news if row.lens_key is None]
     changed += _assign_new_or_misc_lens(
@@ -245,6 +252,30 @@ def _assign_by_centroid(
     return changed
 
 
+def _assign_stale_misc_lens(
+    db: Session,
+    *,
+    user_id: int,
+    pending_sources: list[tuple[BriefingPendingSource, BriefingSource]],
+    settings: Settings,
+) -> int:
+    unassigned = [(row, source) for row, source in pending_sources if row.lens_key is None]
+    if not unassigned or len(unassigned) >= settings.briefing_new_lens_min_items:
+        return 0
+    now = datetime.now(UTC).replace(tzinfo=None)
+    oldest = min(
+        (row.enqueued_at for row, _source in unassigned if row.enqueued_at is not None),
+        default=now,
+    )
+    if (now - oldest).total_seconds() < 86_400:
+        return 0
+
+    lens = _get_or_create_misc_lens(db, user_id=user_id)
+    for row, _source in unassigned:
+        row.lens_key = lens.key
+    return len(unassigned)
+
+
 def _assign_new_or_misc_lens(
     db: Session,
     *,
@@ -277,21 +308,25 @@ def _assign_new_or_misc_lens(
             centroid=_centroid_for_sources(sources),
         )
     elif age_seconds >= 86_400:
-        lens = _get_or_create_lens(
-            db,
-            user_id=user_id,
-            key=MISC_LENS_KEY,
-            tier="news",
-            title="Briefs",
-            deck="A mixed desk of fast reads that did not form a larger category yet.",
-            position=_next_news_position(db, user_id=user_id),
-        )
+        lens = _get_or_create_misc_lens(db, user_id=user_id)
     else:
         return 0
 
     for row, _source in unassigned:
         row.lens_key = lens.key
     return len(unassigned)
+
+
+def _get_or_create_misc_lens(db: Session, *, user_id: int) -> BriefingLens:
+    return _get_or_create_lens(
+        db,
+        user_id=user_id,
+        key=MISC_LENS_KEY,
+        tier="news",
+        title="Briefs",
+        deck="A mixed desk of fast reads that did not form a larger category yet.",
+        position=_next_news_position(db, user_id=user_id),
+    )
 
 
 def _default_lens_name(sources: list[BriefingSource]) -> LensName:
