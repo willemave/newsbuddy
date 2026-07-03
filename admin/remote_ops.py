@@ -325,6 +325,7 @@ def briefing_refresh(
                 user_id=user_id,
                 mode=refresh_mode,
                 use_llm=use_llm,
+                release_db_during_compose=True,
             )
             session.commit()
             return {

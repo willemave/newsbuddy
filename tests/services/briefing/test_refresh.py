@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
@@ -63,6 +64,94 @@ def test_full_refresh_builds_segments_and_schedules_sweep(
         .count()
         == 1
     )
+
+
+def test_release_path_full_refresh_builds_segments_and_schedules_sweep(
+    db_session: Session,
+    test_user: User,
+    content_factory,
+    status_entry_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    contents = [
+        _create_unread_article(
+            content_factory,
+            status_entry_factory,
+            test_user,
+            index=index,
+        )
+        for index in range(3)
+    ]
+
+    result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="full",
+        use_llm=False,
+        release_db_during_compose=True,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert result.appended_segments == 1
+    assert result.pending_added == 3
+    assert result.sweep_enqueued is True
+    lens = db_session.query(BriefingLens).filter(BriefingLens.key == "articles").one()
+    segment = db_session.query(BriefingSegment).filter(BriefingSegment.lens_id == lens.id).one()
+    assert segment.status == "active"
+    assert segment.source_keys == [f"content:{content.id}" for content in reversed(contents)]
+
+
+def test_release_path_full_refresh_preserves_current_segments_when_compose_fails(
+    db_session: Session,
+    test_user: User,
+    content_factory,
+    status_entry_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    for index in range(3):
+        _create_unread_article(
+            content_factory,
+            status_entry_factory,
+            test_user,
+            index=index,
+        )
+    run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="full",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+    existing_segment = db_session.query(BriefingSegment).one()
+
+    def fail_compose(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise TimeoutError("compose timed out")
+
+    monkeypatch.setattr("app.services.briefing.refresh.compose_window", fail_compose)
+    with pytest.raises(TimeoutError, match="compose timed out"):
+        run_briefing_refresh(
+            db_session,
+            user_id=user_id,
+            mode="full",
+            use_llm=True,
+            release_db_during_compose=True,
+            settings=settings,
+        )
+    db_session.rollback()
+    db_session.refresh(existing_segment)
+
+    assert existing_segment.status == "active"
+    assert db_session.query(BriefingSegment).count() == 1
 
 
 def test_mark_read_retires_fully_read_segment_and_bumps_version(

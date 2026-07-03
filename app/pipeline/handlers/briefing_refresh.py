@@ -34,24 +34,25 @@ class BriefingRefreshHandler:
         except (TypeError, ValueError):
             return TaskResult.fail("Missing or invalid user_id", retryable=False)
 
-        with context.db_factory() as db:
-            try:
+        try:
+            with context.db_factory() as db:
                 run_briefing_refresh(
                     db,
                     user_id=user_id,
                     mode=mode,
                     task_id=task.id,
+                    release_db_during_compose=True,
                 )
-            except Exception as exc:  # noqa: BLE001
-                logger.exception(
-                    "Briefing refresh failed",
-                    extra={
-                        "component": "briefing_refresh",
-                        "operation": "handle",
-                        "item_id": user_id,
-                        "task_id": task.id,
-                        "context_data": {"mode": mode, "error": str(exc)},
-                    },
-                )
-                return TaskResult.fail(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "Briefing refresh failed",
+                extra={
+                    "component": "briefing_refresh",
+                    "operation": "handle",
+                    "item_id": user_id,
+                    "task_id": task.id,
+                    "context_data": {"mode": mode, "error": str(exc)},
+                },
+            )
+            return TaskResult.fail(str(exc))
         return TaskResult.ok()
