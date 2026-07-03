@@ -173,15 +173,16 @@ jobs:
           '"
 
           echo "→ Verifying container health"
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+          for attempt in $(seq 1 30); do
             STATUS=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' newsly" 2>/dev/null || true)
+            echo "Health attempt $attempt/30: ${STATUS:-unknown}"
             if [[ "$STATUS" == "healthy" ]]; then
               echo "→ Cleaning up superseded remote Docker images"
               remote_cleanup_docker
               ssh "${SSH_OPTS[@]}" "$REMOTE" "cd '$REMOTE_DIR' && sudo env NEWSLY_IMAGE='$IMAGE_TAG' NEWSLY_ENV_FILE=.env.racknerd docker compose --env-file .env.racknerd ps"
               exit 0
             fi
-            if [[ $attempt -eq 10 ]]; then
+            if [[ $attempt -eq 30 ]]; then
               echo "Container failed to become healthy" >&2
               ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker logs --tail 200 newsly || true"
               exit 1
