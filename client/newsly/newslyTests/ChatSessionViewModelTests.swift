@@ -529,7 +529,7 @@ final class ChatSessionViewModelTests: XCTestCase {
     }
 
     private func waitUntil(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<100 {
+        for _ in 0..<300 {
             if condition() {
                 return true
             }

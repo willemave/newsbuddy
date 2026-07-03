@@ -439,8 +439,8 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     private func prepareForInactiveView() {
         isViewActive = false
 
-        if backgroundTrackingMessageId != nil {
-            handOffBackgroundPollingIfNeeded()
+        if let messageId = backgroundTrackingMessageId {
+            handOffBackgroundPolling(messageId: messageId)
             sendTask?.cancel()
             sendTask = nil
             needsForegroundTranscriptRefresh = true
@@ -448,9 +448,13 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     }
 
     private func handOffBackgroundPollingIfNeeded() {
+        guard let processingMessageId = backgroundTrackingMessageId else { return }
+        handOffBackgroundPolling(messageId: processingMessageId)
+    }
+
+    private func handOffBackgroundPolling(messageId processingMessageId: Int) {
         guard let session else { return }
         guard session.contentId != nil || session.newsItemId != nil else { return }
-        guard let processingMessageId = backgroundTrackingMessageId else { return }
 
         activeSessionManager.startTracking(
             session: session,
@@ -476,7 +480,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     private func suspendForegroundPollingIfInactive(messageId: Int) -> Bool {
         guard !isViewActive else { return false }
         needsForegroundTranscriptRefresh = true
-        handOffBackgroundPollingIfNeeded()
+        handOffBackgroundPolling(messageId: messageId)
         logger.debug(
             "[ViewModel] foreground polling suspended while inactive | sessionId=\(self.sessionId) messageId=\(messageId)"
         )

@@ -1375,6 +1375,17 @@ struct ContentDetailView: View {
                 .accessibilityLabel("Open article")
             }
 
+            if let discussionURL = discussionURL(for: content) {
+                Button {
+                    handleDiscussionTap(content: content, fallbackURL: discussionURL)
+                } label: {
+                    minimalActionIcon("bubble.left.and.bubble.right", overlaid: overlaid)
+                }
+                .detailActionBarSegment()
+                .accessibilityIdentifier("content.discussion.open")
+                .accessibilityLabel("Open comments")
+            }
+
             // Share
             Button(action: { activeSheet = .share }) {
                 minimalActionIcon("square.and.arrow.up", overlaid: overlaid)
