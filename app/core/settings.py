@@ -292,6 +292,7 @@ class Settings(BaseSettings):
     briefing_backlog_limit_longform: int = Field(default=20, ge=1, le=100)
     briefing_backlog_limit_news: int = Field(default=40, ge=1, le=200)
     briefing_category_similarity: float = Field(default=0.55, ge=0.0, le=1.0)
+    briefing_centroid_assignment_enabled: bool = False
     briefing_new_lens_min_items: int = Field(default=4, ge=2, le=20)
     briefing_lens_idle_days: int = Field(default=7, ge=1, le=90)
     briefing_window_min: int = Field(default=3, ge=1, le=12)

@@ -60,3 +60,51 @@ def test_stale_low_volume_news_uses_misc_lens_without_embedding(
         .one()
     )
     assert misc_lens.title == "Briefs"
+
+
+def test_new_news_lens_skips_centroid_embedding_by_default(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_new_lens_min_items", 4)
+    monkeypatch.setattr(settings, "briefing_centroid_assignment_enabled", False)
+    assert test_user.id is not None
+    user_id = test_user.id
+    items = [
+        news_item_factory(
+            raw_metadata={},
+            visibility_scope="user",
+            owner_user_id=user_id,
+            article_title=f"Vector Load Story {index}",
+            summary_title=f"Vector Load Story {index}",
+        )
+        for index in range(4)
+    ]
+    for item in items:
+        db_session.add(
+            BriefingPendingSource(
+                user_id=user_id,
+                source_kind="news",
+                source_id=item.id,
+            )
+        )
+    db_session.flush()
+    encode_calls = 0
+
+    def track_encode(_texts):  # noqa: ANN001
+        nonlocal encode_calls
+        encode_calls += 1
+        raise AssertionError("briefing lens assignment should not embed by default")
+
+    monkeypatch.setattr("app.services.briefing.lenses.encode_news_texts", track_encode)
+
+    changed = assign_pending_lenses(db_session, user_id=user_id, settings=settings)
+
+    assert changed == 4
+    assert encode_calls == 0
+    lens = db_session.query(BriefingLens).filter(BriefingLens.user_id == user_id).one()
+    assert lens.key == "news-vector"
+    assert lens.centroid is None

@@ -203,6 +203,8 @@ def _assign_by_centroid(
     pending_sources: list[tuple[BriefingPendingSource, BriefingSource]],
     settings: Settings,
 ) -> int:
+    if not settings.briefing_centroid_assignment_enabled:
+        return 0
     sources = [(row, source) for row, source in pending_sources if row.lens_key is None]
     if not sources:
         return 0
@@ -305,7 +307,7 @@ def _assign_new_or_misc_lens(
             title=name.title,
             deck=name.deck,
             position=_next_news_position(db, user_id=user_id),
-            centroid=_centroid_for_sources(sources),
+            centroid=_centroid_for_sources(sources, settings=settings),
         )
     elif age_seconds >= 86_400:
         lens = _get_or_create_misc_lens(db, user_id=user_id)
@@ -358,7 +360,13 @@ def _embedding_text(source: BriefingSource) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def _centroid_for_sources(sources: list[BriefingSource]) -> list[float] | None:
+def _centroid_for_sources(
+    sources: list[BriefingSource],
+    *,
+    settings: Settings,
+) -> list[float] | None:
+    if not settings.briefing_centroid_assignment_enabled:
+        return None
     if not sources:
         return None
     try:
