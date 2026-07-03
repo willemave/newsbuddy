@@ -28,6 +28,7 @@ from app.routers import api_content, auth
 from app.routers.api import (
     agent,
     audio_episodes,
+    briefing,
     discovery,
     feedback,
     integrations,
@@ -349,6 +350,7 @@ app.include_router(news.router, prefix="/api/news")
 app.include_router(learning_decks.router, prefix="/api")
 app.include_router(learning_decks.public_router)
 app.include_router(audio_episodes.public_router)
+app.include_router(briefing.router, prefix="/api")
 app.include_router(interactions.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(scraper_configs.router, prefix="/api")

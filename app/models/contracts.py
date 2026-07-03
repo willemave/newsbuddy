@@ -67,6 +67,7 @@ class TaskType(StrEnum):
     GENERATE_AUDIO_EPISODE = "generate_audio_episode"
     GENERATE_LEARNING_DECK = "generate_learning_deck"
     RUN_LLM_TASK = "run_llm_task"
+    BRIEFING_REFRESH = "briefing_refresh"
 
 
 class TaskQueue(StrEnum):
@@ -263,6 +264,7 @@ class AudioEpisodeKind(StrEnum):
     CONTENT_COUNCIL_DISCUSSION = "content_council_discussion"
     NEWS_ITEM_DISCUSSION = "news_item_discussion"
     CUSTOM_NARRATION = "custom_narration"
+    BRIEFING_NARRATION = "briefing_narration"
 
 
 class AudioEpisodeStatus(StrEnum):
@@ -272,6 +274,30 @@ class AudioEpisodeStatus(StrEnum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class BriefingTier(StrEnum):
+    """Top-level briefing lens tier."""
+
+    AUDIO = "audio"
+    LONGFORM = "longform"
+    NEWS = "news"
+
+
+class BriefingBlockType(StrEnum):
+    """Briefing document block kinds."""
+
+    PASSAGE = "passage"
+    FIGURE = "figure"
+    PULLQUOTE = "pullquote"
+
+
+class BriefingRunKind(StrEnum):
+    """Inline run kinds inside server-normalized briefing prose."""
+
+    TEXT = "text"
+    SOURCE_LINK = "source_link"
+    INSIGHT = "insight"
 
 
 class CliLinkStatus(StrEnum):

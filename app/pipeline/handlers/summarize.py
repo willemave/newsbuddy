@@ -32,6 +32,7 @@ from app.models.metadata.summaries import (
 )
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.services.briefing.events import enqueue_content_for_briefing_if_ready
 from app.services.content_bodies import get_content_body_resolver, sync_content_body_storage
 from app.services.content_lifecycle import build_content_lifecycle_log_extra
 from app.services.content_metadata_merge import refresh_merge_content_metadata
@@ -348,6 +349,7 @@ class SummarizeHandler:
                     _log_lifecycle_event("content.summary_completed")
                     if content.status == ContentStatus.COMPLETED.value:
                         _log_lifecycle_event("content.completed")
+                        enqueue_content_for_briefing_if_ready(db, content_id=content_id)
                     return TaskResult.ok()
 
                 if content.content_type in {
@@ -558,6 +560,7 @@ class SummarizeHandler:
                     )
                     if content.status == ContentStatus.COMPLETED.value:
                         _log_lifecycle_event("content.completed")
+                        enqueue_content_for_briefing_if_ready(db, content_id=content_id)
 
                     if share_and_chat_requests:
                         for request in share_and_chat_requests:

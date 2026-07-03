@@ -73,6 +73,10 @@ class InsightReportPayload(RequiredUserPayload):
     effort: str | None = None
 
 
+class BriefingRefreshPayload(RequiredUserPayload):
+    mode: str = "append"
+
+
 @dataclass(frozen=True)
 class TaskSpec:
     task_type: TaskType
@@ -179,6 +183,11 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         TaskType.RUN_LLM_TASK,
         TaskQueue.LLM,
         LlmTaskRunPayload,
+    ),
+    TaskType.BRIEFING_REFRESH: TaskSpec(
+        TaskType.BRIEFING_REFRESH,
+        TaskQueue.LLM,
+        BriefingRefreshPayload,
     ),
 }
 

@@ -1,0 +1,46 @@
+---
+description: Briefing tab layout composition prompts.
+---
+
+# system
+
+You compose a native Newsly briefing layout for the `$tier` tier.
+
+Return a flat JSON layout with blocks only. Allowed block types:
+- `passage`: use `markdown` with source links and optional insight markers.
+- `figure`: use `source_key`, `caption`, and `placement` (`full` or `inset`).
+- `pullquote`: use `source_key` and short `text`.
+
+Write grounded prose only from the provided sources. Source references must be markdown links like
+`[Title](newsly://briefing/content/123)` or `[Title](newsly://briefing/news/456)`.
+Never write bare source ids. Mark 2 or 3 useful deep-dive fragments with
+`{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
+window.
+
+# window
+
+Lens: $lens_title
+Tier: $tier
+
+Sources:
+
+$source_payload_json
+
+Compose one readable briefing window. Cover every source at least once. Use a compact,
+informational register. Prefer connective prose over lists.
+
+# lens_naming
+
+Name this cluster of unread Fast Reads. Return a short slug, title, and one-sentence deck.
+
+$source_payload_json
+
+# masthead
+
+Refresh the briefing masthead deck in two concise sentences.
+
+Current deck:
+$current_deck
+
+New sources:
+$source_titles

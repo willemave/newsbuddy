@@ -31,7 +31,9 @@ from app.models.db import AudioEpisode, Content, NewsItem
 from app.repositories import read_status_repository
 from app.repositories.content_detail_repository import get_visible_content
 from app.services.audio_episode_kinds import (
+    AUDIO_EPISODE_KIND_SPECS,
     AUDIO_EPISODE_MODEL,
+    BRIEFING_NARRATION_KIND,
     CONTENT_COUNCIL_DISCUSSION_KIND,
     CUSTOM_NARRATION_KIND,
     DIALOGUE_TEXT_CHAR_LIMIT,
@@ -588,9 +590,10 @@ def mark_audio_episode_sources_read_on_play(
     *,
     episode: AudioEpisode,
 ) -> dict[str, Any]:
-    """Mark custom narration source rows read when the authenticated owner starts playback."""
+    """Mark narration source rows read when the authenticated owner starts playback."""
 
-    if episode.kind != CUSTOM_NARRATION_KIND:
+    spec = AUDIO_EPISODE_KIND_SPECS.get(str(episode.kind))
+    if spec is None or not spec.marks_sources_read_on_play:
         return {
             "content_marked_count": 0,
             "content_failed_ids": [],
@@ -1620,6 +1623,8 @@ def _audio_episode_kind(value: str | None) -> AudioEpisodeKind:
         return AudioEpisodeKind.NEWS_ITEM_DISCUSSION
     if value == CUSTOM_NARRATION_KIND:
         return AudioEpisodeKind.CUSTOM_NARRATION
+    if value == BRIEFING_NARRATION_KIND:
+        return AudioEpisodeKind.BRIEFING_NARRATION
     raise ValueError(f"Unsupported audio episode kind: {value}")
 
 

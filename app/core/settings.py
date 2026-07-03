@@ -284,6 +284,30 @@ class Settings(BaseSettings):
     news_list_primary_similarity_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     news_list_secondary_similarity_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
 
+    # Briefing tab
+    briefing_enabled_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [1])
+    briefing_model: str = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+    briefing_masthead_title: str = "The Unread Times"
+    briefing_backlog_limit_audio: int = Field(default=12, ge=1, le=100)
+    briefing_backlog_limit_longform: int = Field(default=20, ge=1, le=100)
+    briefing_backlog_limit_news: int = Field(default=40, ge=1, le=200)
+    briefing_category_similarity: float = Field(default=0.55, ge=0.0, le=1.0)
+    briefing_new_lens_min_items: int = Field(default=4, ge=2, le=20)
+    briefing_lens_idle_days: int = Field(default=7, ge=1, le=90)
+    briefing_window_min: int = Field(default=3, ge=1, le=12)
+    briefing_window_max: int = Field(default=6, ge=1, le=12)
+    briefing_news_window_max: int = Field(default=8, ge=1, le=16)
+    briefing_max_figures_deep: int = Field(default=12, ge=0, le=50)
+    briefing_max_figures_news: int = Field(default=6, ge=0, le=50)
+    briefing_llm_timeout_seconds: int = Field(default=300, ge=1, le=900)
+    briefing_debounce_seconds: int = Field(default=900, ge=0, le=86_400)
+    briefing_sweep_seconds: int = Field(default=3600, ge=60, le=86_400)
+    briefing_pending_max_age_seconds: int = Field(default=2700, ge=60, le=86_400)
+    briefing_news_max_age_days: int = Field(default=4, ge=1, le=30)
+    briefing_max_segments_per_lens: int = Field(default=12, ge=1, le=100)
+    briefing_dig_hourly_limit: int = Field(default=60, ge=0, le=1000)
+    briefing_narration_max_chars: int = Field(default=18_000, ge=500, le=100_000)
+
     # External services
     openai_api_key: str | None = None
     openrouter_api_key: str | None = None
@@ -517,6 +541,23 @@ class Settings(BaseSettings):
                 return [str(item).strip() for item in parsed if str(item).strip()]
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return [item.strip() for item in v if item.strip()]
+
+    @field_validator("briefing_enabled_user_ids", mode="before")
+    @classmethod
+    def parse_int_list(cls, v: str | list[int] | tuple[int, ...] | None) -> list[int]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                parsed = json.loads(stripped)
+                if not isinstance(parsed, list):
+                    raise ValueError("Expected a JSON list")
+                return [int(item) for item in parsed]
+            return [int(item.strip()) for item in stripped.split(",") if item.strip()]
+        return [int(item) for item in v]
 
     @model_validator(mode="after")
     def validate_production_security_settings(self) -> "Settings":

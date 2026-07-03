@@ -14,6 +14,7 @@ from app.core.logging import get_logger
 from app.models.contracts import NewsItemStatus
 from app.models.db import NewsItem
 from app.models.metadata.summaries import NewsSummary
+from app.services.briefing.events import enqueue_news_item_for_briefing_if_ready
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.news_article_bodies import get_news_item_article_body_resolver
 from app.services.news_relations import reconcile_news_item_relation
@@ -421,6 +422,8 @@ def process_news_item(
             raw_metadata=raw_metadata,
             summary=summary_to_persist or _fallback_summary(item, raw_metadata),
         )
+        enqueue_news_item_for_briefing_if_ready(db, news_item_id=news_item_id)
+        db.commit()
         return NewsItemProcessingResult(
             success=True,
             status=item.status,

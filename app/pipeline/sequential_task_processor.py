@@ -19,6 +19,7 @@ from app.core.settings import get_settings
 from app.pipeline.dispatcher import TaskDispatcher
 from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
 from app.pipeline.handlers.backfill_feeds import BackfillFeedsHandler
+from app.pipeline.handlers.briefing_refresh import BriefingRefreshHandler
 from app.pipeline.handlers.dig_deeper import DigDeeperHandler
 from app.pipeline.handlers.discover_feeds import DiscoverFeedsHandler
 from app.pipeline.handlers.download_audio import DownloadAudioHandler
@@ -191,6 +192,7 @@ class SequentialTaskProcessor:
             GenerateAudioEpisodeHandler(),
             GenerateLearningDeckHandler(),
             RunLlmTaskHandler(),
+            BriefingRefreshHandler(),
         ]
 
     def _idle_wait(self, timeout_seconds: float) -> None:
