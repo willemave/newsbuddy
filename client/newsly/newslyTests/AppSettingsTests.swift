@@ -3,6 +3,29 @@ import XCTest
 @testable import newsly
 
 final class AppSettingsTests: XCTestCase {
+    @MainActor
+    func testReadingExperienceFallsBackToClassicForUnknownRawValue() {
+        let settings = AppSettings.shared
+        let original = settings.readingExperienceRaw
+        defer { settings.readingExperienceRaw = original }
+
+        settings.readingExperienceRaw = "future"
+
+        XCTAssertEqual(settings.readingExperience, .classic)
+    }
+
+    @MainActor
+    func testSetReadingExperiencePersistsRawValue() {
+        let settings = AppSettings.shared
+        let original = settings.readingExperienceRaw
+        defer { settings.readingExperienceRaw = original }
+
+        settings.setReadingExperience(.briefing)
+
+        XCTAssertEqual(settings.readingExperienceRaw, "briefing")
+        XCTAssertEqual(settings.readingExperience, .briefing)
+    }
+
     func testApplyDebugDefaultsIfNeededSeedsMissingServerConfiguration() {
         let isolated = makeIsolatedDefaults()
         let defaults = isolated.defaults

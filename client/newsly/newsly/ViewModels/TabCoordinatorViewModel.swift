@@ -16,6 +16,7 @@ private let rootTabFlowLogger = Logger(
 enum RootTab: Hashable {
     case longContent
     case shortNews
+    case briefing
     case knowledge
     case more
 
@@ -25,6 +26,8 @@ enum RootTab: Hashable {
             return "long_form"
         case .shortNews:
             return "fast_news"
+        case .briefing:
+            return "briefing"
         case .knowledge:
             return "knowledge"
         case .more:
@@ -39,16 +42,19 @@ final class TabCoordinatorViewModel: ObservableObject {
 
     let shortNewsVM: ShortNewsListViewModel
     let longContentVM: LongContentListViewModel
+    let briefingVM: BriefingViewModel
 
     private var previousTab: RootTab
 
     init(
         shortNewsVM: ShortNewsListViewModel,
         longContentVM: LongContentListViewModel,
+        briefingVM: BriefingViewModel? = nil,
         initialTab: RootTab = .shortNews
     ) {
         self.shortNewsVM = shortNewsVM
         self.longContentVM = longContentVM
+        self.briefingVM = briefingVM ?? BriefingViewModel(service: LiveBriefingService())
         self.selectedTab = initialTab
         self.previousTab = initialTab
     }
@@ -93,6 +99,9 @@ final class TabCoordinatorViewModel: ObservableObject {
                 // TabCoordinatorViewModelTests.testHandleTabChangeKeepsIncomingLongFormStableWhenAlreadyLoaded.
                 rootTabFlowLogger.info("tab content already available | tab=long_form")
             }
+        case .briefing:
+            rootTabFlowLogger.info("tab content load requested | tab=briefing")
+            briefingVM.handleTabEntered()
         case .knowledge, .more:
             rootTabFlowLogger.info(
                 "tab became active with no preload required | tab=\(tab.logName, privacy: .public)"

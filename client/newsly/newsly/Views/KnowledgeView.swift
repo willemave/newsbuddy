@@ -21,6 +21,7 @@ struct KnowledgeView: View {
     let onFocusHandled: ((KnowledgeFocusRequest) -> Void)?
     let onSelectSession: ((ChatSessionRoute) -> Void)?
     let onShowKnowledgeLibrary: (() -> Void)?
+    var onOpenMore: (() -> Void)? = nil
 
     @StateObject private var viewModel = KnowledgeHubViewModel()
     @StateObject private var customNarrationLibrary = CustomNarrationLibraryViewModel()
@@ -68,12 +69,14 @@ struct KnowledgeView: View {
         focusRequest: KnowledgeFocusRequest? = nil,
         onFocusHandled: ((KnowledgeFocusRequest) -> Void)? = nil,
         onSelectSession: ((ChatSessionRoute) -> Void)? = nil,
-        onShowKnowledgeLibrary: (() -> Void)? = nil
+        onShowKnowledgeLibrary: (() -> Void)? = nil,
+        onOpenMore: (() -> Void)? = nil
     ) {
         self.focusRequest = focusRequest
         self.onFocusHandled = onFocusHandled
         self.onSelectSession = onSelectSession
         self.onShowKnowledgeLibrary = onShowKnowledgeLibrary
+        self.onOpenMore = onOpenMore
     }
 
     var body: some View {
@@ -140,7 +143,23 @@ struct KnowledgeView: View {
     // MARK: - Header
 
     private var headerSection: some View {
-        EditorialMastheadHeader(title: "Knowledge")
+        EditorialMastheadHeader(
+            title: "Knowledge",
+            trailingAccessory: onOpenMore.map { action in AnyView(moreMenuButton(action)) }
+        )
+    }
+
+    private func moreMenuButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "line.3.horizontal")
+                .font(.appSymbol(size: 26, weight: .semibold))
+                .frame(width: 48, height: 48, alignment: .trailing)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.onSurface)
+        .accessibilityLabel("Settings and more")
+        .accessibilityIdentifier("knowledge.more_menu")
     }
 
     // MARK: - Section Headers

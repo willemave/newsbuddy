@@ -14,6 +14,47 @@ class DigDeeperTextView: UITextView {
         }
     }
 
+    private lazy var tapEditMenuInteraction = UIEditMenuInteraction(delegate: self)
+
+    /// When set, text wraps around a rectangle anchored to the top-right of the
+    /// text container (used for briefing passages with an inline floated figure).
+    var floatingExclusionSize: CGSize? {
+        didSet {
+            guard floatingExclusionSize != oldValue else { return }
+            updateFloatingExclusion(forWidth: bounds.width)
+            setNeedsLayout()
+        }
+    }
+
+    func updateFloatingExclusion(forWidth width: CGFloat) {
+        guard let size = floatingExclusionSize, width > size.width + 40 else {
+            if !textContainer.exclusionPaths.isEmpty {
+                textContainer.exclusionPaths = []
+            }
+            return
+        }
+        let rect = CGRect(x: width - size.width, y: 0, width: size.width, height: size.height)
+        textContainer.exclusionPaths = [UIBezierPath(rect: rect)]
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        updateFloatingExclusion(forWidth: bounds.width)
+    }
+
+    /// Present the edit menu (Dig Deeper, Copy, …) for the current selection,
+    /// e.g. after a tap programmatically selected a sentence.
+    func presentSelectionMenu(at point: CGPoint) {
+        guard selectedRange.length > 0 else { return }
+        if tapEditMenuInteraction.view == nil {
+            addInteraction(tapEditMenuInteraction)
+        }
+        _ = becomeFirstResponder()
+        tapEditMenuInteraction.presentEditMenu(
+            with: UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
+        )
+    }
+
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         guard previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) != false else {
@@ -67,5 +108,40 @@ class DigDeeperTextView: UITextView {
     private func applyAdaptiveTextColor() {
         guard let adaptiveTextColor else { return }
         textColor = adaptiveTextColor.resolvedColor(with: traitCollection)
+    }
+}
+
+extension DigDeeperTextView: UIEditMenuInteractionDelegate {
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        menuFor configuration: UIEditMenuConfiguration,
+        suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+        // The suggested actions already include "Dig Deeper" via buildMenu(with:),
+        // so only synthesize a menu when the system offers nothing.
+        guard suggestedActions.isEmpty else {
+            return UIMenu(children: suggestedActions)
+        }
+        var children: [UIMenuElement] = []
+        if onDigDeeper != nil {
+            children.append(
+                UIAction(
+                    title: "Dig Deeper",
+                    image: UIImage(systemName: "magnifyingglass")
+                ) { [weak self] _ in
+                    self?.performDigDeeper()
+                }
+            )
+        }
+        children.append(
+            UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                guard let self,
+                      let selectedTextRange,
+                      let selectedText = text(in: selectedTextRange)
+                else { return }
+                UIPasteboard.general.string = selectedText
+            }
+        )
+        return UIMenu(children: children)
     }
 }

@@ -55,6 +55,69 @@ enum AppChrome {
     }
 }
 
+/// Floating replacement for the system tab bar in the briefing experience:
+/// horizontal icon-beside-label items keep the bar vertically compact.
+struct CompactTabBar: View {
+    struct Item: Identifiable {
+        let tab: RootTab
+        let label: String
+        let icon: String
+        let accessibilityIdentifier: String
+
+        var id: RootTab { tab }
+    }
+
+    let items: [Item]
+    let selection: RootTab
+    let onSelect: (RootTab) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(items) { item in
+                itemButton(item)
+            }
+        }
+        .padding(5)
+        .background(Capsule().fill(.ultraThinMaterial))
+        .overlay {
+            Capsule().stroke(Color.outlineVariant.opacity(0.5), lineWidth: 1)
+        }
+        .frame(maxWidth: 320)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity)
+        .accessibilityIdentifier("tabbar.compact")
+    }
+
+    private func itemButton(_ item: Item) -> some View {
+        let isSelected = item.tab == selection
+        return Button {
+            onSelect(item.tab)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: item.icon)
+                    .font(.appSymbol(size: 13, weight: .semibold))
+                Text(item.label)
+                    .font(.appCaption.weight(.semibold))
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background {
+                if isSelected {
+                    Capsule().fill(Color.surfaceSecondary)
+                }
+            }
+            .foregroundStyle(isSelected ? Color.appChromeAccent : Color.onSurfaceSecondary)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier(item.accessibilityIdentifier)
+    }
+}
+
 @MainActor
 enum RootDependencyFactory {
     static func makeTabCoordinator() -> TabCoordinatorViewModel {
@@ -74,10 +137,14 @@ enum RootDependencyFactory {
             readRepository: readRepository,
             unreadCountService: unreadService
         )
+        let briefingViewModel = BriefingViewModel(
+            service: LiveBriefingService()
+        )
 
         return TabCoordinatorViewModel(
             shortNewsVM: shortNewsViewModel,
-            longContentVM: longContentViewModel
+            longContentVM: longContentViewModel,
+            briefingVM: briefingViewModel
         )
     }
 }

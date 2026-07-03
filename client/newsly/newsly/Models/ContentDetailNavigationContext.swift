@@ -15,6 +15,7 @@ enum ContentDetailNavigationSurface: String, Codable, Hashable {
     case savedLibrary = "saved_library"
     case search
     case newsGroup = "news_group"
+    case briefing
 }
 
 struct ContentDetailNavigationContext {

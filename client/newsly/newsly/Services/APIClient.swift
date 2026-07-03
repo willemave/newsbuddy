@@ -65,17 +65,20 @@ struct APIRequestDescriptor<Response: Decodable> {
     let method: String
     let body: Data?
     let queryItems: [URLQueryItem]?
+    let headers: [String: String]?
 
     init(
         path: String,
         method: String = "GET",
         body: Data? = nil,
-        queryItems: [URLQueryItem]? = nil
+        queryItems: [URLQueryItem]? = nil,
+        headers: [String: String]? = nil
     ) {
         self.path = path
         self.method = method
         self.body = body
         self.queryItems = queryItems
+        self.headers = headers
     }
 }
 
@@ -107,15 +110,19 @@ class APIClient {
         _ descriptor: APIRequestDescriptor<T>,
         allowRefresh: Bool = true
     ) async throws -> T {
-        try await request(
-            descriptor.path,
+        let (data, _) = try await executeRequest(
+            endpoint: descriptor.path,
             method: descriptor.method,
             body: descriptor.body,
             queryItems: descriptor.queryItems,
-            allowRefresh: allowRefresh
+            accept: nil,
+            additionalHeaders: descriptor.headers,
+            allowRefresh: allowRefresh,
+            authFailureReason: "request_no_refresh_remaining"
         )
+        return try decodeResponse(data)
     }
-    
+
     func request<T: Decodable>(_ endpoint: String,
                                method: String = "GET",
                                body: Data? = nil,
@@ -130,12 +137,7 @@ class APIClient {
             allowRefresh: allowRefresh,
             authFailureReason: "request_no_refresh_remaining"
         )
-
-        do {
-            return try decoder.decode(T.self, from: data)
-        } catch {
-            throw APIError.decodingError(error)
-        }
+        return try decodeResponse(data)
     }
 
     func requestData(
@@ -158,6 +160,37 @@ class APIClient {
         return data
     }
 
+    private func decodeResponse<T: Decodable>(_ data: Data) throws -> T {
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+
+    func requestHTTP(
+        _ endpoint: String,
+        method: String = "GET",
+        body: Data? = nil,
+        queryItems: [URLQueryItem]? = nil,
+        accept: String? = nil,
+        additionalHeaders: [String: String]? = nil,
+        additionalAllowedStatusCodes: Set<Int> = [],
+        allowRefresh: Bool = true
+    ) async throws -> (Data, HTTPURLResponse) {
+        try await executeRequest(
+            endpoint: endpoint,
+            method: method,
+            body: body,
+            queryItems: queryItems,
+            accept: accept,
+            additionalHeaders: additionalHeaders,
+            additionalAllowedStatusCodes: additionalAllowedStatusCodes,
+            allowRefresh: allowRefresh,
+            authFailureReason: "request_http_no_refresh_remaining"
+        )
+    }
+
     func authorizedMediaResource(
         _ endpoint: String,
         accept: String? = nil
@@ -167,7 +200,8 @@ class APIClient {
             method: "GET",
             body: nil,
             queryItems: nil,
-            accept: accept
+            accept: accept,
+            additionalHeaders: nil
         )
         guard let url = request.url else {
             throw APIError.invalidURL
@@ -190,6 +224,7 @@ class APIClient {
             body: body,
             queryItems: nil,
             accept: nil,
+            additionalHeaders: nil,
             allowRefresh: allowRefresh,
             authFailureReason: "request_void_no_refresh_remaining"
         )
@@ -200,7 +235,8 @@ class APIClient {
         method: String,
         body: Data?,
         queryItems: [URLQueryItem]?,
-        accept: String?
+        accept: String?,
+        additionalHeaders: [String: String]?
     ) async throws -> (request: URLRequest, sentAuthHeader: Bool) {
         guard var components = URLComponents(string: AppSettings.shared.baseURL + endpoint) else {
             throw APIError.invalidURL
@@ -217,6 +253,9 @@ class APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let accept {
             request.setValue(accept, forHTTPHeaderField: "Accept")
+        }
+        for (field, value) in additionalHeaders ?? [:] {
+            request.setValue(value, forHTTPHeaderField: field)
         }
 
         if let accessToken = try await fetchAccessTokenOrRefresh(endpoint: endpoint) {
@@ -235,6 +274,8 @@ class APIClient {
         body: Data?,
         queryItems: [URLQueryItem]?,
         accept: String?,
+        additionalHeaders: [String: String]? = nil,
+        additionalAllowedStatusCodes: Set<Int> = [],
         allowRefresh: Bool,
         authFailureReason: String
     ) async throws -> (Data, HTTPURLResponse) {
@@ -243,7 +284,8 @@ class APIClient {
             method: method,
             body: body,
             queryItems: queryItems,
-            accept: accept
+            accept: accept,
+            additionalHeaders: additionalHeaders
         )
 
         do {
@@ -285,6 +327,8 @@ class APIClient {
                         body: body,
                         queryItems: queryItems,
                         accept: accept,
+                        additionalHeaders: additionalHeaders,
+                        additionalAllowedStatusCodes: additionalAllowedStatusCodes,
                         allowRefresh: false,
                         authFailureReason: authFailureReason
                     )
@@ -308,7 +352,9 @@ class APIClient {
                 }
             }
 
-            guard (200...299).contains(httpResponse.statusCode) else {
+            guard (200...299).contains(httpResponse.statusCode)
+                || additionalAllowedStatusCodes.contains(httpResponse.statusCode)
+            else {
                 throw APIError.httpError(
                     statusCode: httpResponse.statusCode,
                     detail: extractErrorDetail(from: data)

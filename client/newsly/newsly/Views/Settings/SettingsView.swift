@@ -239,6 +239,10 @@ struct SettingsView: View {
             SectionHeader(title: "Display")
 
             VStack(spacing: 0) {
+                readingExperienceRow
+
+                RowDivider()
+
                 textSizeRow
             }
             .settingsCard()
@@ -423,6 +427,29 @@ struct SettingsView: View {
                 ),
                 range: 0...4
             )
+        }
+    }
+
+    private var readingExperienceRow: some View {
+        SettingsRow(
+            icon: "newspaper",
+            iconColor: .brandPrimary,
+            title: "Reading Experience"
+        ) {
+            Picker(
+                "Reading Experience",
+                selection: Binding(
+                    get: { settings.readingExperience },
+                    set: { settings.setReadingExperience($0) }
+                )
+            ) {
+                ForEach(ReadingExperience.allCases) { experience in
+                    Text(experience.title).tag(experience)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 190)
+            .accessibilityIdentifier("settings.reading_experience")
         }
     }
 

@@ -86,6 +86,22 @@ enum ServerConfigurationDefaults {
     }
 }
 
+enum ReadingExperience: String, CaseIterable, Identifiable {
+    case classic
+    case briefing
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .classic:
+            return "Classic"
+        case .briefing:
+            return "Briefing"
+        }
+    }
+}
+
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
     
@@ -96,6 +112,7 @@ class AppSettings: ObservableObject {
     @AppStorage("contentTextSizeIndex", store: SharedContainer.userDefaults) var contentTextSizeIndex: Int = 2
     @AppStorage("useLongFormCardStack", store: SharedContainer.userDefaults) var useLongFormCardStack: Bool = true
     @AppStorage("backendTranscriptionAvailable", store: SharedContainer.userDefaults) var backendTranscriptionAvailable: Bool = false
+    @AppStorage("readingExperience", store: SharedContainer.userDefaults) var readingExperienceRaw: String = ReadingExperience.classic.rawValue
     private var hasExplicitServerConfiguration: Bool {
         ServerConfigurationDefaults.hasPersistedServerConfiguration(in: SharedContainer.userDefaults)
     }
@@ -119,6 +136,10 @@ class AppSettings: ObservableObject {
         return "\(scheme)://\(normalizedHost):\(serverPort)"
     }
 
+    var readingExperience: ReadingExperience {
+        ReadingExperience(rawValue: readingExperienceRaw) ?? .classic
+    }
+
     func setAppTextSize(_ index: Int) {
         guard appTextSizeIndex != index else { return }
         objectWillChange.send()
@@ -133,6 +154,12 @@ class AppSettings: ObservableObject {
 
     func setBackendTranscriptionAvailable(_ isAvailable: Bool) {
         backendTranscriptionAvailable = isAvailable
+    }
+
+    func setReadingExperience(_ experience: ReadingExperience) {
+        guard readingExperience != experience else { return }
+        objectWillChange.send()
+        readingExperienceRaw = experience.rawValue
     }
     
     private init() {

@@ -25,27 +25,29 @@ struct EditorialMastheadHeader: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(dateLabel)
-                .kicker()
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(dateLabel)
+                    .kicker()
 
-            HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.terracottaDisplayLarge)
                     .foregroundStyle(Color.onSurface)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                if let trailingAccessory {
-                    trailingAccessory
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.terracottaHeadlineSmall)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            if let subtitle {
-                Text(subtitle)
-                    .font(.terracottaHeadlineSmall)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+            // Pin the accessory to the top-right corner so it reads as an
+            // upper-right affordance rather than sitting on the title baseline.
+            if let trailingAccessory {
+                trailingAccessory
             }
         }
         .padding(.horizontal, Spacing.appHorizontalMargin)
