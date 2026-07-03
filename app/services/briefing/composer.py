@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai.agent import AgentRunResult
 
@@ -15,12 +16,12 @@ from app.services.briefing.normalize import NormalizedLayout, normalize_layout
 from app.services.briefing.repair import repair_layout
 from app.services.briefing.sources import BriefingSource
 from app.services.llm_agents import get_basic_agent
+from app.services.llm_models import OPENROUTER_PROVIDER_SORT, OPENROUTER_REASONING_CONFIG
 from app.services.prompt_library import render_prompt
-from app.services.vendor_costs import extract_usage_from_result
+from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
 
 PROMPT_VERSION = "briefing-v1"
-LLM_ATTEMPTS = 2
 logger = get_logger(__name__)
 
 
@@ -88,8 +89,8 @@ def compose_window(
     output_tokens: int | None = None
     blocks: list[dict[str, Any] | ComposerBlock]
 
-    try:
-        if use_llm:
+    if use_llm:
+        try:
             llm_blocks, usage = _compose_window_with_llm(
                 sources,
                 lens_title=lens_title,
@@ -99,33 +100,30 @@ def compose_window(
                 task_id=task_id,
                 user_id=user_id,
             )
-            blocks = list(llm_blocks)
-            if usage:
-                input_tokens = usage.get("input_tokens")
-                output_tokens = usage.get("output_tokens")
-        else:
-            blocks = list(deterministic_layout(sources, lens_title=lens_title, tier=tier).blocks)
-            model_spec = "deterministic"
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Briefing composer fell back to deterministic layout",
-            exc_info=True,
-            extra={
-                "component": "briefing",
-                "operation": "compose_window",
-                "task_id": task_id,
-                "item_id": user_id,
-                "context_data": {
-                    "lens_key": lens_key,
-                    "tier": tier,
-                    "window_index": window_index,
-                    "source_count": len(sources),
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
+        except Exception as exc:
+            logger.exception(
+                "Briefing LLM composition failed",
+                extra={
+                    "component": "briefing",
+                    "operation": "compose_window",
+                    "task_id": task_id,
+                    "item_id": user_id,
+                    "context_data": {
+                        "lens_key": lens_key,
+                        "tier": tier,
+                        "window_index": window_index,
+                        "source_count": len(sources),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
                 },
-            },
-        )
-        warnings.append(f"llm_fallback:{type(exc).__name__}")
+            )
+            raise
+        blocks = list(llm_blocks)
+        if usage:
+            input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("output_tokens")
+    else:
         blocks = list(deterministic_layout(sources, lens_title=lens_title, tier=tier).blocks)
         model_spec = "deterministic"
 
@@ -152,6 +150,8 @@ def compose_window(
     warnings.extend(normalized.warnings)
     status = "active" if normalized.blocks else "degraded"
     if status == "degraded":
+        if use_llm:
+            raise RuntimeError("Briefing LLM composition produced no normalized blocks")
         normalized = normalize_layout(
             deterministic_layout(sources, lens_title=lens_title, tier=tier).model_dump(mode="json")[
                 "blocks"
@@ -245,47 +245,138 @@ def _compose_window_with_llm(
         ),
     )
 
-    last_error: Exception | None = None
-    for _attempt in range(LLM_ATTEMPTS):
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(_run_agent, model_spec, system_prompt, user_prompt)
-        try:
-            result = future.result(timeout=timeout_seconds)
-        except TimeoutError as exc:
-            future.cancel()
-            executor.shutdown(wait=False, cancel_futures=True)
-            last_error = exc
-            continue
-        finally:
-            if future.done():
-                executor.shutdown(wait=True, cancel_futures=True)
-        record_model_usage(
-            "briefing_compose",
-            result,
+    if model_spec.startswith("openrouter:"):
+        return _compose_window_with_openrouter(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             model_spec=model_spec,
-            persist={
-                "feature": "briefing_compose",
-                "operation": "briefing.compose_window",
-                "source": "queue" if task_id else "api",
-                "task_id": task_id,
-                "user_id": user_id,
+            timeout_seconds=timeout_seconds,
+            task_id=task_id,
+            user_id=user_id,
+        )
+
+    result = _run_agent(model_spec, system_prompt, user_prompt, timeout_seconds=timeout_seconds)
+    record_model_usage(
+        "briefing_compose",
+        result,
+        model_spec=model_spec,
+        persist={
+            "feature": "briefing_compose",
+            "operation": "briefing.compose_window",
+            "source": "queue" if task_id else "api",
+            "task_id": task_id,
+            "user_id": user_id,
+        },
+    )
+    usage = extract_usage_from_result(result)
+    return (
+        [block.model_dump(mode="json", exclude_none=True) for block in result.output.blocks],
+        usage,
+    )
+
+
+def _compose_window_with_openrouter(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    model_spec: str,
+    timeout_seconds: int,
+    task_id: int | None,
+    user_id: int | None,
+) -> tuple[list[dict[str, Any]], dict[str, int | None] | None]:
+    settings = get_settings()
+    api_key = settings.openrouter_api_key
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not configured in settings.")
+    model_name = model_spec.split(":", 1)[1]
+    request_timeout = httpx.Timeout(
+        timeout_seconds,
+        connect=10.0,
+        read=float(timeout_seconds),
+        write=10.0,
+        pool=10.0,
+    )
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        timeout=request_timeout,
+        max_retries=0,
+        http_client=httpx.Client(timeout=request_timeout),
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "ComposerLayout",
+                    "strict": True,
+                    "schema": ComposerLayout.model_json_schema(),
+                },
             },
+            extra_body={
+                "provider": {
+                    "require_parameters": True,
+                    "sort": OPENROUTER_PROVIDER_SORT,
+                },
+                "reasoning": OPENROUTER_REASONING_CONFIG,
+            },
+            timeout=request_timeout,
         )
-        usage = extract_usage_from_result(result)
-        return (
-            [block.model_dump(mode="json", exclude_none=True) for block in result.output.blocks],
-            usage,
-        )
-    if last_error:
-        raise last_error
-    raise RuntimeError("Briefing composer failed without an error")
+    finally:
+        client.close()
+    content = response.choices[0].message.content
+    if not content:
+        raise RuntimeError("OpenRouter returned an empty briefing response")
+    layout = ComposerLayout.model_validate_json(content)
+    usage = _usage_from_openrouter_response(response)
+    record_vendor_usage_out_of_band(
+        provider="openrouter",
+        model=model_spec,
+        feature="briefing_compose",
+        operation="briefing.compose_window",
+        source="queue" if task_id else "api",
+        usage=usage,
+        task_id=task_id,
+        user_id=user_id,
+    )
+    return (
+        [block.model_dump(mode="json", exclude_none=True) for block in layout.blocks],
+        usage,
+    )
+
+
+def _usage_from_openrouter_response(response: object) -> dict[str, int | None] | None:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return None
+    input_tokens = getattr(usage, "prompt_tokens", None)
+    output_tokens = getattr(usage, "completion_tokens", None)
+    total_tokens = getattr(usage, "total_tokens", None)
+    if input_tokens is None and output_tokens is None and total_tokens is None:
+        return None
+    return {
+        "input_tokens": input_tokens,
+        "cache_read_tokens": None,
+        "cache_write_tokens": None,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
 
 
 def _run_agent(
-    model_spec: str, system_prompt: str, user_prompt: str
+    model_spec: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    timeout_seconds: int,
 ) -> AgentRunResult[ComposerLayout]:
     agent = get_basic_agent(model_spec, ComposerLayout, system_prompt)
-    return agent.run_sync(user_prompt)
+    return agent.run_sync(user_prompt, model_settings={"timeout": timeout_seconds})
 
 
 def _system_prompt(tier: str) -> str:
