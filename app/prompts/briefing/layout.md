@@ -2,7 +2,7 @@
 description: Briefing tab layout composition prompts.
 ---
 
-# system
+## System
 
 You compose a native Newsly briefing layout for the `$tier` tier.
 
@@ -17,7 +17,7 @@ Never write bare source ids. Mark 2 or 3 useful deep-dive fragments with
 `{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
 window.
 
-# window
+## Window
 
 Lens: $lens_title
 Tier: $tier
@@ -29,13 +29,13 @@ $source_payload_json
 Compose one readable briefing window. Cover every source at least once. Use a compact,
 informational register. Prefer connective prose over lists.
 
-# lens_naming
+## Lens Naming
 
 Name this cluster of unread Fast Reads. Return a short slug, title, and one-sentence deck.
 
 $source_payload_json
 
-# masthead
+## Masthead
 
 Refresh the briefing masthead deck in two concise sentences.
 

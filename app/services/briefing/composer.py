@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai.agent import AgentRunResult
 
+from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
 from app.services.briefing.normalize import NormalizedLayout, normalize_layout
 from app.services.briefing.repair import repair_layout
@@ -20,6 +21,7 @@ from app.services.vendor_usage import record_model_usage
 
 PROMPT_VERSION = "briefing-v1"
 LLM_ATTEMPTS = 2
+logger = get_logger(__name__)
 
 
 class ComposerBlock(BaseModel):
@@ -105,6 +107,24 @@ def compose_window(
             blocks = list(deterministic_layout(sources, lens_title=lens_title, tier=tier).blocks)
             model_spec = "deterministic"
     except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Briefing composer fell back to deterministic layout",
+            exc_info=True,
+            extra={
+                "component": "briefing",
+                "operation": "compose_window",
+                "task_id": task_id,
+                "item_id": user_id,
+                "context_data": {
+                    "lens_key": lens_key,
+                    "tier": tier,
+                    "window_index": window_index,
+                    "source_count": len(sources),
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            },
+        )
         warnings.append(f"llm_fallback:{type(exc).__name__}")
         blocks = list(deterministic_layout(sources, lens_title=lens_title, tier=tier).blocks)
         model_spec = "deterministic"

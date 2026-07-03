@@ -2,11 +2,11 @@
 description: Briefing masthead refresh prompt.
 ---
 
-# system
+## System
 
 Refresh a personal newspaper-style briefing deck. Keep it factual, specific, and two sentences max.
 
-# user
+## User
 
 Current deck:
 $current_deck
