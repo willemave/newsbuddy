@@ -59,6 +59,10 @@ class DummyQueue:
         return len(self.calls)
 
 
+def _isolate_generated_images(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.services.long_form_images.get_content_images_dir", lambda: tmp_path)
+
+
 def test_visible_completed_article_is_eligible_for_generated_image(db_session, test_user) -> None:
     content = Content(
         url="https://example.com/article",
@@ -81,7 +85,10 @@ def test_visible_completed_article_is_eligible_for_generated_image(db_session, t
 def test_knowledge_saved_article_is_eligible_for_generated_image(
     db_session,
     test_user,
+    monkeypatch,
+    tmp_path,
 ) -> None:
+    _isolate_generated_images(monkeypatch, tmp_path)
     content = Content(
         url="https://example.com/saved-article",
         content_type=ContentType.ARTICLE.value,
@@ -130,7 +137,10 @@ def test_article_missing_list_ready_summary_is_not_eligible(db_session, test_use
 def test_visible_podcast_with_provider_thumbnail_is_eligible_and_enqueues(
     db_session,
     test_user,
+    monkeypatch,
+    tmp_path,
 ) -> None:
+    _isolate_generated_images(monkeypatch, tmp_path)
     content = Content(
         url="https://example.com/podcast",
         content_type=ContentType.PODCAST.value,
