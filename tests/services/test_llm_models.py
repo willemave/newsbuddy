@@ -21,6 +21,7 @@ def _settings(**kwargs):
         google_cloud_location=kwargs.get("google_cloud_location", "global"),
         cerebras_api_key=kwargs.get("cerebras_api_key"),
         openrouter_api_key=kwargs.get("openrouter_api_key"),
+        openrouter_ignored_providers=kwargs.get("openrouter_ignored_providers", []),
     )
 
 
@@ -167,6 +168,34 @@ def test_build_pydantic_model_openrouter_uses_native_json_schema_profile(
         "openrouter_reasoning": llm_models.OPENROUTER_REASONING_CONFIG,
         "timeout": llm_models.OPENROUTER_MODEL_TIMEOUT_SECONDS,
     }
+
+
+def test_openrouter_provider_config_includes_deny_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        llm_models,
+        "get_settings",
+        lambda: _settings(openrouter_ignored_providers=["Alibaba"]),
+    )
+
+    config = llm_models.openrouter_provider_config()
+
+    assert config == {
+        "require_parameters": True,
+        "sort": llm_models.OPENROUTER_PROVIDER_SORT,
+        "ignore": ["Alibaba"],
+    }
+
+
+def test_openrouter_provider_config_omits_empty_deny_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llm_models, "get_settings", lambda: _settings())
+
+    config = llm_models.openrouter_provider_config()
+
+    assert "ignore" not in config
 
 
 def test_resolve_effective_api_key_prefers_user_key(monkeypatch: pytest.MonkeyPatch) -> None:

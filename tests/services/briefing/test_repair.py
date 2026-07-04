@@ -1,0 +1,155 @@
+from datetime import UTC, datetime
+
+from app.models.contracts import ContentType
+from app.services.briefing.repair import repair_layout
+from app.services.briefing.sources import BriefingSource
+
+
+def test_backfill_adds_inset_figure_after_citing_passage() -> None:
+    sources = [_source(1), _source(2)]
+    blocks = [
+        _passage("[First](newsly://briefing/content/1) covers agents."),
+        _passage("[Second](newsly://briefing/content/2) covers evals."),
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+        ensure_source_figures=True,
+    )
+
+    types = [block["type"] for block in result.blocks]
+    assert types == ["passage", "figure", "passage", "figure"]
+    first_figure = result.blocks[1]
+    assert first_figure["source_key"] == "content:1"
+    assert first_figure["placement"] == "inset"
+    assert first_figure["image_url"] == "/static/images/content/1.png"
+    assert first_figure["caption"] == "Article 1"
+    assert "figure_backfill:2" in result.warnings
+
+
+def test_backfill_skips_sources_already_figured_by_the_llm() -> None:
+    sources = [_source(1), _source(2)]
+    blocks = [
+        _passage("[First](newsly://briefing/content/1) and [Second](newsly://briefing/content/2)."),
+        {"type": "figure", "source_key": "content:1", "caption": "Model caption"},
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+        ensure_source_figures=True,
+    )
+
+    figures = [block for block in result.blocks if block["type"] == "figure"]
+    assert [figure["source_key"] for figure in figures] == ["content:1", "content:2"]
+    assert figures[0]["caption"] == "Model caption"
+    assert "figure_backfill:1" in result.warnings
+
+
+def test_backfill_skips_sources_without_images_and_respects_budget() -> None:
+    sources = [_source(1), _source(2, imaged=False), _source(3), _source(4)]
+    blocks = [
+        _passage(
+            " ".join(
+                f"[Source {index}](newsly://briefing/content/{index}) develops a thesis."
+                for index in (1, 2, 3, 4)
+            )
+        ),
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=2,
+        ensure_source_figures=True,
+    )
+
+    figures = [block for block in result.blocks if block["type"] == "figure"]
+    assert [figure["source_key"] for figure in figures] == ["content:1", "content:3"]
+    assert "figure_backfill:2" in result.warnings
+
+
+def test_backfill_uses_coverage_repair_passage_for_uncited_sources() -> None:
+    sources = [_source(1), _source(2)]
+    blocks = [_passage("[First](newsly://briefing/content/1) stands alone.")]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+        ensure_source_figures=True,
+    )
+
+    types = [block["type"] for block in result.blocks]
+    assert types == ["passage", "figure", "passage", "figure"]
+    assert result.blocks[3]["source_key"] == "content:2"
+    assert "coverage_repair:1" in result.warnings
+
+
+def test_full_placement_coerced_to_inset() -> None:
+    sources = [_source(1)]
+    blocks = [
+        _passage("[First](newsly://briefing/content/1) covers agents."),
+        {"type": "figure", "source_key": "content:1", "placement": "full"},
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+    )
+
+    figures = [block for block in result.blocks if block["type"] == "figure"]
+    assert [figure["placement"] for figure in figures] == ["inset"]
+
+
+def test_backfill_disabled_by_default() -> None:
+    sources = [_source(1)]
+    blocks = [_passage("[First](newsly://briefing/content/1) covers agents.")]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="news-ai",
+        window_index=0,
+        figure_budget=6,
+    )
+
+    assert [block["type"] for block in result.blocks] == ["passage"]
+    assert not any(warning.startswith("figure_backfill") for warning in result.warnings)
+
+
+def _passage(markdown: str) -> dict[str, str]:
+    return {"type": "passage", "weight": "feature", "markdown": markdown}
+
+
+def _source(content_id: int, *, imaged: bool = True) -> BriefingSource:
+    return BriefingSource(
+        source_key=f"content:{content_id}",
+        kind="content",
+        id=content_id,
+        tier="longform",
+        lens_key="articles",
+        title=f"Article {content_id}",
+        summary="A concise summary.",
+        key_points=["A concrete point."],
+        url=f"https://example.com/{content_id}",
+        image_url=f"/static/images/content/{content_id}.png" if imaged else None,
+        thumbnail_url=f"/static/images/thumbnails/{content_id}.png" if imaged else None,
+        published_at=datetime(2026, 1, 1, tzinfo=UTC),
+        content_type=ContentType.ARTICLE,
+        briefing_context=None,
+    )

@@ -16,12 +16,13 @@ from app.services.briefing.normalize import NormalizedLayout, normalize_layout
 from app.services.briefing.repair import repair_layout
 from app.services.briefing.sources import BriefingSource
 from app.services.llm_agents import get_basic_agent
-from app.services.llm_models import OPENROUTER_PROVIDER_SORT, OPENROUTER_REASONING_CONFIG
+from app.services.llm_models import OPENROUTER_REASONING_CONFIG, openrouter_provider_config
 from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
 
 PROMPT_VERSION = "briefing-v1"
+MAX_COMPOSE_ATTEMPTS = 2
 logger = get_logger(__name__)
 
 
@@ -90,19 +91,42 @@ def compose_window(
     blocks: list[dict[str, Any] | ComposerBlock]
 
     if use_llm:
-        try:
-            llm_blocks, usage = _compose_window_with_llm(
-                sources,
-                lens_title=lens_title,
-                tier=tier,
-                model_spec=model_spec,
-                timeout_seconds=settings.briefing_llm_timeout_seconds,
-                task_id=task_id,
-                user_id=user_id,
-            )
-        except Exception as exc:
-            logger.exception(
-                "Briefing LLM composition failed",
+        for attempt in range(1, MAX_COMPOSE_ATTEMPTS + 1):
+            try:
+                llm_blocks, usage = _compose_window_with_llm(
+                    sources,
+                    lens_title=lens_title,
+                    tier=tier,
+                    model_spec=model_spec,
+                    timeout_seconds=settings.briefing_llm_timeout_seconds,
+                    task_id=task_id,
+                    user_id=user_id,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Briefing LLM composition failed",
+                    extra={
+                        "component": "briefing",
+                        "operation": "compose_window",
+                        "task_id": task_id,
+                        "item_id": user_id,
+                        "context_data": {
+                            "lens_key": lens_key,
+                            "tier": tier,
+                            "window_index": window_index,
+                            "source_count": len(sources),
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                    },
+                )
+                raise
+            if not _blocks_look_malformed(llm_blocks):
+                break
+            # Some OpenRouter providers return blocks with all content fields empty
+            # (prose dumped into `weight`); repair cannot recover those, so retry.
+            logger.warning(
+                "Briefing LLM returned malformed layout blocks",
                 extra={
                     "component": "briefing",
                     "operation": "compose_window",
@@ -112,13 +136,16 @@ def compose_window(
                         "lens_key": lens_key,
                         "tier": tier,
                         "window_index": window_index,
-                        "source_count": len(sources),
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
+                        "attempt": attempt,
                     },
                 },
             )
-            raise
+            if attempt >= MAX_COMPOSE_ATTEMPTS:
+                raise RuntimeError(
+                    "Briefing LLM returned malformed layout blocks after "
+                    f"{MAX_COMPOSE_ATTEMPTS} attempts"
+                )
+            warnings.append(f"llm_malformed_retry:{attempt}")
         blocks = list(llm_blocks)
         if usage:
             input_tokens = usage.get("input_tokens")
@@ -141,6 +168,8 @@ def compose_window(
         lens_key=lens_key,
         window_index=window_index,
         figure_budget=figure_budget,
+        # Deep tiers guarantee each imaged source a figure even when the LLM skips them.
+        ensure_source_figures=tier != "news",
     )
     warnings.extend(repaired.warnings)
     normalized: NormalizedLayout = normalize_layout(
@@ -172,6 +201,20 @@ def compose_window(
         generation_ms=generation_ms,
         warnings=warnings,
     )
+
+
+def _blocks_look_malformed(blocks: list[dict[str, Any]]) -> bool:
+    """True when no block carries usable content — the signature of a provider
+    that ignored the JSON schema (e.g. all prose dumped into `weight`)."""
+
+    for block in blocks:
+        markdown = block.get("markdown") or block.get("text")
+        if isinstance(markdown, str) and markdown.strip():
+            return False
+        source_key = block.get("source_key")
+        if isinstance(source_key, str) and source_key.strip():
+            return False
+    return True
 
 
 def deterministic_layout(
@@ -319,10 +362,7 @@ def _compose_window_with_openrouter(
                 },
             },
             extra_body={
-                "provider": {
-                    "require_parameters": True,
-                    "sort": OPENROUTER_PROVIDER_SORT,
-                },
+                "provider": openrouter_provider_config(),
                 "reasoning": OPENROUTER_REASONING_CONFIG,
             },
             timeout=request_timeout,
