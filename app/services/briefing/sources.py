@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
@@ -25,6 +25,10 @@ from app.utils.image_urls import (
 from app.utils.news_titles import resolve_news_display_title
 from app.utils.summary_utils import extract_short_summary
 
+BRIEFING_CONTEXT_MAX_CHARS = 2400
+BRIEFING_SOURCE_EXCERPT_MAX_CHARS = 900
+BRIEFING_CONTEXT_LIST_MAX_ITEMS = 6
+
 
 @dataclass(frozen=True)
 class BriefingSource:
@@ -43,6 +47,7 @@ class BriefingSource:
     content_type: ContentType | None
     topic_slug: str | None = None
     topic_title: str | None = None
+    briefing_context: str | None = None
 
     def dto(self, *, read: bool) -> dict[str, object]:
         return {
@@ -92,6 +97,13 @@ def _content_is_read_clause(*, user_id: int):
     )
 
 
+def _briefing_longform_classification_clause():
+    return or_(
+        Content.classification.is_(None),
+        Content.classification != ContentClassification.SKIP.value,
+    )
+
+
 def list_unread_longform_sources(
     db: Session,
     *,
@@ -99,7 +111,7 @@ def list_unread_longform_sources(
     content_type: ContentType,
     limit: int,
 ) -> list[BriefingSource]:
-    """Return unread completed to-read content rows for one long-form tier."""
+    """Return unread completed non-skipped content rows for one long-form tier."""
 
     read_clause = _content_is_read_clause(user_id=user_id)
     rows = (
@@ -111,7 +123,7 @@ def list_unread_longform_sources(
         .filter(ContentStatusEntry.user_id == user_id)
         .filter(ContentStatusEntry.status == "inbox")
         .filter(Content.status == ContentStatus.COMPLETED.value)
-        .filter(Content.classification == ContentClassification.TO_READ.value)
+        .filter(_briefing_longform_classification_clause())
         .filter(Content.content_type == content_type.value)
         .filter(~read_clause)
         .order_by(
@@ -222,6 +234,7 @@ def _source_from_content(content: Content) -> BriefingSource:
         metadata.get("excerpt")
     )
     key_points = _key_points_from_metadata(metadata)
+    briefing_context = _briefing_context_from_metadata(metadata)
     tier = "audio" if content_type == ContentType.PODCAST else "longform"
     lens_key = "podcasts" if content_type == ContentType.PODCAST else "articles"
     image_version = metadata.get("image_version") or metadata.get("thumbnail_version")
@@ -239,7 +252,211 @@ def _source_from_content(content: Content) -> BriefingSource:
         thumbnail_url=build_thumbnail_url(content_id, version=image_version),
         published_at=content.publication_date or content.created_at,
         content_type=content_type,
+        briefing_context=briefing_context,
     )
+
+
+def _briefing_context_from_metadata(metadata: dict[str, Any]) -> str | None:
+    parts: list[str] = []
+    summary = metadata.get("summary")
+
+    if isinstance(summary, dict):
+        _append_labeled_text(parts, "Overview", summary.get("overview"))
+        _append_labeled_text(parts, "Summary", summary.get("summary"))
+        _append_labeled_text(parts, "Hook", summary.get("hook"))
+        _append_labeled_text(parts, "One line", summary.get("one_line"))
+        _append_labeled_text(parts, "Narrative", summary.get("editorial_narrative"))
+        _append_items(
+            parts,
+            "Key points",
+            summary.get("key_points") or summary.get("bullet_points") or summary.get("points"),
+        )
+        _append_items(parts, "Insights", summary.get("insights"))
+        _append_items(parts, "Topics", summary.get("topics"))
+        _append_items(parts, "Quotes", summary.get("quotes"), max_items=3)
+        _append_items(parts, "Questions", summary.get("questions"), max_items=3)
+        _append_items(parts, "Counterarguments", summary.get("counter_arguments"), max_items=3)
+        _append_labeled_text(parts, "Takeaway", summary.get("takeaway"))
+        _append_source_details(parts, summary.get("source_details"))
+        _append_artifact(parts, summary.get("artifact"))
+        _append_feed_preview(parts, summary.get("feed_preview"))
+        _append_source_excerpt(parts, summary.get("full_markdown"))
+    elif isinstance(summary, str):
+        _append_labeled_text(parts, "Summary", summary)
+
+    _append_labeled_text(parts, "Excerpt", metadata.get("excerpt"))
+    _append_source_excerpt(parts, metadata.get("content_to_summarize"))
+    _append_source_excerpt(parts, metadata.get("content"))
+    _append_source_excerpt(parts, metadata.get("transcript"), label="Transcript excerpt")
+
+    context = "\n\n".join(part for part in parts if part).strip()
+    if not context:
+        return None
+    return _truncate_text(context, BRIEFING_CONTEXT_MAX_CHARS)
+
+
+def _append_labeled_text(parts: list[str], label: str, value: Any) -> None:
+    text = _text_from_value(value)
+    if text:
+        parts.append(f"{label}: {text}")
+
+
+def _append_items(
+    parts: list[str],
+    label: str,
+    value: Any,
+    *,
+    max_items: int = BRIEFING_CONTEXT_LIST_MAX_ITEMS,
+) -> None:
+    if not isinstance(value, list):
+        return
+    items = [_text_from_value(item) for item in value[:max_items]]
+    lines = [f"- {item}" for item in items if item]
+    if lines:
+        parts.append(f"{label}:\n" + "\n".join(lines))
+
+
+def _append_source_details(parts: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        return
+    detail_parts: list[str] = []
+    for key, detail_value in value.items():
+        if key == "template":
+            continue
+        label = key.replace("_", " ").capitalize()
+        if isinstance(detail_value, list):
+            items = [
+                _text_from_value(item) for item in detail_value[:BRIEFING_CONTEXT_LIST_MAX_ITEMS]
+            ]
+            cleaned = [item for item in items if item]
+            if cleaned:
+                detail_parts.append(f"{label}: " + "; ".join(cleaned))
+            continue
+        text = _text_from_value(detail_value)
+        if text:
+            detail_parts.append(f"{label}: {text}")
+    if detail_parts:
+        parts.append("Source details:\n" + "\n".join(f"- {part}" for part in detail_parts))
+
+
+def _append_artifact(parts: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        return
+    payload = value.get("payload")
+    if not isinstance(payload, dict):
+        return
+    artifact_parts: list[str] = []
+    for key in (
+        "overview",
+        "thesis",
+        "primary_claim",
+        "counterpoint",
+        "takeaway",
+        "reason_to_read",
+    ):
+        text = _text_from_value(payload.get(key))
+        if text:
+            artifact_parts.append(f"{key.replace('_', ' ').capitalize()}: {text}")
+    for key in ("key_points", "supporting_arguments", "evidence", "implications", "quotes"):
+        value_items = payload.get(key)
+        if not isinstance(value_items, list):
+            continue
+        items = [_text_from_value(item) for item in value_items[:BRIEFING_CONTEXT_LIST_MAX_ITEMS]]
+        cleaned = [item for item in items if item]
+        if cleaned:
+            artifact_parts.append(f"{key.replace('_', ' ').capitalize()}: " + "; ".join(cleaned))
+    extras = payload.get("extras")
+    if isinstance(extras, dict):
+        for key, extra_value in extras.items():
+            text = _text_from_value(extra_value)
+            if text:
+                artifact_parts.append(f"{key.replace('_', ' ').capitalize()}: {text}")
+    if artifact_parts:
+        parts.append("Artifact context:\n" + "\n".join(f"- {part}" for part in artifact_parts))
+
+
+def _append_feed_preview(parts: list[str], value: Any) -> None:
+    if not isinstance(value, dict):
+        return
+    preview_parts: list[str] = []
+    for key in ("one_line", "reason_to_read"):
+        text = _text_from_value(value.get(key))
+        if text:
+            preview_parts.append(f"{key.replace('_', ' ').capitalize()}: {text}")
+    bullets = value.get("preview_bullets")
+    if isinstance(bullets, list):
+        items = [_text_from_value(item) for item in bullets[:3]]
+        cleaned = [item for item in items if item]
+        if cleaned:
+            preview_parts.append("Preview bullets: " + "; ".join(cleaned))
+    if preview_parts:
+        parts.append("Feed preview:\n" + "\n".join(f"- {part}" for part in preview_parts))
+
+
+def _append_source_excerpt(
+    parts: list[str],
+    value: Any,
+    *,
+    label: str = "Source excerpt",
+) -> None:
+    text = _text_from_value(value)
+    if text:
+        parts.append(f"{label}: {_truncate_text(text, BRIEFING_SOURCE_EXCERPT_MAX_CHARS)}")
+
+
+def _text_from_value(value: Any) -> str | None:
+    if isinstance(value, str):
+        return _clean_string(value)
+    if not isinstance(value, dict):
+        return None
+
+    heading = _clean_string(
+        value.get("heading")
+        or value.get("topic")
+        or value.get("title")
+        or value.get("category")
+        or value.get("attribution")
+        or value.get("context")
+    )
+    body = _clean_string(
+        value.get("text")
+        or value.get("point")
+        or value.get("detail")
+        or value.get("content")
+        or value.get("summary")
+        or value.get("insight")
+        or value.get("overview")
+        or value.get("thesis")
+        or value.get("primary_claim")
+        or value.get("takeaway")
+    )
+
+    nested_lines: list[str] = []
+    bullets = value.get("bullets")
+    if isinstance(bullets, list):
+        nested_lines = [
+            nested for nested in (_text_from_value(item) for item in bullets[:3]) if nested
+        ]
+
+    text: str | None
+    if heading and body and heading.lower() not in body.lower():
+        text = f"{heading}: {body}"
+    else:
+        text = body or heading
+    if nested_lines:
+        nested_text = "; ".join(nested_lines)
+        text = f"{text} ({nested_text})" if text else nested_text
+    return _truncate_text(text, 700) if text else None
+
+
+def _truncate_text(value: str, max_chars: int) -> str:
+    cleaned = " ".join(value.split()).strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    suffix = "..."
+    available_chars = max(max_chars - len(suffix), 0)
+    truncated = cleaned[:available_chars].rsplit(" ", 1)[0].strip()
+    return (truncated.rstrip(".,;:") + suffix)[:max_chars]
 
 
 def _source_from_news_item(item: NewsItem) -> BriefingSource:

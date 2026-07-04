@@ -28,7 +28,7 @@ def enqueue_content_for_briefing_if_ready(
         return 0
     if content.status != ContentStatus.COMPLETED.value:
         return 0
-    if content.classification != ContentClassification.TO_READ.value:
+    if content.classification == ContentClassification.SKIP.value:
         return 0
     if content.content_type not in {ContentType.ARTICLE.value, ContentType.PODCAST.value}:
         return 0

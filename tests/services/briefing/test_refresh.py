@@ -203,6 +203,63 @@ def test_release_path_append_without_pending_skips_planning(
     assert result.compacted_segments == 0
 
 
+def test_append_backfills_uncovered_unclassified_podcasts_after_existing_segment(
+    db_session: Session,
+    test_user: User,
+    content_factory,
+    status_entry_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    for index in range(3):
+        _create_unread_article(
+            content_factory,
+            status_entry_factory,
+            test_user,
+            index=index,
+        )
+    run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="full",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+
+    podcasts = [
+        _create_unread_podcast(
+            content_factory,
+            status_entry_factory,
+            test_user,
+            index=index,
+        )
+        for index in range(3)
+    ]
+
+    result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="append",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert result.pending_added == 3
+    assert result.appended_segments == 1
+    podcast_lens = db_session.query(BriefingLens).filter(BriefingLens.key == "podcasts").one()
+    podcast_segment = (
+        db_session.query(BriefingSegment).filter(BriefingSegment.lens_id == podcast_lens.id).one()
+    )
+    assert podcast_segment.source_keys == [
+        f"content:{podcast.id}" for podcast in reversed(podcasts)
+    ]
+
+
 def test_mark_read_retires_fully_read_segment_and_bumps_version(
     db_session: Session,
     test_user: User,
@@ -293,6 +350,28 @@ def _create_unread_article(
             "summary": {
                 "overview": f"Summary {index}",
                 "key_points": [f"Point {index}"],
+            }
+        },
+    )
+    status_entry_factory(user=user, content=content, status="inbox")
+    return content
+
+
+def _create_unread_podcast(
+    content_factory,
+    status_entry_factory,
+    user: User,
+    *,
+    index: int,
+) -> Content:
+    content = content_factory(
+        content_type=ContentType.PODCAST,
+        title=f"Briefing podcast {index}",
+        classification=None,
+        content_metadata={
+            "summary": {
+                "overview": f"Podcast summary {index}",
+                "key_points": [f"Podcast point {index}"],
             }
         },
     )
