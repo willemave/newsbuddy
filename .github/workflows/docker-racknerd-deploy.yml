@@ -6,12 +6,19 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   deploy:
     name: Build image and deploy to RackNerd
     runs-on: ubuntu-latest
     concurrency: news-app-docker-deploy
     environment: production
+    permissions:
+      contents: read
+      packages: write
     env:
       DEPLOY_REMOTE_DIR: ${{ vars.DEPLOY_REMOTE_DIR }}
       DEPLOY_OWNER_GROUP: ${{ vars.DEPLOY_OWNER_GROUP }}
@@ -35,12 +42,22 @@ jobs:
           docker system prune -af || true
           df -h
 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build deployment image
         uses: docker/build-push-action@v6
         with:
           context: .
-          load: true
-          tags: newsly:${{ github.sha }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -64,12 +81,20 @@ jobs:
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
-          IMAGE_TAG: newsly:${{ github.sha }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+          IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          REGISTRY: ${{ env.REGISTRY }}
         run: |
           set -euo pipefail
 
           if [[ -z "${DEPLOY_SSH_USER:-}" || -z "${DEPLOY_SSH_HOST:-}" ]]; then
             echo "DEPLOY_SSH_USER and DEPLOY_SSH_HOST secrets are required" >&2
+            exit 1
+          fi
+          if [[ -z "${GHCR_TOKEN:-}" || -z "${GHCR_USERNAME:-}" ]]; then
+            echo "GHCR token and username are required for remote image pull" >&2
             exit 1
           fi
 
@@ -123,16 +148,16 @@ jobs:
           ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
             set -euo pipefail
             cd \"$REMOTE_DIR\"
-            if [[ ! -f .env.racknerd ]]; then
+            if ! sudo test -f .env.racknerd; then
               echo \".env.racknerd is required for deploy\" >&2
               exit 1
             fi
-            if grep -q \"^ENVIRONMENT=production$\" .env.racknerd; then
-              if ! grep -q \"^CORS_ALLOW_ORIGINS=\" .env.racknerd; then
+            if sudo grep -q \"^ENVIRONMENT=production$\" .env.racknerd; then
+              if ! sudo grep -q \"^CORS_ALLOW_ORIGINS=\" .env.racknerd; then
                 echo \"CORS_ALLOW_ORIGINS is required when ENVIRONMENT=production\" >&2
                 exit 1
               fi
-              if grep -q \"^CORS_ALLOW_ORIGINS=\\*$\" .env.racknerd; then
+              if sudo grep -q \"^CORS_ALLOW_ORIGINS=\\*$\" .env.racknerd; then
                 echo \"CORS_ALLOW_ORIGINS must be explicit when ENVIRONMENT=production\" >&2
                 exit 1
               fi
@@ -145,12 +170,11 @@ jobs:
             ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
               set -euo pipefail
               current_image=\$(sudo docker inspect --format \"{{.Config.Image}}\" newsly 2>/dev/null || true)
-              if [[ -n \"\${current_image}\" ]]; then
-                sudo docker images --format \"{{.Repository}}:{{.Tag}}\" \
-                  | awk '\''\$1 ~ /^newsly:/ { print \$1 }'\'' \
+              for image_repository in \"$IMAGE_REPOSITORY\" newsly; do
+                sudo docker images --format \"{{.Repository}}:{{.Tag}}\" \"\${image_repository}\" \
                   | grep -Fvx \"\${current_image}\" \
                   | xargs -r sudo docker rmi || true
-              fi
+              done
               sudo docker images --filter dangling=true -q | xargs -r sudo docker rmi || true
               sudo docker builder prune -af || true
               sudo docker container prune -f || true
@@ -158,18 +182,20 @@ jobs:
             '"
           }
 
-          echo "→ Cleaning up unused remote Docker artifacts before image load"
+          echo "→ Logging in to GitHub Container Registry on remote host"
+          printf '%s' "$GHCR_TOKEN" | ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker login '$REGISTRY' --username '$GHCR_USERNAME' --password-stdin >/dev/null"
+
+          echo "→ Cleaning up unused remote Docker artifacts before image pull"
           remote_cleanup_docker
 
-          echo "→ Streaming image to remote host"
-          docker save "$IMAGE_TAG" | gzip | ssh "${SSH_OPTS[@]}" "$REMOTE" "gunzip | sudo docker load"
+          echo "→ Pulling image on remote host"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker pull '$IMAGE_TAG'"
 
           echo "→ Restarting Docker stack"
           ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
             set -euo pipefail
             cd \"$REMOTE_DIR\"
-            sudo env NEWSLY_IMAGE=\"$IMAGE_TAG\" NEWSLY_ENV_FILE=.env.racknerd docker compose --env-file .env.racknerd down --remove-orphans || true
-            sudo env NEWSLY_IMAGE=\"$IMAGE_TAG\" NEWSLY_ENV_FILE=.env.racknerd docker compose --env-file .env.racknerd up -d
+            sudo env NEWSLY_IMAGE=\"$IMAGE_TAG\" NEWSLY_ENV_FILE=.env.racknerd docker compose --env-file .env.racknerd up -d --no-build --remove-orphans
           '"
 
           echo "→ Verifying container health"

@@ -32,12 +32,12 @@ RUN pip install --upgrade pip uv
 
 COPY pyproject.toml uv.lock README.md /app/
 
-RUN uv sync --frozen --no-dev --no-editable --no-install-project
+RUN uv sync --frozen --no-dev --no-editable --no-install-project \
+    && python -m playwright install --with-deps chromium
 
 COPY . /app
 
 RUN uv sync --frozen --no-dev --no-editable \
-    && python -m playwright install --with-deps chromium \
     && chmod +x /app/docker/*.sh /app/scripts/*.sh
 
 VOLUME ["/data"]
