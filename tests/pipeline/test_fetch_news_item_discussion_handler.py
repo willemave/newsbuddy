@@ -117,3 +117,27 @@ def test_handler_completes_unsupported_discussion_task(db_session, monkeypatch) 
     result = handler.handle(task, context)
 
     assert result.success is True
+
+
+def test_handler_completes_gone_discussion_task(db_session, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.pipeline.handlers.fetch_news_item_discussion.refresh_news_item_discussion",
+        lambda _db, news_item_id, summarizer=None: NewsItemDiscussionRefreshResult(
+            success=False,
+            status="gone",
+            error_message="Hacker News discussion is gone",
+            retryable=False,
+        ),
+    )
+
+    handler = FetchNewsItemDiscussionHandler()
+    context = _build_context(db_session)
+    task = TaskEnvelope(
+        id=5,
+        task_type=TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+        payload={"news_item_id": "123"},
+    )
+
+    result = handler.handle(task, context)
+
+    assert result.success is True

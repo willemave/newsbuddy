@@ -57,8 +57,10 @@ logger = get_logger(__name__)
 DISCUSSION_REFRESH_TTL = timedelta(hours=1)
 DISCUSSION_REFRESH_LEASE_TTL = timedelta(minutes=15)
 REFRESH_STATUS_PROCESSING = "processing"
+REFRESH_STATUS_GONE = "gone"
 REFRESH_TTL_HOLD_STATUSES = frozenset({"completed", "failed", REFRESH_STATUS_PROCESSING})
 REFRESH_EMPTY_FETCH_BLOCK_STATUSES = ("failed", REFRESH_STATUS_PROCESSING)
+TERMINAL_REFRESH_STATUSES = frozenset({REFRESH_STATUS_GONE, "unsupported"})
 NEWS_DISCUSSION_SUMMARY_VERSION = 1
 DEFAULT_DISCUSSION_REFRESH_ENQUEUE_LIMIT = 100
 MAX_STORED_COMMENTS = 1_000
@@ -78,6 +80,14 @@ class NewsItemDiscussionRefreshResult:
     refreshed: bool = False
     summarized: bool = False
     retryable: bool = True
+
+
+class TerminalNewsItemDiscussionUnavailable(DiscussionFetchError):
+    """Non-retryable discussion state that should be removed from refresh rotation."""
+
+    def __init__(self, message: str, *, status: str = REFRESH_STATUS_GONE) -> None:
+        super().__init__(message, retryable=False)
+        self.status = status
 
 
 def _utcnow_naive() -> datetime:
@@ -408,6 +418,8 @@ def should_enqueue_news_item_discussion_refresh(
     current_time = now or _utcnow_naive()
     if row.next_refresh_after is not None and row.next_refresh_after > current_time:
         return False
+    if row.last_refresh_status in TERMINAL_REFRESH_STATUSES:
+        return False
     return (
         db.query(NewsItem.id)
         .filter(NewsItem.id == row.news_item_id)
@@ -479,6 +491,12 @@ def list_due_news_item_discussion_refresh_candidates(
         db.query(NewsItemDiscussion.news_item_id)
         .join(NewsItem, NewsItem.id == NewsItemDiscussion.news_item_id)
         .filter(NewsItemDiscussion.platform.in_(list(SUPPORTED_DISCUSSION_PLATFORMS)))
+        .filter(
+            or_(
+                NewsItemDiscussion.last_refresh_status.is_(None),
+                NewsItemDiscussion.last_refresh_status.notin_(list(TERMINAL_REFRESH_STATUSES)),
+            )
+        )
         .filter(_ready_representative_news_item_clause())
         .filter(_visible_to_active_user_clause())
         .filter(_supported_discussion_news_item_clause())
@@ -561,6 +579,11 @@ def _fetch_hackernews_comments(
             HN_FIREBASE_ITEM_URL.format(item_id=external_id),
             retryable_404=False,
         )
+        if firebase_item.get("dead") is True or firebase_item.get("deleted") is True:
+            raise TerminalNewsItemDiscussionUnavailable(
+                "Hacker News discussion is gone",
+                status=REFRESH_STATUS_GONE,
+            )
         algolia_item = _fetch_json(
             client,
             HN_ALGOLIA_ITEM_URL.format(item_id=external_id),
@@ -815,6 +838,27 @@ def _mark_refresh_failure(
     )
 
 
+def _mark_terminal_refresh(
+    db: Session,
+    *,
+    row: NewsItemDiscussion,
+    status: str,
+    error_message: str,
+) -> NewsItemDiscussionRefreshResult:
+    row.last_refresh_status = status
+    row.last_refresh_error = error_message
+    row.next_refresh_after = None
+    if row.summary is None:
+        row.summary_status = status
+    db.commit()
+    return NewsItemDiscussionRefreshResult(
+        success=False,
+        status=status,
+        error_message=error_message,
+        retryable=False,
+    )
+
+
 def _skipped_refresh_result(row: NewsItemDiscussion) -> NewsItemDiscussionRefreshResult:
     retryable = row.last_refresh_status != "failed"
     return NewsItemDiscussionRefreshResult(
@@ -911,6 +955,14 @@ def refresh_news_item_discussion(
         )
 
     now = _utcnow_naive()
+    if not force and row.last_refresh_status in TERMINAL_REFRESH_STATUSES:
+        db.commit()
+        return NewsItemDiscussionRefreshResult(
+            success=False,
+            status=row.last_refresh_status or REFRESH_STATUS_GONE,
+            error_message=row.last_refresh_error,
+            retryable=False,
+        )
     if not force and _refresh_deferred_by_ttl(row, now=now):
         db.commit()
         return _skipped_refresh_result(row)
@@ -920,6 +972,13 @@ def refresh_news_item_discussion(
 
     try:
         raw_payload = _fetch_discussion_comments(row)
+    except TerminalNewsItemDiscussionUnavailable as exc:
+        return _mark_terminal_refresh(
+            db,
+            row=row,
+            status=exc.status,
+            error_message=str(exc),
+        )
     except DiscussionFetchError as exc:
         return _mark_refresh_failure(
             db,
