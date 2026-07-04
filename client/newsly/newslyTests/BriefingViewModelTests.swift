@@ -20,6 +20,25 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedLens?.lens.key, "today")
     }
 
+    func testConcurrentIndexLoadsShareInFlightRequest() async {
+        let service = MockBriefingService()
+        service.fetchIndexDelayNanoseconds = 100_000_000
+        service.indexResults = [
+            .value(makeIndex(lenses: [makeLensSummary(key: "today")]), etag: "briefing-v1")
+        ]
+        service.lensResponses["today"] = makeLens(key: "today")
+        let viewModel = BriefingViewModel(service: service)
+
+        let first = Task { await viewModel.loadIndexIfNeeded() }
+        let second = Task { await viewModel.loadIndexIfNeeded() }
+        await first.value
+        await second.value
+        await waitFor { viewModel.selectedLens != nil }
+
+        XCTAssertEqual(service.indexEtags, [nil])
+        XCTAssertEqual(viewModel.state, .loaded)
+    }
+
     func testRefreshUsesETagAndKeepsExistingIndexOnNotModified() async {
         let service = MockBriefingService()
         service.indexResults = [
@@ -56,6 +75,9 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.index?.version, 8)
         XCTAssertEqual(viewModel.source(for: "content:1")?.read, true)
         XCTAssertEqual(viewModel.source(for: "news:2")?.read, true)
+        XCTAssertEqual(viewModel.selectedLens?.segments.count, 0)
+        XCTAssertEqual(viewModel.index?.lenses.first?.segmentCount, 0)
+        XCTAssertEqual(viewModel.index?.lenses.first?.unreadSourceCount, 0)
     }
 
     func testIndexResponseWithoutEtagKeepsPreviousEtag() async {
@@ -167,6 +189,7 @@ final class BriefingViewModelTests: XCTestCase {
 private final class MockBriefingService: BriefingServicing {
     var indexResults: [BriefingIndexFetchResult] = []
     var indexEtags: [String?] = []
+    var fetchIndexDelayNanoseconds: UInt64?
     var lensResponses: [String: APIBriefingLensResponse] = [:]
     var fetchLensKeys: [String] = []
     var markReadCalls: [[String]] = []
@@ -176,6 +199,9 @@ private final class MockBriefingService: BriefingServicing {
 
     func fetchIndex(ifNoneMatch etag: String?) async throws -> BriefingIndexFetchResult {
         indexEtags.append(etag)
+        if let fetchIndexDelayNanoseconds {
+            try? await Task.sleep(nanoseconds: fetchIndexDelayNanoseconds)
+        }
         guard !indexResults.isEmpty else {
             return .value(makeIndex(lenses: []), etag: nil)
         }

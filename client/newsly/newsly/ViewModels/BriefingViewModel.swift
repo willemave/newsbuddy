@@ -19,6 +19,7 @@ final class BriefingViewModel: ObservableObject {
 
     private let service: BriefingServicing
     private var etag: String?
+    private var indexLoadTask: Task<Void, Never>?
     private var loadedLensKeys: Set<String> = []
     private var lensLoadTasks: [String: Task<Void, Never>] = [:]
     private var pendingReadKeys: Set<String> = []
@@ -150,6 +151,20 @@ final class BriefingViewModel: ObservableObject {
     }
 
     private func loadIndex(force: Bool) async {
+        if let indexLoadTask {
+            await indexLoadTask.value
+            return
+        }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performIndexLoad(force: force)
+        }
+        indexLoadTask = task
+        await task.value
+        indexLoadTask = nil
+    }
+
+    private func performIndexLoad(force: Bool) async {
         if index == nil {
             state = .loading
         }
@@ -203,24 +218,15 @@ final class BriefingViewModel: ObservableObject {
         guard !keys.isEmpty else { return }
         do {
             let response = try await service.markRead(sourceKeys: keys)
-            if var currentIndex = index {
-                currentIndex = APIBriefingIndexResponse(
-                    version: response.version,
-                    mastheadTitle: currentIndex.mastheadTitle,
-                    mastheadDeck: currentIndex.mastheadDeck,
-                    generatedAt: currentIndex.generatedAt,
-                    lenses: currentIndex.lenses
-                )
-                index = currentIndex
-            }
-            markSourcesReadLocally(keys)
+            applyReadMarksLocally(keys, version: response.version)
         } catch {
             pendingReadKeys.formUnion(keys)
         }
     }
 
-    private func markSourcesReadLocally(_ keys: [String]) {
+    private func applyReadMarksLocally(_ keys: [String], version: Int) {
         let keySet = Set(keys)
+        var updatedSummaries: [String: APIBriefingLensSummary] = [:]
         for (lensKey, lens) in lenses {
             let updatedSources = lens.sources.map { source in
                 guard keySet.contains(source.sourceKey) else { return source }
@@ -239,12 +245,38 @@ final class BriefingViewModel: ObservableObject {
                     read: true
                 )
             }
+            let readSourceKeys = Set(updatedSources.filter(\.read).map(\.sourceKey))
+            let remainingSegments = lens.segments.filter { segment in
+                let segmentSourceKeys = Set(segment.sourceKeys)
+                return segmentSourceKeys.isEmpty || !segmentSourceKeys.isSubset(of: readSourceKeys)
+            }
+            let remainingSourceKeys = Set(remainingSegments.flatMap(\.sourceKeys))
+            let updatedSummary = APIBriefingLensSummary(
+                key: lens.lens.key,
+                tier: lens.lens.tier,
+                title: lens.lens.title,
+                deck: lens.lens.deck,
+                position: lens.lens.position,
+                segmentCount: remainingSegments.count,
+                unreadSourceCount: remainingSourceKeys.subtracting(readSourceKeys).count
+            )
             lenses[lensKey] = APIBriefingLensResponse(
-                version: lens.version,
-                lens: lens.lens,
-                segments: lens.segments,
+                version: version,
+                lens: updatedSummary,
+                segments: remainingSegments,
                 sources: updatedSources
             )
+            updatedSummaries[lensKey] = updatedSummary
+        }
+        if var currentIndex = index {
+            currentIndex = APIBriefingIndexResponse(
+                version: version,
+                mastheadTitle: currentIndex.mastheadTitle,
+                mastheadDeck: currentIndex.mastheadDeck,
+                generatedAt: currentIndex.generatedAt,
+                lenses: currentIndex.lenses.map { updatedSummaries[$0.key] ?? $0 }
+            )
+            index = currentIndex
         }
     }
 }

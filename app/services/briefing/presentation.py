@@ -13,12 +13,11 @@ from app.models.api.briefing import (
 from app.models.contracts import BriefingTier
 from app.models.db import BriefingLens, BriefingSegment
 from app.services.briefing.refresh import ensure_state
-from app.services.briefing.sources import read_source_keys, sources_for_keys
+from app.services.briefing.sources import read_source_keys_for, sources_for_keys
 
 
 def get_briefing_index(db: Session, *, user_id: int) -> BriefingIndexResponse:
     state = ensure_state(db, user_id=user_id)
-    read_keys = read_source_keys(db, user_id=user_id)
     lenses = (
         db.query(BriefingLens)
         .filter(BriefingLens.user_id == user_id)
@@ -26,13 +25,22 @@ def get_briefing_index(db: Session, *, user_id: int) -> BriefingIndexResponse:
         .order_by(BriefingLens.position.asc(), BriefingLens.id.asc())
         .all()
     )
-    summaries = [_lens_summary(db, lens=lens, read_keys=read_keys) for lens in lenses]
+    active_segments = _active_segments(db, user_id=user_id)
+    source_keys_by_lens_id = _source_keys_by_lens_id(active_segments)
+    all_source_keys = sorted({key for keys in source_keys_by_lens_id.values() for key in keys})
+    read_keys = read_source_keys_for(db, user_id=user_id, source_keys=all_source_keys)
+    segment_counts_by_lens_id = _segment_counts_by_lens_id(active_segments)
+    summaries = [
+        _lens_summary(
+            lens=lens,
+            read_keys=read_keys,
+            source_keys=source_keys_by_lens_id.get(int(lens.id or 0), set()),
+            segment_count=segment_counts_by_lens_id.get(int(lens.id or 0), 0),
+        )
+        for lens in lenses
+    ]
     generated_at = max(
-        [
-            segment.created_at
-            for segment in _active_segments(db, user_id=user_id)
-            if segment.created_at
-        ],
+        [segment.created_at for segment in active_segments if segment.created_at],
         default=None,
     )
     return BriefingIndexResponse(
@@ -62,7 +70,6 @@ def get_briefing_lens(
     if lens is None:
         return None
     state = ensure_state(db, user_id=user_id)
-    read_keys = read_source_keys(db, user_id=user_id)
     segments = (
         db.query(BriefingSegment)
         .filter(BriefingSegment.lens_id == lens.id)
@@ -71,6 +78,7 @@ def get_briefing_lens(
         .all()
     )
     ordered_keys = _deduped_source_keys(segments)
+    read_keys = read_source_keys_for(db, user_id=user_id, source_keys=ordered_keys)
     source_map = sources_for_keys(db, user_id=user_id, source_keys=ordered_keys)
     source_dtos = [
         BriefingSourceDto.model_validate(source_map[key].dto(read=key in read_keys))
@@ -79,32 +87,31 @@ def get_briefing_lens(
     ]
     return BriefingLensResponse(
         version=int(state.version or 0),
-        lens=_lens_summary(db, lens=lens, read_keys=read_keys),
+        lens=_lens_summary(
+            lens=lens,
+            read_keys=read_keys,
+            source_keys=set(ordered_keys),
+            segment_count=len(segments),
+        ),
         segments=[_segment_dto(segment) for segment in segments],
         sources=source_dtos,
     )
 
 
 def _lens_summary(
-    db: Session,
     *,
     lens: BriefingLens,
     read_keys: set[str],
+    source_keys: set[str],
+    segment_count: int,
 ) -> BriefingLensSummary:
-    segments = (
-        db.query(BriefingSegment.source_keys)
-        .filter(BriefingSegment.lens_id == lens.id)
-        .filter(BriefingSegment.status.in_(("active", "degraded")))
-        .all()
-    )
-    source_keys = {str(key) for (keys,) in segments for key in (keys or [])}
     return BriefingLensSummary(
         key=str(lens.key),
         tier=BriefingTier(str(lens.tier)),
         title=str(lens.title),
         deck=str(lens.deck or ""),
         position=int(lens.position or 0),
-        segment_count=len(segments),
+        segment_count=segment_count,
         unread_source_count=len(source_keys - read_keys),
     )
 
@@ -129,6 +136,26 @@ def _active_segments(db: Session, *, user_id: int) -> list[BriefingSegment]:
         .filter(BriefingSegment.status.in_(("active", "degraded")))
         .all()
     )
+
+
+def _source_keys_by_lens_id(segments: list[BriefingSegment]) -> dict[int, set[str]]:
+    source_keys_by_lens_id: dict[int, set[str]] = {}
+    for segment in segments:
+        if segment.lens_id is None:
+            continue
+        keys = source_keys_by_lens_id.setdefault(int(segment.lens_id), set())
+        keys.update(str(key) for key in (segment.source_keys or []))
+    return source_keys_by_lens_id
+
+
+def _segment_counts_by_lens_id(segments: list[BriefingSegment]) -> dict[int, int]:
+    counts_by_lens_id: dict[int, int] = {}
+    for segment in segments:
+        if segment.lens_id is None:
+            continue
+        lens_id = int(segment.lens_id)
+        counts_by_lens_id[lens_id] = counts_by_lens_id.get(lens_id, 0) + 1
+    return counts_by_lens_id
 
 
 def _deduped_source_keys(segments: list[BriefingSegment]) -> list[str]:
