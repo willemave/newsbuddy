@@ -8,34 +8,31 @@ Since Apple Sign In requires a real device with an Apple ID, we've built a **Deb
 
 1. **Backend Running**: Ensure your FastAPI backend is running on `localhost:8000`
 2. **Database Setup**: Run migrations with `alembic -c migrations/alembic.ini upgrade head`
-3. **Environment Variables**: Ensure `JWT_SECRET_KEY` and `ADMIN_PASSWORD` are set in `.env`
+3. **Environment Variables**: Ensure `JWT_SECRET_KEY` is set in `.env`
 
 ## Testing Method 1: Using Debug Menu (Recommended)
 
 ### Step 1: Generate Test Token
 
-In your terminal, run the authentication test script:
+In your terminal, generate tokens for the user you want to test as:
 
 ```bash
 cd /path/to/news_app
-./scripts/test_auth_flow.sh
+/opt/homebrew/bin/uv run python scripts/generate_auth_tokens.py --user-id 1
 ```
 
 This script will:
-- Validate all authentication endpoints
-- Create a test user in the database
-- Generate valid JWT tokens
-- Output a test access token you can use
+- Generate valid JWT access and refresh tokens
+- Output tokens you can paste into the iOS Debug Menu
+- Include the configured token expiry values
 
 **Example Output:**
 ```
-✨ All authentication tests passed!
-
-📋 Test Token for iOS Simulator:
-================================
-Access Token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-
-You can use this token to test the iOS app...
+USER_ID=1
+ACCESS_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+REFRESH_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ACCESS_TOKEN_EXPIRES_MINUTES=30
+REFRESH_TOKEN_EXPIRES_DAYS=90
 ```
 
 ### Step 2: Open iOS Simulator
@@ -97,12 +94,8 @@ print(f'Created user ID: {user.id}')
 session.close()
 "
 
-# 2. Generate token
-python3 -c "
-from app.core.security import create_access_token
-token = create_access_token(1)  # Use the user ID from step 1
-print(f'Token: {token}')
-"
+# 2. Generate tokens
+/opt/homebrew/bin/uv run python scripts/generate_auth_tokens.py --user-id 1
 
 # 3. Test API endpoint
 curl -H "Authorization: Bearer YOUR_TOKEN_HERE" \
