@@ -13,6 +13,7 @@ def test_briefing_layout_prompt_sections_render() -> None:
     assert "`news` tier" in system_prompt
     assert "Lens: AI desk" in user_prompt
     assert "Sources:\n\n[]" in user_prompt
+    assert "target 3-5 sentences" in user_prompt
 
 
 def test_briefing_auxiliary_prompt_sections_render() -> None:

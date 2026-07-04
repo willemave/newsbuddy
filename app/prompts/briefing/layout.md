@@ -29,6 +29,16 @@ $source_payload_json
 Compose one readable briefing window. Cover every source at least once. Use a compact,
 informational register. Prefer connective prose over lists.
 
+For `audio` and `longform` tiers, treat each podcast or article as a full source, not a
+headline. Use the provided `briefing_context` when present. Give each source its own
+substantive treatment: target 3-5 sentences, roughly 110-170 words, covering the thesis,
+the concrete supporting details, and why it matters to the reader. Do not reduce a
+podcast episode or long article to a single sentence unless the provided source context is
+truly minimal. You may compare sources after each source has been developed.
+
+For `news` tiers, stay tighter: synthesize the cluster in a concise scan-friendly way while
+still linking every source.
+
 ## Lens Naming
 
 Name this cluster of unread Fast Reads. Return a short slug, title, and one-sentence deck.

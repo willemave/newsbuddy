@@ -403,7 +403,7 @@ def _system_prompt(tier: str) -> str:
 
 
 def _source_payload(source: BriefingSource) -> dict[str, Any]:
-    return {
+    payload = {
         "source_key": source.source_key,
         "kind": source.kind,
         "id": source.id,
@@ -416,3 +416,6 @@ def _source_payload(source: BriefingSource) -> dict[str, Any]:
         "published_at": source.published_at.isoformat() if source.published_at else None,
         "content_type": source.content_type.value if source.content_type else None,
     }
+    if source.briefing_context:
+        payload["briefing_context"] = source.briefing_context
+    return payload

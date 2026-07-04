@@ -3,7 +3,11 @@ from datetime import UTC, datetime
 import pytest
 
 from app.models.contracts import ContentType
-from app.services.briefing.composer import _parse_composer_layout_json, compose_window
+from app.services.briefing.composer import (
+    _parse_composer_layout_json,
+    _source_payload,
+    compose_window,
+)
 from app.services.briefing.sources import BriefingSource
 
 
@@ -54,7 +58,17 @@ def test_parse_composer_layout_json_accepts_fenced_root_block_array() -> None:
     assert layout.blocks[0].markdown == "A useful brief."
 
 
+def test_source_payload_includes_briefing_context_when_available() -> None:
+    payload = _source_payload(_source_with_context("Long-form source detail."))
+
+    assert payload["briefing_context"] == "Long-form source detail."
+
+
 def _source() -> BriefingSource:
+    return _source_with_context(None)
+
+
+def _source_with_context(briefing_context: str | None) -> BriefingSource:
     return BriefingSource(
         source_key="content:1",
         kind="content",
@@ -69,4 +83,5 @@ def _source() -> BriefingSource:
         thumbnail_url=None,
         published_at=datetime(2026, 1, 1, tzinfo=UTC),
         content_type=ContentType.ARTICLE,
+        briefing_context=briefing_context,
     )
