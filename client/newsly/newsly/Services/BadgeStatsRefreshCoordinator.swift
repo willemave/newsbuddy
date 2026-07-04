@@ -18,6 +18,7 @@ final class BadgeStatsRefreshCoordinator {
     private let client = APIClient.shared
     private weak var unreadService: UnreadCountService?
     private weak var processingService: ProcessingCountService?
+    private var refreshTask: Task<Void, Never>?
     private var refreshTimer: Timer?
     private var observers: [NSObjectProtocol] = []
     private var didInstallLifecycleObservers = false
@@ -35,6 +36,20 @@ final class BadgeStatsRefreshCoordinator {
     }
 
     func refreshStats() async {
+        if let refreshTask {
+            await refreshTask.value
+            return
+        }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performRefreshStats()
+        }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func performRefreshStats() async {
         do {
             let response: BadgeStatsResponse = try await client.request(APIEndpoints.badgeStats)
             unreadService?.applyCounts(response.unread)
