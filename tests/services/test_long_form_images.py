@@ -1,5 +1,5 @@
 from app.models.contracts import ContentStatus, ContentType, TaskStatus, TaskType
-from app.models.db import Content, ContentStatusEntry, ProcessingTask
+from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry, ProcessingTask
 from app.services.long_form_images import (
     CANCELLED_NOT_VISIBLE_UNDER_FEED_RULES,
     cancel_ineligible_pending_generate_image_tasks,
@@ -76,6 +76,36 @@ def test_visible_completed_article_is_eligible_for_generated_image(db_session, t
     db_session.commit()
 
     assert is_visible_long_form_image_candidate(db_session, content) is True
+
+
+def test_knowledge_saved_article_is_eligible_for_generated_image(
+    db_session,
+    test_user,
+) -> None:
+    content = Content(
+        url="https://example.com/saved-article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.AWAITING_IMAGE.value,
+        content_metadata={
+            "summary": _build_article_summary("Saved article"),
+            "summary_kind": "long_structured",
+            "summary_version": 1,
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.add(ContentKnowledgeSave(user_id=test_user.id, content_id=content.id))
+    db_session.commit()
+
+    queue = DummyQueue()
+    task_id = enqueue_visible_long_form_image_if_needed(
+        db_session,
+        content,
+        queue_service=queue,
+    )
+
+    assert task_id == 1
+    assert queue.calls == [(TaskType.GENERATE_IMAGE, content.id)]
 
 
 def test_article_missing_list_ready_summary_is_not_eligible(db_session, test_user) -> None:

@@ -48,9 +48,9 @@ class FetchNewsItemDiscussionHandler:
 
         if result.success:
             return TaskResult.ok()
-        if result.status == "unsupported":
+        if result.status in {"unsupported", "gone"}:
             logger.info(
-                "Skipping unsupported news item discussion task",
+                "Skipping terminal news item discussion task",
                 extra={
                     "component": "fetch_news_item_discussion",
                     "operation": "handle",

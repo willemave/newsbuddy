@@ -8,7 +8,7 @@ from typing import Protocol
 from sqlalchemy.orm import Session
 
 from app.models.contracts import ContentType, TaskStatus
-from app.models.db import Content, ContentStatusEntry, ProcessingTask
+from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry, ProcessingTask
 from app.models.domain.content_display import is_ready_for_long_form_summary
 from app.models.domain.content_mapper import content_to_domain
 from app.services.content_status_state_machine import ContentStatusStateMachine
@@ -78,14 +78,23 @@ def is_visible_long_form_image_candidate(db: Session, content: Content) -> bool:
         return False
     if content.classification == "skip":
         return False
-    if (
-        not db.query(ContentStatusEntry.id)
+    content_id = _require_content_id(content)
+    is_in_inbox = (
+        db.query(ContentStatusEntry.id)
         .filter(
-            ContentStatusEntry.content_id == _require_content_id(content),
+            ContentStatusEntry.content_id == content_id,
             ContentStatusEntry.status == "inbox",
         )
         .first()
-    ):
+        is not None
+    )
+    is_saved_to_knowledge = (
+        db.query(ContentKnowledgeSave.id)
+        .filter(ContentKnowledgeSave.content_id == content_id)
+        .first()
+        is not None
+    )
+    if not (is_in_inbox or is_saved_to_knowledge):
         return False
     if not (content.content_metadata or {}).get("summary"):
         return False
