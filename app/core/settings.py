@@ -318,6 +318,11 @@ class Settings(BaseSettings):
     # External services
     openai_api_key: str | None = None
     openrouter_api_key: str | None = None
+    # Providers that return malformed structured output for OpenRouter models.
+    # Alibaba's deepseek-v4-flash endpoint dumps all block content into `weight`.
+    openrouter_ignored_providers: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["Alibaba"]
+    )
     anthropic_api_key: str | None = None
     google_api_key: str | None = None
     google_cloud_project: str | None = None
@@ -532,7 +537,12 @@ class Settings(BaseSettings):
             raise ValueError("DATABASE_URL must use a PostgreSQL SQLAlchemy dialect")
         return raw_value
 
-    @field_validator("cors_allow_origins", "apple_signin_audiences", mode="before")
+    @field_validator(
+        "cors_allow_origins",
+        "apple_signin_audiences",
+        "openrouter_ignored_providers",
+        mode="before",
+    )
     @classmethod
     def parse_string_list(cls, v: str | list[str] | tuple[str, ...] | None) -> list[str]:
         if v is None:

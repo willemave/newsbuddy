@@ -4,11 +4,24 @@ import pytest
 
 from app.models.contracts import ContentType
 from app.services.briefing.composer import (
+    _blocks_look_malformed,
     _parse_composer_layout_json,
     _source_payload,
     compose_window,
 )
 from app.services.briefing.sources import BriefingSource
+
+MALFORMED_BLOCKS = [
+    {"type": "passage", "weight": "placeholder_gibberish_with_all_the_prose"},
+    {"type": "figure", "weight": "source_key_markdown_placeholder_ignore"},
+]
+WELL_FORMED_BLOCKS = [
+    {
+        "type": "passage",
+        "weight": "feature",
+        "markdown": "[A useful article](newsly://briefing/content/1) explains the thesis.",
+    }
+]
 
 
 def test_compose_window_raises_llm_errors_without_deterministic_fallback(monkeypatch) -> None:
@@ -18,6 +31,54 @@ def test_compose_window_raises_llm_errors_without_deterministic_fallback(monkeyp
     monkeypatch.setattr("app.services.briefing.composer._compose_window_with_llm", fail_llm)
 
     with pytest.raises(TimeoutError, match="model stalled"):
+        compose_window(
+            [_source()],
+            lens_key="articles",
+            lens_title="Articles",
+            tier="longform",
+            window_index=1,
+            use_llm=True,
+        )
+
+
+def test_blocks_look_malformed_detects_weight_dump() -> None:
+    assert _blocks_look_malformed(MALFORMED_BLOCKS) is True
+    assert _blocks_look_malformed([]) is True
+    assert _blocks_look_malformed(WELL_FORMED_BLOCKS) is False
+    assert _blocks_look_malformed([{"type": "figure", "source_key": "content:1"}]) is False
+
+
+def test_compose_window_retries_once_on_malformed_blocks(monkeypatch) -> None:
+    attempts: list[int] = []
+
+    def fake_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
+        blocks = MALFORMED_BLOCKS if len(attempts) == 1 else WELL_FORMED_BLOCKS
+        return blocks, None
+
+    monkeypatch.setattr("app.services.briefing.composer._compose_window_with_llm", fake_llm)
+
+    segment = compose_window(
+        [_source()],
+        lens_key="articles",
+        lens_title="Articles",
+        tier="longform",
+        window_index=1,
+        use_llm=True,
+    )
+
+    assert len(attempts) == 2
+    assert "llm_malformed_retry:1" in segment.warnings
+    assert segment.blocks
+
+
+def test_compose_window_raises_when_malformed_blocks_persist(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.briefing.composer._compose_window_with_llm",
+        lambda *_args, **_kwargs: (MALFORMED_BLOCKS, None),  # noqa: ANN002, ANN003
+    )
+
+    with pytest.raises(RuntimeError, match="malformed layout blocks"):
         compose_window(
             [_source()],
             lens_key="articles",

@@ -317,4 +317,6 @@ def _normalized_weight(value: Any) -> str:
 
 
 def _normalized_placement(value: Any) -> str:
-    return "inset" if value == "inset" else "full"
+    # Product decision (2026-07): full-width figures overwhelm the page; inset only.
+    del value
+    return "inset"

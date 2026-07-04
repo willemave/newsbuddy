@@ -20,6 +20,7 @@ def repair_layout(
     lens_key: str,
     window_index: int,
     figure_budget: int,
+    ensure_source_figures: bool = False,
 ) -> RepairResult:
     """Apply deterministic guardrails to an LLM-produced flat briefing layout."""
 
@@ -50,7 +51,8 @@ def repair_layout(
             if figures_used >= figure_budget:
                 warnings.append("figure_budget_exceeded")
                 continue
-            block["placement"] = "inset" if block.get("placement") == "inset" else "full"
+            # Product decision (2026-07): full-width figures overwhelm the page; inset only.
+            block["placement"] = "inset"
             block["image_url"] = block.get("image_url") or source.image_url
             block["thumbnail_url"] = block.get("thumbnail_url") or source.thumbnail_url
             figures_used += 1
@@ -89,8 +91,64 @@ def repair_layout(
         )
         warnings.append(f"coverage_repair:{len(missing)}")
 
+    if ensure_source_figures and repaired:
+        backfilled = _backfill_source_figures(
+            repaired,
+            sources=sources,
+            budget_remaining=figure_budget - figures_used,
+        )
+        if backfilled:
+            warnings.append(f"figure_backfill:{backfilled}")
+
     prefixed = _prefix_insight_ids(repaired, prefix=f"{lens_key}_w{window_index}_")
     return RepairResult(blocks=prefixed, warnings=warnings)
+
+
+def _backfill_source_figures(
+    blocks: list[dict[str, Any]],
+    *,
+    sources: list[BriefingSource],
+    budget_remaining: int,
+) -> int:
+    """Insert an inset figure after the citing passage for imaged sources the LLM skipped."""
+
+    figured = {block.get("source_key") for block in blocks if block.get("type") == "figure"}
+    added = 0
+    for source in sources:
+        if budget_remaining - added <= 0:
+            break
+        if source.source_key in figured:
+            continue
+        if not (source.image_url or source.thumbnail_url):
+            continue
+        insert_at = _figure_insert_index(blocks, source_key=source.source_key)
+        blocks.insert(
+            insert_at,
+            {
+                "type": "figure",
+                "source_key": source.source_key,
+                "caption": source.title,
+                "placement": "inset",
+                "image_url": source.image_url,
+                "thumbnail_url": source.thumbnail_url,
+            },
+        )
+        added += 1
+    return added
+
+
+def _figure_insert_index(blocks: list[dict[str, Any]], *, source_key: str) -> int:
+    for index, block in enumerate(blocks):
+        if block.get("type") != "passage":
+            continue
+        if source_key not in source_keys_in_markdown(str(block.get("markdown") or "")):
+            continue
+        # Skip past figures already sitting after the passage to keep source order.
+        insert_at = index + 1
+        while insert_at < len(blocks) and blocks[insert_at].get("type") == "figure":
+            insert_at += 1
+        return insert_at
+    return len(blocks)
 
 
 def _deterministic_source_sentence(source: BriefingSource) -> str:

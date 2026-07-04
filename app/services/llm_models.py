@@ -81,6 +81,18 @@ OPENROUTER_PROVIDER_SORT = "throughput"
 OPENROUTER_REASONING_CONFIG = {"enabled": True, "exclude": True}
 
 
+def openrouter_provider_config() -> dict[str, Any]:
+    """Provider routing config for OpenRouter requests, honoring the deny list."""
+    config: dict[str, Any] = {
+        "require_parameters": True,
+        "sort": OPENROUTER_PROVIDER_SORT,
+    }
+    ignored = get_settings().openrouter_ignored_providers
+    if ignored:
+        config["ignore"] = list(ignored)
+    return config
+
+
 def resolve_model(
     provider: LLMProvider | str | None,
     model_hint: str | None,
@@ -305,10 +317,7 @@ def build_pydantic_model(
         openrouter_model_settings = cast(
             ModelSettings,
             {
-                "openrouter_provider": {
-                    "require_parameters": True,
-                    "sort": OPENROUTER_PROVIDER_SORT,
-                },
+                "openrouter_provider": openrouter_provider_config(),
                 "openrouter_reasoning": OPENROUTER_REASONING_CONFIG,
                 "timeout": OPENROUTER_MODEL_TIMEOUT_SECONDS,
             },

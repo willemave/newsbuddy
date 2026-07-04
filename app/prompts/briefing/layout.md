@@ -11,6 +11,13 @@ Return a flat JSON layout with blocks only. Allowed block types:
 - `figure`: use `source_key`, `caption`, and `placement` (`full` or `inset`).
 - `pullquote`: use `source_key` and short `text`.
 
+Figures carry the page. For `audio` and `longform` tiers, add one `figure` block for every
+source whose payload includes an `image_url` or `thumbnail_url`, placed directly after the
+passage that develops that source, always with `inset` placement. Write a specific caption
+that adds context beyond the title. Add a `pullquote` wherever a source has a genuinely
+sharp line — as many as the material earns, but never two adjacent blocks.
+For the `news` tier figures are optional: include up to two where the image genuinely helps.
+
 Write grounded prose only from the provided sources. Source references must be markdown links like
 `[Title](newsly://briefing/content/123)` or `[Title](newsly://briefing/news/456)`.
 Never write bare source ids. Mark 2 or 3 useful deep-dive fragments with
@@ -34,7 +41,8 @@ headline. Use the provided `briefing_context` when present. Give each source its
 substantive treatment: target 3-5 sentences, roughly 110-170 words, covering the thesis,
 the concrete supporting details, and why it matters to the reader. Do not reduce a
 podcast episode or long article to a single sentence unless the provided source context is
-truly minimal. You may compare sources after each source has been developed.
+truly minimal. You may compare sources after each source has been developed. Give every
+source that has an image its own `figure` block adjacent to its passage.
 
 For `news` tiers, stay tighter: synthesize the cluster in a concise scan-friendly way while
 still linking every source.
