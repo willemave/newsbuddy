@@ -195,6 +195,14 @@ def run_briefing_refresh(
     pending_added = _seed_pending_from_unread(db, user_id=user_id, mode=mode, settings=settings)
     if pending_added:
         db.flush()
+    if mode == "append" and _pending_source_count(db, user_id=user_id) == 0:
+        return _finish_empty_append_refresh(
+            db,
+            user_id=user_id,
+            version=version,
+            pending_added=pending_added,
+            settings=settings,
+        )
     assigned = assign_pending_lenses(db, user_id=user_id, settings=settings)
     if assigned:
         db.flush()
@@ -272,6 +280,14 @@ def _run_refresh_releasing_db(
     if pending_added:
         db.flush()
     db.commit()
+    if mode == "append" and _pending_source_count(db, user_id=user_id) == 0:
+        return _finish_empty_append_refresh(
+            db,
+            user_id=user_id,
+            version=version,
+            pending_added=pending_added,
+            settings=settings,
+        )
 
     assigned = assign_pending_lenses(db, user_id=user_id, settings=settings)
     if assigned:
@@ -322,6 +338,43 @@ def _run_refresh_releasing_db(
         compacted_segments=compacted,
         pending_added=pending_added,
         sweep_enqueued=sweep_enqueued,
+    )
+
+
+def _finish_empty_append_refresh(
+    db: Session,
+    *,
+    user_id: int,
+    version: int,
+    pending_added: int,
+    settings: Settings,
+) -> BriefingRefreshResult:
+    state = ensure_state(db, user_id=user_id, settings=settings)
+    state.last_sweep_at = datetime.now(UTC).replace(tzinfo=None)
+    sweep_enqueued = enqueue_briefing_refresh_task(
+        db,
+        user_id=user_id,
+        mode="sweep",
+        delay_seconds=settings.briefing_sweep_seconds,
+    )
+    db.flush()
+    return BriefingRefreshResult(
+        user_id=user_id,
+        version=version,
+        appended_segments=0,
+        retired_segments=0,
+        compacted_segments=0,
+        pending_added=pending_added,
+        sweep_enqueued=sweep_enqueued,
+    )
+
+
+def _pending_source_count(db: Session, *, user_id: int) -> int:
+    return int(
+        db.query(func.count(BriefingPendingSource.id))
+        .filter(BriefingPendingSource.user_id == user_id)
+        .scalar()
+        or 0
     )
 
 

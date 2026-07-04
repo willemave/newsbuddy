@@ -154,6 +154,55 @@ def test_release_path_full_refresh_preserves_current_segments_when_compose_fails
     assert db_session.query(BriefingSegment).count() == 1
 
 
+def test_release_path_append_without_pending_skips_planning(
+    db_session: Session,
+    test_user: User,
+    content_factory,
+    status_entry_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    for index in range(3):
+        _create_unread_article(
+            content_factory,
+            status_entry_factory,
+            test_user,
+            index=index,
+        )
+    run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="full",
+        use_llm=False,
+        release_db_during_compose=True,
+        settings=settings,
+    )
+    db_session.commit()
+
+    def fail_planning(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("append with no pending work should return before planning")
+
+    monkeypatch.setattr("app.services.briefing.refresh._plan_ready_windows", fail_planning)
+    monkeypatch.setattr("app.services.briefing.refresh._retire_finished_segments", fail_planning)
+
+    result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="append",
+        release_db_during_compose=True,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert result.appended_segments == 0
+    assert result.pending_added == 0
+    assert result.retired_segments == 0
+    assert result.compacted_segments == 0
+
+
 def test_mark_read_retires_fully_read_segment_and_bumps_version(
     db_session: Session,
     test_user: User,
