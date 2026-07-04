@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 
 from app.models.contracts import ContentType
-from app.services.briefing.composer import compose_window
+from app.services.briefing.composer import _parse_composer_layout_json, compose_window
 from app.services.briefing.sources import BriefingSource
 
 
@@ -22,6 +22,36 @@ def test_compose_window_raises_llm_errors_without_deterministic_fallback(monkeyp
             window_index=1,
             use_llm=True,
         )
+
+
+def test_parse_composer_layout_json_accepts_object_wrapper() -> None:
+    layout = _parse_composer_layout_json(
+        '{"blocks":[{"type":"passage","weight":"feature","markdown":"A useful brief."}]}'
+    )
+
+    assert len(layout.blocks) == 1
+    assert layout.blocks[0].type == "passage"
+    assert layout.blocks[0].markdown == "A useful brief."
+
+
+def test_parse_composer_layout_json_accepts_root_block_array() -> None:
+    layout = _parse_composer_layout_json(
+        '[{"type":"passage","weight":"feature","markdown":"A useful brief."}]'
+    )
+
+    assert len(layout.blocks) == 1
+    assert layout.blocks[0].type == "passage"
+    assert layout.blocks[0].markdown == "A useful brief."
+
+
+def test_parse_composer_layout_json_accepts_fenced_root_block_array() -> None:
+    layout = _parse_composer_layout_json(
+        '```json\n[{"type":"passage","weight":"feature","markdown":"A useful brief."}]\n```'
+    )
+
+    assert len(layout.blocks) == 1
+    assert layout.blocks[0].type == "passage"
+    assert layout.blocks[0].markdown == "A useful brief."
 
 
 def _source() -> BriefingSource:

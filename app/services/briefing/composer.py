@@ -332,7 +332,7 @@ def _compose_window_with_openrouter(
     content = response.choices[0].message.content
     if not content:
         raise RuntimeError("OpenRouter returned an empty briefing response")
-    layout = ComposerLayout.model_validate_json(content)
+    layout = _parse_composer_layout_json(content)
     usage = _usage_from_openrouter_response(response)
     record_vendor_usage_out_of_band(
         provider="openrouter",
@@ -348,6 +348,25 @@ def _compose_window_with_openrouter(
         [block.model_dump(mode="json", exclude_none=True) for block in layout.blocks],
         usage,
     )
+
+
+def _parse_composer_layout_json(content: str) -> ComposerLayout:
+    payload = json.loads(_strip_json_code_fence(content))
+    if isinstance(payload, list):
+        return ComposerLayout(blocks=payload)
+    return ComposerLayout.model_validate(payload)
+
+
+def _strip_json_code_fence(content: str) -> str:
+    stripped = content.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if not lines or not lines[0].strip().startswith("```"):
+        return stripped
+    if lines[-1].strip() != "```":
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
 
 
 def _usage_from_openrouter_response(response: object) -> dict[str, int | None] | None:
