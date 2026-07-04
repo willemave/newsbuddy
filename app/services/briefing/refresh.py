@@ -23,6 +23,7 @@ from app.pipeline.task_specs import get_task_spec
 from app.services.briefing.composer import ComposedSegment, compose_window, plan_windows
 from app.services.briefing.lenses import (
     assign_pending_lenses,
+    build_llm_lens_namer,
     ensure_base_lenses,
     retire_idle_lenses,
 )
@@ -203,7 +204,12 @@ def run_briefing_refresh(
             pending_added=pending_added,
             settings=settings,
         )
-    assigned = assign_pending_lenses(db, user_id=user_id, settings=settings)
+    naming_fn = (
+        build_llm_lens_namer(settings=settings, task_id=task_id, user_id=user_id)
+        if use_llm
+        else None
+    )
+    assigned = assign_pending_lenses(db, user_id=user_id, naming_fn=naming_fn, settings=settings)
     if assigned:
         db.flush()
     appended = _append_ready_windows(
@@ -289,7 +295,12 @@ def _run_refresh_releasing_db(
             settings=settings,
         )
 
-    assigned = assign_pending_lenses(db, user_id=user_id, settings=settings)
+    naming_fn = (
+        build_llm_lens_namer(settings=settings, task_id=task_id, user_id=user_id)
+        if use_llm
+        else None
+    )
+    assigned = assign_pending_lenses(db, user_id=user_id, naming_fn=naming_fn, settings=settings)
     if assigned:
         db.flush()
     prepared_windows = _plan_ready_windows(db, user_id=user_id, mode=mode, settings=settings)
@@ -393,11 +404,6 @@ def _seed_pending_from_unread(
     settings: Settings,
     compact_existing: bool = True,
 ) -> int:
-    existing_segment = (
-        db.query(BriefingSegment.id).filter(BriefingSegment.user_id == user_id).first() is not None
-    )
-    if mode != "full" and existing_segment:
-        return 0
     if mode == "full":
         db.query(BriefingPendingSource).filter(BriefingPendingSource.user_id == user_id).delete()
         if compact_existing:

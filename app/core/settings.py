@@ -292,6 +292,11 @@ class Settings(BaseSettings):
     briefing_backlog_limit_longform: int = Field(default=20, ge=1, le=100)
     briefing_backlog_limit_news: int = Field(default=40, ge=1, le=200)
     briefing_category_similarity: float = Field(default=0.55, ge=0.0, le=1.0)
+    briefing_category_cluster_similarity: float = Field(default=0.62, ge=0.0, le=1.0)
+    briefing_semantic_category_assignment_enabled: bool = True
+    briefing_category_embedding_model: str = "openrouter:qwen/qwen3-embedding-8b"
+    briefing_category_embedding_batch_size: int = Field(default=32, ge=1, le=128)
+    briefing_category_embedding_timeout_seconds: int = Field(default=30, ge=1, le=120)
     briefing_centroid_assignment_enabled: bool = False
     briefing_new_lens_min_items: int = Field(default=4, ge=2, le=20)
     briefing_lens_idle_days: int = Field(default=7, ge=1, le=90)
@@ -301,7 +306,7 @@ class Settings(BaseSettings):
     briefing_max_figures_deep: int = Field(default=12, ge=0, le=50)
     briefing_max_figures_news: int = Field(default=6, ge=0, le=50)
     briefing_llm_timeout_seconds: int = Field(default=120, ge=1, le=300)
-    briefing_compose_parallelism: int = Field(default=1, ge=1, le=8)
+    briefing_compose_parallelism: int = Field(default=12, ge=1, le=16)
     briefing_debounce_seconds: int = Field(default=900, ge=0, le=86_400)
     briefing_sweep_seconds: int = Field(default=3600, ge=60, le=86_400)
     briefing_pending_max_age_seconds: int = Field(default=2700, ge=60, le=86_400)
