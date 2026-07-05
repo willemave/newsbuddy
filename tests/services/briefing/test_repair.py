@@ -116,6 +116,36 @@ def test_full_placement_coerced_to_inset() -> None:
     assert [figure["placement"] for figure in figures] == ["inset"]
 
 
+def test_em_dashes_replaced_across_block_types() -> None:
+    sources = [_source(1)]
+    blocks = [
+        _passage(
+            "[First](newsly://briefing/content/1) grew 2024—2026 — a striking run—by any measure."
+        ),
+        {
+            "type": "figure",
+            "source_key": "content:1",
+            "caption": "Growth—and its limits.",
+        },
+        {"type": "pullquote", "source_key": "content:1", "text": "Momentum—not hype."},
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+    )
+
+    passage, figure, pullquote = result.blocks
+    assert "—" not in passage["markdown"]
+    assert "2024-2026" in passage["markdown"]
+    assert "run, by any measure" in passage["markdown"]
+    assert figure["caption"] == "Growth, and its limits."
+    assert pullquote["text"] == "Momentum, not hype."
+
+
 def test_backfill_disabled_by_default() -> None:
     sources = [_source(1)]
     blocks = [_passage("[First](newsly://briefing/content/1) covers agents.")]

@@ -248,6 +248,8 @@ private struct BriefingLensPill: View {
                     Text("\(lens.unreadSourceCount)")
                         .font(.appCaption2.weight(.bold).monospacedDigit())
                         .foregroundStyle(isSelected ? Color.surfacePrimary : Color.brandPrimary)
+                        .contentTransition(.numericText(countsDown: true))
+                        .animation(.easeInOut(duration: 0.3), value: lens.unreadSourceCount)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
@@ -279,7 +281,6 @@ private struct BriefingLensPageView: View {
     let onOpenSource: (String) -> Void
     let onDig: (String, String) -> Void
 
-    @State private var topVisibleSegmentId: Int?
     @State private var isHeaderPinned = false
 
     private var pinnedHeaderId: String { "briefing.strip.\(lensSummary.key)" }
@@ -306,6 +307,13 @@ private struct BriefingLensPageView: View {
                                         onDig: onDig
                                     )
                                     .id(segment.id)
+                                    // Seen = the segment's bottom scrolled past the top edge.
+                                    .onGeometryChange(for: Bool.self) { proxy in
+                                        proxy.frame(in: .scrollView).maxY < 0
+                                    } action: { _, exitedTop in
+                                        guard exitedTop else { return }
+                                        viewModel.markSegmentSeen(segment)
+                                    }
                                     .padding(.horizontal, Spacing.appHorizontalMargin)
                                 }
 
@@ -322,9 +330,6 @@ private struct BriefingLensPageView: View {
                     }
                     .refreshable {
                         await viewModel.pullToRefresh()
-                    }
-                    .onScrollTargetVisibilityChange(idType: Int.self) { visibleIds in
-                        handleVisibleSegments(visibleIds, segments: lens.segments)
                     }
                     .onScrollGeometryChange(for: Bool.self) { geometry in
                         geometry.contentOffset.y + geometry.contentInsets.top > 96
@@ -369,15 +374,6 @@ private struct BriefingLensPageView: View {
         .padding(.bottom, 2)
     }
 
-    private func handleVisibleSegments(_ visibleIds: [Int], segments: [APIBriefingSegment]) {
-        let previousTop = topVisibleSegmentId
-        topVisibleSegmentId = visibleIds.first
-        guard let previousTop,
-              !visibleIds.contains(previousTop),
-              let segment = segments.first(where: { $0.id == previousTop })
-        else { return }
-        viewModel.markSegmentSeen(segment)
-    }
 
     private func tierLabel(_ tier: APIBriefingTier) -> String {
         switch tier {
@@ -427,8 +423,16 @@ private struct BriefingSegmentView: View {
             }
         }
         .padding(.vertical, 2)
+        // Read segments recede without losing legibility.
+        .opacity(allSourcesRead ? 0.72 : 1)
+        .animation(.easeInOut(duration: 0.35), value: allSourcesRead)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("briefing.segment.\(segment.id)")
+    }
+
+    private var allSourcesRead: Bool {
+        !segment.sourceKeys.isEmpty
+            && segment.sourceKeys.allSatisfy { sourceLookup($0)?.read ?? true }
     }
 
     /// Inset figures adjacent to a meaty passage float inside it (text wraps);

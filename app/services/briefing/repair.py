@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from app.services.briefing.normalize import close_unpaired_insights, source_keys_in_markdown
 from app.services.briefing.sources import BriefingSource
+
+_EM_DASH_RANGE_RE = re.compile(r"(?<=\d)\s*—\s*(?=\d)")
+_EM_DASH_RE = re.compile(r"\s*—\s*")
 
 
 @dataclass(frozen=True)
@@ -55,13 +59,15 @@ def repair_layout(
             block["placement"] = "inset"
             block["image_url"] = block.get("image_url") or source.image_url
             block["thumbnail_url"] = block.get("thumbnail_url") or source.thumbnail_url
+            if isinstance(block.get("caption"), str):
+                block["caption"] = _replace_em_dashes(block["caption"])
             figures_used += 1
         elif block_type == "pullquote":
             text = _clean_text(block.get("text"))
             if not text:
                 warnings.append("empty_pullquote")
                 continue
-            block["text"] = _strip_heading_noise(text)[:360]
+            block["text"] = _replace_em_dashes(_strip_heading_noise(text)[:360])
             source_key = str(block.get("source_key") or "")
             if source_key and source_key not in source_by_key:
                 block["source_key"] = None
@@ -71,7 +77,7 @@ def repair_layout(
             if not markdown:
                 warnings.append("empty_passage")
                 continue
-            block["markdown"] = close_unpaired_insights(markdown)
+            block["markdown"] = _replace_em_dashes(close_unpaired_insights(markdown))
             if "markdown" not in raw and raw.get("text"):
                 warnings.append("passage_text_field_recovered")
         repaired.append(block)
@@ -166,6 +172,14 @@ def _prefix_insight_ids(blocks: list[dict[str, Any]], *, prefix: str) -> list[di
             block["markdown"] = markdown.replace("{{insight:", "{{insight:" + prefix)
         prefixed.append(block)
     return prefixed
+
+
+def _replace_em_dashes(text: str) -> str:
+    """Style backstop for the prompt's no-em-dash rule: numeric ranges become
+    hyphens, everything else becomes a comma pause."""
+
+    text = _EM_DASH_RANGE_RE.sub("-", text)
+    return _EM_DASH_RE.sub(", ", text)
 
 
 def _clean_text(value: Any) -> str | None:

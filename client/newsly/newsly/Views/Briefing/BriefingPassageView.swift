@@ -125,8 +125,10 @@ struct BriefingPassageView: UIViewRepresentable {
                effectiveRange.location != NSNotFound,
                NSMaxRange(effectiveRange) <= attributedText.length,
                let range = Range(effectiveRange, in: attributedText.string) {
-                textView.selectedRange = effectiveRange
-                onDig(String(attributedText.string[range]), attributedText.string)
+                let insightText = String(attributedText.string[range])
+                // No lingering highlight behind the dig panel.
+                textView.clearSelection()
+                onDig(insightText, attributedText.string)
                 return
             }
 
@@ -137,6 +139,11 @@ struct BriefingPassageView: UIViewRepresentable {
                 in: attributedText.string
             )
             guard sentenceRange.length > 0 else { return }
+            // Tapping the already-selected sentence deselects it.
+            if textView.selectedRange == sentenceRange {
+                textView.clearSelection()
+                return
+            }
             textView.selectedRange = sentenceRange
             textView.presentSelectionMenu(at: recognizer.location(in: textView))
         }

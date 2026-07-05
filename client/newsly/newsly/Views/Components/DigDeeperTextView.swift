@@ -55,6 +55,12 @@ class DigDeeperTextView: UITextView {
         )
     }
 
+    /// Remove the sentence/insight highlight left behind by tap selection.
+    func clearSelection() {
+        selectedTextRange = nil
+        resignFirstResponder()
+    }
+
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         guard previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) != false else {
@@ -98,8 +104,9 @@ class DigDeeperTextView: UITextView {
         let callback = onDigDeeper
         let captured = selectedText
 
-        // Resign first responder to dismiss selection before returning to SwiftUI.
-        resignFirstResponder()
+        // Clear the highlight before returning to SwiftUI so nothing lingers
+        // behind the dig panel.
+        clearSelection()
         DispatchQueue.main.async {
             callback?(captured)
         }
@@ -112,6 +119,21 @@ class DigDeeperTextView: UITextView {
 }
 
 extension DigDeeperTextView: UIEditMenuInteractionDelegate {
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        willDismissMenuFor configuration: UIEditMenuConfiguration,
+        animator: any UIEditMenuInteractionAnimating
+    ) {
+        // Deselect once the menu goes away. Deferred a runloop so a chosen
+        // action (Dig Deeper, Copy) still sees the selection it acts on, and
+        // skipped when the dismissal came from selecting a different sentence.
+        let rangeAtDismiss = selectedRange
+        DispatchQueue.main.async { [weak self] in
+            guard let self, NSEqualRanges(self.selectedRange, rangeAtDismiss) else { return }
+            self.clearSelection()
+        }
+    }
+
     func editMenuInteraction(
         _ interaction: UIEditMenuInteraction,
         menuFor configuration: UIEditMenuConfiguration,

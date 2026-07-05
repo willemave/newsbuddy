@@ -113,6 +113,11 @@ final class BriefingViewModel: ObservableObject {
     func markSegmentSeen(_ segment: APIBriefingSegment) {
         let unreadKeys = segment.sourceKeys.filter { source(for: $0)?.read == false }
         guard !unreadKeys.isEmpty else { return }
+        // Optimistic: grey-out and chip counters react as the reader scrolls,
+        // before the debounced network flush. The server tolerates stale keys,
+        // and failed flushes re-queue, so local state stays eventually consistent.
+        markSourcesReadLocally(unreadKeys)
+        decrementUnreadCounts(for: unreadKeys)
         pendingReadKeys.formUnion(unreadKeys)
         readFlushTask?.cancel()
         readFlushTask = Task { [weak self] in
@@ -213,10 +218,36 @@ final class BriefingViewModel: ObservableObject {
                 )
                 index = currentIndex
             }
-            markSourcesReadLocally(keys)
         } catch {
             pendingReadKeys.formUnion(keys)
         }
+    }
+
+    /// Optimistically shrink lens-chip unread counts for keys just marked read.
+    /// Server truth reconciles on the next index fetch.
+    private func decrementUnreadCounts(for keys: [String]) {
+        guard let currentIndex = index else { return }
+        let keySet = Set(keys)
+        let updatedLenses = currentIndex.lenses.map { summary in
+            let owned = lenses[summary.key]?.sources.filter { keySet.contains($0.sourceKey) }.count ?? 0
+            guard owned > 0 else { return summary }
+            return APIBriefingLensSummary(
+                key: summary.key,
+                tier: summary.tier,
+                title: summary.title,
+                deck: summary.deck,
+                position: summary.position,
+                segmentCount: summary.segmentCount,
+                unreadSourceCount: max(0, summary.unreadSourceCount - owned)
+            )
+        }
+        index = APIBriefingIndexResponse(
+            version: currentIndex.version,
+            mastheadTitle: currentIndex.mastheadTitle,
+            mastheadDeck: currentIndex.mastheadDeck,
+            generatedAt: currentIndex.generatedAt,
+            lenses: updatedLenses
+        )
     }
 
     private func markSourcesReadLocally(_ keys: [String]) {
