@@ -112,7 +112,12 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func markSegmentSeen(_ segment: APIBriefingSegment) {
-        let unreadKeys = segment.sourceKeys.filter { source(for: $0)?.read == false }
+        markSourcesSeen(segment.sourceKeys)
+    }
+
+    func markSourcesSeen(_ sourceKeys: [String]) {
+        let unreadKeys = uniqueBriefingSourceKeys(sourceKeys)
+            .filter { source(for: $0)?.read == false }
         guard !unreadKeys.isEmpty else { return }
         // Optimistic: grey-out and chip counters react as the reader scrolls,
         // before the debounced network flush. The server tolerates stale keys,

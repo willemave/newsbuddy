@@ -6,9 +6,14 @@ struct BriefingPassageView: UIViewRepresentable {
     var floatingExclusionSize: CGSize? = nil
     let onOpenSource: (String) -> Void
     let onDig: (String, String) -> Void
+    var onSourceLinkPositionsChange: ([BriefingSourceLinkPosition]) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onOpenSource: onOpenSource, onDig: onDig)
+        Coordinator(
+            onOpenSource: onOpenSource,
+            onDig: onDig,
+            onSourceLinkPositionsChange: onSourceLinkPositionsChange
+        )
     }
 
     func makeUIView(context: Context) -> DigDeeperTextView {
@@ -42,6 +47,7 @@ struct BriefingPassageView: UIViewRepresentable {
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
         context.coordinator.onOpenSource = onOpenSource
         context.coordinator.onDig = onDig
+        context.coordinator.onSourceLinkPositionsChange = onSourceLinkPositionsChange
         uiView.floatingExclusionSize = floatingExclusionSize
         let builder = BriefingAttributedTextBuilder()
         let result = builder.build(paragraphs: block.paragraphs ?? [], weight: block.weight)
@@ -52,6 +58,7 @@ struct BriefingPassageView: UIViewRepresentable {
         uiView.onDigDeeper = { selection in
             context.coordinator.onDig(selection, result.plainText)
         }
+        context.coordinator.scheduleSourceLinkPositionPublish(from: uiView)
     }
 
     func sizeThatFits(
@@ -60,25 +67,41 @@ struct BriefingPassageView: UIViewRepresentable {
         context: Context
     ) -> CGSize? {
         guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
+        if abs(uiView.bounds.width - width) > .ulpOfOne {
+            uiView.bounds.size.width = width
+        }
         uiView.updateFloatingExclusion(forWidth: width)
         let fittingSize = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
         let minimumHeight = floatingExclusionSize?.height ?? 0
+        context.coordinator.scheduleSourceLinkPositionPublish(from: uiView)
         return CGSize(width: width, height: max(fittingSize.height, minimumHeight))
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var onOpenSource: (String) -> Void
         var onDig: (String, String) -> Void
+        var onSourceLinkPositionsChange: ([BriefingSourceLinkPosition]) -> Void
         weak var textView: DigDeeperTextView?
+        private var lastPublishedSourceLinkPositions: [BriefingSourceLinkPosition] = []
 
         init(
             onOpenSource: @escaping (String) -> Void,
-            onDig: @escaping (String, String) -> Void
+            onDig: @escaping (String, String) -> Void,
+            onSourceLinkPositionsChange: @escaping ([BriefingSourceLinkPosition]) -> Void
         ) {
             self.onOpenSource = onOpenSource
             self.onDig = onDig
+            self.onSourceLinkPositionsChange = onSourceLinkPositionsChange
+        }
+
+        func scheduleSourceLinkPositionPublish(from textView: UITextView) {
+            DispatchQueue.main.async { [weak self, weak textView] in
+                guard let self, let textView else { return }
+                textView.layoutIfNeeded()
+                self.publishSourceLinkPositions(from: textView)
+            }
         }
 
         func textView(
@@ -187,6 +210,61 @@ struct BriefingPassageView: UIViewRepresentable {
                 return sourceKey(from: url)
             }
             return nil
+        }
+
+        private func publishSourceLinkPositions(from textView: UITextView) {
+            guard let attributedText = textView.attributedText,
+                  attributedText.length > 0
+            else {
+                publishSourceLinkPositionsIfChanged([])
+                return
+            }
+
+            let layoutManager = textView.layoutManager
+            let textContainer = textView.textContainer
+            guard textView.bounds.width > 0,
+                  textContainer.size.width > 0,
+                  textContainer.size.width.isFinite
+            else { return }
+            layoutManager.ensureLayout(for: textContainer)
+
+            var maxYBySourceKey: [String: CGFloat] = [:]
+            let fullRange = NSRange(location: 0, length: attributedText.length)
+            attributedText.enumerateAttribute(.link, in: fullRange) { value, range, _ in
+                guard let value,
+                      let sourceKey = sourceKey(from: value),
+                      range.length > 0
+                else { return }
+
+                let glyphRange = layoutManager.glyphRange(
+                    forCharacterRange: range,
+                    actualCharacterRange: nil
+                )
+                guard glyphRange.length > 0 else { return }
+
+                let rect = layoutManager.boundingRect(
+                    forGlyphRange: glyphRange,
+                    in: textContainer
+                )
+                let maxY = rect.maxY + textView.textContainerInset.top
+                maxYBySourceKey[sourceKey] = max(maxYBySourceKey[sourceKey] ?? 0, maxY)
+            }
+
+            let positions = maxYBySourceKey
+                .map { BriefingSourceLinkPosition(sourceKey: $0.key, maxY: $0.value) }
+                .sorted {
+                    if $0.maxY == $1.maxY {
+                        return $0.sourceKey < $1.sourceKey
+                    }
+                    return $0.maxY < $1.maxY
+                }
+            publishSourceLinkPositionsIfChanged(positions)
+        }
+
+        private func publishSourceLinkPositionsIfChanged(_ positions: [BriefingSourceLinkPosition]) {
+            guard positions != lastPublishedSourceLinkPositions else { return }
+            lastPublishedSourceLinkPositions = positions
+            onSourceLinkPositionsChange(positions)
         }
     }
 }

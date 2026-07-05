@@ -304,7 +304,10 @@ private struct BriefingLensPageView: View {
                                         segment: segment,
                                         sourceLookup: { viewModel.source(for: $0) },
                                         onOpenSource: onOpenSource,
-                                        onDig: onDig
+                                        onDig: onDig,
+                                        onSourceKeysSeen: { sourceKeys in
+                                            viewModel.markSourcesSeen(sourceKeys)
+                                        }
                                     )
                                     .id(segment.id)
                                     // Seen = the segment's bottom scrolled past the top edge.
@@ -392,6 +395,7 @@ private struct BriefingSegmentView: View {
     let sourceLookup: (String) -> APIBriefingSource?
     let onOpenSource: (String) -> Void
     let onDig: (String, String) -> Void
+    let onSourceKeysSeen: ([String]) -> Void
 
     private enum DisplayBlock: Identifiable {
         case single(Int, APIBriefingBlock)
@@ -417,7 +421,8 @@ private struct BriefingSegmentView: View {
                         passage: passage,
                         source: figure.sourceKey.flatMap(sourceLookup),
                         onOpenSource: onOpenSource,
-                        onDig: onDig
+                        onDig: onDig,
+                        onSourceKeysSeen: onSourceKeysSeen
                     )
                 }
             }
@@ -487,10 +492,11 @@ private struct BriefingSegmentView: View {
     private func blockView(_ block: APIBriefingBlock) -> some View {
         switch block.type {
         case .passage:
-            BriefingPassageView(
+            BriefingPassageReadMarker(
                 block: block,
                 onOpenSource: onOpenSource,
-                onDig: onDig
+                onDig: onDig,
+                onSourceKeysSeen: onSourceKeysSeen
             )
         case .figure:
             BriefingFigureView(
@@ -498,13 +504,91 @@ private struct BriefingSegmentView: View {
                 source: block.sourceKey.flatMap(sourceLookup),
                 onOpenSource: onOpenSource
             )
+            .briefingSourceReadMarker(
+                sourceKeys: block.briefingDirectSourceKeys,
+                onSourceKeysSeen: onSourceKeysSeen
+            )
         case .pullquote:
             BriefingPullquoteView(
                 block: block,
                 source: block.sourceKey.flatMap(sourceLookup),
                 onOpenSource: onOpenSource
             )
+            .briefingSourceReadMarker(
+                sourceKeys: block.briefingDirectSourceKeys,
+                onSourceKeysSeen: onSourceKeysSeen
+            )
         }
+    }
+}
+
+private struct BriefingPassageReadMarker: View {
+    let block: APIBriefingBlock
+    var floatingExclusionSize: CGSize? = nil
+    let onOpenSource: (String) -> Void
+    let onDig: (String, String) -> Void
+    let onSourceKeysSeen: ([String]) -> Void
+
+    @State private var sourceLinkPositions: [BriefingSourceLinkPosition] = []
+    @State private var markedSourceKeys = Set<String>()
+
+    var body: some View {
+        BriefingPassageView(
+            block: block,
+            floatingExclusionSize: floatingExclusionSize,
+            onOpenSource: onOpenSource,
+            onDig: onDig,
+            onSourceLinkPositionsChange: { positions in
+                sourceLinkPositions = positions
+            }
+        )
+        .onGeometryChange(for: [String].self) { proxy in
+            let frame = proxy.frame(in: .scrollView)
+            let exitedLinkKeys = sourceLinkPositions.compactMap { position -> String? in
+                frame.minY + position.maxY < 0 ? position.sourceKey : nil
+            }
+            let directKeys = frame.maxY < 0 ? block.briefingDirectSourceKeys : []
+            let fallbackLinkKeys = sourceLinkPositions.isEmpty && frame.maxY < 0
+                ? block.briefingSourceLinkKeys
+                : []
+            return uniqueBriefingSourceKeys(exitedLinkKeys + directKeys + fallbackLinkKeys)
+        } action: { _, sourceKeys in
+            let newSourceKeys = sourceKeys.filter { markedSourceKeys.insert($0).inserted }
+            guard !newSourceKeys.isEmpty else { return }
+            onSourceKeysSeen(newSourceKeys)
+        }
+    }
+}
+
+private struct BriefingSourceReadMarker: ViewModifier {
+    let sourceKeys: [String]
+    let onSourceKeysSeen: ([String]) -> Void
+
+    @State private var didMark = false
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: Bool.self) { proxy in
+                proxy.frame(in: .scrollView).maxY < 0
+            } action: { _, exitedTop in
+                guard exitedTop, !didMark, !sourceKeys.isEmpty else { return }
+                didMark = true
+                onSourceKeysSeen(sourceKeys)
+            }
+    }
+}
+
+private extension View {
+    func briefingSourceReadMarker(
+        sourceKeys: [String],
+        onSourceKeysSeen: @escaping ([String]) -> Void
+    ) -> some View {
+        modifier(
+            BriefingSourceReadMarker(
+                sourceKeys: sourceKeys,
+                onSourceKeysSeen: onSourceKeysSeen
+            )
+        )
     }
 }
 
@@ -514,6 +598,7 @@ private struct BriefingFloatingFigurePassage: View {
     let source: APIBriefingSource?
     let onOpenSource: (String) -> Void
     let onDig: (String, String) -> Void
+    let onSourceKeysSeen: ([String]) -> Void
 
     private static let imageSize = CGSize(width: 148, height: 148)
     // Exclusion adds the text gutter around the floated image.
@@ -521,11 +606,12 @@ private struct BriefingFloatingFigurePassage: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            BriefingPassageView(
+            BriefingPassageReadMarker(
                 block: passage,
                 floatingExclusionSize: Self.exclusionSize,
                 onOpenSource: onOpenSource,
-                onDig: onDig
+                onDig: onDig,
+                onSourceKeysSeen: onSourceKeysSeen
             )
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -550,6 +636,10 @@ private struct BriefingFloatingFigurePassage: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
+            .briefingSourceReadMarker(
+                sourceKeys: figure.briefingDirectSourceKeys,
+                onSourceKeysSeen: onSourceKeysSeen
+            )
             .accessibilityLabel(source?.title ?? "Article image")
         }
     }
