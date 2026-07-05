@@ -8,7 +8,7 @@ from app.core.logging import get_logger
 from app.models.db import BriefingSegment, BriefingState
 from app.repositories import read_status_repository
 from app.services.briefing.source_keys import parse_source_key
-from app.services.briefing.sources import read_source_keys
+from app.services.briefing.sources import read_source_keys_for
 from app.services.news_feed import bulk_mark_news_items_read
 
 logger = get_logger(__name__)
@@ -61,13 +61,16 @@ def mark_briefing_sources_read(
 
 
 def retire_read_segments(db: Session, *, user_id: int) -> int:
-    read_keys = read_source_keys(db, user_id=user_id)
     segments = (
         db.query(BriefingSegment)
         .filter(BriefingSegment.user_id == user_id)
         .filter(BriefingSegment.status.in_(("active", "degraded")))
         .all()
     )
+    active_source_keys = sorted(
+        {str(key) for segment in segments for key in (segment.source_keys or [])}
+    )
+    read_keys = read_source_keys_for(db, user_id=user_id, source_keys=active_source_keys)
     retired = 0
     for segment in segments:
         source_keys = {str(key) for key in (segment.source_keys or [])}

@@ -226,6 +226,44 @@ def read_source_keys(db: Session, *, user_id: int) -> set[str]:
     return keys
 
 
+def read_source_keys_for(
+    db: Session,
+    *,
+    user_id: int,
+    source_keys: list[str],
+) -> set[str]:
+    parsed = [parse_source_key(key) for key in source_keys]
+    content_ids = sorted({key.source_id for key in parsed if key and key.kind == "content"})
+    news_ids = sorted({key.source_id for key in parsed if key and key.kind == "news"})
+
+    keys: set[str] = set()
+    if content_ids:
+        read_content_ids = db.execute(
+            select(ContentReadStatus.content_id).where(
+                ContentReadStatus.user_id == user_id,
+                ContentReadStatus.content_id.in_(content_ids),
+            )
+        ).scalars()
+        keys.update(
+            build_source_key("content", int(content_id))
+            for content_id in read_content_ids
+            if content_id is not None
+        )
+    if news_ids:
+        read_news_ids = db.execute(
+            select(NewsItemReadStatus.news_item_id).where(
+                NewsItemReadStatus.user_id == user_id,
+                NewsItemReadStatus.news_item_id.in_(news_ids),
+            )
+        ).scalars()
+        keys.update(
+            build_source_key("news", int(news_id))
+            for news_id in read_news_ids
+            if news_id is not None
+        )
+    return keys
+
+
 def _source_from_content(content: Content) -> BriefingSource:
     content_id = _require_id(content.id, "content.id")
     content_type = ContentType(str(content.content_type))

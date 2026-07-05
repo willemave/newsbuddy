@@ -177,6 +177,54 @@ def test_briefing_dig_endpoints_are_mockable_and_rate_limited(
     assert limited.status_code == 429
 
 
+def test_briefing_dig_accepts_long_selected_fragment(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    long_fragment = " ".join(["long selected briefing sentence"] * 16)
+    assert len(long_fragment) > 300
+    captured_search: dict[str, str] = {}
+    captured_prompt: dict[str, str] = {}
+
+    def fake_exa_search(query: str, *_args, **_kwargs):
+        captured_search["query"] = query
+        return [
+            ExaSearchResult(
+                title="Useful result",
+                url="https://example.com/useful",
+                snippet="Useful context.",
+                published_date=None,
+            )
+        ]
+
+    class FakeAgent:
+        def run_sync(self, prompt: str):
+            captured_prompt["prompt"] = prompt
+            return type("Result", (), {"output": "A concise grounded digest."})()
+
+    monkeypatch.setattr("app.services.briefing.dig.exa_search", fake_exa_search)
+    monkeypatch.setattr("app.services.briefing.dig.get_basic_agent", lambda *_args: FakeAgent())
+    monkeypatch.setattr(
+        "app.services.briefing.dig.record_model_usage",
+        lambda *_args, **_kwargs: None,
+    )
+
+    search = client.post("/api/briefing/dig/search", json={"fragment": long_fragment})
+    summary = client.post(
+        "/api/briefing/dig/summarize",
+        json={
+            "fragment": long_fragment,
+            "passage_context": "A passage about the selected sentence.",
+            "results": search.json()["results"],
+        },
+    )
+
+    assert search.status_code == 200
+    assert summary.status_code == 200
+    assert captured_search["query"] == long_fragment[:200]
+    assert f"Selected fragment: {long_fragment[:300]}" in captured_prompt["prompt"]
+
+
 def _seed_content_edition(
     db_session: Session,
     user: User,

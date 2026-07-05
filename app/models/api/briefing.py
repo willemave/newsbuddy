@@ -6,6 +6,8 @@ from app.models.api.audio_episodes import AudioEpisodeResponse
 from app.models.api.base import UTCDateTime
 from app.models.contracts import BriefingBlockType, BriefingRunKind, BriefingTier, ContentType
 
+BRIEFING_DIG_FRAGMENT_MAX_LENGTH = 2000
+
 
 class BriefingLensSummary(BaseModel):
     key: str
@@ -90,7 +92,7 @@ class BriefingReadMarkResponse(BaseModel):
 
 
 class BriefingDigSearchRequest(BaseModel):
-    fragment: str = Field(..., min_length=3, max_length=300)
+    fragment: str = Field(..., min_length=3, max_length=BRIEFING_DIG_FRAGMENT_MAX_LENGTH)
 
 
 class BriefingDigSearchResult(BaseModel):
@@ -106,7 +108,7 @@ class BriefingDigSearchResponse(BaseModel):
 
 
 class BriefingDigSummarizeRequest(BaseModel):
-    fragment: str = Field(..., min_length=3, max_length=300)
+    fragment: str = Field(..., min_length=3, max_length=BRIEFING_DIG_FRAGMENT_MAX_LENGTH)
     passage_context: str = Field(..., max_length=2000)
     results: list[BriefingDigSearchResult] = Field(default_factory=list)
 

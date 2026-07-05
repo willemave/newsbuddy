@@ -3,12 +3,17 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
+import pytest
+
 from app.constants import AGGREGATOR_FEED_URL_PREFIX, AGGREGATOR_SCRAPER_TYPE
 from app.models.db import NewsItemDiscussion, UserScraperConfig
 from app.models.metadata.summaries import DiscussionSummary, DiscussionSummaryTopic
 from app.services.gateways.object_storage_gateway import ObjectStorageGateway, StoredObjectMetadata
 from app.services.llm_summarization import ContentSummarizer
 from app.services.news_item_discussions import (
+    REFRESH_STATUS_GONE,
+    TerminalNewsItemDiscussionUnavailable,
+    _fetch_hackernews_comments,
     is_news_item_discussion_visible_to_active_user,
     list_due_news_item_discussion_refresh_candidates,
     refresh_news_item_discussion,
@@ -124,6 +129,26 @@ def _fake_hn_payload(
             "fetched_count": len(comments),
         },
     }
+
+
+def test_fetch_hackernews_comments_marks_dead_firebase_item_terminal(monkeypatch) -> None:
+    def _fake_fetch_json(_client, url: str, *, retryable_404: bool = False):
+        assert retryable_404 is False
+        if "hacker-news.firebaseio.com" in url:
+            return {"id": 123, "type": "story", "dead": True}
+        raise AssertionError("dead HN items should not fetch Algolia comments")
+
+    monkeypatch.setattr("app.services.news_item_discussions._fetch_json", _fake_fetch_json)
+
+    with pytest.raises(TerminalNewsItemDiscussionUnavailable) as exc_info:
+        _fetch_hackernews_comments(
+            external_id="123",
+            discussion_url="https://news.ycombinator.com/item?id=123",
+        )
+
+    assert str(exc_info.value) == "Hacker News discussion is gone"
+    assert exc_info.value.retryable is False
+    assert exc_info.value.status == REFRESH_STATUS_GONE
 
 
 def _extra_hn_comments(
@@ -535,6 +560,67 @@ def test_refresh_news_item_discussion_stores_raw_summary_and_honors_ttl(
     assert refreshed_same_hash.success is True
     assert fetch_calls == 2
     assert summarizer.calls == 1
+
+
+def test_refresh_news_item_discussion_marks_dead_hn_terminal(
+    db_session,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    now = datetime(2026, 5, 1, tzinfo=UTC).replace(tzinfo=None)
+    item = news_item_factory(
+        ingest_key="hn-dead-terminal",
+        platform="hackernews",
+        source_external_id="123",
+        discussion_url="https://news.ycombinator.com/item?id=123",
+        raw_metadata={
+            "platform": "hackernews",
+            "aggregator": {
+                "external_id": "123",
+                "metadata": {"comments_count": 2},
+            },
+        },
+    )
+
+    fetch_calls = 0
+
+    def _fake_fetch(*, external_id: str, discussion_url: str):
+        nonlocal fetch_calls
+        fetch_calls += 1
+        raise TerminalNewsItemDiscussionUnavailable("Hacker News discussion is gone")
+
+    monkeypatch.setattr(
+        "app.services.news_item_discussions._fetch_hackernews_comments",
+        _fake_fetch,
+    )
+
+    result = refresh_news_item_discussion(db_session, news_item_id=item.id)
+
+    assert result.success is False
+    assert result.status == REFRESH_STATUS_GONE
+    assert result.retryable is False
+
+    row = (
+        db_session.query(NewsItemDiscussion)
+        .filter(NewsItemDiscussion.news_item_id == item.id)
+        .one()
+    )
+    assert row.last_refresh_status == REFRESH_STATUS_GONE
+    assert row.last_refresh_error == "Hacker News discussion is gone"
+    assert row.next_refresh_after is None
+    assert row.summary_status == REFRESH_STATUS_GONE
+    assert item.id not in list_due_news_item_discussion_refresh_candidates(
+        db_session,
+        now=now,
+    )
+    assert not should_enqueue_news_item_discussion_refresh(db_session, row=row, now=now)
+    assert fetch_calls == 1
+
+    second = refresh_news_item_discussion(db_session, news_item_id=item.id)
+
+    assert second.status == REFRESH_STATUS_GONE
+    assert second.retryable is False
+    assert fetch_calls == 1
 
 
 def test_refresh_news_item_discussion_skips_small_comment_delta(

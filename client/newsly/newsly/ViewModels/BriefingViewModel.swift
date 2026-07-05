@@ -19,6 +19,7 @@ final class BriefingViewModel: ObservableObject {
 
     private let service: BriefingServicing
     private var etag: String?
+    private var indexLoadTask: Task<Void, Never>?
     private var loadedLensKeys: Set<String> = []
     private var lensLoadTasks: [String: Task<Void, Never>] = [:]
     private var pendingReadKeys: Set<String> = []
@@ -117,7 +118,6 @@ final class BriefingViewModel: ObservableObject {
         // before the debounced network flush. The server tolerates stale keys,
         // and failed flushes re-queue, so local state stays eventually consistent.
         markSourcesReadLocally(unreadKeys)
-        decrementUnreadCounts(for: unreadKeys)
         pendingReadKeys.formUnion(unreadKeys)
         readFlushTask?.cancel()
         readFlushTask = Task { [weak self] in
@@ -155,6 +155,20 @@ final class BriefingViewModel: ObservableObject {
     }
 
     private func loadIndex(force: Bool) async {
+        if let indexLoadTask {
+            await indexLoadTask.value
+            return
+        }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performIndexLoad(force: force)
+        }
+        indexLoadTask = task
+        await task.value
+        indexLoadTask = nil
+    }
+
+    private func performIndexLoad(force: Bool) async {
         if index == nil {
             state = .loading
         }
@@ -223,35 +237,12 @@ final class BriefingViewModel: ObservableObject {
         }
     }
 
-    /// Optimistically shrink lens-chip unread counts for keys just marked read.
-    /// Server truth reconciles on the next index fetch.
-    private func decrementUnreadCounts(for keys: [String]) {
-        guard let currentIndex = index else { return }
-        let keySet = Set(keys)
-        let updatedLenses = currentIndex.lenses.map { summary in
-            let owned = lenses[summary.key]?.sources.filter { keySet.contains($0.sourceKey) }.count ?? 0
-            guard owned > 0 else { return summary }
-            return APIBriefingLensSummary(
-                key: summary.key,
-                tier: summary.tier,
-                title: summary.title,
-                deck: summary.deck,
-                position: summary.position,
-                segmentCount: summary.segmentCount,
-                unreadSourceCount: max(0, summary.unreadSourceCount - owned)
-            )
-        }
-        index = APIBriefingIndexResponse(
-            version: currentIndex.version,
-            mastheadTitle: currentIndex.mastheadTitle,
-            mastheadDeck: currentIndex.mastheadDeck,
-            generatedAt: currentIndex.generatedAt,
-            lenses: updatedLenses
-        )
-    }
-
+    /// Optimistic seen-time update: flip sources to read and rederive lens-chip
+    /// unread counts. Read segments stay visible (greyed by the view); the server
+    /// retires them and the next index fetch reconciles.
     private func markSourcesReadLocally(_ keys: [String]) {
         let keySet = Set(keys)
+        var updatedSummaries: [String: APIBriefingLensSummary] = [:]
         for (lensKey, lens) in lenses {
             let updatedSources = lens.sources.map { source in
                 guard keySet.contains(source.sourceKey) else { return source }
@@ -270,12 +261,34 @@ final class BriefingViewModel: ObservableObject {
                     read: true
                 )
             }
+            let readSourceKeys = Set(updatedSources.filter(\.read).map(\.sourceKey))
+            let segmentSourceKeys = Set(lens.segments.flatMap(\.sourceKeys))
+            let updatedSummary = APIBriefingLensSummary(
+                key: lens.lens.key,
+                tier: lens.lens.tier,
+                title: lens.lens.title,
+                deck: lens.lens.deck,
+                position: lens.lens.position,
+                segmentCount: lens.segments.count,
+                unreadSourceCount: segmentSourceKeys.subtracting(readSourceKeys).count
+            )
             lenses[lensKey] = APIBriefingLensResponse(
                 version: lens.version,
-                lens: lens.lens,
+                lens: updatedSummary,
                 segments: lens.segments,
                 sources: updatedSources
             )
+            updatedSummaries[lensKey] = updatedSummary
+        }
+        if var currentIndex = index {
+            currentIndex = APIBriefingIndexResponse(
+                version: currentIndex.version,
+                mastheadTitle: currentIndex.mastheadTitle,
+                mastheadDeck: currentIndex.mastheadDeck,
+                generatedAt: currentIndex.generatedAt,
+                lenses: currentIndex.lenses.map { updatedSummaries[$0.key] ?? $0 }
+            )
+            index = currentIndex
         }
     }
 }

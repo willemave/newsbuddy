@@ -959,7 +959,7 @@
       "BriefingDigSearchRequest": {
         "properties": {
           "fragment": {
-            "maxLength": 300,
+            "maxLength": 2000,
             "minLength": 3,
             "title": "Fragment",
             "type": "string"
@@ -1023,7 +1023,7 @@
       "BriefingDigSummarizeRequest": {
         "properties": {
           "fragment": {
-            "maxLength": 300,
+            "maxLength": 2000,
             "minLength": 3,
             "title": "Fragment",
             "type": "string"
