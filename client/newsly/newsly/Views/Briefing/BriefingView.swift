@@ -312,10 +312,14 @@ private struct BriefingLensPageView: View {
 
                                 lensHeader(lens.lens)
 
+                                let sourcesByKey = Dictionary(
+                                    lens.sources.map { ($0.sourceKey, $0) },
+                                    uniquingKeysWith: { current, _ in current }
+                                )
                                 ForEach(lens.segments, id: \.id) { segment in
                                     BriefingSegmentView(
                                         segment: segment,
-                                        sourceLookup: { viewModel.source(for: $0) },
+                                        sourcesByKey: sourcesByKey,
                                         onOpenSource: onOpenSource,
                                         onOpenDiscussion: onOpenDiscussion,
                                         onDig: onDig,
@@ -406,11 +410,14 @@ private struct BriefingLensPageView: View {
 
 private struct BriefingSegmentView: View {
     let segment: APIBriefingSegment
-    let sourceLookup: (String) -> APIBriefingSource?
+    let sourcesByKey: [String: APIBriefingSource]
     let onOpenSource: (String) -> Void
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
     let onSourceKeysSeen: ([String]) -> Void
+    private let displayBlocks: [DisplayBlock]
+    private let discussionSources: [APIBriefingSource]
+    private let allSourcesRead: Bool
 
     private enum DisplayBlock: Identifiable {
         case single(Int, APIBriefingBlock)
@@ -424,6 +431,25 @@ private struct BriefingSegmentView: View {
         }
     }
 
+    init(
+        segment: APIBriefingSegment,
+        sourcesByKey: [String: APIBriefingSource],
+        onOpenSource: @escaping (String) -> Void,
+        onOpenDiscussion: @escaping (APIBriefingSource) -> Void,
+        onDig: @escaping (String, String) -> Void,
+        onSourceKeysSeen: @escaping ([String]) -> Void
+    ) {
+        self.segment = segment
+        self.sourcesByKey = sourcesByKey
+        self.onOpenSource = onOpenSource
+        self.onOpenDiscussion = onOpenDiscussion
+        self.onDig = onDig
+        self.onSourceKeysSeen = onSourceKeysSeen
+        self.displayBlocks = Self.displayBlocks(for: segment.blocks, sourcesByKey: sourcesByKey)
+        self.discussionSources = Self.discussionSources(for: segment.sourceKeys, sourcesByKey: sourcesByKey)
+        self.allSourcesRead = Self.allSourcesRead(segment.sourceKeys, sourcesByKey: sourcesByKey)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             ForEach(displayBlocks) { item in
@@ -434,7 +460,7 @@ private struct BriefingSegmentView: View {
                     BriefingFloatingFigurePassage(
                         figure: figure,
                         passage: passage,
-                        source: figure.sourceKey.flatMap(sourceLookup),
+                        source: source(for: figure),
                         figureOpacity: readOpacity(for: figure.briefingDirectSourceKeys),
                         passageOpacity: readOpacity(for: passage.briefingFallbackReadSourceKeys),
                         onOpenSource: onOpenSource,
@@ -459,14 +485,20 @@ private struct BriefingSegmentView: View {
         .accessibilityIdentifier("briefing.segment.\(segment.id)")
     }
 
-    private var allSourcesRead: Bool {
-        !segment.sourceKeys.isEmpty
-            && segment.sourceKeys.allSatisfy { sourceLookup($0)?.read ?? true }
+    private static func allSourcesRead(
+        _ sourceKeys: [String],
+        sourcesByKey: [String: APIBriefingSource]
+    ) -> Bool {
+        !sourceKeys.isEmpty
+            && sourceKeys.allSatisfy { sourcesByKey[$0]?.read ?? true }
     }
 
-    private var discussionSources: [APIBriefingSource] {
-        segment.sourceKeys
-            .compactMap(sourceLookup)
+    private static func discussionSources(
+        for sourceKeys: [String],
+        sourcesByKey: [String: APIBriefingSource]
+    ) -> [APIBriefingSource] {
+        sourceKeys
+            .compactMap { sourcesByKey[$0] }
             .filter { $0.kind == "news" && $0.discussion != nil }
             .sorted { left, right in
                 let leftCount = left.discussion?.commentCount ?? 0
@@ -480,13 +512,15 @@ private struct BriefingSegmentView: View {
 
     /// Inset figures adjacent to a meaty passage float inside it (text wraps);
     /// everything else renders block-by-block as before.
-    private var displayBlocks: [DisplayBlock] {
-        let blocks = segment.blocks
+    private static func displayBlocks(
+        for blocks: [APIBriefingBlock],
+        sourcesByKey: [String: APIBriefingSource]
+    ) -> [DisplayBlock] {
         var items: [DisplayBlock] = []
         var index = 0
         while index < blocks.count {
             let block = blocks[index]
-            if isFloatableFigure(block),
+            if isFloatableFigure(block, sourcesByKey: sourcesByKey),
                index + 1 < blocks.count,
                isFloatHost(blocks[index + 1]) {
                 items.append(.floatingFigure(index, figure: block, passage: blocks[index + 1]))
@@ -495,7 +529,7 @@ private struct BriefingSegmentView: View {
             }
             if isFloatHost(block),
                index + 1 < blocks.count,
-               isFloatableFigure(blocks[index + 1]) {
+               isFloatableFigure(blocks[index + 1], sourcesByKey: sourcesByKey) {
                 items.append(.floatingFigure(index, figure: blocks[index + 1], passage: block))
                 index += 2
                 continue
@@ -506,22 +540,28 @@ private struct BriefingSegmentView: View {
         return items
     }
 
-    private func isFloatableFigure(_ block: APIBriefingBlock) -> Bool {
-        block.type == .figure && block.placement == "inset" && hasImage(block)
+    private static func isFloatableFigure(
+        _ block: APIBriefingBlock,
+        sourcesByKey: [String: APIBriefingSource]
+    ) -> Bool {
+        block.type == .figure && block.placement == "inset" && hasImage(block, sourcesByKey: sourcesByKey)
     }
 
-    private func isFloatHost(_ block: APIBriefingBlock) -> Bool {
+    private static func isFloatHost(_ block: APIBriefingBlock) -> Bool {
         block.type == .passage && plainTextLength(of: block) >= 240
     }
 
-    private func plainTextLength(of block: APIBriefingBlock) -> Int {
+    private static func plainTextLength(of block: APIBriefingBlock) -> Int {
         (block.paragraphs ?? []).reduce(0) { total, paragraph in
             total + paragraph.runs.reduce(0) { $0 + $1.text.count }
         }
     }
 
-    private func hasImage(_ block: APIBriefingBlock) -> Bool {
-        let source = block.sourceKey.flatMap(sourceLookup)
+    private static func hasImage(
+        _ block: APIBriefingBlock,
+        sourcesByKey: [String: APIBriefingSource]
+    ) -> Bool {
+        let source = block.sourceKey.flatMap { sourcesByKey[$0] }
         let url = block.imageUrl ?? block.thumbnailUrl ?? source?.imageUrl ?? source?.thumbnailUrl
         return url?.isEmpty == false
     }
@@ -541,7 +581,7 @@ private struct BriefingSegmentView: View {
         case .figure:
             BriefingFigureView(
                 block: block,
-                source: block.sourceKey.flatMap(sourceLookup),
+                source: source(for: block),
                 onOpenSource: onOpenSource
             )
             .opacity(readOpacity(for: block.briefingDirectSourceKeys))
@@ -553,7 +593,7 @@ private struct BriefingSegmentView: View {
         case .pullquote:
             BriefingPullquoteView(
                 block: block,
-                source: block.sourceKey.flatMap(sourceLookup),
+                source: source(for: block),
                 onOpenSource: onOpenSource
             )
             .opacity(readOpacity(for: block.briefingDirectSourceKeys))
@@ -567,7 +607,11 @@ private struct BriefingSegmentView: View {
 
     private func readOpacity(for sourceKeys: [String]) -> Double {
         guard !allSourcesRead, !sourceKeys.isEmpty else { return 1 }
-        return sourceKeys.allSatisfy { sourceLookup($0)?.read ?? true } ? 0.72 : 1
+        return sourceKeys.allSatisfy { sourcesByKey[$0]?.read ?? true } ? 0.72 : 1
+    }
+
+    private func source(for block: APIBriefingBlock) -> APIBriefingSource? {
+        block.sourceKey.flatMap { sourcesByKey[$0] }
     }
 }
 

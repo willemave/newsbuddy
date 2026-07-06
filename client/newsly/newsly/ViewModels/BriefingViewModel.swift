@@ -17,6 +17,7 @@ final class BriefingViewModel: ObservableObject {
     }
 
     @Published private(set) var index: APIBriefingIndexResponse?
+    @Published private(set) var orderedLenses: [APIBriefingLensSummary] = []
     @Published private(set) var lenses: [String: APIBriefingLensResponse] = [:]
     @Published private(set) var state: LoadState = .idle
     @Published var selectedLensKey: String?
@@ -40,15 +41,6 @@ final class BriefingViewModel: ObservableObject {
 
     deinit {
         tasks.cancelAll()
-    }
-
-    var orderedLenses: [APIBriefingLensSummary] {
-        (index?.lenses ?? []).sorted { left, right in
-            if left.position == right.position {
-                return left.key < right.key
-            }
-            return left.position < right.position
-        }
     }
 
     var selectedLens: APIBriefingLensResponse? {
@@ -200,6 +192,7 @@ final class BriefingViewModel: ObservableObject {
                     invalidateLoadedLenses()
                 }
                 index = response
+                orderedLenses = Self.sortedLenses(response.lenses)
                 // A missing ETag header must not discard the last known validator.
                 etag = responseEtag ?? etag
                 state = response.lenses.isEmpty ? .empty : .loaded
@@ -234,10 +227,12 @@ final class BriefingViewModel: ObservableObject {
     }
 
     private func invalidateLoadedLenses() {
-        for task in lensLoadTasks.values {
-            task.cancel()
+        let knownLensKeys = Set(loadedLensKeys)
+            .union(lenses.keys)
+            .union(index?.lenses.map(\.key) ?? [])
+        for key in knownLensKeys {
+            tasks.cancel(.lens(key))
         }
-        lensLoadTasks.removeAll()
         loadedLensKeys.removeAll()
     }
 
@@ -256,6 +251,7 @@ final class BriefingViewModel: ObservableObject {
                     lenses: currentIndex.lenses
                 )
                 index = currentIndex
+                orderedLenses = Self.sortedLenses(currentIndex.lenses)
             }
         } catch {
             pendingReadKeys.formUnion(keys)
@@ -315,6 +311,16 @@ final class BriefingViewModel: ObservableObject {
                 lenses: currentIndex.lenses.map { updatedSummaries[$0.key] ?? $0 }
             )
             index = currentIndex
+            orderedLenses = Self.sortedLenses(currentIndex.lenses)
+        }
+    }
+
+    private static func sortedLenses(_ lenses: [APIBriefingLensSummary]) -> [APIBriefingLensSummary] {
+        lenses.sorted { left, right in
+            if left.position == right.position {
+                return left.key < right.key
+            }
+            return left.position < right.position
         }
     }
 }

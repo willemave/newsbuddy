@@ -20,6 +20,27 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedLens?.lens.key, "today")
     }
 
+    func testOrderedLensesAreStoredAndRefreshAfterLocalReadMarks() async {
+        let service = MockBriefingService()
+        let segment = makeSegment(sourceKeys: ["content:1", "news:2"])
+        let todaySummary = makeLensSummary(key: "today", title: "Today", position: 2)
+        let firstSummary = makeLensSummary(key: "first", title: "First", position: 1)
+        service.indexResults = [
+            .value(makeIndex(lenses: [todaySummary, firstSummary]), etag: nil)
+        ]
+        service.lensResponses["first"] = makeLens(key: "first", position: 1, segments: [segment])
+        service.lensResponses["today"] = makeLens(key: "today", position: 2)
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitFor { viewModel.selectedLens != nil }
+        viewModel.markSegmentSeen(segment)
+
+        XCTAssertEqual(viewModel.selectedLensKey, "first")
+        XCTAssertEqual(viewModel.orderedLenses.map(\.key), ["first", "today"])
+        XCTAssertEqual(viewModel.orderedLenses.first?.unreadSourceCount, 0)
+    }
+
     func testConcurrentIndexLoadsShareInFlightRequest() async {
         let service = MockBriefingService()
         service.fetchIndexDelayNanoseconds = 100_000_000
@@ -401,14 +422,15 @@ private func makeIndex(
 
 private func makeLensSummary(
     key: String,
-    title: String = "Today"
+    title: String = "Today",
+    position: Int = 0
 ) -> APIBriefingLensSummary {
     APIBriefingLensSummary(
         key: key,
         tier: .news,
         title: title,
         deck: "Latest unread reporting",
-        position: 0,
+        position: position,
         segmentCount: 1,
         unreadSourceCount: 2
     )
@@ -417,12 +439,13 @@ private func makeLensSummary(
 private func makeLens(
     key: String,
     version: Int = 1,
+    position: Int = 0,
     segments: [APIBriefingSegment] = [makeSegment()],
     sources: [APIBriefingSource]? = nil
 ) -> APIBriefingLensResponse {
     APIBriefingLensResponse(
         version: version,
-        lens: makeLensSummary(key: key),
+        lens: makeLensSummary(key: key, position: position),
         segments: segments,
         sources: sources ?? [
             APIBriefingSource(
