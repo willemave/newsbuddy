@@ -420,6 +420,8 @@ private struct BriefingSegmentView: View {
                         figure: figure,
                         passage: passage,
                         source: figure.sourceKey.flatMap(sourceLookup),
+                        figureOpacity: readOpacity(for: figure.briefingDirectSourceKeys),
+                        passageOpacity: readOpacity(for: passage.briefingFallbackReadSourceKeys),
                         onOpenSource: onOpenSource,
                         onDig: onDig,
                         onSourceKeysSeen: onSourceKeysSeen
@@ -498,12 +500,16 @@ private struct BriefingSegmentView: View {
                 onDig: onDig,
                 onSourceKeysSeen: onSourceKeysSeen
             )
+            .opacity(readOpacity(for: block.briefingFallbackReadSourceKeys))
+            .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingFallbackReadSourceKeys))
         case .figure:
             BriefingFigureView(
                 block: block,
                 source: block.sourceKey.flatMap(sourceLookup),
                 onOpenSource: onOpenSource
             )
+            .opacity(readOpacity(for: block.briefingDirectSourceKeys))
+            .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingDirectSourceKeys))
             .briefingSourceReadMarker(
                 sourceKeys: block.briefingDirectSourceKeys,
                 onSourceKeysSeen: onSourceKeysSeen
@@ -514,11 +520,18 @@ private struct BriefingSegmentView: View {
                 source: block.sourceKey.flatMap(sourceLookup),
                 onOpenSource: onOpenSource
             )
+            .opacity(readOpacity(for: block.briefingDirectSourceKeys))
+            .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingDirectSourceKeys))
             .briefingSourceReadMarker(
                 sourceKeys: block.briefingDirectSourceKeys,
                 onSourceKeysSeen: onSourceKeysSeen
             )
         }
+    }
+
+    private func readOpacity(for sourceKeys: [String]) -> Double {
+        guard !allSourcesRead, !sourceKeys.isEmpty else { return 1 }
+        return sourceKeys.allSatisfy { sourceLookup($0)?.read ?? true } ? 0.72 : 1
     }
 }
 
@@ -596,6 +609,8 @@ private struct BriefingFloatingFigurePassage: View {
     let figure: APIBriefingBlock
     let passage: APIBriefingBlock
     let source: APIBriefingSource?
+    let figureOpacity: Double
+    let passageOpacity: Double
     let onOpenSource: (String) -> Void
     let onDig: (String, String) -> Void
     let onSourceKeysSeen: ([String]) -> Void
@@ -614,6 +629,8 @@ private struct BriefingFloatingFigurePassage: View {
                 onSourceKeysSeen: onSourceKeysSeen
             )
             .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(passageOpacity)
+            .animation(.easeInOut(duration: 0.35), value: passageOpacity)
 
             Button {
                 if let sourceKey = figure.sourceKey ?? source?.sourceKey {
@@ -636,6 +653,8 @@ private struct BriefingFloatingFigurePassage: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
+            .opacity(figureOpacity)
+            .animation(.easeInOut(duration: 0.35), value: figureOpacity)
             .briefingSourceReadMarker(
                 sourceKeys: figure.briefingDirectSourceKeys,
                 onSourceKeysSeen: onSourceKeysSeen
