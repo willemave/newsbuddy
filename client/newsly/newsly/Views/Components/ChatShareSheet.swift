@@ -13,7 +13,7 @@ struct ShareContent: Identifiable {
     let articleUrl: String?
 
     var shareText: String {
-        var text = messageContent
+        var text = Self.plainText(fromMarkdown: messageContent)
 
         if let title = articleTitle {
             text = "\(title)\n\n\(text)"
@@ -24,6 +24,16 @@ struct ShareContent: Identifiable {
         }
 
         return text
+    }
+
+    static func plainText(fromMarkdown markdown: String) -> String {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        guard let attributed = try? AttributedString(markdown: markdown, options: options) else {
+            return markdown
+        }
+        return String(attributed.characters)
     }
 }
 

@@ -552,7 +552,13 @@ private extension ChatDependencies {
         ChatDependencies(
             chatService: chatService,
             transcriptionService: transcriptionService,
-            activeSessionManager: activeSessionManager ?? .shared
+            activeSessionManager: activeSessionManager ?? .shared,
+            authService: AuthenticationService.shared,
+            tokenStore: KeychainManager.shared,
+            refreshTranscriptionAvailability: {
+                transcriptionService.isAvailable
+            },
+            setBackendTranscriptionAvailable: { _ in }
         )
     }
 }

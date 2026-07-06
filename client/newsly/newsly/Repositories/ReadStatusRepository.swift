@@ -5,7 +5,6 @@
 //  Created by Assistant on 3/16/26.
 //
 
-import Combine
 import Foundation
 import os.log
 
@@ -26,7 +25,7 @@ enum ReadStatusEndpoint {
 }
 
 protocol ReadStatusRepositoryType {
-    func markRead(ids: [Int]) -> AnyPublisher<Void, Error>
+    func markRead(ids: [Int]) async throws
 }
 
 final class ReadStatusRepository: ReadStatusRepositoryType {
@@ -39,12 +38,10 @@ final class ReadStatusRepository: ReadStatusRepositoryType {
         self.endpoint = endpoint
     }
 
-    func markRead(ids: [Int]) -> AnyPublisher<Void, Error> {
+    func markRead(ids: [Int]) async throws {
         guard !ids.isEmpty else {
             logger.debug("[ReadStatus] markRead called with empty ids, skipping")
-            return Just(())
-                .setFailureType(to: Error.self)
-                .eraseToAnyPublisher()
+            return
         }
 
         logger.info("[ReadStatus] markRead called | ids=\(ids, privacy: .public) count=\(ids.count)")
@@ -60,22 +57,16 @@ final class ReadStatusRepository: ReadStatusRepositoryType {
         let payload = BulkMarkReadRequest(contentIds: ids)
         let body = try? encoder.encode(payload)
 
-        return client.publisher(
-            endpoint.path,
-            method: "POST",
-            body: body
-        )
-        .handleEvents(
-            receiveOutput: { _ in
-                logger.info("[ReadStatus] markRead success | ids=\(ids, privacy: .public)")
-            },
-            receiveCompletion: { completion in
-                if case .failure(let error) = completion {
-                    logger.error("[ReadStatus] markRead failed | ids=\(ids, privacy: .public) error=\(error.localizedDescription)")
-                }
-            }
-        )
-        .map { (_: BulkMarkReadResponse) in () }
-        .eraseToAnyPublisher()
+        do {
+            let _: BulkMarkReadResponse = try await client.request(
+                endpoint.path,
+                method: "POST",
+                body: body
+            )
+            logger.info("[ReadStatus] markRead success | ids=\(ids, privacy: .public)")
+        } catch {
+            logger.error("[ReadStatus] markRead failed | ids=\(ids, privacy: .public) error=\(error.localizedDescription)")
+            throw error
+        }
     }
 }

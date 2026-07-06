@@ -17,6 +17,7 @@ struct CountBadge: View {
             .font(.appSans(size: 14, weight: .medium))
             .foregroundStyle(color)
             .monospacedDigit()
+            .contentTransition(.numericText())
     }
 }
 

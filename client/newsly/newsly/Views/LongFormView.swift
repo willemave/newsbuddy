@@ -6,56 +6,60 @@
 //
 
 import SwiftUI
-import os.log
-
-private let longFormAudioLogger = Logger(subsystem: "com.newsly", category: "LongFormAudio")
 
 struct LongFormView: View {
-    @ObservedObject var viewModel: LongContentListViewModel
+    let viewModel: LongContentListViewModel
     let isActive: Bool
     let onSelect: (ContentDetailRoute) -> Void
+    let scrollToTopRequest: Int
+    let contentTransitionNamespace: Namespace.ID?
     let onShowNarrations: () -> Void
     let currentFastReadItems: () -> [ContentSummary]
 
-    @StateObject private var unreadCountService = UnreadCountService.shared
-    @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
-    @StateObject private var customNarrationCreator = CustomNarrationCreationViewModel()
-    @StateObject private var sourcesViewModel = ScraperSettingsViewModel(
+    @State private var customNarrationCreator = RootDependencyFactory.makeCustomNarrationCreationViewModel()
+    @State private var sourcesViewModel = RootDependencyFactory.makeScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
     )
+    @State private var audioController = LongFormAudioController()
+    @State private var unreadCountService = UnreadCountService.shared
     @State private var showMarkAllConfirmation = false
     @State private var isProcessingBulk = false
     @State private var hasLoadedBootstrapSources = false
-    @State private var pendingOpenContentId: Int?
-    @State private var loadingAudioContentIds: Set<Int> = []
-    @State private var audioEpisodeByContentId: [Int: AudioEpisode] = [:]
-    @State private var audioErrorByContentId: [Int: String] = [:]
     @State private var showCustomNarrationPicker = false
     @State private var isStartingLongFormSummaryChat = false
     @State private var longFormSummaryError: String?
+    @State private var bulkMarkFeedbackTrigger = 0
     private let chatService = ChatService.shared
     private let bottomActionScrollPadding: CGFloat = 96
+    private static let topAnchorID = "longFormTop"
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         let items = viewModel.currentItems()
+        let itemIds = items.map(\.id)
         let lastItemId = items.last?.id
         let hasUnreadItems = items.contains(where: { !$0.isRead })
 
         ZStack {
             VStack(spacing: 0) {
                 if viewModel.state == .initialLoading && items.isEmpty {
-                    LoadingView()
+                    SkeletonFeedList(kind: .longForm)
                 } else if case .error(let error) = viewModel.state, items.isEmpty {
-                    ErrorView(message: error.localizedDescription) {
-                        viewModel.refreshTrigger.send(())
+                    ErrorView(message: error) {
+                        Task { await viewModel.refresh() }
                     }
                 } else {
                     if items.isEmpty {
                         longFormEmptyState
                     } else {
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
+                        ScrollViewReader { scrollProxy in
+                            ScrollView {
+                                LazyVStack(spacing: 0) {
+                                    Color.clear
+                                        .frame(height: 0)
+                                        .id(Self.topAnchorID)
+                                        .accessibilityHidden(true)
+
                                 EditorialMastheadHeader(title: "Long Read")
 
                                 LongFormActionsView(
@@ -78,12 +82,10 @@ struct LongFormView: View {
                                 // plain VStack builds every card (and starts every image load)
                                 // eagerly and fires the last card's load-more trigger on appear.
                                 ForEach(items) { content in
-                                    cardLink(
-                                        content: content,
-                                        isLast: content.id == lastItemId
-                                    )
-                                    .padding(.horizontal, Spacing.appHorizontalMargin)
-                                    .padding(.bottom, content.id == lastItemId ? 0 : CardMetrics.cardSpacing)
+                                    cardLink(content: content)
+                                        .padding(.horizontal, Spacing.appHorizontalMargin)
+                                        .padding(.bottom, content.id == lastItemId ? 0 : CardMetrics.cardSpacing)
+                                        .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
 
                                 if hasUnreadItems {
@@ -107,30 +109,41 @@ struct LongFormView: View {
                                 Color.clear
                                     .frame(height: bottomActionScrollPadding)
                                     .accessibilityHidden(true)
+                                }
+                                .animation(AppMotion.subtle, value: hasUnreadItems)
+                                .animation(AppMotion.subtle, value: itemIds)
                             }
-                            .animation(.easeOut(duration: 0.2), value: hasUnreadItems)
-                        }
-                        .refreshable {
-                            await refreshLongFormSurface(forceReload: true)
-                        }
-                        .alert(
-                            "Mark all long-form content as read?",
-                            isPresented: $showMarkAllConfirmation
-                        ) {
-                            Button("Cancel", role: .cancel) {
-                                showMarkAllConfirmation = false
+                            .onPaginationThresholdReached {
+                                await viewModel.loadNextPage()
                             }
-                            Button("Mark All as Read", role: .destructive) {
-                                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                showMarkAllConfirmation = false
-                                isProcessingBulk = true
-                                Task {
-                                    defer { isProcessingBulk = false }
-                                    await viewModel.markAllVisibleAsRead()
+                            .onChange(of: scrollToTopRequest) { _, request in
+                                guard request > 0 else { return }
+                                withAnimation(AppMotion.panel) {
+                                    scrollProxy.scrollTo(Self.topAnchorID, anchor: .top)
                                 }
                             }
-                        } message: {
-                            Text("Marks every unread long-form item currently loaded in the list.")
+                            .refreshable {
+                                await refreshLongFormSurface(forceReload: true)
+                            }
+                            .alert(
+                                "Mark all long-form content as read?",
+                                isPresented: $showMarkAllConfirmation
+                            ) {
+                                Button("Cancel", role: .cancel) {
+                                    showMarkAllConfirmation = false
+                                }
+                                Button("Mark All as Read", role: .destructive) {
+                                    bulkMarkFeedbackTrigger += 1
+                                    showMarkAllConfirmation = false
+                                    isProcessingBulk = true
+                                    Task {
+                                        defer { isProcessingBulk = false }
+                                        await viewModel.markAllVisibleAsRead()
+                                    }
+                                }
+                            } message: {
+                                Text("Marks every unread long-form item currently loaded in the list.")
+                            }
                         }
                     }
                 }
@@ -152,6 +165,7 @@ struct LongFormView: View {
         .screenContainer()
         .topScreenEdgeFade()
         .accessibilityIdentifier("long.screen")
+        .sensoryFeedback(.success, trigger: bulkMarkFeedbackTrigger)
         .sheet(isPresented: $showCustomNarrationPicker) {
             CustomNarrationPickerSheet(
                 currentItems: viewModel.currentItems(),
@@ -179,7 +193,7 @@ struct LongFormView: View {
         longFormSummaryError = nil
         let visibleContentIds = Array(
             items.lazy
-                .filter { supportsAudioDiscussion(for: $0) }
+                .filter { audioController.supportsAudioDiscussion(for: $0) }
                 .prefix(15)
                 .map(\.id)
         )
@@ -220,18 +234,18 @@ struct LongFormView: View {
     }
 
     @ViewBuilder
-    private func cardLink(content: ContentSummary, isLast: Bool) -> some View {
+    private func cardLink(content: ContentSummary) -> some View {
         LongFormCard(
             content: content,
-            playbackService: narrationPlaybackService,
-            isAudioSupported: supportsAudioDiscussion(for: content),
-            isAudioPreparing: isAudioPreparing(for: content),
-            isAudioPlaying: isAudioPlaying(for: content),
-            isAudioControlVisible: shouldShowAudioControls(for: content),
-            audioTarget: audioTarget(for: content),
-            audioErrorMessage: audioErrorByContentId[content.id],
+            playbackService: audioController.playbackService,
+            isAudioSupported: audioController.supportsAudioDiscussion(for: content),
+            isAudioPreparing: audioController.isAudioPreparing(for: content),
+            isAudioPlaying: audioController.isAudioPlaying(for: content),
+            isAudioControlVisible: audioController.shouldShowAudioControls(for: content),
+            audioTarget: audioController.audioTarget(for: content),
+            audioErrorMessage: audioController.errorMessage(for: content),
             onMarkRead: {
-                viewModel.markAsRead(content.id)
+                Task { await viewModel.markAsRead(content.id) }
             },
             onToggleKnowledgeSave: {
                 Task {
@@ -251,15 +265,13 @@ struct LongFormView: View {
                 openContent(content)
             },
             onToggleAudio: {
-                handleAudioDiscussion(for: content)
+                audioController.handleAudioDiscussion(for: content)
             }
         )
+        .matchedContentZoomSource(id: content.id, namespace: contentTransitionNamespace)
         .accessibilityIdentifier("long.row.\(content.id)")
         .onAppear {
             prefetchUpcomingCardImages(after: content)
-            if isLast {
-                viewModel.loadMoreTrigger.send(())
-            }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -272,134 +284,13 @@ struct LongFormView: View {
         ContentImagePrefetcher.prefetch(contents: upcoming)
     }
 
-    private func supportsAudioDiscussion(for content: ContentSummary) -> Bool {
-        content.contentType == .article || content.contentType == .podcast
-    }
-
-    private func audioTarget(for content: ContentSummary) -> NarrationTarget? {
-        guard let episode = audioEpisodeByContentId[content.id] else { return nil }
-        return .audioEpisode(episode.id)
-    }
-
-    private func isAudioCurrent(for content: ContentSummary) -> Bool {
-        guard let target = audioTarget(for: content) else { return false }
-        return narrationPlaybackService.speakingTarget == target
-    }
-
-    private func isAudioPlaying(for content: ContentSummary) -> Bool {
-        isAudioCurrent(for: content) && narrationPlaybackService.isSpeaking
-    }
-
-    private func isAudioPreparing(for content: ContentSummary) -> Bool {
-        loadingAudioContentIds.contains(content.id)
-    }
-
-    private func shouldShowAudioControls(for content: ContentSummary) -> Bool {
-        isAudioPreparing(for: content) || isAudioCurrent(for: content)
-    }
-
-    private func handleAudioDiscussion(for content: ContentSummary) {
-        Task { @MainActor in
-            await handleAudioDiscussionTask(for: content)
-        }
-    }
-
-    @MainActor
-    private func handleAudioDiscussionTask(for content: ContentSummary) async {
-        if isAudioPlaying(for: content) {
-            narrationPlaybackService.pause()
-            return
-        }
-        guard supportsAudioDiscussion(for: content) else { return }
-        guard !isAudioPreparing(for: content) else { return }
-        let startedAt = Date()
-        longFormAudioLogger.info(
-            "Long-form audio flow started | contentId=\(content.id) type=\(content.contentType.rawValue, privacy: .public)"
-        )
-
-        if isAudioCurrent(for: content),
-           let episode = audioEpisodeByContentId[content.id] {
-            await playAudioDiscussionEpisode(episode, contentId: content.id)
-            longFormAudioLogger.info(
-                "Long-form audio resumed existing episode | contentId=\(content.id) episodeId=\(episode.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
-            )
-            return
-        }
-
-        loadingAudioContentIds.insert(content.id)
-        audioErrorByContentId[content.id] = nil
-        defer { loadingAudioContentIds.remove(content.id) }
-
-        do {
-            let episode: AudioEpisode
-            if let existingEpisode = audioEpisodeByContentId[content.id] {
-                episode = existingEpisode
-                longFormAudioLogger.info(
-                    "Long-form audio reusing episode | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public)"
-                )
-            } else {
-                episode = try await AudioEpisodeService.shared.createContentCouncilEpisode(
-                    contentId: content.id,
-                    delivery: .inline
-                )
-                longFormAudioLogger.info(
-                    "Long-form audio episode created | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
-                )
-            }
-            audioEpisodeByContentId[content.id] = episode
-            try await playAudioDiscussionEpisode(episode)
-            longFormAudioLogger.info(
-                "Long-form audio playback requested | contentId=\(content.id) episodeId=\(episode.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
-            )
-        } catch where isNetworkCancellation(error) {
-            return
-        } catch {
-            longFormAudioLogger.error(
-                "Long-form audio flow failed | contentId=\(content.id) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
-            )
-            audioErrorByContentId[content.id] = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func playAudioDiscussionEpisode(_ episode: AudioEpisode, contentId: Int) async {
-        do {
-            audioEpisodeByContentId[contentId] = episode
-            try await playAudioDiscussionEpisode(episode)
-        } catch where isNetworkCancellation(error) {
-            return
-        } catch {
-            audioErrorByContentId[contentId] = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func playAudioDiscussionEpisode(_ episode: AudioEpisode) async throws {
-        let target = NarrationTarget.audioEpisode(episode.id)
-        try await narrationPlaybackService.playStreamingNarration(
-            for: target,
-            fetchStreamResource: {
-                try await AudioEpisodeService.shared.streamResource(for: episode)
-            }
-        )
-    }
-
     private func openContent(_ content: ContentSummary) {
-        guard pendingOpenContentId != content.id else { return }
-        pendingOpenContentId = content.id
         ContentImagePrefetcher.prefetch(content)
         onSelect(ContentDetailRoute(
             summary: content,
             allContentIds: viewModel.currentItems().map(\.id),
             navigationSurface: .longForm
         ))
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            if pendingOpenContentId == content.id {
-                pendingOpenContentId = nil
-            }
-        }
     }
 
     @ViewBuilder
@@ -408,8 +299,12 @@ struct LongFormView: View {
         // parameter so a single render pass doesn't re-filter and re-sort per access.
         let sources = longFormSources
         if shouldShowBootstrapState(sources: sources) {
-            longFormBootstrapState(sources: sources)
-        } else if unreadCountService.longFormCount == 0 && totalProcessedSourceItems(in: sources) > 0 {
+            LongFormBootstrapStateView(
+                sources: sources,
+                isLoading: sourcesViewModel.isLoading,
+                onRefresh: { await refreshLongFormSurface(forceReload: true) }
+            )
+        } else if unreadCountService.longFormCount == 0 && LongFormBootstrapStateView.totalProcessedSourceItems(in: sources) > 0 {
             EmptyStateView(
                 icon: "checkmark.circle",
                 title: "You're All Caught Up",
@@ -427,7 +322,7 @@ struct LongFormView: View {
     private var longFormSources: [ScraperConfig] {
         sourcesViewModel.configs
             .filter { $0.isActive }
-            .sorted(by: compareSources)
+            .sorted(by: LongFormBootstrapStateView.compareSources)
     }
 
     private var shouldUseBootstrapSourceState: Bool {
@@ -439,210 +334,21 @@ struct LongFormView: View {
         if sourcesViewModel.isLoading {
             return true
         }
-        return hasLoadedBootstrapSources && totalProcessedSourceItems(in: sources) == 0 && !sources.isEmpty
-    }
-
-    private func sourcesReadyCount(in sources: [ScraperConfig]) -> Int {
-        sources.filter { ($0.stats?.completedCount ?? 0) > 0 }.count
-    }
-
-    private func totalProcessedSourceItems(in sources: [ScraperConfig]) -> Int {
-        sources.reduce(0) { partial, config in
-            partial + (config.stats?.completedCount ?? 0)
-        }
-    }
-
-    private func totalSourceItemsProcessing(in sources: [ScraperConfig]) -> Int {
-        sources.reduce(0) { partial, config in
-            partial + (config.stats?.processingCount ?? 0)
-        }
-    }
-
-    private func bootstrapHeadline(sources: [ScraperConfig]) -> String {
-        if totalSourceItemsProcessing(in: sources) > 0 {
-            return "Your long-form feed is being assembled"
-        }
-        if sourcesReadyCount(in: sources) > 0 {
-            return "Your sources are connected"
-        }
-        return "Waiting for the first long-form items"
-    }
-
-    private func bootstrapSubtitle(sources: [ScraperConfig]) -> String {
-        let processing = totalSourceItemsProcessing(in: sources)
-        if processing > 0 {
-            return "\(processing) items are still processing across \(sources.count) sources."
-        }
-        let ready = sourcesReadyCount(in: sources)
-        if ready > 0 {
-            return "\(ready) of \(sources.count) sources have published something, but nothing is ready in this tab yet."
-        }
-        return "We already know the feeds and podcasts you picked. This tab will fill in as their first items are fetched and processed."
-    }
-
-    private static let bootstrapRelativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
-    }()
-
-    private func bootstrapCheckBackSummary(sources: [ScraperConfig]) -> String {
-        if totalSourceItemsProcessing(in: sources) > 0 {
-            return "Check back in a minute."
-        }
-
-        let predictions = sources.compactMap(\.stats)
-        if let earliest = predictions.compactMap(\.nextExpectedDate).min() {
-            let relative = Self.bootstrapRelativeFormatter.localizedString(for: earliest, relativeTo: Date())
-            return earliest > Date() ? "Check back \(relative)." : "Check back later today."
-        }
-
-        if totalProcessedSourceItems(in: sources) == 0 {
-            return "Check back after the first source finishes processing."
-        }
-
-        return "Check back later today."
-    }
-
-    private func longFormBootstrapState(sources: [ScraperConfig]) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                EditorialMastheadHeader(title: "Long Read")
-
-                VStack(alignment: .leading, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 10) {
-                            Image(systemName: totalSourceItemsProcessing(in: sources) > 0 ? "clock.arrow.circlepath" : "dot.radiowaves.left.and.right")
-                                .font(.appSymbol(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.terracottaPrimary)
-
-                            Text(bootstrapHeadline(sources: sources))
-                                .font(.appTitle3.weight(.semibold))
-                                .foregroundStyle(Color.onSurface)
-                        }
-
-                        Text(bootstrapSubtitle(sources: sources))
-                            .font(.listSubtitle)
-                            .foregroundStyle(Color.onSurfaceSecondary)
-
-                        Text(bootstrapCheckBackSummary(sources: sources))
-                            .font(.listSubtitle.weight(.medium))
-                            .foregroundStyle(Color.terracottaPrimary)
-                    }
-
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Selected Sources")
-                            .font(.appHeadline)
-                            .foregroundStyle(Color.onSurface)
-                            .padding(.bottom, 12)
-
-                        ForEach(sources) { config in
-                            sourceProgressRow(config)
-                            if config.id != sources.last?.id {
-                                Divider()
-                                    .padding(.leading, 40)
-                            }
-                        }
-                    }
-
-                    if sourcesViewModel.isLoading && sources.isEmpty {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("Loading your sources")
-                                .font(.listSubtitle)
-                                .foregroundStyle(Color.onSurfaceSecondary)
-                        }
-                        .padding(.top, 4)
-                    }
-                }
-                .padding(.horizontal, Spacing.appHorizontalMargin)
-            }
-            .padding(.bottom, 32)
-        }
-        .refreshable {
-            await refreshLongFormSurface(forceReload: true)
-        }
-    }
-
-    private func sourceProgressRow(_ config: ScraperConfig) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 12) {
-                SourceTypeIcon(type: config.scraperType)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(config.displayName ?? config.feedURL ?? "Source")
-                        .font(.listTitle)
-                        .foregroundStyle(Color.onSurface)
-                        .lineLimit(1)
-
-                    Text(sourceProgressSummary(for: config))
-                        .font(.appCaption)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .lineLimit(2)
-                }
-
-                Spacer(minLength: 8)
-
-                if let stats = config.stats, stats.processingCount > 0 {
-                    ProgressView()
-                        .scaleEffect(0.85)
-                }
-            }
-            .padding(.vertical, Spacing.rowVertical)
-        }
-    }
-
-    private func sourceProgressSummary(for config: ScraperConfig) -> String {
-        guard let stats = config.stats else {
-            return "Waiting for the first fetch"
-        }
-
-        var parts: [String] = []
-        if stats.completedCount > 0 {
-            let suffix = stats.completedCount == 1 ? "item" : "items"
-            parts.append("\(stats.completedCount) processed \(suffix)")
-        }
-        if stats.processingCount > 0 {
-            let suffix = stats.processingCount == 1 ? "item" : "items"
-            parts.append("\(stats.processingCount) processing \(suffix)")
-        }
-        if let nextExpected = stats.nextExpectedSummary {
-            parts.append(nextExpected)
-        } else if let processed = stats.relativeProcessedSummary {
-            parts.append(processed)
-        }
-
-        return parts.isEmpty ? "Waiting for the first fetch" : parts.joined(separator: " • ")
-    }
-
-    private func compareSources(_ lhs: ScraperConfig, _ rhs: ScraperConfig) -> Bool {
-        let leftProcessing = lhs.stats?.processingCount ?? 0
-        let rightProcessing = rhs.stats?.processingCount ?? 0
-        if leftProcessing != rightProcessing {
-            return leftProcessing > rightProcessing
-        }
-
-        let leftCompleted = lhs.stats?.completedCount ?? 0
-        let rightCompleted = rhs.stats?.completedCount ?? 0
-        if leftCompleted != rightCompleted {
-            return leftCompleted > rightCompleted
-        }
-
-        let leftName = lhs.displayName ?? lhs.feedURL ?? ""
-        let rightName = rhs.displayName ?? rhs.feedURL ?? ""
-        return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
+        return hasLoadedBootstrapSources
+            && LongFormBootstrapStateView.totalProcessedSourceItems(in: sources) == 0
+            && !sources.isEmpty
     }
 
     @MainActor
     private func refreshLongFormSurface(forceReload: Bool) async {
         if forceReload {
             if viewModel.currentItems().isEmpty {
-                viewModel.refreshUnreadFeed()
+                await viewModel.refreshUnreadFeed()
             } else {
                 await viewModel.refreshUnreadFeedInBackground()
             }
         } else {
-            viewModel.ensureUnreadFeedLoaded()
+            await viewModel.ensureUnreadFeedLoaded()
         }
 
         await unreadCountService.refreshCounts()

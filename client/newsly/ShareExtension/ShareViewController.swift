@@ -8,46 +8,6 @@
 import UIKit
 import UniformTypeIdentifiers
 
-fileprivate extension UIColor {
-    // The Share Extension is a separate target with no access to the app's SwiftUI design tokens,
-    // so the one-accent terracotta brand color is defined locally to match the app's default-palette
-    // brandPrimary (light #864f4f, dark #b87979).
-    static let brandAccent = UIColor { traitCollection in
-        traitCollection.userInterfaceStyle == .dark
-            ? UIColor(red: 0.722, green: 0.475, blue: 0.475, alpha: 1.0)
-            : UIColor(red: 0.525, green: 0.310, blue: 0.310, alpha: 1.0)
-    }
-}
-
-fileprivate enum ShareExtensionTypography {
-    // The Share Extension is a separate target, so it cannot depend on the app's SwiftUI design tokens.
-    static let bodyFamily = "Lato-Regular"
-    static let titleFamily = "Lora-Regular"
-
-    static func font(textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
-        scaledFont(named: bodyFamily, textStyle: textStyle, weight: weight)
-    }
-
-    static func titleFont(textStyle: UIFont.TextStyle) -> UIFont {
-        scaledFont(named: titleFamily, textStyle: textStyle)
-    }
-
-    private static func scaledFont(
-        named family: String,
-        textStyle: UIFont.TextStyle,
-        weight: UIFont.Weight = .regular
-    ) -> UIFont {
-        let preferred = UIFont.preferredFont(forTextStyle: textStyle)
-        let baseFont = UIFont(name: family, size: preferred.pointSize)
-            ?? UIFont.systemFont(ofSize: preferred.pointSize, weight: weight)
-        let descriptor = baseFont.fontDescriptor.addingAttributes([
-            .traits: [UIFontDescriptor.TraitKey.weight: weight.rawValue]
-        ])
-        let weightedFont = UIFont(descriptor: descriptor, size: preferred.pointSize)
-        return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: weightedFont)
-    }
-}
-
 fileprivate enum LinkHandlingMode: String, CaseIterable {
     case addContent
     case createLearningDeck
@@ -160,7 +120,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         contentStack.setContentHuggingPriority(.required, for: .vertical)
 
         titleLabel.text = "How should Newsbuddy handle this link?"
-        titleLabel.font = ShareExtensionTypography.titleFont(textStyle: .headline)
+        titleLabel.font = ShareExtensionStyle.titleFont(textStyle: .headline)
         titleLabel.numberOfLines = 0
 
         optionsStack.axis = .vertical
@@ -213,11 +173,11 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         chatPromptStack.isHidden = true
 
         chatPromptLabel.text = "First message"
-        chatPromptLabel.font = ShareExtensionTypography.font(textStyle: .subheadline, weight: .medium)
+        chatPromptLabel.font = ShareExtensionStyle.font(textStyle: .subheadline, weight: .medium)
         chatPromptLabel.textColor = .secondaryLabel
 
         chatPromptTextView.delegate = self
-        chatPromptTextView.font = ShareExtensionTypography.font(textStyle: .body)
+        chatPromptTextView.font = ShareExtensionStyle.font(textStyle: .body)
         chatPromptTextView.backgroundColor = .secondarySystemBackground
         chatPromptTextView.layer.cornerRadius = 10
         chatPromptTextView.layer.borderWidth = 1
@@ -246,7 +206,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         var configuration = UIButton.Configuration.filled()
         configuration.title = "Submit"
         configuration.cornerStyle = .medium
-        configuration.baseBackgroundColor = .brandAccent
+        configuration.baseBackgroundColor = ShareExtensionStyle.brandAccent
         configuration.baseForegroundColor = .white
         submitButton.configuration = configuration
         submitButton.addTarget(self, action: #selector(handleSubmitTapped), for: .touchUpInside)
@@ -551,15 +511,15 @@ private final class OptionRowView: UIControl {
         isUserInteractionEnabled = true
 
         titleLabel.text = title
-        titleLabel.font = ShareExtensionTypography.font(textStyle: .body, weight: .medium)
+        titleLabel.font = ShareExtensionStyle.font(textStyle: .body, weight: .medium)
         titleLabel.textColor = .label
 
         descriptionLabel.text = description
-        descriptionLabel.font = ShareExtensionTypography.font(textStyle: .footnote)
+        descriptionLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
         descriptionLabel.textColor = .secondaryLabel
         descriptionLabel.numberOfLines = 0
 
-        indicatorView.tintColor = .brandAccent
+        indicatorView.tintColor = ShareExtensionStyle.brandAccent
         indicatorView.setContentHuggingPriority(.required, for: .horizontal)
         indicatorView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
@@ -607,7 +567,7 @@ private final class OptionRowView: UIControl {
     private func updateSelectionState() {
         if isSelected {
             indicatorView.image = UIImage(systemName: "checkmark.circle.fill")
-            layer.borderColor = UIColor.brandAccent.cgColor
+            layer.borderColor = ShareExtensionStyle.brandAccent.cgColor
         } else {
             indicatorView.image = UIImage(systemName: "circle")
             layer.borderColor = UIColor.separator.cgColor
@@ -649,11 +609,11 @@ private final class ToggleRowView: UIControl {
         isUserInteractionEnabled = true
 
         titleLabel.text = title
-        titleLabel.font = ShareExtensionTypography.font(textStyle: .body, weight: .medium)
+        titleLabel.font = ShareExtensionStyle.font(textStyle: .body, weight: .medium)
         titleLabel.textColor = .label
 
         descriptionLabel.text = description
-        descriptionLabel.font = ShareExtensionTypography.font(textStyle: .footnote)
+        descriptionLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
         descriptionLabel.textColor = .secondaryLabel
         descriptionLabel.numberOfLines = 0
 

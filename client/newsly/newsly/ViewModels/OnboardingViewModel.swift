@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Observation
 import os.log
 
 private let onboardingDiscoveryPollingTimeoutSeconds: TimeInterval = 120
@@ -93,53 +94,72 @@ enum OnboardingAudioState: Equatable {
 }
 
 @MainActor
-final class OnboardingViewModel: ObservableObject {
-    @Published var step: OnboardingStep = .choice
-    @Published var suggestions: OnboardingFastDiscoverResponse?
-    @Published var selectedSourceKeys: Set<String> = []
-    @Published var selectedSubreddits: Set<String> = []
-    @Published var selectedAggregators: Set<String> = []
-    @Published var selectedBrutalistTopics: Set<String> = Set(onboardingBrutalistTopics)
-    @Published var isLoading = false
-    @Published var loadingMessage = ""
-    @Published var errorMessage: String?
-    @Published var completionResponse: OnboardingCompleteResponse?
-    @Published var isPersonalized = false
+@Observable
+final class OnboardingViewModel {
+    private enum TaskKey: Hashable {
+        case discoveryPolling
+    }
 
-    @Published var audioState: OnboardingAudioState = .idle
-    @Published var audioDurationSeconds: Int = 0
-    @Published var hasMicPermissionDenied = false
-    @Published var hasDictationError = false
+    var step: OnboardingStep = .choice
+    var suggestions: OnboardingFastDiscoverResponse?
+    var selectedSourceKeys: Set<String> = []
+    var selectedSubreddits: Set<String> = []
+    var selectedAggregators: Set<String> = []
+    var selectedBrutalistTopics: Set<String> = Set(onboardingBrutalistTopics)
+    var isLoading = false
+    var loadingMessage = ""
+    var errorMessage: String?
+    var completionResponse: OnboardingCompleteResponse?
+    var isPersonalized = false
 
-    @Published var discoveryLanes: [OnboardingDiscoveryLaneStatus] = []
-    @Published var discoveryRunId: Int?
-    @Published var discoveryRunStatus: String?
-    @Published var discoveryErrorMessage: String?
-    @Published var hasReachedDiscoveryPollingLimit = false
-    @Published var topicSummary: String?
-    @Published var inferredTopics: [String] = []
-    @Published var twitterUsername: String = ""
+    var audioState: OnboardingAudioState = .idle
+    var audioDurationSeconds: Int = 0
+    var hasMicPermissionDenied = false
+    var hasDictationError = false
 
+    var discoveryLanes: [OnboardingDiscoveryLaneStatus] = []
+    var discoveryRunId: Int?
+    var discoveryRunStatus: String?
+    var discoveryErrorMessage: String?
+    var hasReachedDiscoveryPollingLimit = false
+    var topicSummary: String?
+    var inferredTopics: [String] = []
+    var twitterUsername: String = ""
+
+    @ObservationIgnored
     private let service: OnboardingService
+    @ObservationIgnored
     private let dictationService: any SpeechTranscribing
+    @ObservationIgnored
+    private let voiceCoordinator: VoiceDictationCoordinator
+    @ObservationIgnored
     private let onboardingStateStore: OnboardingStateStore
+    @ObservationIgnored
     private let user: User
+    @ObservationIgnored
     private var audioTimer: Timer?
-    private var pollingTask: Task<Void, Never>?
+    @ObservationIgnored
+    private let tasks = TaskBag<TaskKey>()
+    @ObservationIgnored
     private var didAutoStartRecording = false
+    @ObservationIgnored
     private var didAttemptResume = false
+    @ObservationIgnored
     private var isSubmittingAudioDiscovery = false
+    @ObservationIgnored
     private var audioCaptureStartedAt: Date?
 
     init(
         user: User,
-        service: OnboardingService = .shared,
+        service: OnboardingService,
         dictationService: (any SpeechTranscribing)? = nil,
-        onboardingStateStore: OnboardingStateStore = .shared
+        onboardingStateStore: OnboardingStateStore
     ) {
         self.user = user
         self.service = service
-        self.dictationService = dictationService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
+        let resolvedDictationService = dictationService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
+        self.dictationService = resolvedDictationService
+        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: resolvedDictationService)
         self.onboardingStateStore = onboardingStateStore
         self.twitterUsername = user.twitterUsername ?? ""
 
@@ -151,7 +171,7 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     deinit {
-        pollingTask?.cancel()
+        tasks.cancelAll()
         audioTimer?.invalidate()
         let service = dictationService
         Task { @MainActor in service.cancel() }
@@ -291,6 +311,7 @@ final class OnboardingViewModel: ObservableObject {
 
     func resetAudioState() {
         dictationService.cancel()
+        voiceCoordinator.stopListening()
         audioState = .idle
         audioDurationSeconds = 0
         hasMicPermissionDenied = false
@@ -450,18 +471,18 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     private func startPolling(runId: Int) {
-        pollingTask?.cancel()
-        pollingTask = Task { @MainActor in
+        tasks.runReplacing(.discoveryPolling) { [weak self] in
+            guard let self else { return }
             let deadline = Date().addingTimeInterval(onboardingDiscoveryPollingTimeoutSeconds)
             while !Task.isCancelled {
-                await refreshDiscoveryStatus(runId: runId)
+                await self.refreshDiscoveryStatus(runId: runId)
 
-                if isDiscoveryTerminalStatus(discoveryRunStatus) {
+                if self.isDiscoveryTerminalStatus(self.discoveryRunStatus) {
                     break
                 }
 
                 if Date() >= deadline {
-                    handleDiscoveryTimeout()
+                    self.handleDiscoveryTimeout()
                     break
                 }
 
@@ -560,7 +581,7 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     private func clearDiscoveryState() {
-        pollingTask?.cancel()
+        tasks.cancel(.discoveryPolling)
         discoveryRunId = nil
         discoveryRunStatus = nil
         discoveryLanes = []
@@ -579,6 +600,7 @@ final class OnboardingViewModel: ObservableObject {
 
     private func stopAudioCapture() {
         dictationService.cancel()
+        voiceCoordinator.stopListening()
         stopAudioTimer()
         audioState = .idle
         if let audioCaptureStartedAt {
@@ -590,9 +612,8 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     private func configureDictationCallbacks() {
-        dictationService.onTranscriptDelta = nil
-        dictationService.onTranscriptFinal = { [weak self] transcript in
-            Task { @MainActor in
+        voiceCoordinator.listen(
+            onTranscriptFinal: { [weak self] transcript in
                 guard let self else { return }
                 guard self.step == .audio else { return }
                 guard self.audioState == .recording || self.audioState == .transcribing else {
@@ -614,26 +635,19 @@ final class OnboardingViewModel: ObservableObject {
                     "Onboarding transcript final | transcriptChars=\(trimmed.count) captureElapsedMs=\(self.audioCaptureStartedAt.map { onboardingVoiceElapsedMilliseconds(since: $0) } ?? 0)"
                 )
                 await self.beginDiscovery(transcript: trimmed)
-            }
-        }
-        dictationService.onStateChange = nil
-
-        dictationService.onStopReason = { [weak self] reason in
-            Task { @MainActor in
-                self?.handleDictationStopReason(reason)
-            }
-        }
-
-        dictationService.onError = { [weak self] message in
-            Task { @MainActor in
+            },
+            onError: { [weak self] message in
                 guard let self else { return }
                 guard self.step == .audio else { return }
                 self.errorMessage = message
                 self.hasDictationError = true
                 self.audioState = .error
                 self.stopAudioTimer()
+            },
+            onStopReason: { [weak self] reason in
+                self?.handleDictationStopReason(reason)
             }
-        }
+        )
     }
 
     private func handleDictationStopReason(_ reason: SpeechStopReason) {

@@ -9,7 +9,7 @@ import SwiftUI
 
 struct SourceDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var viewModel: ScraperSettingsViewModel
+    let viewModel: ScraperSettingsViewModel
     let config: ScraperConfig
 
     @State private var displayName: String

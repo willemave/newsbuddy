@@ -10,7 +10,8 @@ import SwiftUI
 struct TweetSuggestionsSheet: View {
     let contentId: Int
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel = TweetSuggestionsViewModel()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var viewModel = RootDependencyFactory.makeTweetSuggestionsViewModel()
 
     var body: some View {
         NavigationStack {
@@ -162,7 +163,7 @@ struct TweetSuggestionsSheet: View {
             Image(systemName: viewModel.isRecording ? "stop.circle.fill" : "mic.circle.fill")
                 .font(.appSymbol(size: 40))
                 .foregroundColor(viewModel.isRecording ? .statusDestructive : .brandPrimary)
-                .symbolEffect(.pulse, isActive: viewModel.isRecording)
+                .symbolEffect(.pulse, isActive: viewModel.isRecording && !reduceMotion)
         }
         .disabled(viewModel.isTranscribing || viewModel.isLoading || viewModel.isRegenerating)
     }
@@ -310,7 +311,7 @@ struct TweetSuggestionCard: View {
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color.surfaceSecondary)
-                .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                .appShadow(.subtle)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16)

@@ -1,5 +1,8 @@
 # Coding Guidelines
 
+For SwiftUI app and share extension conventions, use
+[`docs/coding-guidelines-ios.md`](coding-guidelines-ios.md).
+
 ## Local Patterns
 
 FastAPI route shape:

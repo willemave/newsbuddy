@@ -7,7 +7,16 @@ SCHEME="newsly"
 APP_ID="${NEWSLY_MAESTRO_APP_ID:-org.willemaw.newsly}"
 DERIVED_DATA_PATH="${NEWSLY_MAESTRO_DERIVED_DATA:-$REPO_ROOT/.derived-data/maestro}"
 
-export PATH="$HOME/.maestro/bin:$PATH"
+export PATH="$HOME/.maestro/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+if ! java -version >/dev/null 2>&1; then
+  for java_bin_dir in /opt/homebrew/opt/openjdk@21/bin /usr/local/opt/openjdk@21/bin; do
+    if [[ -x "$java_bin_dir/java" ]]; then
+      export PATH="$java_bin_dir:$PATH"
+      break
+    fi
+  done
+fi
 
 if ! java -version >/dev/null 2>&1; then
   if brew --prefix openjdk@21 >/dev/null 2>&1; then
@@ -130,6 +139,7 @@ xcrun simctl uninstall "$SIMULATOR_ID" "$APP_ID" >/dev/null 2>&1 || true
 xcrun simctl install "$SIMULATOR_ID" "$APP_PATH"
 
 export NEWSLY_MAESTRO_APP_ID="$APP_ID"
+export NEWSLY_MAESTRO_SIMULATOR_ID="$SIMULATOR_ID"
 
 cd "$REPO_ROOT"
 uv run pytest tests/ios_e2e "$@"

@@ -1,9 +1,6 @@
 //
 //  ContentView.swift
 //  newsly
-//
-//  Created by Willem Ave on 7/8/25.
-//
 
 import os.log
 import SwiftUI
@@ -11,167 +8,130 @@ import SwiftUI
 private let logger = Logger(subsystem: "com.newsly", category: "ContentView")
 
 struct ContentView: View {
-    @StateObject private var unreadCountService = UnreadCountService.shared
-    @StateObject private var readingStateStore: ReadingStateStore
-    @StateObject private var tabCoordinator: TabCoordinatorViewModel
-    @StateObject private var chatSessionManager = ActiveChatSessionManager.shared
-    @StateObject private var chatNavigation = ChatNavigationCoordinator.shared
-    @StateObject private var submissionStatusViewModel = SubmissionStatusViewModel()
-    @ObservedObject private var settings = AppSettings.shared
+    @State private var tabCoordinator: TabCoordinatorViewModel
+    @State private var knowledgeHubViewModel: KnowledgeHubViewModel
 
+    @State private var readingStateStore: ReadingStateStore
+    @State private var readStateCache: ReadStateCache
+    @State private var submissionStatusViewModel: SubmissionStatusViewModel
+    @State private var settings = AppSettings.shared
+    @State private var unreadCountService = UnreadCountService.shared
+    @State private var processingCountService = ProcessingCountService.shared
+    @State private var chatSessionManager = ActiveChatSessionManager.shared
+    @State private var chatNavigation = ChatNavigationCoordinator.shared
+    @State private var e2eRouteInjector = E2ERouteInjector()
     @State private var longFormPath = NavigationPath()
     @State private var shortFormPath = NavigationPath()
     @State private var briefingPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
     @State private var isRestoringPath = false
-    @State private var hasAppliedE2EOpenChatRoute = false
-    @State private var hasAppliedE2EOpenContentRoute = false
     @State private var knowledgeFocusRequest: KnowledgeFocusRequest?
     @State private var showMoreSheet = false
+    @State private var longFormScrollToTopRequest = 0
+    @State private var shortFormScrollToTopRequest = 0
+    @State private var tabRetapFeedbackTrigger = 0
     @Environment(\.scenePhase) private var scenePhase
 
     @MainActor
     init(userId: Int? = nil, tabCoordinator: TabCoordinatorViewModel? = nil) {
-        _readingStateStore = StateObject(wrappedValue: ReadingStateStore(userId: userId))
-        _tabCoordinator = StateObject(wrappedValue: tabCoordinator ?? RootDependencyFactory.makeTabCoordinator())
-    }
-
-    private var contentTextSize: DynamicTypeSize {
-        ContentTextSize(index: settings.contentTextSizeIndex).dynamicTypeSize
-    }
-
-    private var isBriefingExperience: Bool {
-        settings.readingExperience == .briefing
-    }
-
-    private var longBadge: String? {
-        let total = unreadCountService.articleCount + unreadCountService.podcastCount
-        return total > 0 ? String(total) : nil
-    }
-
-    private var shortBadge: String? {
-        let count = unreadCountService.newsCount
-        return count > 0 ? String(count) : nil
-    }
-
-    private var knowledgeBadge: String? {
-        // Show processing indicator if any sessions are being processed
-        chatSessionManager.hasProcessingSessions ? "●" : nil
-    }
-
-    private var moreBadge: String? {
-        let count = submissionStatusViewModel.unseenCount
-        return count > 0 ? String(count) : nil
-    }
-
-    private var selectedTabBinding: Binding<RootTab> {
-        Binding(
-            get: { tabCoordinator.selectedTab },
-            set: { newTab in
-                // TabView writes the current selection again on repeated tab taps.
-                // Avoid publishing a no-op change through the whole app shell.
-                guard tabCoordinator.selectedTab != newTab else { return }
-                tabCoordinator.selectedTab = availableTab(for: newTab)
-            }
+        let readStateCache = ReadStateCache()
+        _readingStateStore = State(initialValue: ReadingStateStore(userId: userId))
+        _readStateCache = State(initialValue: readStateCache)
+        _tabCoordinator = State(
+            initialValue: tabCoordinator ?? RootDependencyFactory.makeTabCoordinator(readStateCache: readStateCache)
+        )
+        _knowledgeHubViewModel = State(initialValue: RootDependencyFactory.makeKnowledgeHubViewModel())
+        _submissionStatusViewModel = State(
+            initialValue: RootDependencyFactory.makeSubmissionStatusViewModel()
         )
     }
 
     var body: some View {
-        TabView(selection: selectedTabBinding) {
+        TabView(selection: tabSelection.binding) {
             if isBriefingExperience {
-                briefingTab
+                BriefingTab(path: $briefingPath, viewModel: tabCoordinator.briefingVM)
             } else {
-                NavigationStack(path: $longFormPath) {
-                    LongFormView(
-                        viewModel: tabCoordinator.longContentVM,
-                        isActive: tabCoordinator.selectedTab == .longContent,
-                        onSelect: { route in
-                            logger.info(
-                                "[Navigation] pushDetail tab=long_form contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(longFormPath.count, privacy: .public)"
-                            )
-                            longFormPath.append(route)
-                        },
-                        onShowNarrations: {
-                            openKnowledgeNarrations()
-                        },
-                        currentFastReadItems: {
-                            tabCoordinator.shortNewsVM.currentItems()
-                        }
-                    )
-                    .withContentRoutes(
-                        tab: .longContent,
-                        path: $longFormPath,
-                        readingStateStore: readingStateStore,
-                        contentTextSize: contentTextSize
-                    )
-                }
-                .toolbar(longFormPath.isEmpty ? .visible : .hidden, for: .tabBar)
-                .tag(RootTab.longContent)
-                .tabItem {
-                    Label("Long", systemImage: "doc.richtext")
-                        .accessibilityIdentifier("tab.long_form")
-                }
-                .badge(longBadge != nil ? Int(longBadge!) ?? 0 : 0)
+                LongFormTab(
+                    path: $longFormPath,
+                    viewModel: tabCoordinator.longContentVM,
+                    isActive: tabCoordinator.selectedTab == .longContent,
+                    badge: longBadge,
+                    readingStateStore: readingStateStore,
+                    readStateCache: readStateCache,
+                    contentTextSize: contentTextSize,
+                    scrollToTopRequest: longFormScrollToTopRequest,
+                    onShowNarrations: openKnowledgeNarrations,
+                    currentFastReadItems: { tabCoordinator.shortNewsVM.currentItems() }
+                )
 
-                NavigationStack(path: $shortFormPath) {
-                    ShortFormView(
-                        viewModel: tabCoordinator.shortNewsVM,
-                        isActive: tabCoordinator.selectedTab == .shortNews,
-                        onSelect: { route in
-                            logger.info(
-                                "[Navigation] pushDetail tab=fast_news contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(shortFormPath.count, privacy: .public)"
-                            )
-                            shortFormPath.append(route)
-                        }
-                    )
-                    .withContentRoutes(
-                        tab: .shortNews,
-                        path: $shortFormPath,
-                        readingStateStore: readingStateStore,
-                        contentTextSize: contentTextSize
-                    )
-                }
-                .toolbar(shortFormPath.isEmpty ? .visible : .hidden, for: .tabBar)
-                .tag(RootTab.shortNews)
-                .tabItem {
-                    Label("Fast", systemImage: "bolt.fill")
-                        .accessibilityIdentifier("tab.fast_news")
-                }
-                .badge(shortBadge != nil ? Int(shortBadge!) ?? 0 : 0)
+                ShortFormTab(
+                    path: $shortFormPath,
+                    viewModel: tabCoordinator.shortNewsVM,
+                    isActive: tabCoordinator.selectedTab == .shortNews,
+                    badge: shortBadge,
+                    readingStateStore: readingStateStore,
+                    readStateCache: readStateCache,
+                    contentTextSize: contentTextSize,
+                    scrollToTopRequest: shortFormScrollToTopRequest
+                )
             }
 
-            knowledgeTab
+            KnowledgeTab(
+                path: $knowledgePath,
+                focusRequest: $knowledgeFocusRequest,
+                isBriefingExperience: isBriefingExperience,
+                viewModel: knowledgeHubViewModel,
+                readStateCache: readStateCache,
+                readingStateStore: readingStateStore,
+                contentTextSize: contentTextSize,
+                onOpenMore: { showMoreSheet = true }
+            )
 
             if !isBriefingExperience {
-                moreTab
+                MoreTab(
+                    submissionsViewModel: submissionStatusViewModel,
+                    readStateCache: readStateCache,
+                    badge: moreBadge
+                )
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            compactTabBarInset
+            BriefingCompactTabBarInset(
+                selectedTab: tabCoordinator.selectedTab,
+                isVisible: isBriefingExperience && isCompactTabBarVisible,
+                onSelect: tabSelection.select
+            )
         }
         .sheet(isPresented: $showMoreSheet) {
             NavigationStack {
-                MoreView(submissionsViewModel: submissionStatusViewModel)
+                MoreView(
+                    submissionsViewModel: submissionStatusViewModel,
+                    readStateCache: readStateCache
+                )
             }
         }
         .tint(Color.appChromeAccent)
         .font(.appBody)
         .dynamicTypeSize(AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize)
-        .environmentObject(readingStateStore)
+        .sensoryFeedback(.impact(weight: .light), trigger: tabRetapFeedbackTrigger)
+        .environment(readingStateStore)
+        .environment(readStateCache)
         .onAppear {
             AppChrome.configure()
-            reconcileSelectedTabForReadingExperience()
+            chatSessionManager.setPollingSuspended(scenePhase != .active)
+            unreadCountService.setPeriodicRefreshSuspended(scenePhase != .active)
+            processingCountService.setPeriodicRefreshSuspended(scenePhase != .active)
+            tabSelection.reconcile()
             tabCoordinator.ensureInitialLoads()
             restoreIfNeeded()
-            applyE2EOpenContentRouteIfNeeded()
-            applyE2EOpenChatRouteIfNeeded()
+            applyE2ERoutesIfNeeded()
         }
         .onChange(of: tabCoordinator.selectedTab) { _, newValue in
             logger.info("[TabChange] selectedTab=\(String(describing: newValue), privacy: .public)")
             tabCoordinator.handleTabChange(to: newValue)
         }
         .onChange(of: settings.readingExperienceRaw) { _, _ in
-            reconcileSelectedTabForReadingExperience()
+            tabSelection.reconcile()
         }
         .onChange(of: longFormPath.count) { oldValue, newValue in
             logger.info(
@@ -189,13 +149,15 @@ struct ContentView: View {
             )
         }
         .onChange(of: scenePhase) { _, newPhase in
+            chatSessionManager.setPollingSuspended(newPhase != .active)
+            unreadCountService.setPeriodicRefreshSuspended(newPhase != .active)
+            processingCountService.setPeriodicRefreshSuspended(newPhase != .active)
             if newPhase == .active {
                 restoreIfNeeded()
-                applyE2EOpenContentRouteIfNeeded()
-                applyE2EOpenChatRouteIfNeeded()
+                applyE2ERoutesIfNeeded()
             }
         }
-        .onReceive(chatNavigation.$pendingRoute) { route in
+        .onChange(of: chatNavigation.pendingRoute) { _, route in
             guard let route else { return }
             logger.info("[Navigation] openChatSession sessionId=\(route.sessionId, privacy: .public)")
             openChatSession(route: route)
@@ -207,140 +169,50 @@ struct ContentView: View {
         }
     }
 
-    private var briefingTab: some View {
-        NavigationStack(path: $briefingPath) {
-            BriefingView(viewModel: tabCoordinator.briefingVM)
-        }
-        .toolbar(.hidden, for: .tabBar)
-        .tag(RootTab.briefing)
-        .tabItem {
-            Label("Briefing", systemImage: "newspaper")
-                .accessibilityIdentifier("tab.briefing")
-        }
+    private var contentTextSize: DynamicTypeSize {
+        ContentTextSize(index: settings.contentTextSizeIndex).dynamicTypeSize
     }
 
-    private var knowledgeTab: some View {
-        NavigationStack(path: $knowledgePath) {
-            KnowledgeView(
-                focusRequest: knowledgeFocusRequest,
-                onFocusHandled: { request in
-                    if knowledgeFocusRequest == request {
-                        knowledgeFocusRequest = nil
-                    }
-                },
-                onSelectSession: { route in
-                    knowledgePath = NavigationPath()
-                    knowledgePath.append(route)
-                },
-                onShowKnowledgeLibrary: {
-                    knowledgePath.append(KnowledgeLibraryRoute())
-                },
-                onOpenMore: isBriefingExperience ? { showMoreSheet = true } : nil
-            )
-            .withContentRoutes(
-                tab: .knowledge,
-                path: $knowledgePath,
-                readingStateStore: readingStateStore,
-                contentTextSize: contentTextSize
-            )
-        }
-        .toolbar(isBriefingExperience ? .hidden : .visible, for: .tabBar)
-        .tag(RootTab.knowledge)
-        .tabItem {
-            Label("Knowledge", systemImage: "books.vertical.fill")
-                .accessibilityIdentifier("tab.knowledge")
-        }
+    private var isBriefingExperience: Bool {
+        settings.readingExperience == .briefing
     }
 
-    private var moreTab: some View {
-        NavigationStack {
-            MoreView(submissionsViewModel: submissionStatusViewModel)
-        }
-        .tag(RootTab.more)
-        .tabItem {
-            Label("More", systemImage: "ellipsis.circle.fill")
-                .accessibilityIdentifier("tab.more")
-        }
-        .badge(moreBadge != nil ? Int(moreBadge!) ?? 0 : 0)
+    private var longBadge: Int {
+        max(unreadCountService.articleCount + unreadCountService.podcastCount, 0)
     }
 
-    @ViewBuilder
-    private var compactTabBarInset: some View {
-        if isBriefingExperience, isCompactTabBarVisible {
-            CompactTabBar(
-                items: Self.briefingExperienceTabItems,
-                selection: tabCoordinator.selectedTab,
-                onSelect: { tab in
-                    guard tabCoordinator.selectedTab != tab else { return }
-                    tabCoordinator.selectedTab = availableTab(for: tab)
-                }
-            )
-        }
+    private var shortBadge: Int {
+        max(unreadCountService.newsCount, 0)
     }
 
-    private static let briefingExperienceTabItems: [CompactTabBar.Item] = [
-        CompactTabBar.Item(
-            tab: .briefing,
-            label: "Briefing",
-            icon: "newspaper",
-            accessibilityIdentifier: "tab.briefing"
-        ),
-        CompactTabBar.Item(
-            tab: .knowledge,
-            label: "Knowledge",
-            icon: "books.vertical.fill",
-            accessibilityIdentifier: "tab.knowledge"
+    private var moreBadge: Int {
+        max(submissionStatusViewModel.unseenCount, 0)
+    }
+
+    private var tabSelection: RootTabSelectionModel {
+        RootTabSelectionModel(
+            tabCoordinator: tabCoordinator,
+            isBriefingExperience: isBriefingExperience,
+            longFormPathIsEmpty: longFormPath.isEmpty,
+            shortFormPathIsEmpty: shortFormPath.isEmpty,
+            onLongFormRetap: { requestScrollToTop($longFormScrollToTopRequest) },
+            onShortFormRetap: { requestScrollToTop($shortFormScrollToTopRequest) }
         )
-    ]
+    }
+
+    private var isCompactTabBarVisible: Bool {
+        tabCoordinator.selectedTab != .briefing || briefingPath.isEmpty
+    }
 
     private func restoreIfNeeded() {
-        guard !isBriefingExperience else { return }
-        let isNews = readingStateStore.current?.contentType == .news
-        let targetPath = isNews ? shortFormPath : longFormPath
-        guard !isRestoringPath, targetPath.isEmpty, let state = readingStateStore.current else { return }
-
-        isRestoringPath = true
-        logger.info(
-            "[NavigationRestore] contentId=\(state.contentId, privacy: .public) contentType=\(state.contentType.rawValue, privacy: .public)"
+        NavigationRestorationModel.restoreIfNeeded(
+            isBriefingExperience: isBriefingExperience,
+            isRestoringPath: $isRestoringPath,
+            readingStateStore: readingStateStore,
+            tabCoordinator: tabCoordinator,
+            shortFormPath: $shortFormPath,
+            longFormPath: $longFormPath
         )
-        let targetTab: RootTab = isNews ? .shortNews : .longContent
-        if tabCoordinator.selectedTab != targetTab {
-            tabCoordinator.selectedTab = targetTab
-        }
-
-        Task { @MainActor in
-            await Task.yield()
-            defer { isRestoringPath = false }
-
-            let currentIds: [Int]
-            if isNews {
-                guard shortFormPath.isEmpty else { return }
-                let ids = tabCoordinator.shortNewsVM.currentItems().map(\.id)
-                currentIds = ids.isEmpty ? [state.contentId] : ids
-            } else {
-                guard longFormPath.isEmpty else { return }
-                let ids = tabCoordinator.longContentVM.currentItems().map(\.id)
-                currentIds = ids.isEmpty ? [state.contentId] : ids
-            }
-
-            let route = ContentDetailRoute(
-                contentId: state.contentId,
-                contentType: state.contentType,
-                allContentIds: currentIds,
-                navigationSurface: isNews ? .fastNews : .longForm
-            )
-
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                if isNews {
-                    shortFormPath.append(route)
-                } else {
-                    longFormPath.append(route)
-                }
-            }
-            logger.info("[NavigationRestore] pathRestored idsCount=\(currentIds.count, privacy: .public)")
-        }
     }
 
     private func openChatSession(route: ChatSessionRoute) {
@@ -355,113 +227,26 @@ struct ContentView: View {
         tabCoordinator.selectedTab = .knowledge
     }
 
-    private var isCompactTabBarVisible: Bool {
-        tabCoordinator.selectedTab != .briefing || briefingPath.isEmpty
-    }
-
-    private func availableTab(for tab: RootTab) -> RootTab {
-        if isBriefingExperience {
-            switch tab {
-            case .longContent, .shortNews:
-                return .briefing
-            case .more:
-                return .knowledge
-            case .briefing, .knowledge:
-                return tab
-            }
-        }
-
-        return tab == .briefing ? .shortNews : tab
-    }
-
-    private func reconcileSelectedTabForReadingExperience() {
-        let available = availableTab(for: tabCoordinator.selectedTab)
-        if available != tabCoordinator.selectedTab {
-            tabCoordinator.selectedTab = available
+    private func openContentRoute(_ route: ContentDetailRoute) {
+        switch route.contentType {
+        case .news:
+            tabCoordinator.selectedTab = .shortNews
+            shortFormPath = NavigationPath()
+            shortFormPath.append(route)
+        case .article, .podcast, .insight_report, .unknown, .unknownRaw:
+            tabCoordinator.selectedTab = .longContent
+            longFormPath = NavigationPath()
+            longFormPath.append(route)
         }
     }
 
-    private func applyE2EOpenChatRouteIfNeeded() {
-        guard !hasAppliedE2EOpenChatRoute else { return }
-        guard let sessionId = E2ETestLaunch.openChatSessionId else { return }
-
-        hasAppliedE2EOpenChatRoute = true
-        Task { @MainActor in
-            await Task.yield()
-            openChatSession(route: ChatSessionRoute(sessionId: sessionId))
-        }
+    private func requestScrollToTop(_ request: Binding<Int>) {
+        request.wrappedValue += 1
+        tabRetapFeedbackTrigger += 1
     }
 
-    private func applyE2EOpenContentRouteIfNeeded() {
-        guard !hasAppliedE2EOpenContentRoute else { return }
-        guard let contentId = E2ETestLaunch.openContentId else { return }
-
-        hasAppliedE2EOpenContentRoute = true
-        let rawType = E2ETestLaunch.openContentType ?? APIContentType.news.rawValue
-        let contentType = APIContentType(rawValue: rawType)
-        let route = ContentDetailRoute(
-            contentId: contentId,
-            contentType: contentType,
-            allContentIds: [contentId],
-            navigationSurface: contentType == .news ? .fastNews : .longForm
-        )
-
-        Task { @MainActor in
-            await Task.yield()
-            switch contentType {
-            case .news:
-                tabCoordinator.selectedTab = .shortNews
-                shortFormPath = NavigationPath()
-                shortFormPath.append(route)
-            case .article, .podcast, .insight_report, .unknown, .unknownRaw:
-                tabCoordinator.selectedTab = .longContent
-                longFormPath = NavigationPath()
-                longFormPath.append(route)
-            }
-        }
-    }
-}
-
-// MARK: - Content navigation destinations
-
-private extension View {
-    func withContentRoutes(
-        tab: RootTab,
-        path: Binding<NavigationPath>,
-        readingStateStore: ReadingStateStore,
-        contentTextSize: DynamicTypeSize
-    ) -> some View {
-        self
-            .navigationDestination(for: ContentDetailRoute.self) { route in
-                ContentDetailView(
-                    contentId: route.contentId,
-                    contentType: route.contentType,
-                    allContentIds: route.allContentIds,
-                    navigationSurface: route.navigationSurface
-                )
-                .dynamicTypeSize(contentTextSize)
-                .environmentObject(readingStateStore)
-            }
-            .navigationDestination(for: ChatSessionRoute.self) { route in
-                ChatSessionView(
-                    route: route,
-                    onShowHistory: tab == .knowledge
-                        ? {
-                            // Pop back to hub root, then push history
-                            path.wrappedValue = NavigationPath()
-                            path.wrappedValue.append(SessionHistoryRoute())
-                        }
-                        : nil
-                )
-                .id(route.stableKey)
-            }
-            .navigationDestination(for: SessionHistoryRoute.self) { _ in
-                ChatSessionHistoryView(onSelectSession: { route in
-                    path.wrappedValue.append(route)
-                })
-            }
-            .navigationDestination(for: KnowledgeLibraryRoute.self) { _ in
-                KnowledgeLibraryView()
-            }
+    private func applyE2ERoutesIfNeeded() {
+        e2eRouteInjector.applyOpenContentRouteIfNeeded(openContentRoute: openContentRoute)
+        e2eRouteInjector.applyOpenChatRouteIfNeeded(openChatSession: openChatSession)
     }
 }

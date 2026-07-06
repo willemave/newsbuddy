@@ -11,6 +11,7 @@ struct OnboardingMicButton: View {
     let onStart: () -> Void
     let onStop: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPressed = false
     @State private var pulseScale: CGFloat = 1.0
 
@@ -28,14 +29,24 @@ struct OnboardingMicButton: View {
                     Circle()
                         .stroke(Color.onboardingAmbientTertiary.opacity(0.45), lineWidth: 2.5)
                         .frame(width: 144, height: 144)
-                        .scaleEffect(pulseScale)
-                        .opacity(2.0 - Double(pulseScale))
+                        .scaleEffect(reduceMotion ? 1.0 : pulseScale)
+                        .opacity(reduceMotion ? 0.78 : 2.0 - Double(pulseScale))
                         .onAppear {
-                            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                            guard !reduceMotion else { return }
+                            withAnimation(AppMotion.recordingPulse) {
                                 pulseScale = 1.15
                             }
                         }
                         .onDisappear { pulseScale = 1.0 }
+                        .onChange(of: reduceMotion) { _, reduceMotion in
+                            if reduceMotion {
+                                pulseScale = 1.0
+                            } else {
+                                withAnimation(AppMotion.recordingPulse) {
+                                    pulseScale = 1.15
+                                }
+                            }
+                        }
                 }
 
                 Circle()
@@ -58,8 +69,7 @@ struct OnboardingMicButton: View {
                             .offset(x: 18, y: 18)
                     }
                     .frame(width: 128, height: 128)
-                    .shadow(color: Color.onboardingText.opacity(0.14), radius: 12, x: 10, y: 10)
-                    .shadow(color: .white.opacity(0.35), radius: 16, x: -8, y: -8)
+                    .appShadow(.onboardingMic)
 
                 iconStack
             }
@@ -67,7 +77,7 @@ struct OnboardingMicButton: View {
         .buttonStyle(.plain)
         .disabled(audioState == .transcribing)
         .scaleEffect(isPressed ? 0.96 : 1.0)
-        .animation(.easeInOut(duration: 0.15), value: isPressed)
+        .animation(AppMotion.press, value: isPressed)
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in isPressed = true }
@@ -99,7 +109,7 @@ struct OnboardingMicButton: View {
                 .scaleEffect(audioState == .transcribing ? 1 : 0.25)
                 .blur(radius: audioState == .transcribing ? 0 : 4)
         }
-        .animation(.spring(response: 0.3, dampingFraction: 1.0), value: audioState)
+        .animation(AppMotion.panel, value: audioState)
     }
 
     private var statusLabel: some View {

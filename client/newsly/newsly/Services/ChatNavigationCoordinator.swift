@@ -6,14 +6,16 @@
 //
 
 import Foundation
+import Observation
 
 @MainActor
-final class ChatNavigationCoordinator: ObservableObject {
+@Observable
+final class ChatNavigationCoordinator {
     static let shared = ChatNavigationCoordinator()
 
     /// App-level sink for chat entry routes originating outside the current
     /// navigation stack (notifications, content actions, quick actions, etc.).
-    @Published private(set) var pendingRoute: ChatSessionRoute?
+    private(set) var pendingRoute: ChatSessionRoute?
 
     private init() {}
 

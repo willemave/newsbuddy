@@ -5,7 +5,6 @@
 //  Created by Assistant on 7/8/25.
 //
 
-import Combine
 import Foundation
 
 enum APIEndpoints {
@@ -116,22 +115,9 @@ enum APIEndpoints {
     static let briefingDigSummarize = "/api/briefing/dig/summarize"
     static let briefingNarration = "/api/briefing/narration"
 
-    // MARK: - Discovery Endpoints
-    static let discoverySuggestions = "/api/discovery/suggestions"
-    static let discoveryHistory = "/api/discovery/history"
-    static let discoveryRefresh = "/api/discovery/refresh"
-    static let discoveryPodcastSearch = "/api/discovery/search/podcasts"
-    static let discoverySubscribe = "/api/discovery/subscribe"
-    static let discoveryAddItem = "/api/discovery/add-item"
-    static let discoveryDismiss = "/api/discovery/dismiss"
-    static let discoveryClear = "/api/discovery/clear"
-
     // MARK: - Onboarding Endpoints
-    static let onboardingProfile = "/api/onboarding/profile"
-    static let onboardingFastDiscover = "/api/onboarding/fast-discover"
     static let onboardingComplete = "/api/onboarding/complete"
     static let onboardingTutorialComplete = "/api/onboarding/tutorial-complete"
-    static let onboardingParseVoice = "/api/onboarding/parse-voice"
     static let onboardingAudioDiscover = "/api/onboarding/audio-discover"
     static let onboardingDiscoveryStatus = "/api/onboarding/discovery-status"
 

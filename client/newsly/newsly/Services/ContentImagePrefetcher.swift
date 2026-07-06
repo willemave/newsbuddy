@@ -11,11 +11,11 @@ enum ContentImagePrefetcher {
     static func urls(for content: ContentSummary, includeFullImage: Bool = true) -> [URL] {
         var urls: [URL] = []
 
-        if let thumbnailURL = content.thumbnailUrl.flatMap(buildImageURL) {
+        if let thumbnailURL = content.thumbnailUrl.flatMap({ ServerImageURL.resolve($0) }) {
             urls.append(thumbnailURL)
         }
 
-        if includeFullImage, let imageURL = content.imageUrl.flatMap(buildImageURL) {
+        if includeFullImage, let imageURL = content.imageUrl.flatMap({ ServerImageURL.resolve($0) }) {
             urls.append(imageURL)
         }
 
@@ -35,15 +35,6 @@ enum ContentImagePrefetcher {
         }
     }
 
-    private static func buildImageURL(from urlString: String) -> URL? {
-        if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") {
-            return URL(string: urlString)
-        }
-
-        let baseURL = AppSettings.shared.baseURL
-        let fullURL = urlString.hasPrefix("/") ? baseURL + urlString : baseURL + "/" + urlString
-        return URL(string: fullURL)
-    }
 }
 
 private extension Array where Element: Hashable {

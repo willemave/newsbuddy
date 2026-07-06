@@ -2,18 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>UIAppFonts</key>
-	<array>
-			<string>Inter.ttf</string>
-			<string>Inter-Italic.ttf</string>
+		<key>UIAppFonts</key>
+		<array>
 			<string>Lato.ttf</string>
 			<string>Lato-Italic.ttf</string>
-			<string>Roboto.ttf</string>
-			<string>Roboto-Italic.ttf</string>
 			<string>Lora.ttf</string>
-		<string>Lora-Italic.ttf</string>
-	</array>
-	<key>NSExtension</key>
+			<string>Lora-Italic.ttf</string>
+		</array>
+		<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>
 		<dict>

@@ -14,7 +14,7 @@ enum NewsRowTypography {
 }
 
 enum NewsRowLayout {
-    static let horizontalPadding: CGFloat = 24     // Card padding applied in PagedCardView
+    static let horizontalPadding: CGFloat = 24
     static let verticalPadding: CGFloat = 16       // .padding(.vertical, 8)
     static let interStackSpacing: CGFloat = 4
     static var dividerHeight: CGFloat { 1 / UIScreen.main.scale }

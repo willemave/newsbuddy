@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SwiftUI
+import Observation
 import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "ActiveChatSessionManager")
@@ -39,35 +39,53 @@ struct ActiveChatSession: Identifiable, Equatable {
 
 /// Manager for tracking and polling active chat sessions in the background
 @MainActor
-class ActiveChatSessionManager: ObservableObject {
+@Observable
+final class ActiveChatSessionManager {
     static let shared = ActiveChatSessionManager()
 
     /// Active sessions being polled, keyed by session ID
-    @Published private(set) var activeSessions: [Int: ActiveChatSession] = [:]  // sessionId -> session
+    private(set) var activeSessions: [Int: ActiveChatSession] = [:]  // sessionId -> session
 
     /// Completed sessions that haven't been viewed yet, keyed by session ID
-    @Published private(set) var completedSessions: [Int: ActiveChatSession] = [:]  // sessionId -> session
+    private(set) var completedSessions: [Int: ActiveChatSession] = [:]  // sessionId -> session
 
+    @ObservationIgnored
     private let chatService: any ChatSessionServicing
+
+    @ObservationIgnored
     private let notificationService = LocalNotificationService.shared
+
+    @ObservationIgnored
     private let startsPolling: Bool
 
-    /// Polling interval (500ms)
-    private let pollingInterval: UInt64 = 500_000_000
+    @ObservationIgnored
+    private let pollingInterval: UInt64
 
-    /// Maximum polling attempts (120 = 60 seconds)
-    private let maxPollingAttempts = 120
+    @ObservationIgnored
+    private let maxPollingAttempts: Int
 
+    @ObservationIgnored
     private var pollingTasks: [Int: Task<Void, Never>] = [:]  // sessionId -> task
+
+    @ObservationIgnored
+    private var isPollingSuspended = false
+
+    @ObservationIgnored
     private var sessionIdsByItemKey: [String: [Int]] = [:]  // item key -> newest-first session IDs
+
+    @ObservationIgnored
     private var authDidLogOutObserver: NSObjectProtocol?
 
     init(
         chatService: any ChatSessionServicing = ChatService.shared,
-        startsPolling: Bool = true
+        startsPolling: Bool = true,
+        pollingInterval: UInt64 = 500_000_000,
+        maxPollingAttempts: Int = 120
     ) {
         self.chatService = chatService
         self.startsPolling = startsPolling
+        self.pollingInterval = pollingInterval
+        self.maxPollingAttempts = maxPollingAttempts
         authDidLogOutObserver = NotificationCenter.default.addObserver(
             forName: .authDidLogOut,
             object: nil,
@@ -108,13 +126,7 @@ class ActiveChatSessionManager: ObservableObject {
         insertSessionReference(sessionId: session.id, itemKey: activeSession.itemKey)
         logger.info("Started tracking session \(session.id)")
 
-        guard startsPolling else { return }
-
-        // Start background polling
-        let task = Task {
-            await pollForCompletion(sessionId: session.id, messageId: messageId)
-        }
-        pollingTasks[session.id] = task
+        startPollingIfNeeded(sessionId: session.id, messageId: messageId)
     }
 
     /// Stop tracking a session (e.g., when user opens the chat view)
@@ -140,6 +152,22 @@ class ActiveChatSessionManager: ObservableObject {
         completedSessions.removeAll()
         sessionIdsByItemKey.removeAll()
         logger.info("Reset all active chat tracking state")
+    }
+
+    func setPollingSuspended(_ isSuspended: Bool) {
+        guard isPollingSuspended != isSuspended else { return }
+        isPollingSuspended = isSuspended
+
+        if isSuspended {
+            for task in pollingTasks.values {
+                task.cancel()
+            }
+            pollingTasks.removeAll()
+            logger.info("Suspended active chat session polling")
+        } else {
+            restartPollingForActiveSessions()
+            logger.info("Resumed active chat session polling")
+        }
     }
 
     /// Mark a completed session as viewed (dismisses banner)
@@ -188,6 +216,23 @@ class ActiveChatSessionManager: ObservableObject {
     /// Whether any sessions are currently processing
     var hasProcessingSessions: Bool {
         !activeSessions.isEmpty
+    }
+
+    private func startPollingIfNeeded(sessionId: Int, messageId: Int) {
+        guard startsPolling, !isPollingSuspended, pollingTasks[sessionId] == nil else { return }
+
+        let task = Task {
+            await pollForCompletion(sessionId: sessionId, messageId: messageId)
+        }
+        pollingTasks[sessionId] = task
+    }
+
+    private func restartPollingForActiveSessions() {
+        guard startsPolling, !isPollingSuspended else { return }
+
+        for (sessionId, session) in activeSessions {
+            startPollingIfNeeded(sessionId: sessionId, messageId: session.messageId)
+        }
     }
 
     /// Poll for message completion

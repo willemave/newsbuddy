@@ -17,7 +17,7 @@ struct AddButton: View {
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
                 .background(Color.brandPrimary, in: Circle())
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                .appShadow(.floating)
         }
         .glassButtonIfAvailable()
     }

@@ -6,9 +6,10 @@
 //
 
 import Foundation
+import Observation
 import SwiftUI
 
-enum ToastType {
+enum ToastType: Equatable {
     case success
     case error
     case info
@@ -44,10 +45,13 @@ struct ToastMessage: Identifiable {
 }
 
 @MainActor
-class ToastService: ObservableObject {
+@Observable
+final class ToastService {
     static let shared = ToastService()
 
-    @Published var currentToast: ToastMessage?
+    var currentToast: ToastMessage?
+
+    @ObservationIgnored
     private var dismissTask: Task<Void, Never>?
 
     private init() {}
@@ -65,6 +69,12 @@ class ToastService: ObservableObject {
             }
             dismissTask = nil
         }
+    }
+
+    func dismiss() {
+        dismissTask?.cancel()
+        dismissTask = nil
+        currentToast = nil
     }
 
     func showError(_ message: String) {

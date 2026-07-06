@@ -6,21 +6,45 @@
 //
 
 import Foundation
+import Observation
 import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "SubmissionStatusViewModel")
 
 @MainActor
-final class SubmissionStatusViewModel: CursorPaginatedViewModel {
+@Observable
+final class SubmissionStatusViewModel {
     private enum StorageKey {
         static let lastViewedSubmissionCreatedAt = "lastViewedSubmissionCreatedAt"
     }
 
-    @Published var submissions: [SubmissionStatusItem] = []
-    @Published var isLoading = false
-    @Published var isLoadingMore = false
-    @Published var errorMessage: String?
-    @Published private var lastViewedSubmissionCreatedAt: Date? {
+    var submissions: [SubmissionStatusItem] {
+        get { feed.items }
+        set { feed.replaceItems(newValue) }
+    }
+
+    var isLoading: Bool {
+        feed.phase == .initialLoading
+    }
+
+    var isLoadingMore: Bool {
+        feed.phase == .loadingMore
+    }
+
+    var errorMessage: String? {
+        guard case .error(let message) = feed.phase else { return nil }
+        return message
+    }
+
+    var nextCursor: String? {
+        feed.nextCursor
+    }
+
+    var hasMore: Bool {
+        feed.hasMore
+    }
+
+    private var lastViewedSubmissionCreatedAt: Date? {
         didSet {
             if let lastViewedSubmissionCreatedAt {
                 defaults.set(lastViewedSubmissionCreatedAt.timeIntervalSince1970, forKey: StorageKey.lastViewedSubmissionCreatedAt)
@@ -29,13 +53,27 @@ final class SubmissionStatusViewModel: CursorPaginatedViewModel {
             }
         }
     }
+
+    private let feed: PaginatedFeed<SubmissionStatusItem>
+
+    @ObservationIgnored
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = SharedContainer.userDefaults) {
+    init(
+        defaults: UserDefaults = SharedContainer.userDefaults,
+        loadPage: @escaping (_ cursor: String?) async throws -> SubmissionStatusFeed
+    ) {
         self.defaults = defaults
         let timestamp = defaults.double(forKey: StorageKey.lastViewedSubmissionCreatedAt)
         self.lastViewedSubmissionCreatedAt = timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : nil
-        super.init()
+        self.feed = PaginatedFeed { cursor in
+            let response = try await loadPage(cursor)
+            return Page(
+                items: response.submissions,
+                nextCursor: response.nextCursor,
+                hasMore: response.hasMore
+            )
+        }
     }
 
     var unseenCount: Int {
@@ -52,32 +90,14 @@ final class SubmissionStatusViewModel: CursorPaginatedViewModel {
 
     func load() async {
         guard !isLoading else { return }
-        isLoading = true
-        errorMessage = nil
-        defer { isLoading = false }
-
-        do {
-            let feed = try await ContentService.shared.fetchSubmissionStatusList()
-            submissions = feed.submissions
-            applyPagination(nextCursor: feed.nextCursor, hasMore: feed.hasMore)
-        } catch {
-            logger.error("[SubmissionStatusViewModel] load failed | error=\(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-        }
+        await feed.loadInitial()
+        logErrorIfNeeded(operation: "load")
     }
 
     func loadMore() async {
-        guard !isLoadingMore, hasMore, let cursor = nextCursor else { return }
-        isLoadingMore = true
-        defer { isLoadingMore = false }
-
-        do {
-            let feed = try await ContentService.shared.fetchSubmissionStatusList(cursor: cursor)
-            submissions.append(contentsOf: feed.submissions)
-            applyPagination(nextCursor: feed.nextCursor, hasMore: feed.hasMore)
-        } catch {
-            logger.error("[SubmissionStatusViewModel] loadMore failed | error=\(error.localizedDescription)")
-        }
+        guard !isLoadingMore, hasMore, nextCursor != nil else { return }
+        await feed.loadNextPage()
+        logErrorIfNeeded(operation: "loadMore")
     }
 
     func markCurrentSubmissionsViewed() {
@@ -89,5 +109,10 @@ final class SubmissionStatusViewModel: CursorPaginatedViewModel {
         }
 
         lastViewedSubmissionCreatedAt = viewedAt
+    }
+
+    private func logErrorIfNeeded(operation: String) {
+        guard let errorMessage else { return }
+        logger.error("[SubmissionStatusViewModel] \(operation) failed | error=\(errorMessage)")
     }
 }

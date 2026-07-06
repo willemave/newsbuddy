@@ -9,7 +9,6 @@ iOS unit and UI tests for models, services, view models, routing, onboarding, ch
 | File | Focus |
 |---|---|
 | `APIClientAuthTests.swift` | API auth/token behavior. |
-| `AncientScrollRevealProgressTests.swift` | Onboarding reveal progress. |
 | `AppSettingsTests.swift` | App settings persistence/defaults. |
 | `CLILinkServiceTests.swift` | CLI QR link service behavior. |
 | `ChatMessageDisplayTests.swift` | Chat message rendering/display models. |
@@ -20,7 +19,6 @@ iOS unit and UI tests for models, services, view models, routing, onboarding, ch
 | `KnowledgeHubViewModelTests.swift` | Knowledge hub state. |
 | `NarrationPlaybackSpeedOptionTests.swift` | Narration playback-rate options. |
 | `OnboardingStateStoreTests.swift` | Onboarding state persistence. |
-| `QuickMicViewModelTests.swift` | Quick Mic dictation state. |
 | `ShareURLRoutingTests.swift` | Share extension/app URL routing. |
 | `SubmissionStatusViewModelTests.swift` | Submission status state. |
 | `TabCoordinatorViewModelTests.swift` | Tab coordination. |

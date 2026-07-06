@@ -3,6 +3,7 @@
 //  newsly
 //
 
+import Observation
 import SwiftUI
 
 @MainActor
@@ -17,10 +18,12 @@ protocol AssistantFeedSubscribing: AnyObject {
 extension ScraperConfigService: AssistantFeedSubscribing {}
 
 @MainActor
-final class AssistantFeedOptionActionModel: ObservableObject {
-    @Published private(set) var subscribedOptionIds: Set<String> = []
-    @Published private(set) var subscribingOptionIds: Set<String> = []
+@Observable
+final class AssistantFeedOptionActionModel {
+    private(set) var subscribedOptionIds: Set<String> = []
+    private(set) var subscribingOptionIds: Set<String> = []
 
+    @ObservationIgnored
     private let service: any AssistantFeedSubscribing
 
     init(service: any AssistantFeedSubscribing = ScraperConfigService.shared) {
@@ -64,7 +67,7 @@ final class AssistantFeedOptionActionModel: ObservableObject {
 
 struct AssistantFeedOptionsSection: View {
     let options: [AssistantFeedOption]
-    @ObservedObject var actionModel: AssistantFeedOptionActionModel
+    let actionModel: AssistantFeedOptionActionModel
     let onPreview: (AssistantFeedOption) -> Void
 
     var body: some View {
@@ -220,8 +223,8 @@ private struct FeedOptionActionButtonStyle: ButtonStyle {
                     .stroke(borderColor, lineWidth: 0.5)
             )
             .opacity(isEnabled ? (configuration.isPressed ? 0.88 : 1) : 0.74)
-            .scaleEffect(configuration.isPressed && isEnabled ? 0.98 : 1)
-            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && isEnabled ? 0.96 : 1)
+            .animation(AppMotion.press, value: configuration.isPressed)
     }
 
     private var foregroundColor: Color {

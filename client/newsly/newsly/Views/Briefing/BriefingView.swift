@@ -5,7 +5,7 @@ struct BriefingView: View {
     @ObservedObject var viewModel: BriefingViewModel
 
     @StateObject private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
-    @StateObject private var playbackService = NarrationPlaybackService.shared
+    @State private var playbackService = NarrationPlaybackService.shared
     @State private var activeSource: BriefingSourceSheetItem?
     @State private var activeDiscussion: BriefingDiscussionSheetItem?
     @State private var preparingNarrationLensKeys: Set<String> = []
@@ -911,7 +911,7 @@ private struct BriefingNarrationBar: View {
     let lensTitle: String
     let episode: AudioEpisode?
     let isPreparing: Bool
-    @ObservedObject var playbackService: NarrationPlaybackService
+    let playbackService: NarrationPlaybackService
     let onToggle: () -> Void
 
     private var target: NarrationTarget? {

@@ -5,110 +5,152 @@
 //  Created by Assistant on 3/16/26.
 //
 
-import Combine
 import Foundation
+import Observation
 import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "LongContentList")
 
 @MainActor
-final class LongContentListViewModel: BaseContentListViewModel {
-    private let readRepository: ReadStatusRepositoryType
-    private let unreadCountService: UnreadCountService
-    private let contentService: ContentService
+@Observable
+final class LongContentListViewModel: ContentSummaryFeedEditing {
+    var contents: [ContentSummary] {
+        get {
+            readStateCache.applying(
+                to: feed.items,
+                removeReadItems: readFilter == .unread
+            )
+        }
+        set { feed.replaceItems(newValue) }
+    }
 
-    private var cancellables = Set<AnyCancellable>()
+    var state: LoadPhase {
+        feed.phase
+    }
+
+    var nextCursor: String? {
+        feed.nextCursor
+    }
+
+    var hasMore: Bool {
+        feed.hasMore
+    }
+
+    @ObservationIgnored
+    private let repository: ContentRepositoryType
+
+    @ObservationIgnored
+    private let readStateCache: ReadStateCache
+
+    @ObservationIgnored
+    private let contentService: any ContentSummaryListServicing
+
+    @ObservationIgnored
+    private let toastPresenter: any ToastPresenting
+
+    @ObservationIgnored
+    private var feed: PaginatedFeed<ContentSummary>!
+
+    @ObservationIgnored
+    private let loadTasks = FeedLoadTaskRunner()
+
+    private var readFilter: ReadFilter = .unread
 
     init(
         repository: ContentRepositoryType,
         readRepository: ReadStatusRepositoryType,
         unreadCountService: UnreadCountService,
-        contentService: ContentService = .shared
+        contentService: any ContentSummaryListServicing,
+        toastPresenter: any ToastPresenting,
+        readStateCache: ReadStateCache? = nil
     ) {
-        self.readRepository = readRepository
-        self.unreadCountService = unreadCountService
-        self.contentService = contentService
-        super.init(
-            repository: repository,
-            contentTypes: [.article, .podcast],
-            readFilter: .unread
+        self.repository = repository
+        self.readStateCache = readStateCache ?? ReadStateCache(
+            contentReadRepository: readRepository,
+            unreadCountService: unreadCountService
         )
-        bindReadStatusNotifications()
+        self.contentService = contentService
+        self.toastPresenter = toastPresenter
+        self.feed = PaginatedFeed(
+            loadPage: { [weak self] cursor in
+                guard let self else {
+                    return Page(items: [], nextCursor: nil, hasMore: false)
+                }
+                return try await self.loadContentPage(cursor: cursor)
+            },
+            mergeReplacement: PaginatedFeed.mergeNewItemsOnTopKeepingExistingOrder
+        )
         logger.info("[LongContentList] ViewModel initialized")
     }
 
-    private func bindReadStatusNotifications() {
-        NotificationCenter.default.publisher(for: .contentMarkedAsRead)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                guard let self,
-                      let userInfo = notification.userInfo,
-                      let contentId = userInfo["contentId"] as? Int,
-                      let contentType = userInfo["contentType"] as? String
-                else {
-                    logger.warning("[LongContentList] Received contentMarkedAsRead with invalid userInfo")
-                    return
-                }
-
-                logger.info("[LongContentList] Received contentMarkedAsRead notification | contentId=\(contentId) type=\(contentType, privacy: .public)")
-
-                // Only update if it's article or podcast content
-                let apiType = APIContentType(rawValue: contentType)
-                guard apiType == .article || apiType == .podcast
-                else {
-                    logger.debug("[LongContentList] Ignoring non-article/podcast content | contentId=\(contentId) type=\(contentType, privacy: .public)")
-                    return
-                }
-
-                logger.info("[LongContentList] Updating local read state | contentId=\(contentId)")
-                let shouldDropReadItems = currentReadFilter() == .unread
-                let markedItems = markItemsLocallyRead(
-                    ids: [contentId],
-                    removeReadItems: shouldDropReadItems
-                )
-                if markedItems.isEmpty && shouldDropReadItems {
-                    dropReadItems()
-                }
-            }
-            .store(in: &cancellables)
-    }
-
-    func refresh() {
+    func refresh() async {
         logger.info("[LongContentList] refresh called")
-        startInitialLoad()
+        await loadTasks.runReplacing { [weak self] in
+            guard let self else { return }
+            await feed.loadInitial()
+        }
     }
 
-    func ensureUnreadFeedLoaded() {
+    func refreshInBackgroundAndWait() async {
+        await loadTasks.runIfIdle { [weak self] in
+            guard let self else { return }
+            await feed.refreshInBackground()
+        }
+    }
+
+    func loadNextPage() async {
+        await loadTasks.runIfIdle { [weak self] in
+            guard let self else { return }
+            if currentItems().isEmpty {
+                await feed.loadInitial()
+            } else {
+                await feed.loadNextPage()
+            }
+        }
+    }
+
+    func updateReadFilter(_ newValue: ReadFilter) async {
+        guard newValue != readFilter else { return }
+        readFilter = newValue
+        loadTasks.cancel()
+        await refresh()
+    }
+
+    func currentReadFilter() -> ReadFilter {
+        readFilter
+    }
+
+    func ensureUnreadFeedLoaded() async {
         let previousFilter = currentReadFilter()
-        setReadFilter(.unread)
+        await setReadFilter(.unread)
 
         guard previousFilter == .unread else { return }
         guard currentItems().isEmpty else { return }
-        refresh()
+        await refresh()
     }
 
-    func refreshUnreadFeed() {
+    func refreshUnreadFeed() async {
         let previousFilter = currentReadFilter()
-        setReadFilter(.unread)
+        await setReadFilter(.unread)
 
         guard previousFilter == .unread else { return }
-        refresh()
+        await refresh()
     }
 
     func refreshUnreadFeedInBackground() async {
         let previousFilter = currentReadFilter()
-        setReadFilter(.unread)
+        await setReadFilter(.unread)
 
         guard previousFilter == .unread else { return }
         await refreshInBackgroundAndWait()
     }
 
-    func setReadFilter(_ filter: ReadFilter) {
+    func setReadFilter(_ filter: ReadFilter) async {
         logger.info("[LongContentList] setReadFilter | filter=\(String(describing: filter), privacy: .public)")
-        updateReadFilter(filter)
+        await updateReadFilter(filter)
     }
 
-    func markAsRead(_ id: Int) {
+    func markAsRead(_ id: Int) async {
         logger.info("[LongContentList] markAsRead called | id=\(id)")
 
         guard let item = currentItems().first(where: { $0.id == id }) else {
@@ -120,32 +162,12 @@ final class LongContentListViewModel: BaseContentListViewModel {
             return
         }
 
-        let previousItems = currentItems()
-        let markedItems = markItemsLocallyRead(
-            ids: [id],
-            removeReadItems: currentReadFilter() == .unread
-        )
-        guard let markedItem = markedItems.first else { return }
-
-        decrementCount(for: markedItem)
-        logger.debug("[LongContentList] Marked locally read | id=\(id) type=\(markedItem.contentType.rawValue, privacy: .public)")
-
-        readRepository
-            .markRead(ids: [id])
-            .receive(on: DispatchQueue.main)
-            .sink { completion in
-                if case .failure(let error) = completion {
-                    logger.error("[LongContentList] markAsRead API failed | id=\(id) error=\(error.localizedDescription)")
-                    self.restoreOptimisticReadRollback(
-                        previousItems: previousItems,
-                        restoredIds: [id]
-                    )
-                    self.incrementCount(for: markedItem)
-                }
-            } receiveValue: { _ in
-                logger.info("[LongContentList] markAsRead API success | id=\(id)")
-            }
-            .store(in: &cancellables)
+        do {
+            try await readStateCache.markReadAndSync([ReadStateKey(item)])
+            logger.info("[LongContentList] markAsRead API success | id=\(id)")
+        } catch {
+            logger.error("[LongContentList] markAsRead API failed | id=\(id) error=\(error.localizedDescription)")
+        }
     }
 
     func markAllVisibleAsRead() async {
@@ -158,59 +180,17 @@ final class LongContentListViewModel: BaseContentListViewModel {
         let ids = unreadItems.map(\.id)
         logger.info("[LongContentList] markAllVisibleAsRead | ids=\(ids, privacy: .public) count=\(ids.count)")
 
-        let previousItems = currentItems()
-        let markedItems = markItemsLocallyRead(
-            ids: ids,
-            removeReadItems: currentReadFilter() == .unread
-        )
-        let markedIds = markedItems.map(\.id)
-        guard !markedIds.isEmpty else {
+        let keys = Set(unreadItems.map(ReadStateKey.init))
+        guard !keys.isEmpty else {
             logger.debug("[LongContentList] markAllVisibleAsRead: all items already read")
             return
         }
 
-        let reductions = markedItems.reduce(into: (articles: 0, podcasts: 0)) { partial, item in
-            switch item.contentType {
-            case .article:
-                partial.articles += 1
-            case .podcast:
-                partial.podcasts += 1
-            default:
-                break
-            }
-        }
-
-        if reductions.articles > 0 {
-            unreadCountService.decrementArticleCount(by: reductions.articles)
-        }
-        if reductions.podcasts > 0 {
-            unreadCountService.decrementPodcastCount(by: reductions.podcasts)
-        }
-        logger.debug("[LongContentList] Decremented counts | articles=\(reductions.articles) podcasts=\(reductions.podcasts)")
-
-        await withCheckedContinuation { continuation in
-            readRepository
-                .markRead(ids: markedIds)
-                .receive(on: DispatchQueue.main)
-                .sink { completion in
-                    if case .failure(let error) = completion {
-                        logger.error("[LongContentList] markAllVisibleAsRead API failed | error=\(error.localizedDescription)")
-                        self.restoreOptimisticReadRollback(
-                            previousItems: previousItems,
-                            restoredIds: markedIds
-                        )
-                        if reductions.articles > 0 {
-                            self.unreadCountService.incrementArticleCount(by: reductions.articles)
-                        }
-                        if reductions.podcasts > 0 {
-                            self.unreadCountService.incrementPodcastCount(by: reductions.podcasts)
-                        }
-                    }
-                    continuation.resume()
-                } receiveValue: { _ in
-                    logger.info("[LongContentList] markAllVisibleAsRead API success | count=\(markedIds.count)")
-                }
-                .store(in: &cancellables)
+        do {
+            let markedKeys = try await readStateCache.markReadAndSync(keys)
+            logger.info("[LongContentList] markAllVisibleAsRead API success | count=\(markedKeys.count)")
+        } catch {
+            logger.error("[LongContentList] markAllVisibleAsRead API failed | error=\(error.localizedDescription)")
         }
     }
 
@@ -246,35 +226,38 @@ final class LongContentListViewModel: BaseContentListViewModel {
             let response = try await contentService.downloadMoreFromSeries(contentId: contentId, count: count)
             let savedCount = response.saved
             if savedCount > 0 {
-                ToastService.shared.showSuccess("Added \(savedCount) new items")
+                toastPresenter.showSuccess("Added \(savedCount) new items")
             } else {
-                ToastService.shared.show("Download started", type: .info)
+                toastPresenter.show("Download started", type: .info, duration: 3.0)
             }
         } catch {
             logger.error("[LongContentList] downloadMoreFromSeries failed | contentId=\(contentId) error=\(error.localizedDescription)")
-            ToastService.shared.showError("Failed to download more: \(error.localizedDescription)")
+            toastPresenter.showError("Failed to download more: \(error.localizedDescription)")
         }
     }
 
-    private func decrementCount(for item: ContentSummary) {
-        switch item.contentType {
-        case .article:
-            unreadCountService.decrementArticleCount()
-        case .podcast:
-            unreadCountService.decrementPodcastCount()
-        default:
-            break
+    private func loadContentPage(cursor: String?) async throws -> Page<ContentSummary> {
+        let requestReadFilter = readFilter
+
+        do {
+            let response = try await repository.loadPage(
+                contentTypes: [.article, .podcast],
+                readFilter: requestReadFilter,
+                cursor: cursor,
+                limit: nil
+            )
+            let incomingItems = readStateCache.applying(
+                to: response.contents,
+                removeReadItems: requestReadFilter == .unread
+            )
+            return Page(
+                items: incomingItems,
+                nextCursor: response.nextCursor,
+                hasMore: response.hasMore
+            )
+        } catch where isNetworkCancellation(error) {
+            throw CancellationError()
         }
     }
 
-    private func incrementCount(for item: ContentSummary) {
-        switch item.contentType {
-        case .article:
-            unreadCountService.incrementArticleCount()
-        case .podcast:
-            unreadCountService.incrementPodcastCount()
-        default:
-            break
-        }
-    }
 }

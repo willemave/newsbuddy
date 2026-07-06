@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct TwitterSettingsView: View {
-    @EnvironmentObject private var authViewModel: AuthenticationViewModel
+    @Environment(AuthenticationViewModel.self) private var authViewModel
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var isUpdatingXConnection = false

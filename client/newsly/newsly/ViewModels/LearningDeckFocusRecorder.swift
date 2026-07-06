@@ -4,24 +4,41 @@
 //
 
 import Foundation
+import Observation
 import SwiftUI
 
 @MainActor
-final class LearningDeckFocusRecorder: ObservableObject {
-    @Published private(set) var isRecording = false
-    @Published private(set) var isTranscribing = false
-    @Published private(set) var isVoiceActionInFlight = false
-    @Published var errorMessage: String?
+@Observable
+final class LearningDeckFocusRecorder {
+    private(set) var isRecording = false
+    private(set) var isTranscribing = false
+    private(set) var isVoiceActionInFlight = false
+    var errorMessage: String?
 
+    @ObservationIgnored
     private let transcriptionService: any SpeechTranscribing
+    @ObservationIgnored
+    private let voiceCoordinator: VoiceDictationCoordinator
+    @ObservationIgnored
+    private let refreshTranscriptionAvailability: () async -> Bool
+    @ObservationIgnored
     private var voiceDictationAvailable = false
+    @ObservationIgnored
     private var pendingTranscript: String?
+    @ObservationIgnored
     private var transcriptHandler: ((String) -> Void)?
+    @ObservationIgnored
     private var hasConfiguredCallbacks = false
 
-    init(transcriptionService: (any SpeechTranscribing)? = nil) {
-        self.transcriptionService = transcriptionService
+    init(
+        transcriptionService: (any SpeechTranscribing)? = nil,
+        refreshTranscriptionAvailability: @escaping () async -> Bool
+    ) {
+        let resolvedTranscriptionService = transcriptionService
             ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
+        self.transcriptionService = resolvedTranscriptionService
+        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: resolvedTranscriptionService)
+        self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
     }
 
     func toggleRecording(onTranscript: @escaping (String) -> Void) async {
@@ -39,6 +56,7 @@ final class LearningDeckFocusRecorder: ObservableObject {
         guard hasConfiguredCallbacks || isRecording || isTranscribing || pendingTranscript != nil else {
             return
         }
+        voiceCoordinator.stopListening()
         transcriptionService.reset()
         hasConfiguredCallbacks = false
         pendingTranscript = nil
@@ -99,42 +117,45 @@ final class LearningDeckFocusRecorder: ObservableObject {
             return
         }
 
-        voiceDictationAvailable = await OpenAIService.shared.refreshTranscriptionAvailability()
+        voiceDictationAvailable = await refreshTranscriptionAvailability()
     }
 
     private func configureTranscriptionCallbacks() {
         hasConfiguredCallbacks = true
-        transcriptionService.onTranscriptDelta = nil
-        transcriptionService.onTranscriptFinal = { [weak self] transcript in
-            self?.pendingTranscript = transcript
-        }
-        transcriptionService.onStopReason = { [weak self] reason in
-            guard let self else { return }
-            switch reason {
-            case .manual:
-                return
-            case .silenceAutoStop:
-                let transcript = self.pendingTranscript ?? ""
-                self.pendingTranscript = nil
-                self.isRecording = false
-                self.isTranscribing = false
-                self.isVoiceActionInFlight = false
-                self.applyTranscript(transcript)
-            case .cancel, .failure:
-                self.pendingTranscript = nil
-                self.isRecording = false
-                self.isTranscribing = false
-                self.isVoiceActionInFlight = false
+        voiceCoordinator.listen(
+            onTranscriptFinal: { [weak self] transcript in
+                self?.pendingTranscript = transcript
+            },
+            onError: { [weak self] message in
+                self?.errorMessage = message
+                self?.pendingTranscript = nil
+                self?.isRecording = false
+                self?.isTranscribing = false
+                self?.isVoiceActionInFlight = false
+            },
+            onStopReason: { [weak self] reason in
+                self?.handleTranscriptionStopReason(reason)
             }
+        )
+    }
+
+    private func handleTranscriptionStopReason(_ reason: SpeechStopReason) {
+        switch reason {
+        case .manual:
+            return
+        case .silenceAutoStop:
+            let transcript = pendingTranscript ?? ""
+            pendingTranscript = nil
+            isRecording = false
+            isTranscribing = false
+            isVoiceActionInFlight = false
+            applyTranscript(transcript)
+        case .cancel, .failure:
+            pendingTranscript = nil
+            isRecording = false
+            isTranscribing = false
+            isVoiceActionInFlight = false
         }
-        transcriptionService.onError = { [weak self] message in
-            self?.errorMessage = message
-            self?.pendingTranscript = nil
-            self?.isRecording = false
-            self?.isTranscribing = false
-            self?.isVoiceActionInFlight = false
-        }
-        transcriptionService.onStateChange = nil
     }
 
     private func applyTranscript(_ transcript: String) {

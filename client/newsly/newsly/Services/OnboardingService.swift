@@ -20,24 +20,6 @@ final class OnboardingService {
 
     private init() {}
 
-    func buildProfile(request: OnboardingProfileRequest) async throws -> OnboardingProfileResponse {
-        let body = try JSONEncoder().encode(request)
-        return try await client.request(
-            APIEndpoints.onboardingProfile,
-            method: "POST",
-            body: body
-        )
-    }
-
-    func fastDiscover(request: OnboardingFastDiscoverRequest) async throws -> OnboardingFastDiscoverResponse {
-        let body = try JSONEncoder().encode(request)
-        return try await client.request(
-            APIEndpoints.onboardingFastDiscover,
-            method: "POST",
-            body: body
-        )
-    }
-
     func audioDiscover(request: OnboardingAudioDiscoverRequest) async throws -> OnboardingAudioDiscoverResponse {
         let startedAt = Date()
         if let fixtureResponse = OnboardingE2EFixtureStore.shared?.audioDiscoverResponse {
@@ -92,30 +74,6 @@ final class OnboardingService {
             method: "POST",
             body: body
         )
-    }
-
-    func parseVoice(request: OnboardingVoiceParseRequest) async throws -> OnboardingVoiceParseResponse {
-        let startedAt = Date()
-        onboardingServiceLogger.info(
-            "Parse voice request started | transcriptChars=\(request.transcript.count) locale=\(request.locale ?? "nil", privacy: .public)"
-        )
-        let body = try JSONEncoder().encode(request)
-        do {
-            let response: OnboardingVoiceParseResponse = try await client.request(
-                APIEndpoints.onboardingParseVoice,
-                method: "POST",
-                body: body
-            )
-            onboardingServiceLogger.info(
-                "Parse voice request completed | topicCount=\(response.interestTopics.count) hasFirstName=\(response.firstName != nil) elapsedMs=\(onboardingServiceElapsedMilliseconds(since: startedAt))"
-            )
-            return response
-        } catch {
-            onboardingServiceLogger.error(
-                "Parse voice request failed | elapsedMs=\(onboardingServiceElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
-            )
-            throw error
-        }
     }
 
     func markTutorialComplete() async throws -> OnboardingTutorialResponse {

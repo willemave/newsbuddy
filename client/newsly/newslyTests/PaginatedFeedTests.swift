@@ -1,0 +1,179 @@
+import XCTest
+@testable import newsly
+
+@MainActor
+final class PaginatedFeedTests: XCTestCase {
+    func testLoadInitialStoresItemsAndPagination() async {
+        let feed = PaginatedFeed<TestFeedItem> { cursor in
+            XCTAssertNil(cursor)
+            return Page(
+                items: [TestFeedItem(id: 1), TestFeedItem(id: 2)],
+                nextCursor: "next",
+                hasMore: true
+            )
+        }
+
+        await feed.loadInitial()
+
+        XCTAssertEqual(feed.items.map(\.id), [1, 2])
+        XCTAssertEqual(feed.nextCursor, "next")
+        XCTAssertTrue(feed.hasMore)
+        XCTAssertEqual(feed.phase, .loaded)
+    }
+
+    func testLoadNextPageAppendsAndSkipsDuplicateIDs() async {
+        let loader = SequencePageLoader([
+            Page(items: [TestFeedItem(id: 1), TestFeedItem(id: 2)], nextCursor: "next", hasMore: true),
+            Page(items: [TestFeedItem(id: 2), TestFeedItem(id: 3)], nextCursor: nil, hasMore: false),
+        ])
+        let feed = PaginatedFeed<TestFeedItem>(loadPage: loader.loadPage)
+
+        await feed.loadInitial()
+        await feed.loadNextPage()
+
+        XCTAssertEqual(feed.items.map(\.id), [1, 2, 3])
+        XCTAssertNil(feed.nextCursor)
+        XCTAssertFalse(feed.hasMore)
+        XCTAssertEqual(feed.phase, .loaded)
+    }
+
+    func testRefreshInBackgroundMergesNewItemsOnTopAndKeepsExistingOrder() async {
+        let feed = PaginatedFeed<TestFeedItem>(
+            items: [TestFeedItem(id: 2), TestFeedItem(id: 1)],
+            phase: .loaded,
+            loadPage: { _ in
+                Page(
+                    items: [
+                        TestFeedItem(id: 3),
+                        TestFeedItem(id: 1),
+                        TestFeedItem(id: 2),
+                    ],
+                    nextCursor: nil,
+                    hasMore: false
+                )
+            },
+            mergeReplacement: PaginatedFeed.mergeNewItemsOnTopKeepingExistingOrder
+        )
+
+        await feed.refreshInBackground()
+
+        XCTAssertEqual(feed.items.map(\.id), [3, 2, 1])
+        XCTAssertEqual(feed.phase, .loaded)
+    }
+
+    func testSupersededRequestDoesNotOverwriteNewerResult() async {
+        let loader = ControlledPageLoader()
+        let feed = PaginatedFeed<TestFeedItem>(loadPage: loader.loadPage)
+
+        let firstLoad = Task { await feed.loadInitial() }
+        await loader.waitForPendingRequestCount(1)
+
+        let secondLoad = Task { await feed.loadInitial() }
+        await loader.waitForPendingRequestCount(2)
+
+        loader.resolveRequest(
+            at: 1,
+            with: Page(items: [TestFeedItem(id: 2)], nextCursor: nil, hasMore: false)
+        )
+        await secondLoad.value
+        XCTAssertEqual(feed.items.map(\.id), [2])
+
+        loader.resolveRequest(
+            at: 0,
+            with: Page(items: [TestFeedItem(id: 1)], nextCursor: nil, hasMore: false)
+        )
+        await firstLoad.value
+
+        XCTAssertEqual(feed.items.map(\.id), [2])
+        XCTAssertEqual(feed.phase, .loaded)
+    }
+
+    func testLoadNextPageIgnoresDuplicateTriggerWhileLoading() async {
+        let loader = ControlledPageLoader()
+        let feed = PaginatedFeed<TestFeedItem>(
+            items: [TestFeedItem(id: 1)],
+            phase: .loaded,
+            nextCursor: "next",
+            hasMore: true,
+            loadPage: loader.loadPage
+        )
+
+        let firstLoadMore = Task { await feed.loadNextPage() }
+        await loader.waitForPendingRequestCount(1)
+
+        await feed.loadNextPage()
+
+        XCTAssertEqual(loader.pendingRequestCount, 1)
+
+        loader.resolveRequest(
+            at: 0,
+            with: Page(items: [TestFeedItem(id: 2)], nextCursor: nil, hasMore: false)
+        )
+        await firstLoadMore.value
+
+        XCTAssertEqual(feed.items.map(\.id), [1, 2])
+    }
+}
+
+private struct TestFeedItem: Identifiable, Equatable, Sendable {
+    let id: Int
+}
+
+@MainActor
+private final class SequencePageLoader {
+    private var pages: [Page<TestFeedItem>]
+
+    init(_ pages: [Page<TestFeedItem>]) {
+        self.pages = pages
+    }
+
+    func loadPage(cursor: String?) async throws -> Page<TestFeedItem> {
+        guard !pages.isEmpty else {
+            XCTFail("Unexpected page request for cursor \(cursor ?? "nil")")
+            return Page(items: [], nextCursor: nil, hasMore: false)
+        }
+        return pages.removeFirst()
+    }
+}
+
+@MainActor
+private final class ControlledPageLoader {
+    private struct PendingRequest {
+        let cursor: String?
+        let continuation: CheckedContinuation<Page<TestFeedItem>, Never>
+    }
+
+    private var pendingRequests: [PendingRequest] = []
+
+    var pendingRequestCount: Int {
+        pendingRequests.count
+    }
+
+    func loadPage(cursor: String?) async throws -> Page<TestFeedItem> {
+        await withCheckedContinuation { continuation in
+            pendingRequests.append(
+                PendingRequest(cursor: cursor, continuation: continuation)
+            )
+        }
+    }
+
+    func resolveRequest(at index: Int, with page: Page<TestFeedItem>) {
+        let request = pendingRequests.remove(at: index)
+        request.continuation.resume(returning: page)
+    }
+
+    func waitForPendingRequestCount(
+        _ expectedCount: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<50 {
+            if pendingRequests.count == expectedCount {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(pendingRequests.count, expectedCount, file: file, line: line)
+    }
+}

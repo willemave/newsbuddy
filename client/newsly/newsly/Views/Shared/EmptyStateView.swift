@@ -2,10 +2,103 @@
 //  EmptyStateView.swift
 //  newsly
 //
-//  Centered empty state with icon, title, subtitle, and optional action.
+//  Centered state views with icon, title, subtitle, and optional action.
 //
 
 import SwiftUI
+
+struct StateView: View {
+    let role: Role
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    enum Role {
+        case empty(icon: String, title: String, subtitle: String)
+        case error(message: String)
+
+        var icon: String {
+            switch self {
+            case .empty(let icon, _, _):
+                return icon
+            case .error:
+                return "exclamationmark.triangle"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .empty(_, let title, _):
+                return title
+            case .error:
+                return "Error"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .empty(_, _, let subtitle):
+                return subtitle
+            case .error(let message):
+                return message
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .empty:
+                return Color.onSurfaceSecondary
+            case .error:
+                return Color.statusDestructive
+            }
+        }
+
+        var isError: Bool {
+            if case .error = self {
+                return true
+            }
+            return false
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: role.icon)
+                .font(.appSymbol(size: 40, weight: .light))
+                .foregroundStyle(role.tint)
+
+            VStack(spacing: 4) {
+                Text(role.title)
+                    .font(.listTitle.weight(.semibold))
+                    .foregroundStyle(Color.onSurface)
+
+                Text(role.subtitle)
+                    .font(.listSubtitle)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 280)
+            }
+
+            if let actionTitle, let action {
+                if role.isError {
+                    Button(actionTitle, action: action)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                } else {
+                    Button(action: action) {
+                        Text(actionTitle)
+                            .font(.listSubtitle.weight(.medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .padding(.top, 4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.surfacePrimary)
+    }
+}
 
 struct EmptyStateView: View {
     let icon: String
@@ -15,35 +108,11 @@ struct EmptyStateView: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: icon)
-                .font(.appSymbol(size: 40, weight: .light))
-                .foregroundStyle(Color.onSurfaceSecondary)
-
-            VStack(spacing: 4) {
-                Text(title)
-                    .font(.listTitle.weight(.semibold))
-                    .foregroundStyle(Color.onSurface)
-
-                Text(subtitle)
-                    .font(.listSubtitle)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 280)
-            }
-
-            if let actionTitle, let action {
-                Button(action: action) {
-                    Text(actionTitle)
-                        .font(.listSubtitle.weight(.medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .padding(.top, 4)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.surfacePrimary)
+        StateView(
+            role: .empty(icon: icon, title: title, subtitle: subtitle),
+            actionTitle: actionTitle,
+            action: action
+        )
     }
 }
 
@@ -51,11 +120,15 @@ struct EmptyStateView: View {
 typealias SettingsEmptyStateView = EmptyStateView
 
 #Preview {
-    EmptyStateView(
-        icon: "books.vertical",
-        title: "No Saved Items",
-        subtitle: "Bookmarks and saved knowledge will appear here",
-        actionTitle: "Browse Content",
-        action: {}
-    )
+    VStack {
+        EmptyStateView(
+            icon: "books.vertical",
+            title: "No Saved Items",
+            subtitle: "Bookmarks and saved knowledge will appear here",
+            actionTitle: "Browse Content",
+            action: {}
+        )
+
+        StateView(role: .error(message: "Unable to load content."))
+    }
 }

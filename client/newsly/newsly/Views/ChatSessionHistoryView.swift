@@ -7,13 +7,21 @@ import SwiftUI
 
 struct ChatSessionHistoryView: View {
     let onSelectSession: (ChatSessionRoute) -> Void
+    let chatTransitionNamespace: Namespace.ID?
 
-    @StateObject private var viewModel = ChatSessionsViewModel()
-    @ObservedObject private var settings = AppSettings.shared
+    @State private var viewModel: ChatSessionsViewModel
     @State private var searchText = ""
 
-    private var appTextSize: DynamicTypeSize {
-        AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize
+    init(
+        onSelectSession: @escaping (ChatSessionRoute) -> Void,
+        viewModel: ChatSessionsViewModel? = nil,
+        chatTransitionNamespace: Namespace.ID? = nil
+    ) {
+        self.onSelectSession = onSelectSession
+        self.chatTransitionNamespace = chatTransitionNamespace
+        self._viewModel = State(
+            initialValue: viewModel ?? RootDependencyFactory.makeChatSessionsViewModel()
+        )
     }
 
     private var knowledgeSessions: [ChatSessionSummary] {
@@ -66,6 +74,7 @@ struct ChatSessionHistoryView: View {
                                 ChatSessionCard(session: session)
                             }
                             .buttonStyle(.plain)
+                            .matchedContentZoomSource(id: session.id, namespace: chatTransitionNamespace)
                             .padding(.horizontal, Spacing.appHorizontalMargin)
                             .contextMenu {
                                 Button(role: .destructive) {
@@ -82,12 +91,12 @@ struct ChatSessionHistoryView: View {
                     }
                     .padding(.vertical, 8)
                 }
+                .topScreenEdgeFade()
                 .refreshable {
                     await viewModel.loadSessions()
                 }
             }
         }
-        .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationTitle("Chat History")
         .navigationBarTitleDisplayMode(.inline)

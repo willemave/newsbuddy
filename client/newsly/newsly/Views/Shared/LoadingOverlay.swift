@@ -20,6 +20,6 @@ struct LoadingOverlay: View {
         }
         .padding(20)
         .glassCard(cornerRadius: 14)
-        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+        .appShadow(.floating)
     }
 }

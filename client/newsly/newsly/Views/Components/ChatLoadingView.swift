@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct ChatLoadingView: View {
-    @State private var rotation: Double = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var scale: CGFloat = 1.0
     @State private var bubbleOffset: CGFloat = 0
 
@@ -27,7 +27,7 @@ struct ChatLoadingView: View {
                         )
                     )
                     .frame(width: 120, height: 120)
-                    .scaleEffect(scale)
+                    .scaleEffect(reduceMotion ? 1.0 : scale)
 
                 // Three floating chat bubbles
                 HStack(spacing: 4) {
@@ -35,10 +35,9 @@ struct ChatLoadingView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Color.terracottaPrimary.opacity(0.6 + Double(index) * 0.15))
                             .frame(width: 12, height: 12)
-                            .offset(y: bubbleOffset)
+                            .offset(y: reduceMotion ? 0 : bubbleOffset)
                             .animation(
-                                .easeInOut(duration: 0.5)
-                                    .repeatForever(autoreverses: true)
+                                reduceMotion ? nil : AppMotion.loadingBubblePulse
                                     .delay(Double(index) * 0.15),
                                 value: bubbleOffset
                             )
@@ -46,9 +45,21 @@ struct ChatLoadingView: View {
                 }
             }
             .onAppear {
+                guard !reduceMotion else { return }
                 bubbleOffset = -8
-                withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
+                withAnimation(AppMotion.chatIllustrationPulse) {
                     scale = 1.1
+                }
+            }
+            .onChange(of: reduceMotion) { _, reduceMotion in
+                if reduceMotion {
+                    bubbleOffset = 0
+                    scale = 1.0
+                } else {
+                    bubbleOffset = -8
+                    withAnimation(AppMotion.chatIllustrationPulse) {
+                        scale = 1.1
+                    }
                 }
             }
 

@@ -11,11 +11,12 @@ import SwiftUI
 private let logger = Logger(subsystem: "com.newsly", category: "ShortFormView")
 
 struct ShortFormView: View {
-    @ObservedObject var viewModel: ShortNewsListViewModel
+    let viewModel: ShortNewsListViewModel
     let isActive: Bool
     let onSelect: (ContentDetailRoute) -> Void
-    @StateObject private var processingCountService = ProcessingCountService.shared
-    @StateObject private var narrationPlaybackService = NarrationPlaybackService.shared
+    let scrollToTopRequest: Int
+    @State private var narrationPlaybackService = NarrationPlaybackService.shared
+    @State private var processingCountService = ProcessingCountService.shared
     @State private var scrollReadTracker = ShortNewsScrollReadTracker()
     @State private var isScrollReadTrackingEnabled = false
     private let chatService = ChatService.shared
@@ -28,172 +29,204 @@ struct ShortFormView: View {
     @State private var fastNewsAudioErrorMessage: String?
     @State private var fastNewsAudioTask: Task<Void, Never>?
     @State private var quickActionTask: Task<Void, Never>?
+    @State private var markReadFeedbackTrigger = 0
+    @State private var bulkMarkFeedbackTrigger = 0
 
     private let bottomActionScrollPadding: CGFloat = 96
+    private static let topAnchorID = "shortFormTop"
 
     var body: some View {
-        let items = viewModel.currentItems()
+        let dayGroups = viewModel.dayGroups
+        let items = dayGroups.flatMap(\.items)
+        let itemIds = items.map(\.id)
         let isEmpty = items.isEmpty
         let hasUnreadItems = items.contains(where: { !$0.isRead })
 
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                if case .error(let error) = viewModel.state, isEmpty {
-                    ErrorView(message: error.localizedDescription) {
-                        viewModel.refreshTrigger.send(())
-                    }
-                    .padding(.top, 48)
-                } else if viewModel.state == .initialLoading, isEmpty {
-                    LoadingView()
-                        .containerRelativeFrame(.vertical)
-                } else if isEmpty {
-                    shortFormEmptyState
-                } else {
-                    EditorialMastheadHeader(
-                        title: "Fast Read"
-                    )
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    Color.clear
+                        .frame(height: 0)
+                        .id(Self.topAnchorID)
+                        .accessibilityHidden(true)
 
-                    shortNewsQuickActions(items: items)
-                        .padding(.bottom, shouldShowFastNewsAudioControls ? 10 : 18)
-                        .animation(
-                            .spring(duration: 0.3, bounce: 0),
-                            value: shouldShowFastNewsAudioControls
+                    if case .error(let error) = viewModel.state, isEmpty {
+                        ErrorView(message: error) {
+                            Task { await viewModel.refresh() }
+                        }
+                        .padding(.top, 48)
+                    } else if viewModel.state == .initialLoading, isEmpty {
+                        SkeletonFeedList(kind: .shortForm)
+                            .containerRelativeFrame(.vertical)
+                    } else if isEmpty {
+                        shortFormEmptyState
+                    } else {
+                        EditorialMastheadHeader(
+                            title: "Fast Read"
                         )
 
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        // Day delimiter: show when this item starts a new day
-                        if index == 0 || item.calendarDayKey != items[index - 1].calendarDayKey {
-                            DayDelimiter(item: item, isFirst: index == 0)
-                                .equatable()
-                        }
-
-                        Button {
-                            let route = ContentDetailRoute(
-                                contentId: item.id,
-                                contentType: item.contentType,
-                                allContentIds: items.map(\.id),
-                                navigationSurface: .fastNews
+                        ShortNewsQuickActionsSection(
+                            items: items,
+                            isPlayingAudio: isPlayingFastNewsAudio,
+                            isPreparingAudio: isPreparingFastNewsAudio,
+                            isHeaderActionInFlight: isHeaderActionInFlight,
+                            audioTarget: fastNewsAudioTarget,
+                            playbackService: narrationPlaybackService,
+                            audioErrorMessage: fastNewsAudioErrorMessage,
+                            quickActionErrorMessage: quickActionErrorMessage,
+                            activeQuickActionId: activeQuickActionId,
+                            onToggleAudio: handleFastNewsAudioEpisode,
+                            onStartQuickAction: startQuickAction
+                        )
+                            .padding(.bottom, shouldShowFastNewsAudioControls ? 10 : 18)
+                            .animation(
+                                AppMotion.panel,
+                                value: shouldShowFastNewsAudioControls
                             )
-                            onSelect(route)
-                        } label: {
-                            ShortNewsRow(item: item)
+
+                        ForEach(Array(dayGroups.enumerated()), id: \.element.id) { groupIndex, group in
+                            DayDelimiter(item: group.delimiterItem, isFirst: groupIndex == 0)
                                 .equatable()
-                        }
-                        .buttonStyle(FeedRowButtonStyle())
-                        // Row-level menu so the whole row (not just the title text)
-                        // responds to long-press.
-                        .contextMenu {
-                            if !item.isRead {
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+
+                            ForEach(group.items) { item in
                                 Button {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    viewModel.markRead(ids: [item.id])
+                                    let route = ContentDetailRoute(
+                                        contentId: item.id,
+                                        contentType: item.contentType,
+                                        allContentIds: itemIds,
+                                        navigationSurface: .fastNews
+                                    )
+                                    onSelect(route)
                                 } label: {
-                                    Label("Mark as Read", systemImage: "checkmark.circle")
+                                    ShortNewsRow(item: item)
+                                        .equatable()
                                 }
-                            }
+                                .buttonStyle(FeedRowButtonStyle())
+                                // Row-level menu so the whole row (not just the title text)
+                                // responds to long-press.
+                                .contextMenu {
+                                    if !item.isRead {
+                                        Button {
+                                            markReadFeedbackTrigger += 1
+                                            Task { await viewModel.markRead(ids: [item.id]) }
+                                        } label: {
+                                            Label("Mark as Read", systemImage: "checkmark.circle")
+                                        }
+                                    }
 
-                            Button {
-                                FeedDigDeeperAction.start(
-                                    selectedText: item.displayTitle,
-                                    item: item,
-                                    visibleContentIds: items.prefix(15).map(\.id),
-                                    surface: .shortNews
-                                )
-                            } label: {
-                                Label("Dig Deeper", systemImage: "magnifyingglass")
+                                    Button {
+                                        FeedDigDeeperAction.start(
+                                            selectedText: item.displayTitle,
+                                            item: item,
+                                            visibleContentIds: items.prefix(15).map(\.id),
+                                            surface: .shortNews
+                                        )
+                                    } label: {
+                                        Label("Dig Deeper", systemImage: "magnifyingglass")
+                                    }
+                                }
+                                .id(item.id)
+                                .accessibilityIdentifier("short.row.\(item.id)")
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
-                        .id(item.id)
-                        .accessibilityIdentifier("short.row.\(item.id)")
-                        .onAppear {
-                            if item.id == items.last?.id {
-                                viewModel.loadMoreTrigger.send(())
+
+                        if hasUnreadItems {
+                            MarkAllReadButton {
+                                showMarkAllConfirmation = true
                             }
+                            .padding(.horizontal, Spacing.appHorizontalMargin)
+                            .padding(.vertical, 8)
+                            .transition(.opacity)
                         }
-                    }
 
-                    if hasUnreadItems {
-                        MarkAllReadButton {
-                            showMarkAllConfirmation = true
+                        if viewModel.state == .loadingMore {
+                            ProgressView()
+                                .padding(.vertical, 16)
                         }
-                        .padding(.horizontal, Spacing.appHorizontalMargin)
-                        .padding(.vertical, 8)
-                        .transition(.opacity)
-                    }
 
-                    if viewModel.state == .loadingMore {
-                        ProgressView()
-                            .padding(.vertical, 16)
+                        Color.clear
+                            .frame(height: bottomActionScrollPadding)
+                            .accessibilityHidden(true)
                     }
-
-                    Color.clear
-                        .frame(height: bottomActionScrollPadding)
-                        .accessibilityHidden(true)
+                }
+                .scrollTargetLayout()
+                .background(Color.surfacePrimary)
+                .animation(AppMotion.subtle, value: hasUnreadItems)
+                .animation(AppMotion.subtle, value: itemIds)
+            }
+            .scrollIndicators(.hidden)
+            .onPaginationThresholdReached {
+                await viewModel.loadNextPage()
+            }
+            .background(Color.surfacePrimary.ignoresSafeArea())
+            .accessibilityIdentifier("short.screen")
+            .screenContainer()
+            .topScreenEdgeFade()
+            .onScrollTargetVisibilityChange(idType: Int.self) { visibleIds in
+                scrollReadTracker.updateTopVisibleItemId(visibleIds.first)
+                markItemsAboveAsRead()
+            }
+            .onScrollPhaseChange { _, newPhase in
+                guard newPhase == .idle else { return }
+                markItemsAboveAsRead()
+            }
+            .onChange(of: scrollToTopRequest) { _, request in
+                guard request > 0 else { return }
+                withAnimation(AppMotion.panel) {
+                    scrollProxy.scrollTo(Self.topAnchorID, anchor: .top)
                 }
             }
-            .scrollTargetLayout()
-            .background(Color.surfacePrimary)
-            .animation(.easeOut(duration: 0.2), value: hasUnreadItems)
-        }
-        .scrollIndicators(.hidden)
-        .background(Color.surfacePrimary.ignoresSafeArea())
-        .accessibilityIdentifier("short.screen")
-        .screenContainer()
-        .topScreenEdgeFade()
-        .onScrollTargetVisibilityChange(idType: Int.self) { visibleIds in
-            scrollReadTracker.updateTopVisibleItemId(visibleIds.first)
-            markItemsAboveAsRead()
-        }
-        .onScrollPhaseChange { _, newPhase in
-            guard newPhase == .idle else { return }
-            markItemsAboveAsRead()
-        }
-        .task(id: isActive) {
-            isScrollReadTrackingEnabled = false
-            guard isActive else { return }
-            guard await TabActivationTiming.waitForSettle() else { return }
-            isScrollReadTrackingEnabled = true
-            markItemsAboveAsRead()
-        }
-        .refreshable {
-            // Background replace keeps the current rows visible while the fresh
-            // page loads, and awaiting it keeps the spinner up until it lands.
-            await viewModel.refreshInBackgroundAndWait()
-            await processingCountService.refreshCount()
-        }
-        .onChange(of: processingCountService.newsProcessingCount) {
-            refreshFeedIfAwaitingFirstItems()
-        }
-        .onChange(of: processingCountService.newsCrawlCount) {
-            refreshFeedIfAwaitingFirstItems()
-        }
-        .onAppear {
-            if viewModel.currentItems().isEmpty {
-                viewModel.refreshTrigger.send(())
+            .task(id: isActive) {
+                isScrollReadTrackingEnabled = false
+                guard isActive else { return }
+                guard await TabActivationTiming.waitForSettle() else { return }
+                isScrollReadTrackingEnabled = true
+                markItemsAboveAsRead()
             }
-            Task {
+            .refreshable {
+                // Background replace keeps the current rows visible while the fresh
+                // page loads, and awaiting it keeps the spinner up until it lands.
+                await viewModel.refreshInBackgroundAndWait()
                 await processingCountService.refreshCount()
             }
-        }
-        .onDisappear {
-            fastNewsAudioTask?.cancel()
-            fastNewsAudioTask = nil
-            quickActionTask = nil
-        }
-        .alert(
-            "Mark all news items as read?",
-            isPresented: $showMarkAllConfirmation
-        ) {
-            Button("Cancel", role: .cancel) {
-                showMarkAllConfirmation = false
+            .onChange(of: processingCountService.newsProcessingCount) {
+                refreshFeedIfAwaitingFirstItems()
             }
-            Button("Mark All as Read", role: .destructive) {
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                showMarkAllConfirmation = false
-                viewModel.markAllVisibleAsRead()
+            .onChange(of: processingCountService.newsCrawlCount) {
+                refreshFeedIfAwaitingFirstItems()
             }
-        } message: {
-            Text("Marks every unread item currently loaded in the list.")
+            .onAppear {
+                if viewModel.currentItems().isEmpty {
+                    Task { await viewModel.refresh() }
+                }
+                Task {
+                    await processingCountService.refreshCount()
+                }
+            }
+            .onDisappear {
+                fastNewsAudioTask?.cancel()
+                fastNewsAudioTask = nil
+                quickActionTask = nil
+            }
+            .alert(
+                "Mark all news items as read?",
+                isPresented: $showMarkAllConfirmation
+            ) {
+                Button("Cancel", role: .cancel) {
+                    showMarkAllConfirmation = false
+                }
+                Button("Mark All as Read", role: .destructive) {
+                    bulkMarkFeedbackTrigger += 1
+                    showMarkAllConfirmation = false
+                    Task { await viewModel.markAllVisibleAsRead() }
+                }
+            } message: {
+                Text("Marks every unread item currently loaded in the list.")
+            }
+            .sensoryFeedback(.impact(weight: .light), trigger: markReadFeedbackTrigger)
+            .sensoryFeedback(.success, trigger: bulkMarkFeedbackTrigger)
         }
     }
 
@@ -223,7 +256,7 @@ struct ShortFormView: View {
     private func refreshFeedIfAwaitingFirstItems() {
         guard viewModel.currentItems().isEmpty else { return }
         guard viewModel.state != .initialLoading else { return }
-        viewModel.refreshTrigger.send(())
+        Task { await viewModel.refresh() }
     }
 
     private func handleFastNewsAudioEpisode() {
@@ -289,133 +322,6 @@ struct ShortFormView: View {
         viewModel.itemsScrolledPastTop(ids: idsToMark)
     }
 
-    @ViewBuilder
-    private func shortNewsQuickActions(items: [ContentSummary]) -> some View {
-        let quickActions = makeQuickActions(items: items)
-
-        VStack(alignment: .leading, spacing: 10) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    Button {
-                        handleFastNewsAudioEpisode()
-                    } label: {
-                        FeedActionChip(
-                            title: "Audio Brief",
-                            systemImage: isPlayingFastNewsAudio ? "pause.fill" : "waveform",
-                            isLoading: isPreparingFastNewsAudio
-                        )
-                    }
-                    .buttonStyle(EditorialCardButtonStyle())
-                    .disabled(isHeaderActionInFlight)
-                    .accessibilityIdentifier("short.audio.fast_reads")
-
-                    ForEach(quickActions) { action in
-                        Button {
-                            startQuickAction(action)
-                        } label: {
-                            FeedActionChip(
-                                title: action.title,
-                                systemImage: action.systemImage,
-                                isLoading: activeQuickActionId == action.id
-                            )
-                        }
-                        .buttonStyle(EditorialCardButtonStyle())
-                        .disabled(isHeaderActionInFlight)
-                        .accessibilityIdentifier("short.quick_action.\(action.id)")
-                    }
-                }
-                .padding(.horizontal, Spacing.appHorizontalMargin)
-            }
-
-            if shouldShowFastNewsAudioControls {
-                NarrationPlaybackControlRow(
-                    playbackService: narrationPlaybackService,
-                    target: fastNewsAudioTarget,
-                    isPreparing: isPreparingFastNewsAudio,
-                    cornerRadius: CornerRadius.control,
-                    onTogglePlayback: handleFastNewsAudioEpisode
-                )
-                .padding(.horizontal, Spacing.appHorizontalMargin)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            if let fastNewsAudioErrorMessage {
-                Text(fastNewsAudioErrorMessage)
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(Color.statusDestructive)
-                    .padding(.horizontal, Spacing.appHorizontalMargin)
-                    .transition(.opacity)
-            }
-
-            if let quickActionErrorMessage {
-                Text(quickActionErrorMessage)
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(Color.statusDestructive)
-                    .padding(.horizontal, Spacing.appHorizontalMargin)
-                    .transition(.opacity)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.easeOut(duration: 0.2), value: fastNewsAudioErrorMessage)
-        .animation(.easeOut(duration: 0.2), value: quickActionErrorMessage)
-    }
-
-    private func makeQuickActions(items: [ContentSummary]) -> [ShortNewsQuickAction] {
-        let visibleItemIds = Array(items.prefix(15).map(\.id))
-
-        return [
-            ShortNewsQuickAction(
-                id: "best_unread",
-                title: "Best Unread",
-                systemImage: "sparkles",
-                prompt: InterestingUnreadNewsAssistantAction.prompt,
-                screenContext: InterestingUnreadNewsAssistantAction.screenContext(
-                    screenType: "short_news_feed",
-                    screenTitle: "Fast Read"
-                )
-            ),
-            ShortNewsQuickAction(
-                id: "summarize_top_15",
-                title: "Summarize Top 15",
-                systemImage: "text.alignleft",
-                prompt: "Summarize the top 15 news items in my short news feed right now.",
-                screenContext: AssistantScreenContext(
-                    screenType: "short_news_feed",
-                    screenTitle: "Fast Read",
-                    visibleContentIds: visibleItemIds,
-                    query: "top 15 news items in my short news feed",
-                    note: "Summarize the most important items from the fast news feed. Prefer the in-app short news feed over web search."
-                )
-            ),
-            ShortNewsQuickAction(
-                id: "latest_news",
-                title: "What's Latest",
-                systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-                prompt: "What's the latest news in my short news feed right now?",
-                screenContext: AssistantScreenContext(
-                    screenType: "short_news_feed",
-                    screenTitle: "Fast Read",
-                    visibleContentIds: visibleItemIds,
-                    query: "latest news in my short news feed",
-                    note: "Focus on the newest important developments from the fast news feed."
-                )
-            ),
-            ShortNewsQuickAction(
-                id: "spicy_discussions",
-                title: "Spicy Discussions",
-                systemImage: "flame",
-                prompt: "What are the spiciest discussions in my short news feed right now?",
-                screenContext: AssistantScreenContext(
-                    screenType: "short_news_feed",
-                    screenTitle: "Fast Read",
-                    visibleContentIds: visibleItemIds,
-                    query: "spiciest discussions in my short news feed",
-                    note: "Pull out the sharpest disagreements, surprising takes, and most interesting discussion threads from the fast news feed."
-                )
-            ),
-        ]
-    }
-
     private func startQuickAction(_ action: ShortNewsQuickAction) {
         guard activeQuickActionId == nil else { return }
 
@@ -458,220 +364,5 @@ struct ShortFormView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .containerRelativeFrame(.vertical)
         }
-    }
-}
-
-@MainActor
-private final class ShortNewsScrollReadTracker {
-    private var topVisibleItemId: Int?
-    private var markedAsReadIds: Set<Int> = []
-
-    func updateTopVisibleItemId(_ itemId: Int?) {
-        topVisibleItemId = itemId
-    }
-
-    func idsToMarkAboveTop(in items: [ContentSummary]) -> [Int] {
-        guard let topVisibleItemId,
-              let topIndex = items.firstIndex(where: { $0.id == topVisibleItemId })
-        else {
-            return []
-        }
-
-        let idsToMark = items.prefix(topIndex).compactMap { item -> Int? in
-            guard !item.isRead, !markedAsReadIds.contains(item.id) else { return nil }
-            return item.id
-        }
-
-        markedAsReadIds.formUnion(idsToMark)
-        return idsToMark
-    }
-}
-
-private struct ShortFormSetupEmptyState: View {
-    let processingCount: Int
-    let crawlingSourceCount: Int
-
-    private var title: String {
-        if processingCount > 0 {
-            return "Preparing \(processingCount) Fast \(processingCount == 1 ? "Read" : "Reads")"
-        }
-        return "Crawling \(crawlingSourceCount) \(crawlingSourceCount == 1 ? "Source" : "Sources")"
-    }
-
-    private var subtitle: String {
-        if processingCount > 0 && crawlingSourceCount > 0 {
-            return "We're checking your sources and summarizing new items as they arrive."
-        }
-        if processingCount > 0 {
-            return "Summaries will appear here as soon as processing finishes."
-        }
-        return "We're checking your selected sources now. Fast Reads will appear as soon as the first item is ready."
-    }
-
-    var body: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .controlSize(.regular)
-
-            VStack(spacing: 4) {
-                Text(title)
-                    .font(.listTitle.weight(.semibold))
-                    .foregroundStyle(Color.onSurface)
-                    .multilineTextAlignment(.center)
-
-                Text(subtitle)
-                    .font(.listSubtitle)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 280)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.surfacePrimary)
-    }
-}
-
-// MARK: - Short News Row
-
-private struct FeedRowButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .overlay {
-                Color.onSurface.opacity(configuration.isPressed ? 0.06 : 0)
-                    .allowsHitTesting(false)
-            }
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-private struct ShortNewsRow: View, Equatable {
-    let item: ContentSummary
-
-    @Environment(\.displayScale) private var displayScale
-
-    static func == (lhs: ShortNewsRow, rhs: ShortNewsRow) -> Bool {
-        lhs.item == rhs.item
-    }
-
-    private var titleColor: Color {
-        item.isRead ? .onSurfaceSecondary : .readerBodyText
-    }
-
-    private var titleFont: Font {
-        .appSerif(size: 18, relativeTo: .headline, weight: .medium)
-    }
-
-    private var metadataColor: Color {
-        Color.platformLabel
-    }
-
-    private var metadataParts: [String] {
-        var parts: [String] = []
-        if let source = FastReadPresentation.sourceLabel(for: item) {
-            parts.append(source)
-        }
-        if let time = item.relativeTimeDisplay {
-            parts.append(time.uppercased())
-        }
-        return parts
-    }
-
-    var body: some View {
-        let metadata = metadataParts
-
-        VStack(alignment: .leading, spacing: 7) {
-            FeedListText(
-                item.displayTitle,
-                textColor: titleColor,
-                font: titleFont,
-                lineLimit: 3
-            )
-
-            if !metadata.isEmpty || item.commentCountDisplay != nil {
-                metadataRow(parts: metadata)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Spacing.appHorizontalMargin)
-        .padding(.vertical, 14)
-        .background(Color.surfacePrimary)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.borderSubtle.opacity(0.48))
-                .frame(height: 1 / displayScale)
-                .padding(.horizontal, Spacing.appHorizontalMargin)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private func metadataRow(parts metadataParts: [String]) -> some View {
-        HStack(spacing: 6) {
-            if !metadataParts.isEmpty {
-                Text(metadataParts.joined(separator: "  •  "))
-                    .kicker(color: metadataColor)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-
-            if let comments = item.commentCountDisplay {
-                if !metadataParts.isEmpty {
-                    Text("•")
-                        .kicker(color: metadataColor)
-                        .accessibilityHidden(true)
-                }
-
-                Image(systemName: "bubble.left")
-                    .font(.appSymbol(size: 11, weight: .medium))
-                    .foregroundStyle(metadataColor)
-                    .accessibilityHidden(true)
-
-                Text(comments)
-                    .monospacedDigit()
-                    .kicker(color: metadataColor)
-            }
-        }
-        .lineLimit(1)
-    }
-}
-
-// MARK: - Day Delimiter
-
-private struct DayDelimiter: View, Equatable {
-    let item: ContentSummary
-    let isFirst: Bool
-
-    private static let monthDayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        formatter.timeZone = TimeZone.current
-        return formatter
-    }()
-
-    private var dayLabel: String {
-        guard let date = item.itemDate else { return "" }
-        let calendar = Calendar.current
-
-        if calendar.isDateInToday(date) {
-            return "TODAY"
-        } else if calendar.isDateInYesterday(date) {
-            return "YESTERDAY"
-        } else {
-            return Self.monthDayFormatter.string(from: date).uppercased()
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(dayLabel)
-                .kicker(color: .sectionDelimiter)
-
-            Rectangle()
-                .fill(Color.outlineVariant)
-                .frame(height: 1)
-        }
-        .padding(.horizontal, Spacing.appHorizontalMargin)
-        .padding(.top, isFirst ? 12 : 20)
-        .padding(.bottom, 7)
-        .background(Color.surfacePrimary)
     }
 }

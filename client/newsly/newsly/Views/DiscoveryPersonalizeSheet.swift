@@ -8,13 +8,13 @@
 import SwiftUI
 
 struct DiscoveryPersonalizeSheet: View {
-    @StateObject private var viewModel: DiscoveryPersonalizeViewModel
+    @State private var viewModel: DiscoveryPersonalizeViewModel
     @Environment(\.dismiss) private var dismiss
     private let onComplete: () -> Void
 
     init(userId: Int, onComplete: @escaping () -> Void) {
-        _viewModel = StateObject(
-            wrappedValue: DiscoveryPersonalizeViewModel(userId: userId)
+        _viewModel = State(
+            initialValue: RootDependencyFactory.makeDiscoveryPersonalizeViewModel(userId: userId)
         )
         self.onComplete = onComplete
     }

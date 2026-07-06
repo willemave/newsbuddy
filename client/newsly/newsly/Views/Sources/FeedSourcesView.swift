@@ -5,15 +5,30 @@
 
 import SwiftUI
 
+private enum FeedSourcesSheetDestination: Identifiable {
+    case addSource
+    case sourceDetail(ScraperConfig)
+
+    var id: String {
+        switch self {
+        case .addSource:
+            "addSource"
+        case .sourceDetail(let config):
+            "sourceDetail.\(config.id)"
+        }
+    }
+}
+
 struct FeedSourcesView: View {
-    @StateObject private var viewModel = ScraperSettingsViewModel(
+    @State private var viewModel = RootDependencyFactory.makeScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube"]
     )
-    @State private var selectedConfig: ScraperConfig?
-    @State private var showAddSheet = false
+    @State private var activeSheet: FeedSourcesSheetDestination?
     @State private var newFeedURL: String = ""
     @State private var newFeedName: String = ""
     @State private var newFeedType: String = "substack"
+    @State private var addSourceError: String?
+    @State private var isAddingSource = false
     private let feedTypeOptions = [
         FormChoiceOption(title: "Substack", value: "substack"),
         FormChoiceOption(title: "RSS/Atom", value: "atom"),
@@ -32,7 +47,7 @@ struct FeedSourcesView: View {
                             title: "No Feed Sources",
                             subtitle: "Add RSS feeds, Substacks, or YouTube channels to start receiving content",
                             actionTitle: "Add Source",
-                            action: { showAddSheet = true }
+                            action: { activeSheet = .addSource }
                         )
                         .frame(minHeight: 400)
                     } else {
@@ -48,7 +63,7 @@ struct FeedSourcesView: View {
 
             // Floating add button
             if !viewModel.configs.isEmpty {
-                AddButton { showAddSheet = true }
+                AddButton { activeSheet = .addSource }
                     .padding(Spacing.rowHorizontal)
             }
         }
@@ -56,11 +71,13 @@ struct FeedSourcesView: View {
         .navigationTitle("Feed Sources")
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadConfigsWithDeferredStats() }
-        .sheet(item: $selectedConfig) { config in
-            SourceDetailSheet(viewModel: viewModel, config: config)
-        }
-        .sheet(isPresented: $showAddSheet) {
-            addSourceSheet
+        .sheet(item: $activeSheet) { destination in
+            switch destination {
+            case .addSource:
+                addSourceSheet
+            case .sourceDetail(let config):
+                SourceDetailSheet(viewModel: viewModel, config: config)
+            }
         }
     }
 
@@ -89,7 +106,7 @@ struct FeedSourcesView: View {
                     isActive: config.isActive,
                     stats: config.stats
                 )
-                .onTapGesture { selectedConfig = config }
+                .onTapGesture { activeSheet = .sourceDetail(config) }
 
                 if config.id != viewModel.configs.last?.id {
                     RowDivider()
@@ -164,6 +181,10 @@ struct FeedSourcesView: View {
                     )
                 }
 
+                if let addSourceError {
+                    addSourceErrorBanner(addSourceError)
+                }
+
                 Spacer()
             }
             .padding()
@@ -174,34 +195,65 @@ struct FeedSourcesView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         resetAddForm()
-                        showAddSheet = false
+                        activeSheet = nil
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        Task {
-                            await viewModel.addConfig(
-                                scraperType: newFeedType,
-                                displayName: newFeedName.isEmpty ? nil : newFeedName,
-                                feedURL: newFeedURL
-                            )
-                            if viewModel.errorMessage == nil {
-                                resetAddForm()
-                                showAddSheet = false
-                            }
-                        }
+                        Task { await submitAddSource() }
                     }
                     .fontWeight(.semibold)
-                    .disabled(newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isAddingSource || newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
+    }
+
+    private func addSourceErrorBanner(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.statusDestructive)
+                .accessibilityHidden(true)
+
+            Text(error)
+                .font(.appSubheadline)
+                .foregroundStyle(Color.onSurface)
+
+            Spacer()
+        }
+        .padding()
+        .background(Color.statusDestructive.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @MainActor
+    private func submitAddSource() async {
+        guard !isAddingSource else { return }
+
+        addSourceError = nil
+        isAddingSource = true
+        defer { isAddingSource = false }
+
+        let trimmedName = newFeedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let didAdd = await viewModel.addConfig(
+            scraperType: newFeedType,
+            displayName: trimmedName.isEmpty ? nil : trimmedName,
+            feedURL: newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+
+        guard didAdd else {
+            addSourceError = viewModel.errorMessage ?? "Failed to add source"
+            return
+        }
+
+        resetAddForm()
+        activeSheet = nil
     }
 
     private func resetAddForm() {
         newFeedURL = ""
         newFeedName = ""
         newFeedType = "substack"
+        addSourceError = nil
     }
 
 }

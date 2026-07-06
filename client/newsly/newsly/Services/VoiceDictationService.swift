@@ -8,8 +8,8 @@
 
 import AVFoundation
 import Foundation
+import Observation
 import os
-import UIKit
 
 private let logger = Logger(subsystem: "com.newsly", category: "VoiceDictation")
 private let voicePerfSignposter = OSSignposter(subsystem: "com.newsly.chat", category: "perf")
@@ -81,37 +81,76 @@ enum VoiceDictationError: LocalizedError {
 
 /// Service for voice dictation using the authenticated backend transcription API.
 @MainActor
-final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribing {
+@Observable
+final class VoiceDictationService: NSObject, SpeechTranscribing {
     static let shared = VoiceDictationService()
 
-    @Published private(set) var isRecording = false {
+    private(set) var isRecording = false {
         didSet { notifyStateChange() }
     }
-    @Published private(set) var isTranscribing = false {
+    private(set) var isTranscribing = false {
         didSet { notifyStateChange() }
     }
 
+    @ObservationIgnored
     var onTranscriptDelta: ((String) -> Void)?
+
+    @ObservationIgnored
     var onTranscriptFinal: ((String) -> Void)?
+
+    @ObservationIgnored
     var onError: ((String) -> Void)?
+
+    @ObservationIgnored
     var onStateChange: ((SpeechTranscriptionState) -> Void)?
+
+    @ObservationIgnored
     var onStopReason: ((SpeechStopReason) -> Void)?
 
+    @ObservationIgnored
     private var audioRecorder: AVAudioRecorder?
+
+    @ObservationIgnored
     private var recordingURL: URL?
+
+    @ObservationIgnored
     private var meteringTimer: Timer?
+
+    @ObservationIgnored
     private var autoStopTask: Task<Void, Never>?
+
+    @ObservationIgnored
     private var recordingStartedAt: Date?
+
+    @ObservationIgnored
     private var silenceStartedAt: Date?
+
+    @ObservationIgnored
     private var hasDetectedSpeech = false
+
+    @ObservationIgnored
     private var ambientPeakDb: Float = -80
+
+    @ObservationIgnored
     private var speechThresholdDb = SilenceDetectionConfig.minimumSpeechThresholdDb
+
+    @ObservationIgnored
     private var silenceThresholdDb =
         SilenceDetectionConfig.minimumSpeechThresholdDb - SilenceDetectionConfig.silenceHysteresisDb
+
+    @ObservationIgnored
     private var isFinalizing = false
+
+    @ObservationIgnored
     private var interruptionObserver: NSObjectProtocol?
+
+    @ObservationIgnored
     private var routeChangeObserver: NSObjectProtocol?
+
+    @ObservationIgnored
     private let audioSessionLease = AudioRecordingSessionLease()
+
+    @ObservationIgnored
     private let openAIService = OpenAIService.shared
 
     private override init() {
@@ -232,7 +271,6 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
             audioRecorder = recorder
             startMetering()
             isRecording = true
-            playRecordingStartHaptic()
             logger.info(
                 "Started recording | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) sampleRate=16000 channels=1"
             )
@@ -317,7 +355,6 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
         audioSessionLease.deactivate()
         removeAudioNotificationObservers()
         isRecording = false
-        playRecordingStopHaptic()
         logger.info(
             "Stopped recording | stopReason=\(String(describing: stopReason), privacy: .public) finalizeElapsedMs=\(voiceElapsedMilliseconds(since: finalizeStartedAt)) recordingDurationMs=\(recordingDurationMs)"
         )
@@ -567,14 +604,6 @@ final class VoiceDictationService: NSObject, ObservableObject, SpeechTranscribin
         default:
             logger.debug("Ignoring non-fatal audio route change | reason=\(reason.rawValue)")
         }
-    }
-
-    private func playRecordingStartHaptic() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
-    private func playRecordingStopHaptic() {
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
     private func withTranscriptionDeadline<T: Sendable>(

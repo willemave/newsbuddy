@@ -5,8 +5,8 @@
 //  Created by Assistant on 1/16/26.
 //
 
-import Combine
 import Foundation
+import Observation
 import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "ProcessingCountService")
@@ -14,14 +14,16 @@ private let logger = Logger(subsystem: "com.newsly", category: "ProcessingCountS
 typealias ProcessingCountResponse = APIProcessingCountResponse
 
 @MainActor
-final class ProcessingCountService: ObservableObject {
+@Observable
+final class ProcessingCountService {
     static let shared = ProcessingCountService()
 
-    @Published var processingCount: Int = 0
-    @Published var longFormProcessingCount: Int = 0
-    @Published var newsProcessingCount: Int = 0
-    @Published var newsCrawlCount: Int = 0
+    var processingCount: Int = 0
+    var longFormProcessingCount: Int = 0
+    var newsProcessingCount: Int = 0
+    var newsCrawlCount: Int = 0
 
+    @ObservationIgnored
     private let badgeStatsCoordinator = BadgeStatsRefreshCoordinator.shared
 
     private init() {
@@ -67,5 +69,9 @@ final class ProcessingCountService: ObservableObject {
                 )
             )
         }
+    }
+
+    func setPeriodicRefreshSuspended(_ isSuspended: Bool) {
+        badgeStatsCoordinator.setRefreshSuspended(isSuspended)
     }
 }

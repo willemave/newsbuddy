@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import Observation
 
 struct CustomNarrationPollKey: Equatable {
     let episodeId: Int?
@@ -20,11 +21,46 @@ struct CustomNarrationSourceSelection {
     }
 }
 
+protocol CustomNarrationAudioServicing: AnyObject {
+    func createCustomNarrationEpisode(
+        contentIds: [Int],
+        newsItemIds: [Int],
+        title: String?,
+        markSourceContentReadOnPlay: Bool,
+        delivery: AudioEpisodeDelivery
+    ) async throws -> AudioEpisode
+    func waitForCompletedEpisode(
+        _ episode: AudioEpisode,
+        pollIntervalNanoseconds: UInt64,
+        maxAttempts: Int
+    ) async throws -> AudioEpisode
+    func fetchEpisode(id: Int) async throws -> AudioEpisode
+    func fetchCustomNarrationEpisodes(limit: Int) async throws -> [AudioEpisode]
+    func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource
+    func enableEpisodeShare(id: Int) async throws -> AudioEpisodeShareResponse
+}
+
+extension AudioEpisodeService: CustomNarrationAudioServicing {}
+
 @MainActor
-final class CustomNarrationCreationViewModel: ObservableObject {
-    @Published private(set) var isCreating = false
-    @Published private(set) var episode: AudioEpisode?
-    @Published var errorMessage: String?
+@Observable
+final class CustomNarrationCreationViewModel {
+    private(set) var isCreating = false
+    private(set) var episode: AudioEpisode?
+    var errorMessage: String?
+
+    @ObservationIgnored
+    private let audioService: any CustomNarrationAudioServicing
+    @ObservationIgnored
+    private let toastPresenter: any ToastPresenting
+
+    init(
+        audioService: any CustomNarrationAudioServicing,
+        toastPresenter: any ToastPresenting
+    ) {
+        self.audioService = audioService
+        self.toastPresenter = toastPresenter
+    }
 
     var isGenerating: Bool {
         isCreating || episode?.isGenerating == true
@@ -44,14 +80,15 @@ final class CustomNarrationCreationViewModel: ObservableObject {
         defer { isCreating = false }
 
         do {
-            let createdEpisode = try await AudioEpisodeService.shared.createCustomNarrationEpisode(
+            let createdEpisode = try await audioService.createCustomNarrationEpisode(
                 contentIds: selection.contentIds,
                 newsItemIds: selection.newsItemIds,
+                title: nil,
                 markSourceContentReadOnPlay: selection.markSourceContentReadOnPlay,
                 delivery: .background
             )
             episode = createdEpisode
-            ToastService.shared.showSuccess(
+            toastPresenter.showSuccess(
                 createdEpisode.isCompleted ? "Narration ready in Knowledge" : "Narration is generating"
             )
             return true
@@ -59,7 +96,7 @@ final class CustomNarrationCreationViewModel: ObservableObject {
             return false
         } catch {
             errorMessage = error.localizedDescription
-            ToastService.shared.showError("Failed to create narration: \(error.localizedDescription)")
+            toastPresenter.showError("Failed to create narration: \(error.localizedDescription)")
             return false
         }
     }
@@ -71,13 +108,13 @@ final class CustomNarrationCreationViewModel: ObservableObject {
         else { return }
 
         do {
-            let completed = try await AudioEpisodeService.shared.waitForCompletedEpisode(
+            let completed = try await audioService.waitForCompletedEpisode(
                 currentEpisode,
                 pollIntervalNanoseconds: 2_000_000_000,
                 maxAttempts: 90
             )
             episode = completed
-            ToastService.shared.showSuccess("Narration ready in Knowledge")
+            toastPresenter.showSuccess("Narration ready in Knowledge")
         } catch where isNetworkCancellation(error) {
             return
         } catch {
@@ -88,10 +125,10 @@ final class CustomNarrationCreationViewModel: ObservableObject {
     private func handlePollError(_ error: Error, episodeId: Int) async {
         let nsError = error as NSError
         if nsError.domain == "AudioEpisodeService", nsError.code == 1 {
-            let latest = try? await AudioEpisodeService.shared.fetchEpisode(id: episodeId)
+            let latest = try? await audioService.fetchEpisode(id: episodeId)
             episode = latest
             errorMessage = latest?.errorMessage ?? error.localizedDescription
-            ToastService.shared.showError(errorMessage ?? "Narration generation failed.")
+            toastPresenter.showError(errorMessage ?? "Narration generation failed.")
             return
         }
 
@@ -99,7 +136,7 @@ final class CustomNarrationCreationViewModel: ObservableObject {
             let timeoutMessage = "Narration is still generating. Check Knowledge for status."
             errorMessage = timeoutMessage
             episode = nil
-            ToastService.shared.show(timeoutMessage)
+            toastPresenter.show(timeoutMessage, type: .info, duration: 3.0)
             return
         }
 

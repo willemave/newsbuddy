@@ -1,35 +1,28 @@
-import Combine
 import XCTest
 @testable import newsly
 
 @MainActor
 final class BadgeCountServiceTests: XCTestCase {
-    private var cancellables: Set<AnyCancellable> = []
-
     override func tearDown() {
         UnreadCountService.shared.stopPeriodicRefresh(resetCounts: true)
         ProcessingCountService.shared.stopPeriodicRefresh(resetCounts: true)
-        cancellables.removeAll()
         super.tearDown()
     }
 
-    func testUnreadCountApplySkipsUnchangedAssignments() {
+    func testUnreadCountApplyReturnsFalseForUnchangedCounts() {
         let service = UnreadCountService.shared
         service.stopPeriodicRefresh(resetCounts: true)
         service.applyCounts(UnreadCountsResponse(article: 2, podcast: 1, news: 4))
 
-        var objectWillChangeCount = 0
-        service.objectWillChange
-            .sink { objectWillChangeCount += 1 }
-            .store(in: &cancellables)
-
         let changed = service.applyCounts(UnreadCountsResponse(article: 2, podcast: 1, news: 4))
 
         XCTAssertFalse(changed)
-        XCTAssertEqual(objectWillChangeCount, 0)
+        XCTAssertEqual(service.articleCount, 2)
+        XCTAssertEqual(service.podcastCount, 1)
+        XCTAssertEqual(service.newsCount, 4)
     }
 
-    func testProcessingCountApplySkipsUnchangedAssignments() {
+    func testProcessingCountApplyReturnsFalseForUnchangedCounts() {
         let service = ProcessingCountService.shared
         service.stopPeriodicRefresh(resetCounts: true)
         service.applyCount(
@@ -41,11 +34,6 @@ final class BadgeCountServiceTests: XCTestCase {
             )
         )
 
-        var objectWillChangeCount = 0
-        service.objectWillChange
-            .sink { objectWillChangeCount += 1 }
-            .store(in: &cancellables)
-
         let changed = service.applyCount(
             ProcessingCountResponse(
                 processingCount: 3,
@@ -56,6 +44,9 @@ final class BadgeCountServiceTests: XCTestCase {
         )
 
         XCTAssertFalse(changed)
-        XCTAssertEqual(objectWillChangeCount, 0)
+        XCTAssertEqual(service.processingCount, 3)
+        XCTAssertEqual(service.longFormProcessingCount, 2)
+        XCTAssertEqual(service.newsProcessingCount, 1)
+        XCTAssertEqual(service.newsCrawlCount, 1)
     }
 }

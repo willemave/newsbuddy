@@ -12,7 +12,7 @@ struct LearningDeckChatPanel: View {
     @Binding var isExpanded: Bool
     let isPeekable: Bool
 
-    @StateObject private var feedOptionActionModel = AssistantFeedOptionActionModel()
+    @State private var feedOptionActionModel = AssistantFeedOptionActionModel()
 
     var body: some View {
         Group {
@@ -163,8 +163,8 @@ struct LearningDeckChatPanel: View {
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 8)
                 .padding(.bottom, 18)
-                .animation(.easeOut(duration: 0.2), value: viewModel.timeline.count)
-                .animation(.easeOut(duration: 0.2), value: viewModel.isSending)
+                .animation(AppMotion.subtle, value: viewModel.timeline.count)
+                .animation(AppMotion.subtle, value: viewModel.isSending)
             }
             .onChange(of: viewModel.timeline.last?.id) { _, newId in
                 guard let newId else { return }
@@ -249,11 +249,11 @@ struct LearningDeckChatPanel: View {
     }
 
     private func scrollToBottom<ID: Hashable>(_ target: ID, proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(AppMotion.subtle) {
             proxy.scrollTo(target, anchor: .bottom)
         }
         DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(AppMotion.subtle) {
                 proxy.scrollTo(target, anchor: .bottom)
             }
         }

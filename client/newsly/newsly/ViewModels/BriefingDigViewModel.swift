@@ -2,6 +2,10 @@ import Foundation
 
 @MainActor
 final class BriefingDigViewModel: ObservableObject {
+    private enum TaskKey: Hashable {
+        case dig
+    }
+
     enum State {
         case idle
         case searching
@@ -31,10 +35,14 @@ final class BriefingDigViewModel: ObservableObject {
 
     private let service: BriefingServicing
     private var cache: [String: State] = [:]
-    private var currentTask: Task<Void, Never>?
+    private let tasks = TaskBag<TaskKey>()
 
     init(service: BriefingServicing) {
         self.service = service
+    }
+
+    deinit {
+        tasks.cancelAll()
     }
 
     func dig(fragment rawFragment: String, passageContext: String) {
@@ -46,8 +54,7 @@ final class BriefingDigViewModel: ObservableObject {
             return
         }
 
-        currentTask?.cancel()
-        currentTask = Task { [weak self] in
+        tasks.runReplacing(.dig) { [weak self] in
             guard let self else { return }
             do {
                 self.state = .searching
@@ -70,7 +77,7 @@ final class BriefingDigViewModel: ObservableObject {
     }
 
     func clear() {
-        currentTask?.cancel()
+        tasks.cancel(.dig)
         fragment = nil
         state = .idle
     }

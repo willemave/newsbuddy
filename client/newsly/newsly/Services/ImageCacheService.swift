@@ -9,6 +9,9 @@ import Foundation
 import UIKit
 import CryptoKit
 import ImageIO
+import os.log
+
+private let imageCacheLogger = Logger(subsystem: "com.newsly", category: "ImageCacheService")
 
 /// Two-tier image caching service with memory (NSCache) and disk (FileManager) caching.
 actor ImageCacheService {
@@ -18,30 +21,39 @@ actor ImageCacheService {
     
     private let maxDiskCacheSize: Int64 = 100 * 1024 * 1024 // 100MB
     private let maxCacheAge: TimeInterval = 7 * 24 * 60 * 60 // 7 days
+    private let diskCleanupInterval: TimeInterval = 12 * 60 * 60 // 12 hours
     
     // MARK: - Private Properties
     
-    private let memoryCache = NSCache<NSString, UIImage>()
+    private let memoryCache: NSCache<NSString, UIImage>
     private let fileManager = FileManager.default
     private let cacheDirectory: URL
     private var inFlightDownloads: [String: Task<UIImage?, Never>] = [:]
+    private var diskCleanupTask: Task<Void, Never>?
+    private var lastDiskCleanupDate: Date?
     // MARK: - Initialization
     
     private init() {
+        let memoryCache = NSCache<NSString, UIImage>()
+        memoryCache.countLimit = 100 // Max 100 images in memory
+        memoryCache.totalCostLimit = 50 * 1024 * 1024 // 50MB memory limit
+        self.memoryCache = memoryCache
+
         // Set up cache directory
         let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
         cacheDirectory = cachesDirectory.appendingPathComponent("ImageCache", isDirectory: true)
         
         // Create cache directory if needed
-        try? fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        } catch {
+            imageCacheLogger.error(
+                "Failed to create image cache directory | path=\(self.cacheDirectory.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
         
-        // Configure memory cache
-        memoryCache.countLimit = 100 // Max 100 images in memory
-        memoryCache.totalCostLimit = 50 * 1024 * 1024 // 50MB memory limit
-        
-        // Clean up old entries on init (async)
         Task {
-            await cleanupDiskCache()
+            await scheduleDiskCleanupIfNeeded(reason: "init", force: true)
         }
     }
     
@@ -123,15 +135,28 @@ actor ImageCacheService {
     func clearCache() async {
         // Clear memory cache
         memoryCache.removeAllObjects()
-        
-        // Clear disk cache
-        let fileURLs = (try? fileManager.contentsOfDirectory(
-            at: cacheDirectory,
-            includingPropertiesForKeys: nil
-        )) ?? []
+
+        let fileURLs: [URL]
+        do {
+            fileURLs = try fileManager.contentsOfDirectory(
+                at: cacheDirectory,
+                includingPropertiesForKeys: nil
+            )
+        } catch {
+            imageCacheLogger.error(
+                "Failed to enumerate image cache during clear | path=\(self.cacheDirectory.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+            return
+        }
         
         for fileURL in fileURLs {
-            try? fileManager.removeItem(at: fileURL)
+            do {
+                try fileManager.removeItem(at: fileURL)
+            } catch {
+                imageCacheLogger.error(
+                    "Failed to remove cached image during clear | path=\(fileURL.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
     }
     
@@ -179,11 +204,24 @@ actor ImageCacheService {
            let modificationDate = attributes[.modificationDate] as? Date,
            Date().timeIntervalSince(modificationDate) > maxCacheAge {
             // Remove stale entry
-            try? fileManager.removeItem(at: fileURL)
+            do {
+                try fileManager.removeItem(at: fileURL)
+            } catch {
+                imageCacheLogger.error(
+                    "Failed to remove stale cached image | path=\(fileURL.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
             return nil
         }
         
-        return try? Data(contentsOf: fileURL)
+        do {
+            return try Data(contentsOf: fileURL)
+        } catch {
+            imageCacheLogger.error(
+                "Failed to read cached image data | path=\(fileURL.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
     }
     
     private func saveToDisk(image: UIImage, key: String) async {
@@ -197,14 +235,22 @@ actor ImageCacheService {
 
         do {
             try data.write(to: fileURL)
-        } catch {}
+            scheduleDiskCleanupIfNeeded(reason: "write")
+        } catch {
+            imageCacheLogger.error(
+                "Failed to write image cache data | path=\(fileURL.path, privacy: .public) bytes=\(data.count) error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
     
     private func downloadAndCache(url: URL, targetPixelSize: Int?) async -> UIImage? {
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let (data, _) = try await URLSession.newslyDefault.data(from: url)
             return await cacheImageData(data, for: url, targetPixelSize: targetPixelSize)
         } catch {
+            imageCacheLogger.error(
+                "Failed to download image | url=\(url.absoluteString, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
             return nil
         }
     }
@@ -216,9 +262,13 @@ actor ImageCacheService {
         }
 
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let (data, _) = try await URLSession.newslyDefault.data(from: url)
             await saveDataToDisk(data, key: key)
-        } catch {}
+        } catch {
+            imageCacheLogger.error(
+                "Failed to prefetch image | url=\(url.absoluteString, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     private func preparedImage(from data: Data, targetPixelSize: Int?) async -> UIImage? {
@@ -251,11 +301,40 @@ actor ImageCacheService {
         return UIImage(cgImage: image)
     }
     
-    private func cleanupDiskCache() async {
-        guard let fileURLs = try? fileManager.contentsOfDirectory(
-            at: cacheDirectory,
-            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]
-        ) else { return }
+    private func scheduleDiskCleanupIfNeeded(reason: String, force: Bool = false) {
+        let now = Date()
+        if !force,
+           let lastDiskCleanupDate,
+           now.timeIntervalSince(lastDiskCleanupDate) < diskCleanupInterval {
+            return
+        }
+        guard diskCleanupTask == nil else {
+            return
+        }
+
+        diskCleanupTask = Task {
+            await self.cleanupDiskCache(reason: reason)
+        }
+    }
+
+    private func cleanupDiskCache(reason: String) async {
+        defer {
+            lastDiskCleanupDate = Date()
+            diskCleanupTask = nil
+        }
+
+        let fileURLs: [URL]
+        do {
+            fileURLs = try fileManager.contentsOfDirectory(
+                at: cacheDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]
+            )
+        } catch {
+            imageCacheLogger.error(
+                "Failed to enumerate image cache directory | reason=\(reason, privacy: .public) path=\(self.cacheDirectory.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+            return
+        }
         
         var totalSize: Int64 = 0
         var filesToDelete: [URL] = []
@@ -295,7 +374,19 @@ actor ImageCacheService {
         
         // Delete files
         for fileURL in filesToDelete {
-            try? fileManager.removeItem(at: fileURL)
+            do {
+                try fileManager.removeItem(at: fileURL)
+            } catch {
+                imageCacheLogger.error(
+                    "Failed to remove cached image during cleanup | reason=\(reason, privacy: .public) path=\(fileURL.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+
+        if !filesToDelete.isEmpty {
+            imageCacheLogger.info(
+                "Image cache cleanup completed | reason=\(reason, privacy: .public) removed=\(filesToDelete.count) scanned=\(fileURLs.count)"
+            )
         }
     }
 }

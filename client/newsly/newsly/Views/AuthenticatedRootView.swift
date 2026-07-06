@@ -15,7 +15,7 @@ private enum AuthenticatedPresentationState {
 }
 
 struct AuthenticatedRootView: View {
-    @EnvironmentObject var authViewModel: AuthenticationViewModel
+    @Environment(AuthenticationViewModel.self) private var authViewModel
     let user: User
 
     @State private var presentationState: AuthenticatedPresentationState = .deciding
@@ -52,7 +52,7 @@ struct AuthenticatedRootView: View {
             case .content:
                 ContentView(userId: user.id)
                     .id(user.id)
-                    .environmentObject(authViewModel)
+                    .environment(authViewModel)
                     .withToast()
                     .task {
                         await LocalNotificationService.shared.requestAuthorization()

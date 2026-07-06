@@ -12,6 +12,30 @@ import os.log
 
 private let authLogger = Logger(subsystem: "com.newsly", category: "AuthenticationService")
 
+private enum AuthenticationResponseDecoder {
+    static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(type, from: data)
+    }
+}
+
+protocol AuthenticationServicing: AnyObject {
+    @MainActor
+    func signInWithApple() async throws -> AuthSession
+
+    func refreshAccessToken() async throws -> String
+    func logout()
+    func getCurrentUser() async throws -> User
+
+    @MainActor
+    func createDebugSession(
+        userId: Int?,
+        hasCompletedOnboarding: Bool?,
+        hasCompletedNewUserTutorial: Bool?
+    ) async throws -> AuthSession
+}
+
 /// Authentication service handling Apple Sign In and token management
 final class AuthenticationService: NSObject {
     static let shared = AuthenticationService()
@@ -89,7 +113,7 @@ final class AuthenticationService: NSObject {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.newslyDefault.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw AuthError.serverError(statusCode: -1, message: "Invalid HTTP response")
@@ -97,11 +121,7 @@ final class AuthenticationService: NSObject {
 
             switch httpResponse.statusCode {
             case 200:
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-
-                let user = try decoder.decode(User.self, from: data)
-                return user
+                return try AuthenticationResponseDecoder.decode(User.self, from: data)
             case 401, 403:
                 // Access token expired/invalid; clear it but keep refresh token for rotation
                 KeychainManager.shared.deleteToken(key: .accessToken)
@@ -139,7 +159,7 @@ final class AuthenticationService: NSObject {
         request.httpBody = try JSONEncoder().encode(body)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.newslyDefault.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw AuthError.serverError(statusCode: -1, message: "Invalid HTTP response")
@@ -147,9 +167,7 @@ final class AuthenticationService: NSObject {
 
             switch httpResponse.statusCode {
             case 200:
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                return try decoder.decode(User.self, from: data)
+                return try AuthenticationResponseDecoder.decode(User.self, from: data)
             case 401, 403:
                 KeychainManager.shared.deleteToken(key: .accessToken)
                 throw AuthError.notAuthenticated
@@ -182,16 +200,14 @@ final class AuthenticationService: NSObject {
         )
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.newslyDefault.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw AuthError.serverError(statusCode: -1, message: "Invalid HTTP response")
             }
 
             switch httpResponse.statusCode {
             case 200:
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
+                let tokenResponse = try AuthenticationResponseDecoder.decode(TokenResponse.self, from: data)
                 persistSessionTokens(tokenResponse)
                 return AuthSession(user: tokenResponse.user, isNewUser: tokenResponse.isNewUser)
             case 404:
@@ -248,6 +264,8 @@ final class AuthenticationService: NSObject {
         return hashString
     }
 }
+
+extension AuthenticationService: AuthenticationServicing {}
 
 // MARK: - Apple Sign In Delegate
 
@@ -339,7 +357,7 @@ private class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, 
         print("🔐 Sending Apple Sign In request to: \(url)")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.newslyDefault.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             print("❌ Invalid response from backend")
@@ -356,10 +374,7 @@ private class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, 
 
         print("✅ Apple Sign In successful - Status \(httpResponse.statusCode)")
 
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-
-        let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
+        let tokenResponse = try AuthenticationResponseDecoder.decode(TokenResponse.self, from: data)
 
         persistSessionTokens(tokenResponse)
 

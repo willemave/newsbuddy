@@ -3,6 +3,11 @@ import SwiftUI
 
 @MainActor
 final class BriefingViewModel: ObservableObject {
+    private enum TaskKey: Hashable {
+        case lens(String)
+        case readFlush
+    }
+
     enum LoadState: Equatable {
         case idle
         case loading
@@ -21,9 +26,8 @@ final class BriefingViewModel: ObservableObject {
     private var etag: String?
     private var indexLoadTask: Task<Void, Never>?
     private var loadedLensKeys: Set<String> = []
-    private var lensLoadTasks: [String: Task<Void, Never>] = [:]
+    private let tasks = TaskBag<TaskKey>()
     private var pendingReadKeys: Set<String> = []
-    private var readFlushTask: Task<Void, Never>?
     private var headerPinnedLensKeys: Set<String> = []
 
     /// True when the lens we just navigated away from had its category strip
@@ -32,6 +36,10 @@ final class BriefingViewModel: ObservableObject {
 
     init(service: BriefingServicing) {
         self.service = service
+    }
+
+    deinit {
+        tasks.cancelAll()
     }
 
     var orderedLenses: [APIBriefingLensSummary] {
@@ -95,8 +103,8 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func loadLensIfNeeded(key: String) {
-        guard !loadedLensKeys.contains(key), lensLoadTasks[key] == nil else { return }
-        lensLoadTasks[key] = Task { [weak self] in
+        guard !loadedLensKeys.contains(key), !tasks.isRunning(.lens(key)) else { return }
+        tasks.runReplacing(.lens(key)) { [weak self] in
             guard let self else { return }
             do {
                 let response = try await service.fetchLens(key: key)
@@ -110,7 +118,6 @@ final class BriefingViewModel: ObservableObject {
                     self.state = .error(error.localizedDescription)
                 }
             }
-            self.lensLoadTasks[key] = nil
         }
     }
 
@@ -127,8 +134,7 @@ final class BriefingViewModel: ObservableObject {
         // and failed flushes re-queue, so local state stays eventually consistent.
         markSourcesReadLocally(unreadKeys)
         pendingReadKeys.formUnion(unreadKeys)
-        readFlushTask?.cancel()
-        readFlushTask = Task { [weak self] in
+        tasks.runReplacing(.readFlush) { [weak self] in
             try? await Task.sleep(nanoseconds: 300_000_000)
             await self?.flushPendingReadMarks()
         }

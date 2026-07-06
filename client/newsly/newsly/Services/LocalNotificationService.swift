@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Observation
 import UserNotifications
 import os.log
 
@@ -13,11 +14,13 @@ private let logger = Logger(subsystem: "com.newsly", category: "LocalNotificatio
 
 /// Service for handling local push notifications
 @MainActor
-class LocalNotificationService: NSObject, ObservableObject {
+@Observable
+final class LocalNotificationService: NSObject {
     static let shared = LocalNotificationService()
 
-    @Published private(set) var isAuthorized = false
+    private(set) var isAuthorized = false
 
+    @ObservationIgnored
     private let notificationCenter = UNUserNotificationCenter.current()
 
     private override init() {

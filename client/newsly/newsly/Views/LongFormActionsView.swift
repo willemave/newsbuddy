@@ -61,8 +61,8 @@ struct LongFormActionsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.easeOut(duration: 0.2), value: customNarrationError)
-        .animation(.easeOut(duration: 0.2), value: summaryError)
+        .animation(AppMotion.subtle, value: customNarrationError)
+        .animation(AppMotion.subtle, value: summaryError)
     }
 
     private func errorText(_ message: String) -> some View {

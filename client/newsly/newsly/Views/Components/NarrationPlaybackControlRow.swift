@@ -7,8 +7,8 @@ import Foundation
 import SwiftUI
 
 struct NarrationPlaybackControlRow: View {
-    @ObservedObject private var playbackService: NarrationPlaybackService
-    @ObservedObject private var progressState: NarrationPlaybackProgress
+    private let playbackService: NarrationPlaybackService
+    private let progressState: NarrationPlaybackProgress
 
     let target: NarrationTarget?
     let isPreparing: Bool
@@ -22,8 +22,8 @@ struct NarrationPlaybackControlRow: View {
         cornerRadius: CGFloat = 10,
         onTogglePlayback: @escaping () -> Void
     ) {
-        self._playbackService = ObservedObject(wrappedValue: playbackService)
-        self._progressState = ObservedObject(wrappedValue: playbackService.progress)
+        self.playbackService = playbackService
+        self.progressState = playbackService.progress
         self.target = target
         self.isPreparing = isPreparing
         self.cornerRadius = cornerRadius

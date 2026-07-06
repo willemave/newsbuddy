@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import Observation
 import SwiftUI
 
 @MainActor
@@ -25,34 +26,49 @@ protocol KnowledgeHubChatServicing: AnyObject {
 extension ChatService: KnowledgeHubChatServicing {}
 
 @MainActor
-class KnowledgeHubViewModel: ObservableObject {
-    @Published var sessions: [ChatSessionSummary] = []
-    @Published var isLoading = false
-    @Published var isLoadingMore = false
-    @Published var hasMoreSessions = false
-    @Published var isCreatingSession = false
-    @Published var errorMessage: String?
-    @Published var hasLoadMoreError = false
-    @Published private(set) var voiceDictationAvailable = false
-    @Published private(set) var isVoiceRecording = false
-    @Published private(set) var isVoiceTranscribing = false
-    @Published private(set) var isVoiceActionInFlight = false
-    @Published private(set) var completedVoiceRoute: ChatSessionRoute?
+@Observable
+final class KnowledgeHubViewModel {
+    var sessions: [ChatSessionSummary] = []
+    var isLoading = false
+    var isLoadingMore = false
+    var hasMoreSessions = false
+    var isCreatingSession = false
+    var errorMessage: String?
+    var hasLoadMoreError = false
+    private(set) var voiceDictationAvailable = false
+    private(set) var isVoiceRecording = false
+    private(set) var isVoiceTranscribing = false
+    private(set) var isVoiceActionInFlight = false
+    private(set) var completedVoiceRoute: ChatSessionRoute?
 
+    @ObservationIgnored
     private let chatService: any KnowledgeHubChatServicing
+    @ObservationIgnored
     private let transcriptionService: any SpeechTranscribing
+    @ObservationIgnored
+    private let voiceCoordinator: VoiceDictationCoordinator
+    @ObservationIgnored
+    private let refreshTranscriptionAvailability: () async -> Bool
+    @ObservationIgnored
     private var nextCursor: String?
+    @ObservationIgnored
     private let historyPageLimit = 20
+    @ObservationIgnored
     private var pendingVoiceTranscript: String?
+    @ObservationIgnored
     private var hasConfiguredVoiceCallbacks = false
 
     init(
-        chatService: any KnowledgeHubChatServicing = ChatService.shared,
+        chatService: any KnowledgeHubChatServicing,
         transcriptionService: (any SpeechTranscribing)? = nil,
+        refreshTranscriptionAvailability: @escaping () async -> Bool = { false },
         initialVoiceDictationAvailable: Bool = false
     ) {
+        let resolvedTranscriptionService = transcriptionService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
         self.chatService = chatService
-        self.transcriptionService = transcriptionService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
+        self.transcriptionService = resolvedTranscriptionService
+        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: resolvedTranscriptionService)
+        self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
         self.voiceDictationAvailable = initialVoiceDictationAvailable
     }
 
@@ -119,7 +135,7 @@ class KnowledgeHubViewModel: ObservableObject {
             return
         }
 
-        voiceDictationAvailable = await OpenAIService.shared.refreshTranscriptionAvailability()
+        voiceDictationAvailable = await refreshTranscriptionAvailability()
     }
 
     func toggleVoiceRecording() async -> ChatSessionRoute? {
@@ -140,6 +156,7 @@ class KnowledgeHubViewModel: ObservableObject {
         guard hasConfiguredVoiceCallbacks || isVoiceRecording || isVoiceTranscribing || pendingVoiceTranscript != nil else {
             return
         }
+        voiceCoordinator.stopListening()
         transcriptionService.reset()
         hasConfiguredVoiceCallbacks = false
         pendingVoiceTranscript = nil
@@ -309,43 +326,40 @@ class KnowledgeHubViewModel: ObservableObject {
 
     private func configureTranscriptionCallbacks() {
         hasConfiguredVoiceCallbacks = true
-        transcriptionService.onTranscriptDelta = nil
-        transcriptionService.onTranscriptFinal = { [weak self] transcript in
-            self?.pendingVoiceTranscript = transcript
-        }
-        transcriptionService.onStopReason = { [weak self] reason in
-            guard let self else { return }
-            switch reason {
-            case .manual:
-                return
-            case .silenceAutoStop:
-                let transcript = self.pendingVoiceTranscript ?? ""
-                self.pendingVoiceTranscript = nil
-                self.isVoiceRecording = false
-                self.isVoiceTranscribing = false
-                self.isVoiceActionInFlight = true
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
+        voiceCoordinator.listen(
+            onTranscriptFinal: { [weak self] transcript in
+                self?.pendingVoiceTranscript = transcript
+            },
+            onError: { [weak self] message in
+                self?.errorMessage = message
+                self?.pendingVoiceTranscript = nil
+                self?.isVoiceRecording = false
+                self?.isVoiceTranscribing = false
+                self?.isVoiceActionInFlight = false
+            },
+            onStopReason: { [weak self] reason in
+                guard let self else { return }
+                switch reason {
+                case .manual:
+                    return
+                case .silenceAutoStop:
+                    let transcript = self.pendingVoiceTranscript ?? ""
+                    self.pendingVoiceTranscript = nil
+                    self.isVoiceRecording = false
+                    self.isVoiceTranscribing = false
+                    self.isVoiceActionInFlight = true
                     let route = await self.submitVoiceTranscript(transcript)
                     self.isVoiceActionInFlight = false
                     if let route {
                         self.completedVoiceRoute = route
                     }
+                case .cancel, .failure:
+                    self.pendingVoiceTranscript = nil
+                    self.isVoiceRecording = false
+                    self.isVoiceTranscribing = false
+                    self.isVoiceActionInFlight = false
                 }
-            case .cancel, .failure:
-                self.pendingVoiceTranscript = nil
-                self.isVoiceRecording = false
-                self.isVoiceTranscribing = false
-                self.isVoiceActionInFlight = false
             }
-        }
-        transcriptionService.onError = { [weak self] message in
-            self?.errorMessage = message
-            self?.pendingVoiceTranscript = nil
-            self?.isVoiceRecording = false
-            self?.isVoiceTranscribing = false
-            self?.isVoiceActionInFlight = false
-        }
-        transcriptionService.onStateChange = nil
+        )
     }
 }

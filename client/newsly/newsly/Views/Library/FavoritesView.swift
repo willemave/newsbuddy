@@ -7,13 +7,22 @@ import SwiftUI
 
 struct KnowledgeLibraryView: View {
     let showNavigationTitle: Bool
+    let readStateCache: ReadStateCache
 
-    @StateObject private var viewModel = ContentListViewModel(defaultReadFilter: "all")
+    @State private var viewModel: ContentListViewModel
     @State private var selectedTypeFilter: LibraryTypeFilter = .all
     @State private var selectedSort: LibrarySort = .newest
 
-    init(showNavigationTitle: Bool = true) {
+    init(showNavigationTitle: Bool = true, readStateCache: ReadStateCache? = nil) {
+        let readStateCache = readStateCache ?? ReadStateCache()
         self.showNavigationTitle = showNavigationTitle
+        self.readStateCache = readStateCache
+        self._viewModel = State(
+            initialValue: RootDependencyFactory.makeContentListViewModel(
+                defaultReadFilter: "all",
+                readStateCache: readStateCache
+            )
+        )
     }
 
     private var visibleContents: [ContentSummary] {
@@ -114,7 +123,8 @@ struct KnowledgeLibraryView: View {
                     contentId: content.id,
                     contentType: content.contentType,
                     allContentIds: displayedContentIds,
-                    navigationSurface: .savedLibrary
+                    navigationSurface: .savedLibrary,
+                    readStateCache: readStateCache
                 )) {
                     SavedLibraryRow(content: content)
                 }
@@ -134,7 +144,7 @@ struct KnowledgeLibraryView: View {
                     Button {
                         Task {
                             await viewModel.toggleKnowledgeSave(content.id)
-                            withAnimation(.easeOut(duration: 0.3)) {
+                            withAnimation(AppMotion.panel) {
                                 viewModel.contents.removeAll { $0.id == content.id }
                             }
                         }
@@ -153,22 +163,13 @@ struct KnowledgeLibraryView: View {
                     Spacer()
                 }
                 .appListRow()
-            } else if viewModel.hasMore {
-                Button {
-                    Task { await viewModel.loadMoreContent() }
-                } label: {
-                    Label("Load more", systemImage: "chevron.down")
-                        .font(.terracottaBodyMedium.weight(.semibold))
-                        .foregroundStyle(Color.terracottaPrimary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                }
-                .buttonStyle(.plain)
-                .appListRow()
             }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .onPaginationThresholdReached {
+            await viewModel.loadMoreContent()
+        }
         .refreshable { await viewModel.loadKnowledgeLibrary() }
     }
 
@@ -222,7 +223,7 @@ struct KnowledgeLibraryView: View {
                             systemImage: filter.systemImage,
                             isSelected: selectedTypeFilter == filter
                         ) {
-                            withAnimation(.easeOut(duration: 0.18)) {
+                            withAnimation(AppMotion.subtle) {
                                 selectedTypeFilter = filter
                             }
                         }
@@ -234,7 +235,7 @@ struct KnowledgeLibraryView: View {
 
             if hasActiveFilters {
                 Button("Clear filter") {
-                    withAnimation(.easeOut(duration: 0.18)) {
+                    withAnimation(AppMotion.subtle) {
                         selectedTypeFilter = .all
                     }
                 }
@@ -262,7 +263,7 @@ struct KnowledgeLibraryView: View {
                 .foregroundStyle(Color.onSurface)
 
             Button("Clear filters") {
-                withAnimation(.easeOut(duration: 0.18)) {
+                withAnimation(AppMotion.subtle) {
                     selectedTypeFilter = .all
                 }
             }

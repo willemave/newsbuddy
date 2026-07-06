@@ -8,6 +8,8 @@ import SwiftUI
 struct ThinkingBubbleView: View {
     let startDate: Date?
     let statusText: String?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAnimating = false
 
     private func elapsedSeconds(at date: Date) -> Int {
@@ -33,10 +35,9 @@ struct ThinkingBubbleView: View {
                     Circle()
                         .fill(Color.chatAccent.opacity(0.5))
                         .frame(width: 6, height: 6)
-                        .offset(y: isAnimating ? -2 : 2)
+                        .offset(y: reduceMotion ? 0 : (isAnimating ? -2 : 2))
                         .animation(
-                            .easeInOut(duration: 0.4)
-                                .repeatForever(autoreverses: true)
+                            reduceMotion ? nil : AppMotion.typingDotPulse
                                 .delay(Double(index) * 0.1),
                             value: isAnimating
                         )
@@ -63,12 +64,17 @@ struct ThinkingBubbleView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
+            guard !reduceMotion else { return }
             isAnimating = true
+        }
+        .onChange(of: reduceMotion) { _, reduceMotion in
+            isAnimating = !reduceMotion
         }
     }
 }
 
 struct InitialSuggestionsLoadingView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dotOffset: CGFloat = 0
     @State private var pulseScale: CGFloat = 1.0
 
@@ -78,17 +84,16 @@ struct InitialSuggestionsLoadingView: View {
                 Circle()
                     .fill(Color.chatAccent.opacity(0.08))
                     .frame(width: 80, height: 80)
-                    .scaleEffect(pulseScale)
+                    .scaleEffect(reduceMotion ? 1.0 : pulseScale)
 
                 HStack(spacing: 6) {
                     ForEach(0..<3) { index in
                         Circle()
                             .fill(Color.chatAccent.opacity(0.7))
                             .frame(width: 10, height: 10)
-                            .offset(y: dotOffset)
+                            .offset(y: reduceMotion ? 0 : dotOffset)
                             .animation(
-                                .easeInOut(duration: 0.4)
-                                    .repeatForever(autoreverses: true)
+                                reduceMotion ? nil : AppMotion.typingDotPulse
                                     .delay(Double(index) * 0.12),
                                 value: dotOffset
                             )
@@ -96,9 +101,21 @@ struct InitialSuggestionsLoadingView: View {
                 }
             }
             .onAppear {
+                guard !reduceMotion else { return }
                 dotOffset = -6
-                withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                withAnimation(AppMotion.chatStatusPulse) {
                     pulseScale = 1.15
+                }
+            }
+            .onChange(of: reduceMotion) { _, reduceMotion in
+                if reduceMotion {
+                    dotOffset = 0
+                    pulseScale = 1.0
+                } else {
+                    dotOffset = -6
+                    withAnimation(AppMotion.chatStatusPulse) {
+                        pulseScale = 1.15
+                    }
                 }
             }
 

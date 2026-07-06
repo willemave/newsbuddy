@@ -9,7 +9,6 @@ import SwiftUI
 
 struct NewsGroupCard: View {
     let group: NewsGroup
-    var isCurrent: Bool = false
 
     var body: some View {
         let content = VStack(alignment: .leading, spacing: 0) {
@@ -65,18 +64,6 @@ struct NewsGroupCard: View {
                 }
             }
         }
-        // Measure intrinsic content height BEFORE parent applies frame constraints
-        .background(
-            Group {
-                if isCurrent {
-                    GeometryReader { proxy in
-                        Color.clear
-                            .preference(key: GroupHeightPreferenceKey.self,
-                                        value: proxy.size.height)
-                    }
-                }
-            }
-        )
 
         content
             .opacity(group.isRead ? 0.7 : 1.0)

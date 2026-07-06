@@ -6,43 +6,99 @@
 //
 
 import Foundation
+import Observation
 import os.log
 import UIKit
 
 private let logger = Logger(subsystem: "com.newsly", category: "TweetSuggestions")
 
+protocol TweetSuggestionContentServicing: AnyObject {
+    func generateTweetSuggestions(
+        id: Int,
+        message: String?,
+        creativity: Int,
+        provider: ChatModelProvider?
+    ) async throws -> TweetSuggestionsResponse
+}
+
 @MainActor
-final class TweetSuggestionsViewModel: ObservableObject {
+protocol TweetSharing: AnyObject {
+    func share(tweet: String, completion: ((Bool) -> Void)?)
+}
+
+extension ContentService: TweetSuggestionContentServicing {}
+extension TwitterShareService: TweetSharing {}
+
+@MainActor
+@Observable
+final class TweetSuggestionsViewModel {
+    private enum TaskKey: Hashable {
+        case creativityDebounce
+    }
+
     // MARK: - Published Properties
 
-    @Published var suggestions: [TweetSuggestion] = []
-    @Published var creativity: Int = 5
-    @Published var tweakMessage: String = ""
-    @Published var isLoading = false
-    @Published var isRegenerating = false
-    @Published var errorMessage: String?
-    @Published var selectedSuggestionId: Int?
-    @Published var selectedProvider: ChatModelProvider = .google
+    var suggestions: [TweetSuggestion] = []
+    var creativity: Int = 5
+    var tweakMessage: String = ""
+    var isLoading = false
+    var isRegenerating = false
+    var errorMessage: String?
+    var selectedSuggestionId: Int?
+    var selectedProvider: ChatModelProvider = .google
 
     // Voice dictation state
-    @Published var isRecording = false
-    @Published var isTranscribing = false
-    @Published private(set) var voiceDictationAvailable = false
+    var isRecording = false
+    var isTranscribing = false
+    private(set) var voiceDictationAvailable = false
 
     // MARK: - Private Properties
 
-    private let contentService = ContentService.shared
-    private let twitterService = TwitterShareService.shared
+    @ObservationIgnored
+    private let contentService: any TweetSuggestionContentServicing
+    @ObservationIgnored
+    private let twitterService: any TweetSharing
+    @ObservationIgnored
     private let transcriptionService: any SpeechTranscribing
+    @ObservationIgnored
+    private let authService: any AuthenticationServicing
+    @ObservationIgnored
+    private let tokenStore: any AuthTokenStore
+    @ObservationIgnored
+    private let refreshTranscriptionAvailability: () async -> Bool
+    @ObservationIgnored
+    private let setBackendTranscriptionAvailable: (Bool) -> Void
+    @ObservationIgnored
     private var contentId: Int?
-    private var creativityDebounceTask: Task<Void, Never>?
+    @ObservationIgnored
+    private let tasks = TaskBag<TaskKey>()
+    @ObservationIgnored
     private var lastCreativity: Int = 5
+    @ObservationIgnored
     private var voiceRecordingStartedAt: Date?
 
     // MARK: - Public Methods
 
-    init(transcriptionService: (any SpeechTranscribing)? = nil) {
-        self.transcriptionService = transcriptionService ?? VoiceDictationService.shared
+    init(
+        contentService: any TweetSuggestionContentServicing,
+        twitterService: any TweetSharing,
+        transcriptionService: any SpeechTranscribing,
+        authService: any AuthenticationServicing,
+        tokenStore: any AuthTokenStore,
+        refreshTranscriptionAvailability: @escaping () async -> Bool,
+        setBackendTranscriptionAvailable: @escaping (Bool) -> Void
+    ) {
+        self.contentService = contentService
+        self.twitterService = twitterService
+        self.transcriptionService = transcriptionService
+        self.authService = authService
+        self.tokenStore = tokenStore
+        self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
+        self.setBackendTranscriptionAvailable = setBackendTranscriptionAvailable
+    }
+
+    deinit {
+        tasks.cancelAll()
     }
 
     /// Initialize with content ID and generate suggestions.
@@ -61,9 +117,9 @@ final class TweetSuggestionsViewModel: ObservableObject {
         do {
             if !hasVoiceAuthToken {
                 logger.info("🎤 Voice dictation unavailable, attempting session refresh...")
-                _ = try await AuthenticationService.shared.refreshAccessToken()
+                _ = try await authService.refreshAccessToken()
             }
-            voiceDictationAvailable = await OpenAIService.shared.refreshTranscriptionAvailability()
+            voiceDictationAvailable = await refreshTranscriptionAvailability()
             if voiceDictationAvailable {
                 logger.info("🎤 Voice dictation available")
             } else {
@@ -71,7 +127,7 @@ final class TweetSuggestionsViewModel: ObservableObject {
             }
         } catch {
             logger.warning("🎤 Token refresh failed: \(error.localizedDescription)")
-            AppSettings.shared.backendTranscriptionAvailable = false
+            setBackendTranscriptionAvailable(false)
             voiceDictationAvailable = false
         }
     }
@@ -85,17 +141,14 @@ final class TweetSuggestionsViewModel: ObservableObject {
     func creativityChanged(to newValue: Int) {
         guard newValue != lastCreativity else { return }
 
-        // Cancel any pending debounce task
-        creativityDebounceTask?.cancel()
-
         // Debounce: wait 500ms after user stops sliding before regenerating
-        creativityDebounceTask = Task {
+        tasks.runReplacing(.creativityDebounce) { [weak self] in
             try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
 
-            guard !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled else { return }
 
-            lastCreativity = newValue
-            await regenerate()
+            self.lastCreativity = newValue
+            await self.regenerate()
         }
     }
 
@@ -269,10 +322,10 @@ final class TweetSuggestionsViewModel: ObservableObject {
     }
 
     private var hasVoiceAuthToken: Bool {
-        if let accessToken = KeychainManager.shared.getToken(key: .accessToken), !accessToken.isEmpty {
+        if let accessToken = tokenStore.getToken(key: .accessToken), !accessToken.isEmpty {
             return true
         }
-        if let refreshToken = KeychainManager.shared.getToken(key: .refreshToken), !refreshToken.isEmpty {
+        if let refreshToken = tokenStore.getToken(key: .refreshToken), !refreshToken.isEmpty {
             return true
         }
         return false

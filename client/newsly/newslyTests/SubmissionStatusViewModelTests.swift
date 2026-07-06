@@ -89,7 +89,7 @@ final class SubmissionStatusViewModelTests: XCTestCase {
         let defaults = isolated.defaults
         defer { clear(isolated.suiteName, defaults: defaults) }
 
-        let viewModel = SubmissionStatusViewModel(defaults: defaults)
+        let viewModel = makeViewModel(defaults: defaults)
         viewModel.submissions = [
             makeSubmission(id: 1, createdAt: "2026-04-10T10:00:00Z"),
             makeSubmission(id: 2, createdAt: "2026-04-10T09:00:00Z")
@@ -98,12 +98,76 @@ final class SubmissionStatusViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.unseenCount, 2)
     }
 
+    func testLoadStoresSubmissionsAndPagination() async {
+        let isolated = makeIsolatedDefaults()
+        let defaults = isolated.defaults
+        defer { clear(isolated.suiteName, defaults: defaults) }
+
+        var requestedCursors: [String?] = []
+        let viewModel = makeViewModel(defaults: defaults) { cursor in
+            requestedCursors.append(cursor)
+            return self.makeFeed(
+                submissions: [
+                    self.makeSubmission(id: 1, createdAt: "2026-04-10T10:00:00Z"),
+                    self.makeSubmission(id: 2, createdAt: "2026-04-10T09:00:00Z")
+                ],
+                nextCursor: "next",
+                hasMore: true
+            )
+        }
+
+        await viewModel.load()
+
+        XCTAssertEqual(requestedCursors.count, 1)
+        XCTAssertNil(requestedCursors[0])
+        XCTAssertEqual(viewModel.submissions.map(\.id), [1, 2])
+        XCTAssertEqual(viewModel.nextCursor, "next")
+        XCTAssertTrue(viewModel.hasMore)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testLoadMoreAppendsSubmissionsThroughPaginationFeed() async {
+        let isolated = makeIsolatedDefaults()
+        let defaults = isolated.defaults
+        defer { clear(isolated.suiteName, defaults: defaults) }
+
+        var requestedCursors: [String?] = []
+        var feeds = [
+            makeFeed(
+                submissions: [makeSubmission(id: 1, createdAt: "2026-04-10T10:00:00Z")],
+                nextCursor: "next",
+                hasMore: true
+            ),
+            makeFeed(
+                submissions: [makeSubmission(id: 2, createdAt: "2026-04-10T09:00:00Z")],
+                nextCursor: nil,
+                hasMore: false
+            ),
+        ]
+        let viewModel = makeViewModel(defaults: defaults) { cursor in
+            requestedCursors.append(cursor)
+            return feeds.removeFirst()
+        }
+
+        await viewModel.load()
+        await viewModel.loadMore()
+
+        XCTAssertEqual(requestedCursors.count, 2)
+        XCTAssertNil(requestedCursors[0])
+        XCTAssertEqual(requestedCursors[1], "next")
+        XCTAssertEqual(viewModel.submissions.map(\.id), [1, 2])
+        XCTAssertNil(viewModel.nextCursor)
+        XCTAssertFalse(viewModel.hasMore)
+        XCTAssertFalse(viewModel.isLoadingMore)
+    }
+
     func testMarkCurrentSubmissionsViewedClearsCurrentBadgeAndPersists() {
         let isolated = makeIsolatedDefaults()
         let defaults = isolated.defaults
         defer { clear(isolated.suiteName, defaults: defaults) }
 
-        let viewModel = SubmissionStatusViewModel(defaults: defaults)
+        let viewModel = makeViewModel(defaults: defaults)
         viewModel.submissions = [
             makeSubmission(id: 1, createdAt: "2026-04-10T10:00:00Z"),
             makeSubmission(id: 2, createdAt: "2026-04-10T09:00:00Z")
@@ -113,7 +177,7 @@ final class SubmissionStatusViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.unseenCount, 0)
 
-        let reloadedViewModel = SubmissionStatusViewModel(defaults: defaults)
+        let reloadedViewModel = makeViewModel(defaults: defaults)
         reloadedViewModel.submissions = [
             makeSubmission(id: 1, createdAt: "2026-04-10T10:00:00Z"),
             makeSubmission(id: 2, createdAt: "2026-04-10T09:00:00Z"),
@@ -141,6 +205,32 @@ final class SubmissionStatusViewModelTests: XCTestCase {
             submittedVia: "app",
             isSelfSubmission: true,
             outcome: outcome
+        )
+    }
+
+    private func makeViewModel(
+        defaults: UserDefaults,
+        loadPage: ((_ cursor: String?) async throws -> SubmissionStatusFeed)? = nil
+    ) -> SubmissionStatusViewModel {
+        let resolvedLoadPage = loadPage ?? { _ in
+            self.makeFeed(submissions: [], nextCursor: nil, hasMore: false)
+        }
+        return SubmissionStatusViewModel(defaults: defaults, loadPage: resolvedLoadPage)
+    }
+
+    private func makeFeed(
+        submissions: [SubmissionStatusItem],
+        nextCursor: String?,
+        hasMore: Bool
+    ) -> SubmissionStatusFeed {
+        SubmissionStatusFeed(
+            submissions: submissions,
+            meta: PaginationMetadata(
+                nextCursor: nextCursor,
+                hasMore: hasMore,
+                pageSize: submissions.count,
+                total: submissions.count
+            )
         )
     }
 

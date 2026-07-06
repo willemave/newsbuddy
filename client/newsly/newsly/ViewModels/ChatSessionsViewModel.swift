@@ -6,22 +6,54 @@
 //
 
 import Foundation
+import Observation
 import SwiftUI
 
-@MainActor
-class ChatSessionsViewModel: ObservableObject {
-    @Published var sessions: [ChatSessionSummary] = []
-    @Published var isLoading = false
-    @Published var errorMessage: String?
+protocol ChatSessionsServicing: AnyObject {
+    func listSessions(
+        contentId: Int?,
+        newsItemId: Int?,
+        limit: Int
+    ) async throws -> [ChatSessionSummary]
 
-    private let chatService = ChatService.shared
+    func createSession(
+        contentId: Int?,
+        newsItemId: Int?,
+        topic: String?,
+        provider: ChatModelProvider?,
+        modelHint: String?,
+        initialMessage: String?
+    ) async throws -> ChatSessionSummary
+
+    func deleteSession(sessionId: Int) async throws
+}
+
+extension ChatService: ChatSessionsServicing {}
+
+@MainActor
+@Observable
+final class ChatSessionsViewModel {
+    var sessions: [ChatSessionSummary] = []
+    var isLoading = false
+    var errorMessage: String?
+
+    @ObservationIgnored
+    private let chatService: any ChatSessionsServicing
+
+    init(chatService: any ChatSessionsServicing) {
+        self.chatService = chatService
+    }
 
     func loadSessions() async {
         isLoading = true
         errorMessage = nil
 
         do {
-            sessions = try await chatService.listSessions()
+            sessions = try await chatService.listSessions(
+                contentId: nil,
+                newsItemId: nil,
+                limit: 50
+            )
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -37,8 +69,11 @@ class ChatSessionsViewModel: ObservableObject {
         do {
             let session = try await chatService.createSession(
                 contentId: contentId,
+                newsItemId: nil,
                 topic: topic,
-                provider: provider
+                provider: provider,
+                modelHint: nil,
+                initialMessage: nil
             )
             // Prepend to list
             sessions.insert(session, at: 0)

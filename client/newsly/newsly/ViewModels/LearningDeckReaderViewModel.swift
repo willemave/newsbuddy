@@ -10,6 +10,11 @@ private enum LearningDeckForegroundPollingSuspended: Error {
     case inactive
 }
 
+private enum LearningDeckReaderTaskKey: Hashable {
+    case send
+    case viewer
+}
+
 protocol LearningDeckReaderChatServicing: AnyObject {
     func createAssistantTurn(
         message: String,
@@ -98,16 +103,14 @@ final class LearningDeckReaderViewModel {
     private let viewerPollAttemptLimit = 120
 
     @ObservationIgnored
-    private var sendTask: Task<Void, Never>?
-    @ObservationIgnored
-    private var viewerTask: Task<Void, Never>?
+    private let tasks = TaskBag<LearningDeckReaderTaskKey>()
     @ObservationIgnored
     private var isViewActive = true
 
     init(
         deck: LearningDeck,
-        chatService: LearningDeckReaderChatServicing = ChatService.shared,
-        deckService: LearningDeckService = .shared
+        chatService: any LearningDeckReaderChatServicing,
+        deckService: LearningDeckService
     ) {
         self.deck = deck
         self.chatService = chatService
@@ -115,8 +118,7 @@ final class LearningDeckReaderViewModel {
     }
 
     deinit {
-        sendTask?.cancel()
-        viewerTask?.cancel()
+        tasks.cancelAll()
     }
 
     // MARK: - Viewer resolution
@@ -127,27 +129,24 @@ final class LearningDeckReaderViewModel {
             isResolvingViewer = false
             return
         }
-        guard resolvedViewerURL == nil, viewerTask == nil else { return }
+        guard resolvedViewerURL == nil, !tasks.isRunning(.viewer) else { return }
         startViewerResolution()
     }
 
     func retryViewerResolution() {
-        viewerTask?.cancel()
-        viewerTask = nil
+        tasks.cancel(.viewer)
         startViewerResolution()
     }
 
     func cancelViewerResolution() {
-        viewerTask?.cancel()
-        viewerTask = nil
+        tasks.cancel(.viewer)
     }
 
     private func startViewerResolution() {
         isResolvingViewer = true
         viewerResolutionFailed = false
-        viewerTask = Task { @MainActor [weak self] in
+        tasks.runReplacing(.viewer) { [weak self] in
             await self?.resolveViewerLoop()
-            self?.viewerTask = nil
         }
     }
 
@@ -195,11 +194,9 @@ final class LearningDeckReaderViewModel {
 
     func performSendMessage(text overrideText: String? = nil) {
         guard !isSending else { return }
-        sendTask?.cancel()
-        sendTask = Task { @MainActor [weak self] in
+        tasks.runReplacing(.send) { [weak self] in
             guard let self else { return }
             await self.sendMessage(text: overrideText)
-            self.sendTask = nil
         }
     }
 
@@ -212,8 +209,7 @@ final class LearningDeckReaderViewModel {
         isViewActive = false
 
         if pendingForegroundMessageId != nil {
-            sendTask?.cancel()
-            sendTask = nil
+            tasks.cancel(.send)
             isSending = false
             thinkingStartedAt = nil
         }
@@ -330,14 +326,13 @@ final class LearningDeckReaderViewModel {
     }
 
     private func resumeAcceptedSendIfNeeded() {
-        guard sendTask == nil, let messageId = pendingForegroundMessageId else { return }
+        guard !tasks.isRunning(.send), let messageId = pendingForegroundMessageId else { return }
 
         isSending = true
         thinkingStartedAt = Date()
-        sendTask = Task { @MainActor [weak self] in
+        tasks.runReplacing(.send) { [weak self] in
             guard let self else { return }
             await self.resumePolling(messageId: messageId)
-            self.sendTask = nil
         }
     }
 

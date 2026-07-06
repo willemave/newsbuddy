@@ -6,17 +6,31 @@ private enum ChatSessionDesign {
     static let edgeBackSwipeThreshold: CGFloat = 80
 }
 
+private enum ChatSessionSheetDestination: Identifiable {
+    case councilSettings
+    case share(ShareContent)
+
+    var id: String {
+        switch self {
+        case .councilSettings:
+            "councilSettings"
+        case .share(let content):
+            "share.\(content.id.uuidString)"
+        }
+    }
+}
+
 struct ChatSessionView: View {
-    @EnvironmentObject private var authViewModel: AuthenticationViewModel
+    @Environment(AuthenticationViewModel.self) private var authViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: ChatSessionViewModel
     let onShowHistory: (() -> Void)?
     @FocusState private var isInputFocused: Bool
-    @State private var shareContent: ShareContent?
+    @State private var activeSheet: ChatSessionSheetDestination?
     @State private var scrollToBottomRequest = 0
-    @State private var isCouncilSettingsPresented = false
     @State private var edgeBackDragOffset: CGFloat = 0
+    @State private var edgeBackSwipeFeedbackTrigger = 0
     private let route: ChatSessionRoute
     private let dependencies: ChatDependencies
 
@@ -53,12 +67,6 @@ struct ChatSessionView: View {
                 floatingBackButton
             }
             .offset(x: edgeBackDragOffset)
-            .sheet(isPresented: $isCouncilSettingsPresented) {
-                NavigationStack {
-                    SettingsView(scrollToCouncilOnAppear: true)
-                        .environmentObject(authViewModel)
-                }
-            }
             .scrollDismissesKeyboard(.interactively)
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -82,9 +90,18 @@ struct ChatSessionView: View {
             .onDisappear {
                 viewModel.handleDisappear()
             }
-            .sheet(item: $shareContent) { content in
-                ShareSheet(content: content)
+            .sheet(item: $activeSheet) { destination in
+                switch destination {
+                case .councilSettings:
+                    NavigationStack {
+                        SettingsView(scrollToCouncilOnAppear: true)
+                            .environment(authViewModel)
+                    }
+                case .share(let content):
+                    ShareSheet(content: content)
+                }
             }
+            .sensoryFeedback(.impact(weight: .light), trigger: edgeBackSwipeFeedbackTrigger)
     }
 
     private func switchToProvider(_ provider: ChatModelProvider) async {
@@ -126,21 +143,9 @@ struct ChatSessionView: View {
     }
 
     private var floatingBackButton: some View {
-        Button {
+        FloatingBackButton(style: .surface) {
             dismiss()
-        } label: {
-            Image(systemName: "chevron.left")
-                .font(.appSymbol(size: 20, weight: .semibold))
-                .foregroundStyle(Color.onSurface)
-                .frame(width: 44, height: 44)
-                .background(Color.surfacePrimary.opacity(0.72), in: Circle())
-                .overlay(
-                    Circle()
-                        .stroke(Color.outlineVariant.opacity(0.16), lineWidth: 1)
-                )
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Back")
         .padding(.leading, 16)
         .padding(.top, 12)
     }
@@ -165,9 +170,9 @@ struct ChatSessionView: View {
                     return
                 }
 
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                edgeBackSwipeFeedbackTrigger += 1
                 let dismissWidth = activeScreenWidth
-                withAnimation(.easeOut(duration: 0.18)) {
+                withAnimation(AppMotion.subtle) {
                     edgeBackDragOffset = dismissWidth
                 } completion: {
                     dismiss()
@@ -177,10 +182,12 @@ struct ChatSessionView: View {
     }
 
     private func presentShareSheet(for content: String) {
-        shareContent = ShareContent(
-            messageContent: content,
-            articleTitle: viewModel.session?.articleTitle,
-            articleUrl: viewModel.session?.articleUrl
+        activeSheet = .share(
+            ShareContent(
+                messageContent: content,
+                articleTitle: viewModel.session?.articleTitle,
+                articleUrl: viewModel.session?.articleUrl
+            )
         )
     }
 
@@ -236,7 +243,7 @@ private extension ChatSessionView {
         Task { await switchToProvider(provider) }
     }
 
-    func openCouncilSettings() { isCouncilSettingsPresented = true }
+    func openCouncilSettings() { activeSheet = .councilSettings }
 
     func dismissError() { viewModel.errorMessage = nil }
 
@@ -293,7 +300,7 @@ private extension ChatSessionView {
     }
 
     func snapBackFromEdgeSwipe() {
-        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82)) {
+        withAnimation(AppMotion.press) {
             edgeBackDragOffset = 0
         }
     }

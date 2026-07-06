@@ -16,6 +16,7 @@ final class KeychainManager: AuthTokenStore {
     private init() {}
 
     private let serviceName = "com.newsly.app"
+    private let accessGroupLock = NSLock()
     private var accessGroup: String?
 
     enum KeychainKey: String {
@@ -26,6 +27,8 @@ final class KeychainManager: AuthTokenStore {
 
     /// Optional configuration for shared keychain access (e.g., extensions).
     func configure(accessGroup: String?) {
+        accessGroupLock.lock()
+        defer { accessGroupLock.unlock() }
         self.accessGroup = accessGroup
     }
 
@@ -35,12 +38,13 @@ final class KeychainManager: AuthTokenStore {
     func saveToken(_ token: String, key: KeychainKey) {
         guard let data = token.data(using: .utf8) else { return }
 
-        let primaryStatus = upsertToken(data, account: key.rawValue, accessGroup: accessGroup)
+        let configuredAccessGroup = currentAccessGroup()
+        let primaryStatus = upsertToken(data, account: key.rawValue, accessGroup: configuredAccessGroup)
         if primaryStatus != errSecSuccess {
             logger.error("[Keychain] Save failed | account=\(key.rawValue, privacy: .public) status=\(primaryStatus)")
         }
 
-        if accessGroup != nil {
+        if configuredAccessGroup != nil {
             let legacyStatus = upsertToken(data, account: key.rawValue, accessGroup: nil)
             if legacyStatus != errSecSuccess {
                 logger.error("[Keychain] Legacy save failed | account=\(key.rawValue, privacy: .public) status=\(legacyStatus)")
@@ -56,20 +60,21 @@ final class KeychainManager: AuthTokenStore {
 
     /// Retrieve a token from the keychain
     func getToken(key: KeychainKey) -> String? {
-        if let accessGroup,
+        let configuredAccessGroup = currentAccessGroup()
+        if let accessGroup = configuredAccessGroup,
            let token = queryToken(account: key.rawValue, accessGroup: accessGroup) {
             return token
         }
 
         if let legacyToken = queryToken(account: key.rawValue, accessGroup: nil) {
-            if accessGroup != nil {
+            if configuredAccessGroup != nil {
                 saveToken(legacyToken, key: key)
             }
             return legacyToken
         }
 
         if let mirroredToken = mirroredTokenFromSharedDefaults(key: key) {
-            if accessGroup != nil {
+            if configuredAccessGroup != nil {
                 saveToken(mirroredToken, key: key)
             }
             return mirroredToken
@@ -89,11 +94,17 @@ final class KeychainManager: AuthTokenStore {
     }
 
     private func deleteToken(account: String) {
-        if let accessGroup {
+        if let accessGroup = currentAccessGroup() {
             deleteToken(account: account, accessGroup: accessGroup)
         }
         deleteToken(account: account, accessGroup: nil)
         clearMirroredTokenFromSharedDefaults(account: account)
+    }
+
+    private func currentAccessGroup() -> String? {
+        accessGroupLock.lock()
+        defer { accessGroupLock.unlock() }
+        return accessGroup
     }
 
     private func mirrorTokenToSharedDefaults(_ token: String, key: KeychainKey) {
@@ -177,293 +188,4 @@ protocol AuthTokenStore: AnyObject {
     func saveToken(_ token: String, key: KeychainManager.KeychainKey)
     func deleteToken(key: KeychainManager.KeychainKey)
     func clearAll()
-}
-
-protocol TokenRefreshing: AnyObject {
-    func refreshAccessToken() async throws -> String
-}
-
-enum AuthError: Error, LocalizedError {
-    case notAuthenticated
-    case noRefreshToken
-    case refreshTokenExpired
-    case refreshFailed
-    case serverError(statusCode: Int, message: String?)
-    case networkError(Error)
-    case appleSignInFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .notAuthenticated:
-            return "Not authenticated"
-        case .noRefreshToken:
-            return "No refresh token available"
-        case .refreshTokenExpired:
-            return "Refresh token expired"
-        case .refreshFailed:
-            return "Failed to refresh token"
-        case .serverError(let statusCode, let message):
-            return "Server error \(statusCode): \(message ?? "Unknown")"
-        case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
-        case .appleSignInFailed:
-            return "Apple Sign In failed"
-        }
-    }
-
-    var userFacingMessage: String {
-        switch self {
-        case .notAuthenticated, .noRefreshToken, .refreshTokenExpired:
-            return "Your session expired. Sign in again to continue."
-        case .refreshFailed:
-            return "We couldn't restore your session. Please try again."
-        case .serverError(let statusCode, let message):
-            return Self.sanitizedServerMessage(statusCode: statusCode, message: message)
-        case .networkError:
-            return "We couldn't reach Newsbuddy. Check your connection and try again."
-        case .appleSignInFailed:
-            return "Apple Sign In couldn't be completed. Please try again."
-        }
-    }
-
-    private static func sanitizedServerMessage(statusCode: Int, message: String?) -> String {
-        guard let extractedMessage = extractedMessage(from: message) else {
-            return fallbackMessage(for: statusCode)
-        }
-
-        if looksLikeHTML(extractedMessage) || statusCode >= 500 {
-            return fallbackMessage(for: statusCode)
-        }
-
-        return extractedMessage
-    }
-
-    private static func extractedMessage(from rawMessage: String?) -> String? {
-        guard let rawMessage else { return nil }
-
-        let trimmed = rawMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        if let jsonMessage = jsonFieldMessage(from: trimmed) {
-            return jsonMessage
-        }
-
-        return trimmed
-    }
-
-    private static func jsonFieldMessage(from rawMessage: String) -> String? {
-        guard let data = rawMessage.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            return nil
-        }
-
-        for key in ["detail", "message", "error", "error_message"] {
-            guard let value = object[key] as? String else { continue }
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                return trimmed
-            }
-        }
-
-        return nil
-    }
-
-    private static func fallbackMessage(for statusCode: Int) -> String {
-        switch statusCode {
-        case 429:
-            return "Too many attempts right now. Please try again in a moment."
-        case 500...599:
-            return "Newsbuddy is temporarily unavailable. Please try again in a moment."
-        default:
-            return "Something went wrong. Please try again."
-        }
-    }
-
-    private static func looksLikeHTML(_ message: String) -> Bool {
-        let lowercaseMessage = message.lowercased()
-        let htmlIndicators = [
-            "<!doctype",
-            "<html",
-            "<head",
-            "<body",
-            "</html",
-            "</body",
-            "<title",
-            "<meta",
-            "<div",
-            "<span",
-            "text/html",
-        ]
-
-        return htmlIndicators.contains { lowercaseMessage.contains($0) }
-    }
-}
-
-final class TokenRefreshService: TokenRefreshing {
-    static let shared = TokenRefreshService()
-
-    private let session: URLSession
-    private let tokenStore: AuthTokenStore
-    private let refreshCoordinator = RefreshCoordinator(cooldownSeconds: 10)
-    private let logger = Logger(subsystem: "com.newsly", category: "TokenRefreshService")
-
-    init(
-        session: URLSession = .shared,
-        tokenStore: AuthTokenStore = KeychainManager.shared
-    ) {
-        self.session = session
-        self.tokenStore = tokenStore
-    }
-
-    func refreshAccessToken() async throws -> String {
-        if let task = await refreshCoordinator.activeTask() {
-            return try await task.value
-        }
-
-        if let cached = await refreshCoordinator.cachedToken(
-            accessToken: tokenStore.getToken(key: .accessToken)
-        ) {
-            return cached
-        }
-
-        let task = Task { [weak self] () throws -> String in
-            defer {
-                Task { [weak self] in
-                    await self?.refreshCoordinator.clearTask()
-                }
-            }
-            guard let self else { throw AuthError.refreshFailed }
-            let token = try await self.performRefreshAccessToken()
-            await self.refreshCoordinator.markSuccess()
-            return token
-        }
-
-        await refreshCoordinator.setTask(task)
-        return try await task.value
-    }
-
-    private func performRefreshAccessToken() async throws -> String {
-        guard let refreshToken = tokenStore.getToken(key: .refreshToken) else {
-            logger.error("[AuthRefresh] Missing refresh token")
-            throw AuthError.noRefreshToken
-        }
-
-        guard let url = URL(string: "\(AppSettings.shared.baseURL)/auth/refresh") else {
-            throw AuthError.serverError(statusCode: -1, message: "Invalid refresh URL")
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONEncoder().encode(TokenRefreshRequestPayload(refreshToken: refreshToken))
-
-        do {
-            let (data, response) = try await session.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw AuthError.serverError(statusCode: -1, message: "Invalid HTTP response")
-            }
-
-            switch httpResponse.statusCode {
-            case 200:
-                let decoder = JSONDecoder()
-                let tokenResponse = try decoder.decode(TokenRefreshResponsePayload.self, from: data)
-                tokenStore.saveToken(tokenResponse.accessToken, key: .accessToken)
-                tokenStore.saveToken(tokenResponse.refreshToken, key: .refreshToken)
-                tokenStore.deleteLegacyTokenIfAvailable(named: "openaiApiKey")
-                logger.info("[AuthRefresh] Refresh succeeded")
-                return tokenResponse.accessToken
-
-            case 401, 403:
-                tokenStore.deleteToken(key: .accessToken)
-                tokenStore.deleteToken(key: .refreshToken)
-                let detail = String(data: data, encoding: .utf8) ?? "Unknown"
-                logger.error(
-                    "[AuthRefresh] Invalid refresh token | status=\(httpResponse.statusCode) detail=\(detail, privacy: .public)"
-                )
-                throw AuthError.refreshTokenExpired
-
-            default:
-                let detail = String(data: data, encoding: .utf8)
-                logger.error(
-                    "[AuthRefresh] Refresh failed | status=\(httpResponse.statusCode) detail=\((detail ?? "n/a"), privacy: .public)"
-                )
-                throw AuthError.serverError(statusCode: httpResponse.statusCode, message: detail)
-            }
-        } catch let urlError as URLError {
-            logger.error(
-                "[AuthRefresh] Network error | code=\(urlError.errorCode) description=\(urlError.localizedDescription, privacy: .public)"
-            )
-            throw AuthError.networkError(urlError)
-        } catch let authError as AuthError {
-            throw authError
-        } catch {
-            logger.error("[AuthRefresh] Unexpected error | description=\(error.localizedDescription, privacy: .public)")
-            throw AuthError.refreshFailed
-        }
-    }
-}
-
-private struct TokenRefreshRequestPayload: Codable {
-    let refreshToken: String
-
-    enum CodingKeys: String, CodingKey {
-        case refreshToken = "refresh_token"
-    }
-}
-
-private struct TokenRefreshResponsePayload: Codable {
-    let accessToken: String
-    let refreshToken: String
-
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
-        case refreshToken = "refresh_token"
-    }
-}
-
-private actor RefreshCoordinator {
-    private var refreshTask: Task<String, Error>?
-    private var lastSuccessfulRefresh: Date?
-    private let cooldownSeconds: TimeInterval
-
-    init(cooldownSeconds: TimeInterval) {
-        self.cooldownSeconds = cooldownSeconds
-    }
-
-    func activeTask() -> Task<String, Error>? {
-        refreshTask
-    }
-
-    func setTask(_ task: Task<String, Error>) {
-        refreshTask = task
-    }
-
-    func clearTask() {
-        refreshTask = nil
-    }
-
-    func markSuccess() {
-        lastSuccessfulRefresh = Date()
-    }
-
-    func cachedToken(accessToken: String?) -> String? {
-        guard let lastSuccessfulRefresh,
-              Date().timeIntervalSince(lastSuccessfulRefresh) < cooldownSeconds,
-              let token = accessToken,
-              !token.isEmpty else {
-            return nil
-        }
-        return token
-    }
-}
-
-private extension AuthTokenStore {
-    func deleteLegacyTokenIfAvailable(named account: String) {
-        guard let keychainManager = self as? KeychainManager else {
-            return
-        }
-        keychainManager.deleteLegacyToken(named: account)
-    }
 }

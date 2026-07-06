@@ -7,6 +7,7 @@ DESIGN_TOKENS = APP_ROOT / "Views/Shared/DesignTokens.swift"
 APP_INFO_PLIST = APP_ROOT / "Info.plist"
 SHARE_EXTENSION_INFO_PLIST = SHARE_EXTENSION_ROOT / "Info.plist"
 SHARE_VIEW_CONTROLLER = SHARE_EXTENSION_ROOT / "ShareViewController.swift"
+SHARE_EXTENSION_STYLE = APP_ROOT / "Shared/ShareExtensionStyle.swift"
 
 
 def test_ios_body_sans_family_uses_lato() -> None:
@@ -31,6 +32,10 @@ def test_lato_fonts_are_registered_for_app_and_share_extension() -> None:
 
 
 def test_share_extension_body_family_matches_app_sans_family() -> None:
-    source = SHARE_VIEW_CONTROLLER.read_text()
+    controller_source = SHARE_VIEW_CONTROLLER.read_text()
+    style_source = SHARE_EXTENSION_STYLE.read_text()
 
-    assert 'static let bodyFamily = "Lato-Regular"' in source
+    assert 'static let bodyFamily = "Lato-Regular"' in style_source
+    assert 'static let titleFamily = "Lora-Regular"' in style_source
+    assert "ShareExtensionStyle.font(textStyle: .body)" in controller_source
+    assert "ShareExtensionStyle.titleFont(textStyle: .headline)" in controller_source
