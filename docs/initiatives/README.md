@@ -26,6 +26,7 @@ Change-oriented docs that used to live under `docs/plans/`, `docs/specs/`, and `
 - `onboarding-speech-realtime/`
 - `pipeline-reliability/`
 - `podcast-sources-2025-11/`
+- `python-cleanup-2026-07/` - executes the 2026-07 full Python audit: bug fixes, ~13.5k lines of dead-code deletion, perf work, consolidations.
 - `settings-ui-modernization/`
 - `share-sheet-instruction-processing/`
 - `swiftui-list-views-refactor/`
