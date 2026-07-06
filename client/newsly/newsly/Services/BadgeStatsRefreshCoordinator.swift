@@ -19,6 +19,7 @@ final class BadgeStatsRefreshCoordinator {
     private weak var unreadService: UnreadCountService?
     private weak var processingService: ProcessingCountService?
     private var refreshTask: Task<Void, Never>?
+    private var refreshGeneration = 0
     private var refreshTimer: Timer?
     private var observers: [NSObjectProtocol] = []
     private var didInstallLifecycleObservers = false
@@ -44,22 +45,29 @@ final class BadgeStatsRefreshCoordinator {
             return
         }
 
+        refreshGeneration += 1
+        let generation = refreshGeneration
         let task = Task { [weak self] in
             guard let self else { return }
             await self.performRefreshStats()
         }
         refreshTask = task
         await task.value
-        refreshTask = nil
+        if refreshGeneration == generation {
+            refreshTask = nil
+        }
     }
 
     private func performRefreshStats() async {
-        guard !isRefreshSuspended else { return }
+        guard !Task.isCancelled, !isRefreshSuspended else { return }
         do {
             let response: BadgeStatsResponse = try await client.request(APIEndpoints.badgeStats)
+            guard !Task.isCancelled, !isRefreshSuspended else { return }
             unreadService?.applyCounts(response.unread)
             processingService?.applyCount(response.processing)
             scheduleNextRefresh(hasActiveProcessing: response.processing.processingCount > 0)
+        } catch where Task.isCancelled || isRefreshSuspended {
+            return
         } catch {
             badgeStatsLogger.error("Failed to fetch badge stats: \(error.localizedDescription, privacy: .public)")
             scheduleNextRefresh(hasActiveProcessing: false)
@@ -73,12 +81,14 @@ final class BadgeStatsRefreshCoordinator {
         if isSuspended {
             refreshTimer?.invalidate()
             refreshTimer = nil
+            cancelRefreshTask()
         }
     }
 
     func stop(resetCounts: Bool = false) {
         refreshTimer?.invalidate()
         refreshTimer = nil
+        cancelRefreshTask()
         if resetCounts {
             unreadService?.applyCounts(UnreadCountsResponse(article: 0, podcast: 0, news: 0))
             processingService?.applyCount(
@@ -117,15 +127,23 @@ final class BadgeStatsRefreshCoordinator {
             }
         })
 
-        observers.append(NotificationCenter.default.addObserver(
-            forName: .authDidLogOut,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.stop(resetCounts: true)
-            }
-        })
+        for notificationName in [Notification.Name.authDidLogOut, .authenticationRequired] {
+            observers.append(NotificationCenter.default.addObserver(
+                forName: notificationName,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.stop(resetCounts: true)
+                }
+            })
+        }
+    }
+
+    private func cancelRefreshTask() {
+        refreshGeneration += 1
+        refreshTask?.cancel()
+        refreshTask = nil
     }
 
     private func scheduleNextRefresh(hasActiveProcessing: Bool) {
