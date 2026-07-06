@@ -11,6 +11,7 @@ struct HowItWorksModal: View {
     let feedCount: Int
     let onDone: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
 
     private struct TutorialTip: Identifiable {
@@ -77,18 +78,18 @@ struct HowItWorksModal: View {
                     Text("What to expect")
                         .font(.appTitle2)
                         .foregroundColor(.onboardingText)
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 10)
+                        .opacity(entranceOpacity)
+                        .offset(y: entranceOffset(10))
                 }
                 .padding(.bottom, 30)
 
                 VStack(spacing: 10) {
                     ForEach(Array(tips.enumerated()), id: \.element.id) { index, tip in
                         tipRow(tip)
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 16)
+                            .opacity(entranceOpacity)
+                            .offset(y: entranceOffset(16))
                             .animation(
-                                .easeOut(duration: 0.5).delay(0.15 + Double(index) * 0.08),
+                                stagedEntranceAnimation(index: index),
                                 value: appeared
                             )
                     }
@@ -108,13 +109,13 @@ struct HowItWorksModal: View {
                 .buttonStyle(.plain)
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.bottom, 16)
-                .opacity(appeared ? 1 : 0)
-                .animation(.easeOut(duration: 0.4).delay(0.6), value: appeared)
+                .opacity(entranceOpacity)
+                .animation(buttonEntranceAnimation, value: appeared)
                 .accessibilityIdentifier("onboarding.tutorial.complete")
             }
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.6)) {
+            withAnimation(reduceMotion ? nil : AppMotion.emphasized) {
                 appeared = true
             }
         }
@@ -160,7 +161,7 @@ struct HowItWorksModal: View {
                     RoundedRectangle(cornerRadius: 18)
                         .stroke(Color.onboardingText.opacity(tip.isFeatured ? 0.14 : 0.08), lineWidth: 0.5)
                 )
-                .shadow(color: .black.opacity(tip.isFeatured ? 0.08 : 0.04), radius: 14, x: 0, y: 10)
+                .appShadow(tip.isFeatured ? .elevated : .card)
         )
     }
 
@@ -171,6 +172,22 @@ struct HowItWorksModal: View {
     private var primaryButtonBackground: some View {
         RoundedRectangle(cornerRadius: 24)
             .fill(Color.onboardingText)
-            .shadow(color: .black.opacity(0.10), radius: 18, x: 0, y: 12)
+            .appShadow(.elevated)
+    }
+
+    private var entranceOpacity: Double {
+        appeared || reduceMotion ? 1 : 0
+    }
+
+    private func entranceOffset(_ distance: CGFloat) -> CGFloat {
+        appeared || reduceMotion ? 0 : distance
+    }
+
+    private func stagedEntranceAnimation(index: Int) -> Animation? {
+        reduceMotion ? nil : AppMotion.emphasized.delay(0.12 + Double(index) * 0.06)
+    }
+
+    private var buttonEntranceAnimation: Animation? {
+        reduceMotion ? nil : AppMotion.panel.delay(0.36)
     }
 }

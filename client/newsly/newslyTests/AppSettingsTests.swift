@@ -4,6 +4,25 @@ import XCTest
 
 final class AppSettingsTests: XCTestCase {
     @MainActor
+    func testSetBackendTranscriptionAvailabilityPersistsWhenChanged() {
+        let settings = AppSettings.shared
+        let original = settings.backendTranscriptionAvailable
+        let target = !original
+        defer {
+            settings.setBackendTranscriptionAvailable(original)
+        }
+
+        settings.setBackendTranscriptionAvailable(target)
+        settings.setBackendTranscriptionAvailable(target)
+
+        XCTAssertEqual(settings.backendTranscriptionAvailable, target)
+        XCTAssertEqual(
+            SharedContainer.userDefaults.object(forKey: "backendTranscriptionAvailable") as? Bool,
+            target
+        )
+    }
+
+    @MainActor
     func testReadingExperienceFallsBackToClassicForUnknownRawValue() {
         let settings = AppSettings.shared
         let original = settings.readingExperienceRaw

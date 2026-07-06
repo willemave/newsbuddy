@@ -6,8 +6,18 @@
 import SwiftUI
 
 struct MoreView: View {
-    @ObservedObject var submissionsViewModel: SubmissionStatusViewModel
-    @StateObject private var processingCountService = ProcessingCountService.shared
+    let submissionsViewModel: SubmissionStatusViewModel
+    let readStateCache: ReadStateCache
+    @State private var processingCountService = ProcessingCountService.shared
+
+    init(
+        submissionsViewModel: SubmissionStatusViewModel,
+        readStateCache: ReadStateCache? = nil
+    ) {
+        let readStateCache = readStateCache ?? ReadStateCache()
+        self.submissionsViewModel = submissionsViewModel
+        self.readStateCache = readStateCache
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,13 +26,16 @@ struct MoreView: View {
             List {
                 Section {
                     menuRow(
-                        destination: SearchView(),
+                        destination: SearchView(
+                            readStateCache: readStateCache,
+                            viewModel: RootDependencyFactory.makeSearchViewModel()
+                        ),
                         icon: "magnifyingglass",
                         title: "Search"
                     )
 
                     menuRow(
-                        destination: RecentlyReadView(),
+                        destination: RecentlyReadView(readStateCache: readStateCache),
                         icon: "clock",
                         title: "Recently Read"
                     )
@@ -105,5 +118,5 @@ struct MoreView: View {
 }
 
 #Preview {
-    MoreView(submissionsViewModel: SubmissionStatusViewModel())
+    MoreView(submissionsViewModel: RootDependencyFactory.makeSubmissionStatusViewModel())
 }

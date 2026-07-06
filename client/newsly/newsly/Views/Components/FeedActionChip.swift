@@ -19,7 +19,7 @@ struct FeedActionChip: View {
                     .font(.appSymbol(size: 13, weight: .semibold))
                     .foregroundStyle(Color.brandPrimary)
                     .contentTransition(.symbolEffect(.replace))
-                    .animation(.easeOut(duration: 0.18), value: systemImage)
+                    .animation(AppMotion.subtle, value: systemImage)
                     .opacity(isLoading ? 0 : 1)
 
                 ProgressView()
@@ -27,7 +27,7 @@ struct FeedActionChip: View {
                     .tint(Color.brandPrimary)
                     .opacity(isLoading ? 1 : 0)
             }
-            .animation(.easeInOut(duration: 0.18), value: isLoading)
+            .animation(AppMotion.subtle, value: isLoading)
 
             Text(title)
                 .font(.terracottaBodyMedium.weight(.semibold))

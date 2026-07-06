@@ -6,6 +6,8 @@
 import SwiftUI
 
 struct ChatMessageList: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let timeline: [ChatTimelineItem]
     let hasMessages: Bool
     let isLoading: Bool
@@ -28,7 +30,7 @@ struct ChatMessageList: View {
     @State private var isNearBottom = true
     @State private var hasNewerContentBelow = false
     @State private var hasAnchoredInitialScroll = false
-    @StateObject private var feedOptionActionModel = AssistantFeedOptionActionModel()
+    @State private var feedOptionActionModel = AssistantFeedOptionActionModel()
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -66,7 +68,8 @@ struct ChatMessageList: View {
                                 onDigDeeper: onDigDeeper,
                                 onShare: onShare
                             )
-                                .id(item.id)
+                            .id(item.id)
+                            .transition(messageInsertionTransition)
                         }
 
                         if isSending {
@@ -75,15 +78,18 @@ struct ChatMessageList: View {
                                 statusText: latestProcessSummary
                             )
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            .transition(messageInsertionTransition)
                             .id(Self.thinkingBubbleID)
                         }
                     }
                 }
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.vertical, 10)
+                .animation(messageAnimation, value: timeline.map(\.id))
+                .animation(messageAnimation, value: isSending)
             }
             .contentMargins(.bottom, 12, for: .scrollContent)
+            .topScreenEdgeFade()
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 let distanceFromBottom =
                     geometry.contentSize.height
@@ -106,7 +112,7 @@ struct ChatMessageList: View {
                     return
                 }
                 if isNearBottom {
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(messageAnimation) {
                         proxy.scrollTo(newId, anchor: .bottom)
                     }
                 } else {
@@ -115,14 +121,14 @@ struct ChatMessageList: View {
             }
             .onChange(of: isSending) { _, sending in
                 if sending, isNearBottom {
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(messageAnimation) {
                         proxy.scrollTo(Self.thinkingBubbleID, anchor: .bottom)
                     }
                 }
             }
             .onChange(of: scrollToBottomRequest) { _, _ in
                 guard let anchorId = timeline.last?.id else { return }
-                withAnimation(.easeOut(duration: 0.2)) {
+                withAnimation(messageAnimation) {
                     proxy.scrollTo(anchorId, anchor: .bottom)
                 }
                 hasNewerContentBelow = false
@@ -134,6 +140,18 @@ struct ChatMessageList: View {
     }
 
     private static let thinkingBubbleID = "chat.thinkingBubble"
+
+    private var messageAnimation: Animation {
+        AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)
+    }
+
+    private var messageInsertionTransition: AnyTransition {
+        if reduceMotion {
+            return .opacity
+        } else {
+            return .opacity.combined(with: .move(edge: .bottom))
+        }
+    }
 
     @ViewBuilder
     private var emptyTimelineState: some View {
@@ -174,7 +192,7 @@ struct ChatMessageList: View {
         if hasNewerContentBelow {
             Button {
                 if let anchorId = timeline.last?.id {
-                    withAnimation(.easeOut(duration: 0.2)) {
+                    withAnimation(messageAnimation) {
                         proxy.scrollTo(anchorId, anchor: .bottom)
                     }
                 }
@@ -190,12 +208,12 @@ struct ChatMessageList: View {
                         Capsule()
                             .stroke(Color.chatAccent.opacity(0.24), lineWidth: 1)
                     )
-                    .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+                    .appShadow(.subtle)
             }
             .buttonStyle(.plain)
             .padding(.bottom, 10)
             .transition(.opacity)
-            .animation(.easeOut(duration: 0.2), value: hasNewerContentBelow)
+            .animation(messageAnimation, value: hasNewerContentBelow)
         }
     }
 

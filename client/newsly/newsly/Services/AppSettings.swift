@@ -5,9 +5,8 @@
 //  Created by Assistant on 7/9/25.
 //
 
-import Combine
 import Foundation
-import SwiftUI
+import Observation
 import os.log
 
 private let appSettingsLogger = Logger(
@@ -102,19 +101,37 @@ enum ReadingExperience: String, CaseIterable, Identifiable {
     }
 }
 
-class AppSettings: ObservableObject {
+@Observable
+final class AppSettings {
     static let shared = AppSettings()
-    
-    @AppStorage("serverHost", store: SharedContainer.userDefaults) var serverHost: String = "localhost"
-    @AppStorage("serverPort", store: SharedContainer.userDefaults) var serverPort: String = "8000"
-    @AppStorage("useHTTPS", store: SharedContainer.userDefaults) var useHTTPS: Bool = false
-    @AppStorage("appTextSizeIndex", store: SharedContainer.userDefaults) var appTextSizeIndex: Int = 1
-    @AppStorage("contentTextSizeIndex", store: SharedContainer.userDefaults) var contentTextSizeIndex: Int = 2
-    @AppStorage("useLongFormCardStack", store: SharedContainer.userDefaults) var useLongFormCardStack: Bool = true
-    @AppStorage("backendTranscriptionAvailable", store: SharedContainer.userDefaults) var backendTranscriptionAvailable: Bool = false
-    @AppStorage("readingExperience", store: SharedContainer.userDefaults) var readingExperienceRaw: String = ReadingExperience.classic.rawValue
+
+    var serverHost: String {
+        didSet { userDefaults.set(serverHost, forKey: ServerConfigurationDefaults.hostKey) }
+    }
+    var serverPort: String {
+        didSet { userDefaults.set(serverPort, forKey: ServerConfigurationDefaults.portKey) }
+    }
+    var useHTTPS: Bool {
+        didSet { userDefaults.set(useHTTPS, forKey: ServerConfigurationDefaults.useHTTPSKey) }
+    }
+    var appTextSizeIndex: Int {
+        didSet { userDefaults.set(appTextSizeIndex, forKey: "appTextSizeIndex") }
+    }
+    var contentTextSizeIndex: Int {
+        didSet { userDefaults.set(contentTextSizeIndex, forKey: "contentTextSizeIndex") }
+    }
+    var backendTranscriptionAvailable: Bool {
+        didSet { userDefaults.set(backendTranscriptionAvailable, forKey: "backendTranscriptionAvailable") }
+    }
+    var readingExperienceRaw: String {
+        didSet { userDefaults.set(readingExperienceRaw, forKey: "readingExperience") }
+    }
+
+    @ObservationIgnored
+    private let userDefaults: UserDefaults
+
     private var hasExplicitServerConfiguration: Bool {
-        ServerConfigurationDefaults.hasPersistedServerConfiguration(in: SharedContainer.userDefaults)
+        ServerConfigurationDefaults.hasPersistedServerConfiguration(in: userDefaults)
     }
     private var normalizedHost: String {
 #if targetEnvironment(simulator)
@@ -142,28 +159,34 @@ class AppSettings: ObservableObject {
 
     func setAppTextSize(_ index: Int) {
         guard appTextSizeIndex != index else { return }
-        objectWillChange.send()
         appTextSizeIndex = index
     }
 
     func setContentTextSize(_ index: Int) {
         guard contentTextSizeIndex != index else { return }
-        objectWillChange.send()
         contentTextSizeIndex = index
     }
 
     func setBackendTranscriptionAvailable(_ isAvailable: Bool) {
+        guard backendTranscriptionAvailable != isAvailable else { return }
         backendTranscriptionAvailable = isAvailable
     }
 
     func setReadingExperience(_ experience: ReadingExperience) {
         guard readingExperience != experience else { return }
-        objectWillChange.send()
         readingExperienceRaw = experience.rawValue
     }
     
-    private init() {
-        ServerConfigurationDefaults.applyDebugDefaultsIfNeeded(to: SharedContainer.userDefaults)
-        ServerConfigurationDefaults.applyLaunchOverridesIfNeeded(to: SharedContainer.userDefaults)
+    private init(userDefaults: UserDefaults = SharedContainer.userDefaults) {
+        self.userDefaults = userDefaults
+        ServerConfigurationDefaults.applyDebugDefaultsIfNeeded(to: userDefaults)
+        ServerConfigurationDefaults.applyLaunchOverridesIfNeeded(to: userDefaults)
+        serverHost = userDefaults.string(forKey: ServerConfigurationDefaults.hostKey) ?? ServerConfigurationDefaults.defaultHost
+        serverPort = userDefaults.string(forKey: ServerConfigurationDefaults.portKey) ?? ServerConfigurationDefaults.defaultPort
+        useHTTPS = userDefaults.object(forKey: ServerConfigurationDefaults.useHTTPSKey) as? Bool ?? false
+        appTextSizeIndex = userDefaults.object(forKey: "appTextSizeIndex") as? Int ?? 1
+        contentTextSizeIndex = userDefaults.object(forKey: "contentTextSizeIndex") as? Int ?? 2
+        backendTranscriptionAvailable = userDefaults.object(forKey: "backendTranscriptionAvailable") as? Bool ?? false
+        readingExperienceRaw = userDefaults.string(forKey: "readingExperience") ?? ReadingExperience.classic.rawValue
     }
 }

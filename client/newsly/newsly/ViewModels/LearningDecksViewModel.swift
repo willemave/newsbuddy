@@ -4,21 +4,31 @@
 //
 
 import Foundation
+import Observation
+
+private enum LearningDecksTaskKey: Hashable {
+    case deckPolling(Int)
+}
 
 @MainActor
-final class LearningDecksViewModel: ObservableObject {
-    @Published private(set) var decks: [LearningDeck] = []
-    @Published private(set) var isLoading = false
-    @Published private(set) var isCreating = false
-    @Published private(set) var busyDeckIDs: Set<Int> = []
-    @Published var errorMessage: String?
+@Observable
+final class LearningDecksViewModel {
+    private(set) var decks: [LearningDeck] = []
+    private(set) var isLoading = false
+    private(set) var isCreating = false
+    private(set) var busyDeckIDs: Set<Int> = []
+    var errorMessage: String?
 
+    @ObservationIgnored
     private let service: LearningDeckService
-    private var pollingDeckIDs: Set<Int> = []
+    @ObservationIgnored
+    private let tasks = TaskBag<LearningDecksTaskKey>()
+    @ObservationIgnored
     private let pollingIntervalNanoseconds: UInt64 = 3_000_000_000
+    @ObservationIgnored
     private let pollingAttemptLimit = 120
 
-    init(service: LearningDeckService = .shared) {
+    init(service: LearningDeckService) {
         self.service = service
     }
 
@@ -144,6 +154,7 @@ final class LearningDecksViewModel: ObservableObject {
                     errorMessage = "This deck can't be regenerated."
                     return nil
                 }
+                tasks.cancel(.deckPolling(deck.id))
                 decks.removeAll { $0.id == deck.id }
                 upsert(replacement)
                 errorMessage = nil
@@ -161,6 +172,7 @@ final class LearningDecksViewModel: ObservableObject {
         await withDeckBusy(deck.id) {
             do {
                 try await service.deleteDeck(deckId: deck.id)
+                tasks.cancel(.deckPolling(deck.id))
                 decks.removeAll { $0.id == deck.id }
                 errorMessage = nil
             } catch where isNetworkCancellation(error) {
@@ -190,17 +202,18 @@ final class LearningDecksViewModel: ObservableObject {
     }
 
     private func startPollingIfNeeded(_ deck: LearningDeck) {
-        guard deck.hasActiveLatestRun, !pollingDeckIDs.contains(deck.id) else { return }
-        pollingDeckIDs.insert(deck.id)
+        let taskKey = LearningDecksTaskKey.deckPolling(deck.id)
+        guard deck.hasActiveLatestRun else {
+            tasks.cancel(taskKey)
+            return
+        }
 
-        Task { [weak self] in
+        tasks.runIfIdle(taskKey) { [weak self] in
             await self?.pollUntilLatestRunFinishes(deckId: deck.id)
         }
     }
 
     private func pollUntilLatestRunFinishes(deckId: Int) async {
-        defer { pollingDeckIDs.remove(deckId) }
-
         for _ in 0..<pollingAttemptLimit {
             do {
                 try await Task.sleep(nanoseconds: pollingIntervalNanoseconds)

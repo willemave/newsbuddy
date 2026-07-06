@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Observation
 import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "ReadingState")
@@ -16,16 +17,15 @@ struct ReadingState: Codable, Equatable {
     let lastUpdated: Date
 }
 
-/// Notification posted when content is marked as read from detail view
-extension Notification.Name {
-    static let contentMarkedAsRead = Notification.Name("contentMarkedAsRead")
-}
-
 @MainActor
-final class ReadingStateStore: ObservableObject {
-    @Published var current: ReadingState?
+@Observable
+final class ReadingStateStore {
+    var current: ReadingState?
 
+    @ObservationIgnored
     private let defaults: UserDefaults
+
+    @ObservationIgnored
     private let storageKey: String
 
     init(userId: Int? = nil, defaults: UserDefaults = .standard) {
@@ -44,17 +44,6 @@ final class ReadingStateStore: ObservableObject {
         let state = ReadingState(contentId: contentId, contentType: type, lastUpdated: Date())
         current = state
         persist()
-    }
-
-    func markAsRead(contentId: Int, contentType: APIContentType) {
-        logger.info("[ReadingState] markAsRead called | contentId=\(contentId) type=\(contentType.rawValue, privacy: .public)")
-        // Post notification so list views can update their local state
-        NotificationCenter.default.post(
-            name: .contentMarkedAsRead,
-            object: nil,
-            userInfo: ["contentId": contentId, "contentType": contentType.rawValue]
-        )
-        logger.debug("[ReadingState] Posted contentMarkedAsRead notification | contentId=\(contentId)")
     }
 
     func clear() {

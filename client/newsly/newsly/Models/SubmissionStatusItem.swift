@@ -343,6 +343,11 @@ struct SubmissionStatusFeed {
     let submissions: [SubmissionStatusItem]
     let meta: PaginationMetadata
 
+    init(submissions: [SubmissionStatusItem], meta: PaginationMetadata) {
+        self.submissions = submissions
+        self.meta = meta
+    }
+
     init(api response: APISubmissionStatusListResponse) {
         submissions = response.submissions.map(SubmissionStatusItem.init(api:))
         meta = response.meta

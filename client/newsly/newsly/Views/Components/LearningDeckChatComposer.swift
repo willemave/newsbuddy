@@ -40,8 +40,8 @@ struct LearningDeckChatComposer: View {
                     }
                 }
                 .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
-                .animation(.easeOut(duration: 0.18), value: sendButtonDisabled)
-                .animation(.easeOut(duration: 0.18), value: viewModel.isSending)
+                .animation(AppMotion.subtle, value: sendButtonDisabled)
+                .animation(AppMotion.subtle, value: viewModel.isSending)
                 .frame(width: 44, height: 44)
                 .learningDeckReaderSendSurface(isEnabled: !sendButtonDisabled)
                 .contentShape(Circle())

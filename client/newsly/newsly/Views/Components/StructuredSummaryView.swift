@@ -122,7 +122,7 @@ struct StructuredSummaryView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(AppMotion.subtle) {
                     isExpanded.wrappedValue.toggle()
                 }
             } label: {

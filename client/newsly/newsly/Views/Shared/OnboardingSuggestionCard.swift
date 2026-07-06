@@ -147,7 +147,7 @@ struct OnboardingSuggestionCard: View {
                         lineWidth: isSelected ? 0.75 : 0.5
                     )
             )
-            .shadow(color: .black.opacity(isSelected ? 0.07 : 0.04), radius: 14, x: 0, y: 10)
+            .appShadow(.card)
     }
 
     private func formattedHost(_ urlString: String) -> String? {

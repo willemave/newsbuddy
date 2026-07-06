@@ -7,8 +7,8 @@ import SwiftUI
 import UIKit
 
 struct CustomNarrationListSheet: View {
-    @ObservedObject var viewModel: CustomNarrationLibraryViewModel
-    @ObservedObject var playbackService: NarrationPlaybackService
+    let viewModel: CustomNarrationLibraryViewModel
+    let playbackService: NarrationPlaybackService
 
     @Environment(\.dismiss) private var dismiss
     @State private var shareItem: NarrationShareItem?

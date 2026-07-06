@@ -13,6 +13,8 @@ struct ChatStatusBanner: View {
     let onTap: () -> Void
     let onDismiss: () -> Void
     var style: BannerStyle = .floating
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPulsing = false
 
     enum BannerStyle {
@@ -48,15 +50,21 @@ struct ChatStatusBanner: View {
         .padding(.vertical, style == .inline ? 10 : 12)
         .background(backgroundColor)
         .applyBannerStyle(style)
-        .opacity(isPulsing && style == .inline && isProcessing ? 0.7 : 1.0)
-        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: isPulsing)
+        .opacity(!reduceMotion && isPulsing && style == .inline && isProcessing ? 0.7 : 1.0)
+        .animation(
+            reduceMotion ? nil : AppMotion.chatStatusPulse,
+            value: isPulsing
+        )
         .onAppear {
-            if style == .inline && isProcessing {
+            if !reduceMotion && style == .inline && isProcessing {
                 isPulsing = true
             }
         }
         .onChange(of: isProcessing) { _, processing in
-            isPulsing = processing && style == .inline
+            isPulsing = !reduceMotion && processing && style == .inline
+        }
+        .onChange(of: reduceMotion) { _, reduceMotion in
+            isPulsing = !reduceMotion && isProcessing && style == .inline
         }
         .onTapGesture {
             if case .completed = session.status {
@@ -147,7 +155,7 @@ private extension View {
         case .floating:
             self
                 .cornerRadius(12)
-                .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                .appShadow(.subtle)
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.top, 8)
         case .inline:

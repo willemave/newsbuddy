@@ -21,6 +21,7 @@ final class BadgeStatsRefreshCoordinator {
     private var refreshTimer: Timer?
     private var observers: [NSObjectProtocol] = []
     private var didInstallLifecycleObservers = false
+    private var isRefreshSuspended = false
 
     private init() {}
 
@@ -35,6 +36,8 @@ final class BadgeStatsRefreshCoordinator {
     }
 
     func refreshStats() async {
+        guard !isRefreshSuspended else { return }
+
         do {
             let response: BadgeStatsResponse = try await client.request(APIEndpoints.badgeStats)
             unreadService?.applyCounts(response.unread)
@@ -43,6 +46,16 @@ final class BadgeStatsRefreshCoordinator {
         } catch {
             badgeStatsLogger.error("Failed to fetch badge stats: \(error.localizedDescription, privacy: .public)")
             scheduleNextRefresh(hasActiveProcessing: false)
+        }
+    }
+
+    func setRefreshSuspended(_ isSuspended: Bool) {
+        guard isRefreshSuspended != isSuspended else { return }
+        isRefreshSuspended = isSuspended
+
+        if isSuspended {
+            refreshTimer?.invalidate()
+            refreshTimer = nil
         }
     }
 
@@ -72,6 +85,7 @@ final class BadgeStatsRefreshCoordinator {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
+                self?.setRefreshSuspended(false)
                 await self?.refreshStats()
             }
         })
@@ -82,27 +96,25 @@ final class BadgeStatsRefreshCoordinator {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.stop(resetCounts: false)
+                self?.setRefreshSuspended(true)
             }
         })
 
-        for notificationName in [Notification.Name.authDidLogOut, .authenticationRequired] {
-            observers.append(NotificationCenter.default.addObserver(
-                forName: notificationName,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in
-                    self?.stop(resetCounts: true)
-                }
-            })
-        }
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .authDidLogOut,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.stop(resetCounts: true)
+            }
+        })
     }
 
     private func scheduleNextRefresh(hasActiveProcessing: Bool) {
         refreshTimer?.invalidate()
         refreshTimer = nil
-        guard hasActiveProcessing, UIApplication.shared.applicationState == .active else { return }
+        guard hasActiveProcessing, !isRefreshSuspended, UIApplication.shared.applicationState == .active else { return }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 await self?.refreshStats()

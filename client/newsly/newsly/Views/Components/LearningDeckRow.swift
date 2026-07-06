@@ -186,7 +186,7 @@ struct LearningDeckRow: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .learningDeckStatusSurface(tint: statusColor)
-                .animation(.easeInOut(duration: 0.25), value: deck.statusLabel)
+                .animation(AppMotion.subtle, value: deck.statusLabel)
         }
     }
 

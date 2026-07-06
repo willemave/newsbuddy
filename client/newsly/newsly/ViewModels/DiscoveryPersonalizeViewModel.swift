@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Observation
 import os.log
 
 private let discoveryPersonalizePollingIntervalNanoseconds: UInt64 = 500_000_000
@@ -19,7 +20,12 @@ private func discoveryPersonalizeElapsedMilliseconds(since start: Date) -> Int {
 }
 
 @MainActor
-final class DiscoveryPersonalizeViewModel: ObservableObject {
+@Observable
+final class DiscoveryPersonalizeViewModel {
+    private enum TaskKey: Hashable {
+        case discoveryPolling
+    }
+
     enum Step: Int {
         case audio
         case loading
@@ -28,49 +34,76 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
 
     // MARK: - Published State
 
-    @Published var step: Step = .audio
-    @Published var suggestions: OnboardingFastDiscoverResponse?
-    @Published var selectedSourceKeys: Set<String> = []
-    @Published var selectedSubreddits: Set<String> = []
-    @Published var isLoading = false
-    @Published var loadingMessage = ""
-    @Published var errorMessage: String?
+    var step: Step = .audio
+    var suggestions: OnboardingFastDiscoverResponse?
+    var selectedSourceKeys: Set<String> = []
+    var selectedSubreddits: Set<String> = []
+    var isLoading = false
+    var loadingMessage = ""
+    var errorMessage: String?
 
-    @Published var audioState: OnboardingAudioState = .idle
-    @Published var audioDurationSeconds: Int = 0
+    var audioState: OnboardingAudioState = .idle
+    var audioDurationSeconds: Int = 0
 
-    @Published var discoveryLanes: [OnboardingDiscoveryLaneStatus] = []
-    @Published var discoveryRunId: Int?
-    @Published var discoveryRunStatus: String?
-    @Published var discoveryErrorMessage: String?
-    @Published var topicSummary: String?
-    @Published var inferredTopics: [String] = []
+    var discoveryLanes: [OnboardingDiscoveryLaneStatus] = []
+    var discoveryRunId: Int?
+    var discoveryRunStatus: String?
+    var discoveryErrorMessage: String?
+    var topicSummary: String?
+    var inferredTopics: [String] = []
 
+    @ObservationIgnored
     var onComplete: (() -> Void)?
 
     // MARK: - Dependencies
 
-    private let service = OnboardingService.shared
+    @ObservationIgnored
+    private let service: OnboardingService
+    @ObservationIgnored
     private let dictationService: any SpeechTranscribing
-    private let onboardingStateStore = OnboardingStateStore.shared
+    @ObservationIgnored
+    private let voiceCoordinator: VoiceDictationCoordinator
+    @ObservationIgnored
+    private let onboardingStateStore: OnboardingStateStore
+    @ObservationIgnored
     private let userId: Int
+    @ObservationIgnored
     private var audioTimer: Timer?
-    private var pollingTask: Task<Void, Never>?
+    @ObservationIgnored
+    private let tasks = TaskBag<TaskKey>()
+    @ObservationIgnored
     private var isSubmittingAudioDiscovery = false
+    @ObservationIgnored
     private var didAutoStartRecording = false
+    @ObservationIgnored
     private var didAttemptResume = false
+    @ObservationIgnored
     private var audioCaptureStartedAt: Date?
 
-    init(userId: Int) {
+    init(
+        userId: Int,
+        service: OnboardingService,
+        dictationService: (any SpeechTranscribing)? = nil,
+        onboardingStateStore: OnboardingStateStore
+    ) {
         self.userId = userId
-        self.dictationService = SpeechTranscriberFactory.makeVoiceDictationTranscriber()
+        self.service = service
+        let resolvedDictationService = dictationService
+            ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
+        self.dictationService = resolvedDictationService
+        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: resolvedDictationService)
+        self.onboardingStateStore = onboardingStateStore
     }
 
     deinit {
-        pollingTask?.cancel()
+        tasks.cancelAll()
         audioTimer?.invalidate()
         let service = dictationService
-        Task { @MainActor in service.cancel() }
+        let coordinator = voiceCoordinator
+        Task { @MainActor in
+            coordinator.stopListening()
+            service.cancel()
+        }
     }
 
     // MARK: - Computed Helpers
@@ -152,8 +185,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
 
     func handleDisappear() {
         stopAudioCapture()
-        pollingTask?.cancel()
-        pollingTask = nil
+        tasks.cancel(.discoveryPolling)
     }
 
     // MARK: - Discovery
@@ -221,18 +253,18 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
     }
 
     private func startPolling(runId: Int) {
-        pollingTask?.cancel()
-        pollingTask = Task { @MainActor in
+        tasks.runReplacing(.discoveryPolling) { [weak self] in
+            guard let self else { return }
             let deadline = Date().addingTimeInterval(60)
             while !Task.isCancelled {
-                await refreshDiscoveryStatus(runId: runId)
+                await self.refreshDiscoveryStatus(runId: runId)
 
-                if isDiscoveryTerminalStatus(discoveryRunStatus) {
+                if self.isDiscoveryTerminalStatus(self.discoveryRunStatus) {
                     break
                 }
 
                 if Date() >= deadline {
-                    handleDiscoveryTimeout()
+                    self.handleDiscoveryTimeout()
                     break
                 }
 
@@ -360,7 +392,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
     }
 
     private func clearDiscoveryState() {
-        pollingTask?.cancel()
+        tasks.cancel(.discoveryPolling)
         discoveryRunId = nil
         discoveryRunStatus = nil
         discoveryLanes = []
@@ -376,6 +408,7 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
 
     private func stopAudioCapture() {
         dictationService.cancel()
+        voiceCoordinator.stopListening()
         stopAudioTimer()
         audioState = .idle
         if let audioCaptureStartedAt {
@@ -387,9 +420,8 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
     }
 
     private func configureDictationCallbacks() {
-        dictationService.onTranscriptDelta = nil
-        dictationService.onTranscriptFinal = { [weak self] transcript in
-            Task { @MainActor in
+        voiceCoordinator.listen(
+            onTranscriptFinal: { [weak self] transcript in
                 guard let self else { return }
                 guard self.step == .audio else { return }
                 guard self.audioState == .recording || self.audioState == .transcribing else { return }
@@ -408,34 +440,30 @@ final class DiscoveryPersonalizeViewModel: ObservableObject {
                     "Discovery personalize transcript final | transcriptChars=\(trimmed.count) captureElapsedMs=\(self.audioCaptureStartedAt.map { discoveryPersonalizeElapsedMilliseconds(since: $0) } ?? 0)"
                 )
                 await self.beginDiscovery(transcript: trimmed)
-            }
-        }
-        dictationService.onStateChange = nil
-
-        dictationService.onStopReason = { [weak self] reason in
-            Task { @MainActor in
-                guard let self else { return }
-                switch reason {
-                case .manual, .silenceAutoStop:
-                    break
-                case .cancel:
-                    self.audioState = .idle
-                    self.stopAudioTimer()
-                case .failure:
-                    self.audioState = .error
-                    self.stopAudioTimer()
-                }
-            }
-        }
-
-        dictationService.onError = { [weak self] message in
-            Task { @MainActor in
+            },
+            onError: { [weak self] message in
                 guard let self else { return }
                 guard self.step == .audio else { return }
                 self.errorMessage = message
                 self.audioState = .error
                 self.stopAudioTimer()
+            },
+            onStopReason: { [weak self] reason in
+                self?.handleDictationStopReason(reason)
             }
+        )
+    }
+
+    private func handleDictationStopReason(_ reason: SpeechStopReason) {
+        switch reason {
+        case .manual, .silenceAutoStop:
+            break
+        case .cancel:
+            audioState = .idle
+            stopAudioTimer()
+        case .failure:
+            audioState = .error
+            stopAudioTimer()
         }
     }
 

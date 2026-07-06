@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import UIKit
 import os.log
 
 enum DetailSwipeOrigin: String {
@@ -92,6 +91,8 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     @State private var dragAmount: CGFloat = 0
     @State private var isLeadingEdgeSwipeActive = false
     @State private var didTriggerHaptic = false
+    @State private var thresholdFeedbackTrigger = 0
+    @State private var completionFeedbackTrigger = 0
 
     init(
         currentIndex: Int,
@@ -132,7 +133,9 @@ struct ContentDetailSwipeContainer<Content: View>: View {
                 }
                 .simultaneousGesture(swipeGesture(viewportWidth: proxy.size.width))
                 .offset(x: dragAmount)
-                .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.8), value: dragAmount)
+                .animation(AppMotion.press, value: dragAmount)
+                .sensoryFeedback(.impact(weight: .light), trigger: thresholdFeedbackTrigger)
+                .sensoryFeedback(.impact(weight: .medium), trigger: completionFeedbackTrigger)
         }
     }
 
@@ -177,8 +180,7 @@ struct ContentDetailSwipeContainer<Content: View>: View {
                 dragAmount = newOffset
 
                 if abs(newOffset) > 80 && !didTriggerHaptic {
-                    let generator = UIImpactFeedbackGenerator(style: .light)
-                    generator.impactOccurred()
+                    thresholdFeedbackTrigger += 1
                     didTriggerHaptic = true
                 }
             }
@@ -221,10 +223,9 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     ) {
         logSwipeDecision("dismiss", origin: origin, value: value)
         triggerCompletionHaptic()
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(AppMotion.subtle, completionCriteria: .logicallyComplete) {
             dragAmount = viewportWidth
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        } completion: {
             onDismiss()
         }
     }
@@ -236,10 +237,9 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     ) {
         logSwipeDecision("next", origin: origin, value: value)
         triggerCompletionHaptic()
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(AppMotion.subtle, completionCriteria: .logicallyComplete) {
             dragAmount = -viewportWidth
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        } completion: {
             resetDragWithoutAnimation()
             onNext()
         }
@@ -252,10 +252,9 @@ struct ContentDetailSwipeContainer<Content: View>: View {
     ) {
         logSwipeDecision("previous", origin: origin, value: value)
         triggerCompletionHaptic()
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(AppMotion.subtle, completionCriteria: .logicallyComplete) {
             dragAmount = viewportWidth
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        } completion: {
             resetDragWithoutAnimation()
             onPrevious()
         }
@@ -270,14 +269,13 @@ struct ContentDetailSwipeContainer<Content: View>: View {
         ) != nil {
             logSwipeDecision("snap_back", origin: origin, value: value)
         }
-        withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.8)) {
+        withAnimation(AppMotion.press) {
             dragAmount = 0
         }
     }
 
     private func triggerCompletionHaptic() {
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
+        completionFeedbackTrigger += 1
     }
 
     private func resetDragWithoutAnimation() {

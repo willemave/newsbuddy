@@ -26,9 +26,13 @@ enum OpenAIServiceError: LocalizedError {
 
 final class OpenAIService {
     static let shared = OpenAIService()
-    private let client = APIClient.shared
+    private let tokenRefresher: TokenRefreshing
 
-    private init() {}
+    private init(
+        tokenRefresher: TokenRefreshing = TokenRefreshService.shared
+    ) {
+        self.tokenRefresher = tokenRefresher
+    }
 
     @discardableResult
     func refreshTranscriptionAvailability() async -> Bool {
@@ -84,7 +88,7 @@ final class OpenAIService {
         openAIServiceLogger.info(
             "Audio transcription upload started | filename=\(filename, privacy: .public) bytes=\(audioData.count) allowRefresh=\(allowRefresh)"
         )
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.newslyDefault.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             openAIServiceLogger.error(
@@ -102,7 +106,7 @@ final class OpenAIService {
             }
 
             do {
-                _ = try await AuthenticationService.shared.refreshAccessToken()
+                _ = try await tokenRefresher.refreshAccessToken()
             } catch {
                 openAIServiceLogger.error(
                     "Audio transcription token refresh failed | filename=\(filename, privacy: .public) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
@@ -145,25 +149,11 @@ final class OpenAIService {
     }
 
     private func fetchAccessToken() async throws -> String {
-        if let existing = KeychainManager.shared.getToken(key: .accessToken),
-           !existing.isEmpty {
-            return existing
-        }
-
-        guard KeychainManager.shared.getToken(key: .refreshToken) != nil else {
-            throw OpenAIServiceError.notAuthenticated
-        }
-
-        let refreshed: String
         do {
-            refreshed = try await AuthenticationService.shared.refreshAccessToken()
+            return try await tokenRefresher.accessToken()
         } catch {
             throw OpenAIServiceError.notAuthenticated
         }
-        guard !refreshed.isEmpty else {
-            throw OpenAIServiceError.notAuthenticated
-        }
-        return refreshed
     }
 
     private func buildTranscriptionRequest(

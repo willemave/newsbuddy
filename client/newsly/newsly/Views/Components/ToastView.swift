@@ -24,13 +24,13 @@ struct ToastView: View {
         .padding()
         .background(Color.surfaceSecondary)
         .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 4)
+        .appShadow(.floating)
         .padding(.horizontal)
     }
 }
 
 struct ToastModifier: ViewModifier {
-    @ObservedObject var toastService = ToastService.shared
+    @State private var toastService = ToastService.shared
 
     func body(content: Content) -> some View {
         ZStack(alignment: .top) {
@@ -39,7 +39,7 @@ struct ToastModifier: ViewModifier {
             if let toast = toastService.currentToast {
                 ToastView(toast: toast)
                     .transition(.move(edge: .top).combined(with: .opacity))
-                    .animation(.spring(), value: toastService.currentToast?.id)
+                    .animation(AppMotion.panel, value: toastService.currentToast?.id)
                     .padding(.top, 8)
                     .zIndex(999)
             }

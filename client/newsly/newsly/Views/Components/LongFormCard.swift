@@ -27,6 +27,9 @@ struct LongFormCard: View {
     var onToggleAudio: (() -> Void)?
 
     @State private var heroWidth: CGFloat = 0
+    @State private var markReadFeedbackTrigger = 0
+    @State private var knowledgeSaveFeedbackTrigger = 0
+    @State private var knowledgeSelectionFeedbackTrigger = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -99,14 +102,14 @@ struct LongFormCard: View {
 
                     HStack(spacing: 12) {
                         Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            markReadFeedbackTrigger += 1
                             onMarkRead?()
                         } label: {
                             Image(systemName: content.isRead ? "checkmark.circle.fill" : "checkmark.circle")
                                 .font(.appSymbol(size: 20))
                                 .foregroundStyle(Color.onSurfaceSecondary)
                                 .contentTransition(.symbolEffect(.replace))
-                                .animation(.easeOut(duration: 0.2), value: content.isRead)
+                                .animation(AppMotion.subtle, value: content.isRead)
                                 .frame(width: 44, height: 44)
                         }
                         .buttonStyle(.plain)
@@ -115,7 +118,11 @@ struct LongFormCard: View {
                         .accessibilityLabel(content.isRead ? "Marked as read" : "Mark as read")
 
                         Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            if content.isSavedToKnowledge {
+                                knowledgeSelectionFeedbackTrigger += 1
+                            } else {
+                                knowledgeSaveFeedbackTrigger += 1
+                            }
                             onToggleKnowledgeSave?()
                         } label: {
                             KnowledgeSaveIcon(
@@ -174,13 +181,15 @@ struct LongFormCard: View {
                 .offset(y: CardMetrics.textOverlapOffset)
                 .padding(.bottom, CardMetrics.textOverlapOffset)
             )
-            .animation(.spring(duration: 0.3, bounce: 0), value: isAudioControlVisible)
-            .animation(.easeOut(duration: 0.2), value: audioErrorMessage)
+            .animation(AppMotion.panel, value: isAudioControlVisible)
+            .animation(AppMotion.subtle, value: audioErrorMessage)
         }
         .background(Color.surfaceSecondary)
         .clipShape(RoundedRectangle(cornerRadius: CardMetrics.cardCornerRadius, style: .continuous))
-        .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
-        .shadow(color: Color.black.opacity(0.06), radius: 24, x: 0, y: 8)
+        .appShadow(.editorialCard)
+        .sensoryFeedback(.impact(weight: .light), trigger: markReadFeedbackTrigger)
+        .sensoryFeedback(.success, trigger: knowledgeSaveFeedbackTrigger)
+        .sensoryFeedback(.selection, trigger: knowledgeSelectionFeedbackTrigger)
     }
 
     private var heroSection: some View {
@@ -218,7 +227,7 @@ struct LongFormCard: View {
                 Circle()
                     .fill(Color.surfacePrimary.opacity(0.92))
                     .frame(width: 38, height: 38)
-                    .shadow(color: Color.black.opacity(0.16), radius: 10, x: 0, y: 4)
+                    .appShadow(.floating)
 
                 if isAudioPreparing {
                     ProgressView()
@@ -229,7 +238,7 @@ struct LongFormCard: View {
                         .font(.appSymbol(size: 14, weight: .bold))
                         .foregroundStyle(Color.terracottaPrimary)
                         .contentTransition(.symbolEffect(.replace))
-                        .animation(.easeOut(duration: 0.18), value: isAudioPlaying)
+                        .animation(AppMotion.subtle, value: isAudioPlaying)
                         .offset(x: isAudioPlaying ? 0 : 1)
                 }
             }
@@ -258,8 +267,8 @@ struct LongFormCard: View {
 
     @ViewBuilder
     private func heroImageContent(targetSize: CGSize) -> some View {
-        let imageUrl = content.imageUrl.flatMap { buildImageURL(from: $0) }
-        let thumbnailUrl = content.thumbnailUrl.flatMap { buildImageURL(from: $0) }
+        let imageUrl = content.imageUrl.flatMap { ServerImageURL.resolve($0) }
+        let thumbnailUrl = content.thumbnailUrl.flatMap { ServerImageURL.resolve($0) }
         if let imageUrl {
             CachedAsyncImage(url: imageUrl, thumbnailUrl: thumbnailUrl, targetSize: targetSize) { image in
                 image
@@ -339,14 +348,6 @@ struct LongFormCard: View {
         }
     }
 
-    private func buildImageURL(from urlString: String) -> URL? {
-        if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") {
-            return URL(string: urlString)
-        }
-        let baseURL = AppSettings.shared.baseURL
-        let fullURL = urlString.hasPrefix("/") ? baseURL + urlString : baseURL + "/" + urlString
-        return URL(string: fullURL)
-    }
 }
 
 // Press feedback for the card's open regions. Opacity-only: scaling a single
@@ -356,6 +357,6 @@ private struct CardRegionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? 0.82 : 1)
-            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .animation(AppMotion.press, value: configuration.isPressed)
     }
 }

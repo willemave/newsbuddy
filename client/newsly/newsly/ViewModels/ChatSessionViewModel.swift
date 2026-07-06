@@ -17,6 +17,16 @@ private enum ChatForegroundPollingSuspended: Error {
     case inactive
 }
 
+private enum ChatSessionTaskKey: Hashable {
+    case send
+    case startCouncil
+    case retryCouncil
+    case digDeeper
+    case voiceAction
+    case selectCouncil
+    case selectCouncilDeadline
+}
+
 /// Owns the visible chat transcript, local pending sends, polling, council selection, and voice state.
 ///
 /// Streaming readiness: the timeline reconciler is intentionally isolated so a future SSE
@@ -45,7 +55,12 @@ final class ChatSessionViewModel {
 
     private let chatService: any ChatSessionServicing
     private let transcriptionService: any SpeechTranscribing
+    private let voiceCoordinator: VoiceDictationCoordinator
     private let activeSessionManager: ActiveChatSessionManager
+    private let authService: any AuthenticationServicing
+    private let tokenStore: any AuthTokenStore
+    private let refreshTranscriptionAvailability: () async -> Bool
+    private let setBackendTranscriptionAvailable: (Bool) -> Void
     private let timelineReconciler = ChatTimelineReconciler()
     let sessionId: Int
     private let initialPendingMessageId: Int?
@@ -62,21 +77,9 @@ final class ChatSessionViewModel {
     @ObservationIgnored
     private var localIdentityAliases: [ChatTimelineID: UUID] = [:]
     @ObservationIgnored
-    private var selectCouncilTask: Task<Void, Never>?
-    @ObservationIgnored
-    private var selectCouncilDeadlineTask: Task<Void, Never>?
-    @ObservationIgnored
     private var selectCouncilRequestId: UUID?
     @ObservationIgnored
-    private var sendTask: Task<Void, Never>?
-    @ObservationIgnored
-    private var startCouncilTask: Task<Void, Never>?
-    @ObservationIgnored
-    private var retryCouncilTask: Task<Void, Never>?
-    @ObservationIgnored
-    private var digDeeperTask: Task<Void, Never>?
-    @ObservationIgnored
-    private var voiceActionTask: Task<Void, Never>?
+    private let tasks = TaskBag<ChatSessionTaskKey>()
     @ObservationIgnored
     private var voiceRecordingStartedAt: Date?
     @ObservationIgnored
@@ -93,7 +96,12 @@ final class ChatSessionViewModel {
         let initialPendingLocalId = initialPendingUserMessage.map { _ in UUID() }
         self.chatService = dependencies.chatService
         self.transcriptionService = dependencies.transcriptionService
+        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: dependencies.transcriptionService)
         self.activeSessionManager = dependencies.activeSessionManager
+        self.authService = dependencies.authService
+        self.tokenStore = dependencies.tokenStore
+        self.refreshTranscriptionAvailability = dependencies.refreshTranscriptionAvailability
+        self.setBackendTranscriptionAvailable = dependencies.setBackendTranscriptionAvailable
         self.sessionId = route.sessionId
         self.session = route.session
         self.initialPendingMessageId = route.pendingMessageId
@@ -103,13 +111,7 @@ final class ChatSessionViewModel {
     }
 
     deinit {
-        sendTask?.cancel()
-        startCouncilTask?.cancel()
-        retryCouncilTask?.cancel()
-        digDeeperTask?.cancel()
-        voiceActionTask?.cancel()
-        selectCouncilTask?.cancel()
-        selectCouncilDeadlineTask?.cancel()
+        tasks.cancelAll()
     }
 
     func handleAppear() {
@@ -117,47 +119,37 @@ final class ChatSessionViewModel {
     }
 
     func performSendMessage(text overrideText: String? = nil) {
-        sendTask?.cancel()
-        sendTask = Task { @MainActor [weak self] in
+        tasks.runReplacing(.send) { [weak self] in
             guard let self else { return }
             await self.sendMessage(text: overrideText)
-            self.sendTask = nil
         }
     }
 
     func performStartCouncil(message: String) {
-        startCouncilTask?.cancel()
-        startCouncilTask = Task { @MainActor [weak self] in
+        tasks.runReplacing(.startCouncil) { [weak self] in
             guard let self else { return }
             await self.startCouncil(message: message)
-            self.startCouncilTask = nil
         }
     }
 
     func performRetryCouncilCandidate(childSessionId: Int) {
-        retryCouncilTask?.cancel()
-        retryCouncilTask = Task { @MainActor [weak self] in
+        tasks.runReplacing(.retryCouncil) { [weak self] in
             guard let self else { return }
             await self.retryCouncilCandidate(childSessionId: childSessionId)
-            self.retryCouncilTask = nil
         }
     }
 
     func performDigDeeper(into selectedText: String) {
-        digDeeperTask?.cancel()
-        digDeeperTask = Task { @MainActor [weak self] in
+        tasks.runReplacing(.digDeeper) { [weak self] in
             guard let self else { return }
             await self.digDeeper(into: selectedText)
-            self.digDeeperTask = nil
         }
     }
 
     func performToggleVoiceRecording() {
-        voiceActionTask?.cancel()
-        voiceActionTask = Task { @MainActor [weak self] in
+        tasks.runReplacing(.voiceAction) { [weak self] in
             guard let self else { return }
             await self.toggleVoiceRecording()
-            self.voiceActionTask = nil
         }
     }
 
@@ -389,29 +381,24 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
 
     func handleDisappear() {
         prepareForInactiveView()
-        startCouncilTask?.cancel()
-        startCouncilTask = nil
-        retryCouncilTask?.cancel()
-        retryCouncilTask = nil
-        digDeeperTask?.cancel()
-        digDeeperTask = nil
-        voiceActionTask?.cancel()
-        voiceActionTask = nil
-        selectCouncilTask?.cancel()
-        selectCouncilTask = nil
-        selectCouncilDeadlineTask?.cancel()
-        selectCouncilDeadlineTask = nil
+        tasks.cancel(.startCouncil)
+        tasks.cancel(.retryCouncil)
+        tasks.cancel(.digDeeper)
+        tasks.cancel(.voiceAction)
+        tasks.cancel(.selectCouncil)
+        tasks.cancel(.selectCouncilDeadline)
         selectCouncilRequestId = nil
         selectingCouncilChildSessionId = nil
         retryingCouncilChildSessionId = nil
         councilSelectionTimedOut = false
         isLoading = false
         isStartingCouncil = false
-        if sendTask == nil {
+        if !tasks.isRunning(.send) {
             isSending = false
             stopThinkingTimer()
         }
         transcriptionService.reset()
+        voiceCoordinator.stopListening()
         isRecording = false
         isTranscribing = false
         isVoiceActionInFlight = false
@@ -441,8 +428,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
 
         if let messageId = backgroundTrackingMessageId {
             handOffBackgroundPolling(messageId: messageId)
-            sendTask?.cancel()
-            sendTask = nil
+            tasks.cancel(.send)
             needsForegroundTranscriptRefresh = true
         }
     }
@@ -714,11 +700,11 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
 
     func selectCouncilBranch(childSessionId: Int) async {
         guard session?.activeChildSessionId != childSessionId else { return }
-        selectCouncilTask?.cancel()
-        selectCouncilDeadlineTask?.cancel()
+        tasks.cancel(.selectCouncil)
+        tasks.cancel(.selectCouncilDeadline)
         let requestId = UUID()
         selectCouncilRequestId = requestId
-        let task = Task { @MainActor [weak self] in
+        let task = tasks.runReplacing(.selectCouncil) { [weak self] in
             guard let self else { return }
             let signpostState = chatPerfSignposter.beginInterval("select-council-branch")
             defer { chatPerfSignposter.endInterval("select-council-branch", signpostState) }
@@ -730,9 +716,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
             defer {
                 if self.selectCouncilRequestId == requestId {
                     self.selectingCouncilChildSessionId = nil
-                    self.selectCouncilTask = nil
-                    self.selectCouncilDeadlineTask?.cancel()
-                    self.selectCouncilDeadlineTask = nil
+                    self.tasks.cancel(.selectCouncilDeadline)
                     self.selectCouncilRequestId = nil
                     self.councilSelectionTimedOut = false
                 }
@@ -753,15 +737,12 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
                 logger.error("[ViewModel] selectCouncilBranch failed | error=\(error.localizedDescription)")
             }
         }
-        selectCouncilTask = task
         await task.value
     }
 
     func cancelCouncilSelection() {
-        selectCouncilTask?.cancel()
-        selectCouncilTask = nil
-        selectCouncilDeadlineTask?.cancel()
-        selectCouncilDeadlineTask = nil
+        tasks.cancel(.selectCouncil)
+        tasks.cancel(.selectCouncilDeadline)
         selectCouncilRequestId = nil
         selectingCouncilChildSessionId = nil
         councilSelectionTimedOut = false
@@ -792,7 +773,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     }
 
     private func startCouncilSelectionDeadline(requestId: UUID) {
-        selectCouncilDeadlineTask = Task { @MainActor [weak self] in
+        tasks.runReplacing(.selectCouncilDeadline) { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: 10_000_000_000)
             } catch {
@@ -830,12 +811,12 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
 
         do {
             if !hasVoiceAuthToken {
-                _ = try await AuthenticationService.shared.refreshAccessToken()
+                _ = try await authService.refreshAccessToken()
             }
-            voiceDictationAvailable = await OpenAIService.shared.refreshTranscriptionAvailability()
+            voiceDictationAvailable = await refreshTranscriptionAvailability()
         } catch {
             logger.debug("Token refresh for voice dictation failed: \(error.localizedDescription)")
-            AppSettings.shared.backendTranscriptionAvailable = false
+            setBackendTranscriptionAvailable(false)
             voiceDictationAvailable = false
         }
     }
@@ -922,6 +903,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     /// Cancel voice recording.
     func cancelVoiceRecording() {
         transcriptionService.cancel()
+        voiceCoordinator.stopListening()
         isRecording = false
         isTranscribing = false
         isVoiceActionInFlight = false
@@ -935,67 +917,65 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     }
 
     private var hasVoiceAuthToken: Bool {
-        if let accessToken = KeychainManager.shared.getToken(key: .accessToken), !accessToken.isEmpty {
+        if let accessToken = tokenStore.getToken(key: .accessToken), !accessToken.isEmpty {
             return true
         }
-        if let refreshToken = KeychainManager.shared.getToken(key: .refreshToken), !refreshToken.isEmpty {
+        if let refreshToken = tokenStore.getToken(key: .refreshToken), !refreshToken.isEmpty {
             return true
         }
         return false
     }
 
     private func configureTranscriptionCallbacks() {
-        transcriptionService.onTranscriptDelta = nil
-        transcriptionService.onTranscriptFinal = { [weak self] transcript in
-            self?.pendingVoiceTranscript = transcript
-        }
-        transcriptionService.onStopReason = { [weak self] reason in
-            guard let self else { return }
-            switch reason {
-            case .manual:
-                return
-            case .silenceAutoStop:
-                let transcript = self.pendingVoiceTranscript ?? ""
-                self.pendingVoiceTranscript = nil
-                self.isRecording = false
-                self.isTranscribing = false
-                self.isVoiceActionInFlight = true
-                self.voiceRecordingStartedAt = nil
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
+        voiceCoordinator.listen(
+            onTranscriptFinal: { [weak self] transcript in
+                self?.pendingVoiceTranscript = transcript
+            },
+            onError: { [weak self] message in
+                self?.errorMessage = message
+                self?.pendingVoiceTranscript = nil
+                self?.isRecording = false
+                self?.isTranscribing = false
+                self?.isVoiceActionInFlight = false
+                self?.voiceRecordingStartedAt = nil
+            },
+            onStateChange: { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .idle:
+                    self.isRecording = false
+                    self.isTranscribing = false
+                case .recording:
+                    self.isRecording = true
+                    self.isTranscribing = false
+                case .transcribing:
+                    self.isRecording = false
+                    self.isTranscribing = true
+                }
+            },
+            onStopReason: { [weak self] reason in
+                guard let self else { return }
+                switch reason {
+                case .manual:
+                    return
+                case .silenceAutoStop:
+                    let transcript = self.pendingVoiceTranscript ?? ""
+                    self.pendingVoiceTranscript = nil
+                    self.isRecording = false
+                    self.isTranscribing = false
+                    self.isVoiceActionInFlight = true
+                    self.voiceRecordingStartedAt = nil
                     await self.sendVoiceTranscript(transcript)
                     self.isVoiceActionInFlight = false
+                case .cancel, .failure:
+                    self.pendingVoiceTranscript = nil
+                    self.isRecording = false
+                    self.isTranscribing = false
+                    self.isVoiceActionInFlight = false
+                    self.voiceRecordingStartedAt = nil
                 }
-            case .cancel, .failure:
-                self.pendingVoiceTranscript = nil
-                self.isRecording = false
-                self.isTranscribing = false
-                self.isVoiceActionInFlight = false
-                self.voiceRecordingStartedAt = nil
             }
-        }
-        transcriptionService.onError = { [weak self] message in
-            self?.errorMessage = message
-            self?.pendingVoiceTranscript = nil
-            self?.isRecording = false
-            self?.isTranscribing = false
-            self?.isVoiceActionInFlight = false
-            self?.voiceRecordingStartedAt = nil
-        }
-        transcriptionService.onStateChange = { [weak self] state in
-            guard let self else { return }
-            switch state {
-            case .idle:
-                self.isRecording = false
-                self.isTranscribing = false
-            case .recording:
-                self.isRecording = true
-                self.isTranscribing = false
-            case .transcribing:
-                self.isRecording = false
-                self.isTranscribing = true
-            }
-        }
+        )
     }
 
     private func sendVoiceTranscript(_ transcript: String) async {

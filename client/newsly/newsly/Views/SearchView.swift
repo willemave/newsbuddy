@@ -8,8 +8,19 @@
 import SwiftUI
 
 struct SearchView: View {
-    @StateObject private var viewModel = SearchViewModel()
     @Environment(\.openURL) private var openURL
+
+    private let readStateCache: ReadStateCache
+    @State private var viewModel: SearchViewModel
+
+    init(
+        readStateCache: ReadStateCache? = nil,
+        viewModel: SearchViewModel? = nil
+    ) {
+        let readStateCache = readStateCache ?? ReadStateCache()
+        self.readStateCache = readStateCache
+        self._viewModel = State(initialValue: viewModel ?? RootDependencyFactory.makeSearchViewModel())
+    }
 
     var body: some View {
         List {
@@ -44,6 +55,9 @@ struct SearchView: View {
         .background(Color.surfacePrimary.ignoresSafeArea())
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
         .navigationTitle("Search")
+        .task(id: viewModel.searchText) {
+            await viewModel.handleSearchTextChangedAfterDelay()
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -102,7 +116,8 @@ struct SearchView: View {
                 ForEach(viewModel.contentResults, id: \.id) { item in
                     NavigationLink(destination: ContentDetailView(
                         contentId: item.id,
-                        navigationSurface: .search
+                        navigationSurface: .search,
+                        readStateCache: readStateCache
                     )) {
                         HStack(spacing: 12) {
                             Image(systemName: item.contentType == .podcast ? "waveform" : "doc.text")

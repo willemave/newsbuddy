@@ -5,16 +5,30 @@
 
 import SwiftUI
 
+private enum PodcastSourcesSheetDestination: Identifiable {
+    case addSource
+    case sourceDetail(ScraperConfig)
+
+    var id: String {
+        switch self {
+        case .addSource:
+            "addSource"
+        case .sourceDetail(let config):
+            "sourceDetail.\(config.id)"
+        }
+    }
+}
+
 struct PodcastSourcesView: View {
-    @StateObject private var viewModel = ScraperSettingsViewModel(
+    @State private var viewModel = RootDependencyFactory.makeScraperSettingsViewModel(
         filterTypes: ["podcast_rss"]
     )
-    @State private var selectedConfig: ScraperConfig?
-    @State private var showAddSheet = false
+    @State private var activeSheet: PodcastSourcesSheetDestination?
     @State private var newFeedURL: String = ""
     @State private var newFeedName: String = ""
     @State private var newLimit: String = ""
-    @State private var localError: String?
+    @State private var addSourceError: String?
+    @State private var isAddingSource = false
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -28,14 +42,14 @@ struct PodcastSourcesView: View {
                             title: "No Podcast Sources",
                             subtitle: "Add podcast RSS feeds to start receiving episodes",
                             actionTitle: "Add Source",
-                            action: { showAddSheet = true }
+                            action: { activeSheet = .addSource }
                         )
                         .frame(minHeight: 400)
                     } else {
                         sourcesList
                     }
 
-                    if let error = viewModel.errorMessage ?? localError {
+                    if let error = viewModel.errorMessage {
                         errorBanner(error)
                     }
                 }
@@ -44,7 +58,7 @@ struct PodcastSourcesView: View {
 
             // Floating add button
             if !viewModel.configs.isEmpty {
-                AddButton { showAddSheet = true }
+                AddButton { activeSheet = .addSource }
                     .padding(Spacing.rowHorizontal)
             }
         }
@@ -52,11 +66,13 @@ struct PodcastSourcesView: View {
         .navigationTitle("Podcast Sources")
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadConfigsWithDeferredStats() }
-        .sheet(item: $selectedConfig) { config in
-            SourceDetailSheet(viewModel: viewModel, config: config)
-        }
-        .sheet(isPresented: $showAddSheet) {
-            addSourceSheet
+        .sheet(item: $activeSheet) { destination in
+            switch destination {
+            case .addSource:
+                addSourceSheet
+            case .sourceDetail(let config):
+                SourceDetailSheet(viewModel: viewModel, config: config)
+            }
         }
     }
 
@@ -85,7 +101,7 @@ struct PodcastSourcesView: View {
                     isActive: config.isActive,
                     stats: config.stats
                 )
-                .onTapGesture { selectedConfig = config }
+                .onTapGesture { activeSheet = .sourceDetail(config) }
 
                 if config.id != viewModel.configs.last?.id {
                     RowDivider()
@@ -165,6 +181,10 @@ struct PodcastSourcesView: View {
                     )
                 }
 
+                if let addSourceError {
+                    addSourceErrorBanner(addSourceError)
+                }
+
                 Spacer()
             }
             .padding()
@@ -175,49 +195,78 @@ struct PodcastSourcesView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         resetAddForm()
-                        showAddSheet = false
+                        activeSheet = nil
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        let trimmedLimit = newLimit.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let limitValue = Int(trimmedLimit)
-
-                        if !trimmedLimit.isEmpty && limitValue == nil {
-                            localError = "Limit must be a number between 1 and 100"
-                            return
-                        }
-
-                        if let limitValue, !(1...100).contains(limitValue) {
-                            localError = "Limit must be between 1 and 100"
-                            return
-                        }
-
-                        localError = nil
-                        Task {
-                            await viewModel.addConfig(
-                                scraperType: "podcast_rss",
-                                displayName: newFeedName.isEmpty ? nil : newFeedName,
-                                feedURL: newFeedURL,
-                                limit: limitValue
-                            )
-                            if viewModel.errorMessage == nil {
-                                resetAddForm()
-                                showAddSheet = false
-                            }
-                        }
+                        Task { await submitAddSource() }
                     }
                     .fontWeight(.semibold)
-                    .disabled(newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isAddingSource || newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
+    }
+
+    private func addSourceErrorBanner(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.statusDestructive)
+                .accessibilityHidden(true)
+
+            Text(error)
+                .font(.appSubheadline)
+                .foregroundStyle(Color.onSurface)
+
+            Spacer()
+        }
+        .padding()
+        .background(Color.statusDestructive.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @MainActor
+    private func submitAddSource() async {
+        guard !isAddingSource else { return }
+
+        addSourceError = nil
+        let trimmedLimit = newLimit.trimmingCharacters(in: .whitespacesAndNewlines)
+        let limitValue = Int(trimmedLimit)
+
+        if !trimmedLimit.isEmpty && limitValue == nil {
+            addSourceError = "Limit must be a number between 1 and 100"
+            return
+        }
+
+        if let limitValue, !(1...100).contains(limitValue) {
+            addSourceError = "Limit must be between 1 and 100"
+            return
+        }
+
+        isAddingSource = true
+        defer { isAddingSource = false }
+
+        let trimmedName = newFeedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let didAdd = await viewModel.addConfig(
+            scraperType: "podcast_rss",
+            displayName: trimmedName.isEmpty ? nil : trimmedName,
+            feedURL: newFeedURL.trimmingCharacters(in: .whitespacesAndNewlines),
+            limit: limitValue
+        )
+
+        guard didAdd else {
+            addSourceError = viewModel.errorMessage ?? "Failed to add source"
+            return
+        }
+
+        resetAddForm()
+        activeSheet = nil
     }
 
     private func resetAddForm() {
         newFeedURL = ""
         newFeedName = ""
         newLimit = ""
-        localError = nil
+        addSourceError = nil
     }
 }

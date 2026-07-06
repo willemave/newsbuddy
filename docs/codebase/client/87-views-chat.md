@@ -8,6 +8,8 @@ Chat-specific SwiftUI subviews used by `ChatSessionView` and chat previews.
 ## Runtime behavior
 - `ChatSessionView` remains the screen shell; this folder owns message list, composer, bubbles, activity/error states, council branches, assistant feed options, and previews.
 - Chat rendering consumes `ChatTimelineItem` and reconciled timeline state from `ChatSessionViewModel`/`ChatTimelineReconciler`.
+- Chat loading, recording, and activity pulses respect Reduce Motion and settle to stable indicators when decorative movement is disabled.
+- Chat edge-back snapback uses the shared `AppMotion.press` token and SwiftUI sensory feedback.
 - Preview fixture files provide local design/development data.
 
 ## Important files
@@ -15,7 +17,7 @@ Chat-specific SwiftUI subviews used by `ChatSessionView` and chat previews.
 |---|---|
 | `ChatMessageList.swift` | Scrollable chat timeline. |
 | `ChatComposerDock.swift` | Input/composer dock. |
-| `MessageRow.swift`, `MessageBubble.swift`, `UserMessageBubble.swift`, `AssistantMessageBubble.swift` | Message row and bubble presentation. |
+| `MessageRow.swift`, `MessageBubble.swift` | Message row and parameterized user/assistant bubble presentation. |
 | `ChatActivityViews.swift`, `ChatEmptyState.swift`, `ChatErrorBanner.swift` | Loading/empty/error states. |
 | `AssistantFeedOptionsSection.swift`, `ArticlePreviewCard.swift` | Assistant feed options and article preview. |
 | `CouncilBranchTabs.swift`, `CouncilCandidatesBubble.swift` | Council/candidate chat presentation. |

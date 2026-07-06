@@ -3,22 +3,26 @@
 //  newsly
 //
 
+import Observation
 import SwiftUI
 import UIKit
 import WebKit
 
 /// Bridges the SwiftUI reader to the underlying reveal.js `WKWebView`: exposes a
 /// load phase for loading/error overlays and forwards slide navigation commands.
-final class LearningDeckReaderWebController: ObservableObject {
+@Observable
+final class LearningDeckReaderWebController {
     enum LoadPhase {
         case loading
         case loaded
         case failed
     }
 
-    @Published private(set) var phase: LoadPhase = .loading
+    private(set) var phase: LoadPhase = .loading
 
+    @ObservationIgnored
     private weak var webView: WKWebView?
+    @ObservationIgnored
     private var url: URL?
 
     func attach(_ webView: WKWebView, url: URL) {

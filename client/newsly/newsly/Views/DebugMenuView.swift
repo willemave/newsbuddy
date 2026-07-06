@@ -9,8 +9,8 @@ import SwiftUI
 
 struct DebugMenuView: View {
     @Environment(\.dismiss) var dismiss
-    @EnvironmentObject var authViewModel: AuthenticationViewModel
-    @ObservedObject private var appSettings = AppSettings.shared
+    @Environment(AuthenticationViewModel.self) private var authViewModel
+    @State private var appSettings = AppSettings.shared
     @State private var showingTokenInput = false
     @State private var forceOnboardingAfterTokenSave = false
     @State private var accessToken = ""

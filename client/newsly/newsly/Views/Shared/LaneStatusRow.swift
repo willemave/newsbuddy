@@ -57,11 +57,11 @@ struct LaneStatusRow: View {
         .padding(.vertical, 4)
         .opacity(rowOpacity)
         .animation(
-            reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.3),
+            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.panel),
             value: lane.status
         )
         .animation(
-            reduceMotion ? .linear(duration: 0.01) : .easeInOut(duration: 0.3),
+            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.panel),
             value: lane.completedQueries
         )
     }
@@ -195,6 +195,7 @@ private struct OnboardingProgressBar: View {
             .onAppear { restartShimmer(fillWidth: fillWidth) }
             .onChange(of: isActive) { _, _ in restartShimmer(fillWidth: fillWidth) }
             .onChange(of: progress) { _, _ in restartShimmer(fillWidth: fillWidth) }
+            .onChange(of: reduceMotion) { _, _ in restartShimmer(fillWidth: fillWidth) }
         }
     }
 
@@ -203,9 +204,12 @@ private struct OnboardingProgressBar: View {
     }
 
     private func restartShimmer(fillWidth: CGFloat) {
-        guard shouldShimmer(fillWidth: fillWidth) else { return }
+        guard shouldShimmer(fillWidth: fillWidth) else {
+            shimmerPhase = 0
+            return
+        }
         shimmerPhase = 0
-        withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
+        withAnimation(AppMotion.laneShimmer) {
             shimmerPhase = 1
         }
     }
@@ -220,18 +224,29 @@ private struct LanePulsingDot: View {
             Circle()
                 .fill(Color.statusProcessing.opacity(0.45))
                 .frame(width: 14, height: 14)
-                .scaleEffect(isPulsing ? 1.6 : 0.85)
-                .opacity(isPulsing ? 0 : 0.65)
+                .scaleEffect(reduceMotion ? 1.0 : (isPulsing ? 1.6 : 0.85))
+                .opacity(reduceMotion ? 0.55 : (isPulsing ? 0 : 0.65))
 
             Circle()
                 .fill(Color.statusProcessing)
                 .frame(width: 7, height: 7)
         }
         .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
-                isPulsing = true
-            }
+            restartPulse()
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            restartPulse()
+        }
+    }
+
+    private func restartPulse() {
+        guard !reduceMotion else {
+            isPulsing = false
+            return
+        }
+        isPulsing = false
+        withAnimation(AppMotion.lanePulse) {
+            isPulsing = true
         }
     }
 }

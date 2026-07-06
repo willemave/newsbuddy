@@ -7,7 +7,14 @@ Top-level SwiftUI screens, routed feature surfaces, and modal sheets. Subfolders
 
 ## Runtime behavior
 - `AuthenticatedRootView` owns the main authenticated tab/root surface.
+- `RootTabs.swift` contains the per-tab root `NavigationStack` views; `ContentRoutes.swift` centralizes shared tab destinations.
 - Long-form, short-form, Briefing, Knowledge, search, recently-read, submissions, settings/more, and detail screens bind to view models and services.
+- Short-form, long-form, and Knowledge root files are thin shells; dedicated section/controller files hold row rendering, quick actions, audio state, bootstrap state, library tiles, action chips, and chat history.
+- Long-form and short-form root tabs accept scroll-to-top requests from `ContentView` when the active tab is re-selected; the request scrolls to a stable top anchor and does not trigger a long-form refresh.
+- Main feed, saved-library, recently-read, and submissions lists use the shared `onPaginationThresholdReached` scroll-depth modifier instead of manual or last-row pagination triggers.
+- Long-form cards, Knowledge chat rows, and article-reader entrypoints use the shared `ContentZoomTransition` helper so card-to-detail, chat-row-to-chat, and detail-to-reader presentations use iOS 18 zoom transitions through `ContentRoutes` or the reader cover.
+- Detail edge-swipe drag and snapback use the shared `AppMotion.press` token with sensory-feedback triggers instead of bespoke springs/manual haptics.
+- `LandingView` keeps the animated mascot/title treatment for normal motion settings and switches to a static title treatment when Reduce Motion is enabled.
 - Chat, onboarding, settings, shared, source, library, and component subfolders keep specialized UI out of the top-level screen files.
 - Reader/narration/learning/chat sheets are presented from feature surfaces rather than landing pages.
 
@@ -15,11 +22,16 @@ Top-level SwiftUI screens, routed feature surfaces, and modal sheets. Subfolders
 | File | Purpose |
 |---|---|
 | `AuthenticatedRootView.swift` | Main authenticated app root/tab surface. |
-| `AuthenticationView.swift`, `LandingView.swift` | Login/landing surfaces. |
-| `LongFormView.swift`, `ShortFormView.swift`, `ContentListView.swift` | Primary content list surfaces. |
+| `ContentRoutes.swift`, `RootTabs.swift` | Shared root-tab navigation stacks and destinations. |
+| `ContentZoomTransition.swift` | Shared matched-source and destination zoom-transition modifiers for content routes. |
+| `LandingView.swift` | Unauthenticated landing surface. |
+| `LongFormView.swift`, `ShortFormView.swift` | Primary content list surfaces. |
+| `LongFormAudioController.swift`, `LongFormBootstrapStateView.swift` | Long-form audio discussion state and bootstrap/source-progress UI. |
+| `ShortNewsQuickActionsSection.swift`, `ShortFormRows.swift`, `ShortFormSetupEmptyState.swift`, `ShortNewsScrollReadTracker.swift` | Fast-read action strip, row/delimiter UI, setup empty state, and scroll-read tracking. |
 | `Briefing/BriefingView.swift` | Native Briefing tab surface with lens paging, source sheets, dig panel, and narration controls. |
 | `ContentDetailView.swift`, `ArticleReaderView.swift`, `LongFormActionsView.swift` | Detail/reader/action surfaces. |
-| `KnowledgeView.swift`, `KnowledgeDiscoveryView.swift`, `RecentlyReadView.swift`, `SearchView.swift` | Knowledge, discovery, search, and reading-history screens. |
+| `KnowledgeView.swift`, `RecentlyReadView.swift`, `SearchView.swift` | Knowledge, search, and reading-history screens. |
+| `KnowledgeActionsSection.swift`, `KnowledgeChatHistorySection.swift`, `KnowledgeLibrarySection.swift` | Knowledge action, recent chat, and library tile sections. |
 | `ChatSessionView.swift`, `ChatSessionHistoryView.swift` | Chat session shell and history screen. |
 | `CustomNarrationListSheet.swift`, `CustomNarrationPickerSheet.swift` | Custom narration sheets. |
 | `DiscoveryPersonalizeSheet.swift` | Discovery personalization sheet. |

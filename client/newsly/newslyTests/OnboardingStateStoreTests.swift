@@ -32,6 +32,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         let user = makeUser(id: 41)
         let viewModel = OnboardingViewModel(
             user: user,
+            service: .shared,
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -89,6 +90,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
+            service: .shared,
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -137,6 +139,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
+            service: .shared,
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -169,6 +172,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
+            service: .shared,
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )

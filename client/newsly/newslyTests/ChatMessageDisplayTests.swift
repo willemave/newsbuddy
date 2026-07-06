@@ -8,6 +8,19 @@ import XCTest
 @testable import newsly
 
 final class ChatMessageDisplayTests: XCTestCase {
+    func testChatShareTextUsesPlainMarkdownContent() {
+        let content = ShareContent(
+            messageContent: "Here is **bold** text with [a source](https://example.com).",
+            articleTitle: "Chat context",
+            articleUrl: "https://news.example/story"
+        )
+
+        XCTAssertEqual(
+            content.shareText,
+            "Chat context\n\nHere is bold text with a source.\n\nhttps://news.example/story"
+        )
+    }
+
     func testChatMessageDecodesProcessSummaryDisplayMetadata() throws {
         let data = Data(
             """

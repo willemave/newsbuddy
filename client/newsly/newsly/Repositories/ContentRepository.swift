@@ -5,7 +5,6 @@
 //  Created by Assistant on 3/16/26.
 //
 
-import Combine
 import Foundation
 
 protocol ContentRepositoryType {
@@ -14,9 +13,9 @@ protocol ContentRepositoryType {
         readFilter: ReadFilter,
         cursor: String?,
         limit: Int?
-    ) -> AnyPublisher<ContentListResponse, Error>
+    ) async throws -> ContentListResponse
 
-    func loadDetail(id: Int) -> AnyPublisher<ContentDetail, Error>
+    func loadDetail(id: Int) async throws -> ContentDetail
 }
 
 final class ContentRepository: ContentRepositoryType {
@@ -39,7 +38,7 @@ final class ContentRepository: ContentRepositoryType {
         readFilter: ReadFilter,
         cursor: String?,
         limit: Int? = nil
-    ) -> AnyPublisher<ContentListResponse, Error> {
+    ) async throws -> ContentListResponse {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "read_filter", value: readFilter.rawValue),
             URLQueryItem(name: "limit", value: String(limit ?? defaultPageSize))
@@ -59,13 +58,13 @@ final class ContentRepository: ContentRepositoryType {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return client.publisher(
+        return try await client.request(
             isNewsOnly ? APIEndpoints.newsItems : APIEndpoints.contentList,
             queryItems: queryItems
         )
     }
 
-    func loadDetail(id: Int) -> AnyPublisher<ContentDetail, Error> {
-        client.publisher(APIEndpoints.contentDetail(id: id))
+    func loadDetail(id: Int) async throws -> ContentDetail {
+        try await client.request(APIEndpoints.contentDetail(id: id))
     }
 }

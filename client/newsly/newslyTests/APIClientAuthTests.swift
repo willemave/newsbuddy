@@ -304,6 +304,20 @@ private final class MockTokenRefresher: TokenRefreshing {
         self.result = result
     }
 
+    var hasStoredCredentialMaterial: Bool {
+        let accessToken = tokenStore.getToken(key: .accessToken)
+        let refreshToken = tokenStore.getToken(key: .refreshToken)
+        return !(accessToken?.isEmpty ?? true) || !(refreshToken?.isEmpty ?? true)
+    }
+
+    func accessToken() async throws -> String {
+        if let token = tokenStore.getToken(key: .accessToken) {
+            return token
+        }
+
+        return try await refreshAccessToken()
+    }
+
     func refreshAccessToken() async throws -> String {
         refreshCallCount += 1
 

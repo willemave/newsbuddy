@@ -73,8 +73,11 @@
 				Models/ServerDate.swift,
 				Services/APIClient.swift,
 				Services/AppSettings.swift,
+				Services/AuthError.swift,
 				Services/KeychainManager.swift,
+				Services/TokenRefreshService.swift,
 				Shared/ReaderPalette.swift,
+				Shared/ShareExtensionStyle.swift,
 				Shared/SharedContainer.swift,
 			);
 			target = E61B938D2EF910AC0006676A /* ShareExtension */;
@@ -83,7 +86,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				Info.plist.backup,
 			);
 			target = E6CB70082E1DBAD7001AB7F2 /* newsly */;
 		};

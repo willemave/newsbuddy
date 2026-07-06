@@ -8,11 +8,11 @@
 import SwiftUI
 
 struct ProcessingStatsView: View {
-    @StateObject private var processingCountService = ProcessingCountService.shared
-    @StateObject private var unreadCountService = UnreadCountService.shared
-    @StateObject private var sourcesViewModel = ScraperSettingsViewModel(
+    @State private var sourcesViewModel = RootDependencyFactory.makeScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
     )
+    @State private var processingCountService = ProcessingCountService.shared
+    @State private var unreadCountService = UnreadCountService.shared
 
     var body: some View {
         List {
@@ -107,6 +107,8 @@ struct ProcessingStatsView: View {
                 .font(.appCallout)
                 .fontWeight(.semibold)
                 .foregroundStyle(Color.onSurface)
+                .monospacedDigit()
+                .contentTransition(.numericText())
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .ignore)

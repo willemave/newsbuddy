@@ -5,41 +5,55 @@
 //  Created by Assistant on 9/15/25.
 //
 
-import Combine
 import Foundation
+import Observation
 
 @MainActor
-final class SearchViewModel: ObservableObject {
+@Observable
+final class SearchViewModel {
+    private enum TaskKey: Hashable {
+        case mixed
+    }
+
     // Keep the auto-updating local search compact so each keystroke does less work.
     private let localSearchResultLimit = 10
 
-    @Published var searchText: String = ""
-    @Published var contentResults: [ContentSummary] = []
-    @Published var feedResults: [MixedSearchFeedResult] = []
-    @Published var podcastResults: [PodcastSearchResult] = []
-    @Published var isLoadingLocal: Bool = false
-    @Published var isLoadingMixed: Bool = false
-    @Published var actionInFlightIds: Set<String> = []
-    @Published var completedActionIds: Set<String> = []
-    @Published var errorMessage: String?
-    @Published var hasLocalSearch: Bool = false
-    @Published var hasSubmittedSearch: Bool = false
+    var searchText: String = ""
+    var contentResults: [ContentSummary] = []
+    var feedResults: [MixedSearchFeedResult] = []
+    var podcastResults: [PodcastSearchResult] = []
+    var isLoadingLocal: Bool = false
+    var isLoadingMixed: Bool = false
+    var actionInFlightIds: Set<String> = []
+    var completedActionIds: Set<String> = []
+    var errorMessage: String?
+    var hasLocalSearch: Bool = false
+    var hasSubmittedSearch: Bool = false
 
-    private let contentService = ContentService.shared
-    private let scraperConfigService = ScraperConfigService.shared
-    private var cancellables = Set<AnyCancellable>()
-    private var localSearchTask: Task<Void, Never>?
-    private var mixedSearchTask: Task<Void, Never>?
+    @ObservationIgnored
+    private let contentService: ContentService
+
+    @ObservationIgnored
+    private let scraperConfigService: ScraperConfigService
+
+    @ObservationIgnored
+    private let tasks = TaskBag<TaskKey>()
+
+    @ObservationIgnored
+    private var localSearchGeneration = 0
+
     private var lastSubmittedQuery: String?
 
-    init() {
-        $searchText
-            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
-            .removeDuplicates()
-            .sink { [weak self] text in
-                self?.handleQueryChanged(text)
-            }
-            .store(in: &cancellables)
+    init(
+        contentService: ContentService,
+        scraperConfigService: ScraperConfigService
+    ) {
+        self.contentService = contentService
+        self.scraperConfigService = scraperConfigService
+    }
+
+    deinit {
+        tasks.cancelAll()
     }
 
     var trimmedQuery: String {
@@ -57,9 +71,10 @@ final class SearchViewModel: ObservableObject {
         }
         let query = trimmedQuery
         guard query.count >= 2 else { return }
-        localSearchTask?.cancel()
-        localSearchTask = Task { [weak self] in
-            await self?.runLocalSearchTask(for: query)
+        localSearchGeneration += 1
+        let generation = localSearchGeneration
+        Task { [weak self] in
+            await self?.runLocalSearchTask(for: query, generation: generation)
         }
     }
 
@@ -70,8 +85,7 @@ final class SearchViewModel: ObservableObject {
             return
         }
 
-        mixedSearchTask?.cancel()
-        mixedSearchTask = Task { [weak self] in
+        tasks.runReplacing(.mixed) { [weak self] in
             await self?.runMixedSearch(for: query)
         }
     }
@@ -110,9 +124,10 @@ final class SearchViewModel: ObservableObject {
         }
     }
 
-    private func handleQueryChanged(_ query: String) {
-        localSearchTask?.cancel()
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    func handleSearchTextChangedAfterDelay() async {
+        localSearchGeneration += 1
+        let generation = localSearchGeneration
+        let trimmed = trimmedQuery
 
         if lastSubmittedQuery != trimmed {
             hasSubmittedSearch = false
@@ -125,16 +140,27 @@ final class SearchViewModel: ObservableObject {
             contentResults = []
             hasLocalSearch = false
             errorMessage = nil
+            isLoadingLocal = false
             return
         }
 
-        localSearchTask = Task { [weak self] in
-            await self?.runLocalSearchTask(for: trimmed)
+        do {
+            try await Task.sleep(for: .milliseconds(350))
+        } catch {
+            return
         }
+
+        guard !Task.isCancelled, generation == localSearchGeneration else { return }
+        await runLocalSearchTask(for: trimmed, generation: generation)
     }
 
-    private func runLocalSearchTask(for query: String) async {
+    private func runLocalSearchTask(for query: String, generation: Int) async {
         isLoadingLocal = true
+        defer {
+            if generation == localSearchGeneration {
+                isLoadingLocal = false
+            }
+        }
         errorMessage = nil
 
         do {
@@ -144,17 +170,15 @@ final class SearchViewModel: ObservableObject {
                 limit: localSearchResultLimit,
                 cursor: nil
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == localSearchGeneration else { return }
             contentResults = response.contents
             hasLocalSearch = true
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == localSearchGeneration else { return }
             errorMessage = error.localizedDescription
             contentResults = []
             hasLocalSearch = true
         }
-
-        isLoadingLocal = false
     }
 
     private func runMixedSearch(for query: String) async {

@@ -4,22 +4,49 @@
 //
 
 import Foundation
+import Observation
 import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "ScraperSettings")
 
-@MainActor
-class ScraperSettingsViewModel: ObservableObject {
-    @Published var configs: [ScraperConfig] = []
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String?
+protocol ScraperSettingsServicing: AnyObject {
+    func listConfigs(types: [String]?, includeStats: Bool) async throws -> [ScraperConfig]
+    func createConfig(
+        scraperType: String,
+        displayName: String?,
+        feedURL: String,
+        limit: Int?,
+        isActive: Bool
+    ) async throws -> ScraperConfig
+    func updateConfig(
+        configId: Int,
+        displayName: String?,
+        feedURL: String?,
+        limit: Int?,
+        isActive: Bool?
+    ) async throws -> ScraperConfig
+    func deleteConfig(configId: Int) async throws
+}
 
+extension ScraperConfigService: ScraperSettingsServicing {}
+
+@MainActor
+@Observable
+final class ScraperSettingsViewModel {
+    var configs: [ScraperConfig] = []
+    var isLoading: Bool = false
+    var errorMessage: String?
+
+    @ObservationIgnored
     private let filterTypes: [String]?
-    private let service = ScraperConfigService.shared
+    @ObservationIgnored
+    private let service: any ScraperSettingsServicing
+    @ObservationIgnored
     private var activeLoad: ActiveConfigLoad?
 
-    init(filterTypes: [String]? = nil) {
+    init(filterTypes: [String]? = nil, service: any ScraperSettingsServicing) {
         self.filterTypes = filterTypes
+        self.service = service
     }
 
     func loadConfigs(includeStats: Bool = true, showLoading: Bool = true) async {
@@ -76,7 +103,8 @@ class ScraperSettingsViewModel: ObservableObject {
         }
     }
 
-    func addConfig(scraperType: String, displayName: String?, feedURL: String, limit: Int? = nil) async {
+    @discardableResult
+    func addConfig(scraperType: String, displayName: String?, feedURL: String, limit: Int? = nil) async -> Bool {
         errorMessage = nil
         do {
             let newConfig = try await service.createConfig(
@@ -87,8 +115,10 @@ class ScraperSettingsViewModel: ObservableObject {
                 isActive: true
             )
             configs.insert(newConfig, at: 0)
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 

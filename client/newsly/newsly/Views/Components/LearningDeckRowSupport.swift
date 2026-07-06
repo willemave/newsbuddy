@@ -81,7 +81,7 @@ extension View {
                 RoundedRectangle(cornerRadius: DeckRowMetrics.surfaceRadius, style: .continuous)
                     .stroke(Color.outlineVariant.opacity(0.22), lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
+            .appShadow(.subtle)
     }
 
     @ViewBuilder

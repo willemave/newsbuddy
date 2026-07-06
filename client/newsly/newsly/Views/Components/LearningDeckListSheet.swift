@@ -17,14 +17,28 @@ private struct LearningDeckNotice: Identifiable {
     let message: String
 }
 
-struct LearningDeckListSheet: View {
-    @ObservedObject var viewModel: LearningDecksViewModel
-    @Binding var isPresented: Bool
+private enum LearningDeckListSheetDestination: Identifiable {
+    case createDeck
+    case share(ShareContent)
 
-    @State private var showCreateSheet = false
+    var id: String {
+        switch self {
+        case .createDeck:
+            "createDeck"
+        case .share(let content):
+            "share.\(content.id.uuidString)"
+        }
+    }
+}
+
+struct LearningDeckListSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let viewModel: LearningDecksViewModel
+
+    @State private var activeSheet: LearningDeckListSheetDestination?
     @State private var readerDestination: LearningDeckReaderDestination?
     @State private var browserDestination: LearningDeckBrowserDestination?
-    @State private var shareContent: ShareContent?
     @State private var notice: LearningDeckNotice?
     @State private var deckPendingDeletion: LearningDeck?
 
@@ -41,7 +55,7 @@ struct LearningDeckListSheet: View {
                             .padding(.horizontal, Spacing.appHorizontalMargin)
                             .padding(.vertical, 14)
                     } else if viewModel.decks.isEmpty {
-                        LearningDeckEmptyRow(onCreate: { showCreateSheet = true })
+                        LearningDeckEmptyRow(onCreate: presentCreateSheet)
                             .padding(.horizontal, Spacing.appHorizontalMargin)
                             .padding(.vertical, 18)
                     } else {
@@ -77,7 +91,7 @@ struct LearningDeckListSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        isPresented = false
+                        dismiss()
                     } label: {
                         Text("Done")
                             .frame(minHeight: 44)
@@ -86,9 +100,7 @@ struct LearningDeckListSheet: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showCreateSheet = true
-                    } label: {
+                    Button(action: presentCreateSheet) {
                         Image(systemName: "plus")
                             .frame(width: 44, height: 44)
                     }
@@ -99,16 +111,18 @@ struct LearningDeckListSheet: View {
             .refreshable {
                 await viewModel.load()
             }
-            .sheet(isPresented: $showCreateSheet) {
-                LearningDeckCreateSheet(
-                    sourceTitle: nil,
-                    requiresURL: true,
-                    isSubmitting: viewModel.isCreating,
-                    onCreate: createDeck
-                )
-            }
-            .sheet(item: $shareContent) { content in
-                ShareSheet(content: content)
+            .sheet(item: $activeSheet) { destination in
+                switch destination {
+                case .createDeck:
+                    LearningDeckCreateSheet(
+                        sourceTitle: nil,
+                        requiresURL: true,
+                        isSubmitting: viewModel.isCreating,
+                        onCreate: createDeck
+                    )
+                case .share(let content):
+                    ShareSheet(content: content)
+                }
             }
             .fullScreenCover(item: $browserDestination) { destination in
                 SafariView(url: destination.url)
@@ -182,6 +196,10 @@ struct LearningDeckListSheet: View {
         )
     }
 
+    private func presentCreateSheet() {
+        activeSheet = .createDeck
+    }
+
     @MainActor
     private func createDeck(url: String?, interestsPrompt: String?) async -> Bool {
         guard let url else {
@@ -229,10 +247,12 @@ struct LearningDeckListSheet: View {
     private func toggleShare(_ deck: LearningDeck) async {
         let shareURL = await viewModel.toggleShare(for: deck)
         if let shareURL {
-            shareContent = ShareContent(
-                messageContent: shareURL,
-                articleTitle: deck.displayTitle,
-                articleUrl: nil
+            activeSheet = .share(
+                ShareContent(
+                    messageContent: shareURL,
+                    articleTitle: deck.displayTitle,
+                    articleUrl: nil
+                )
             )
         } else if deck.shareEnabled {
             ToastService.shared.show("Deck is private again", type: .success)

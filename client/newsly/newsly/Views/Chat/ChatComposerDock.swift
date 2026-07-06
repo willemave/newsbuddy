@@ -58,7 +58,7 @@ struct ChatComposerDock: View {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .stroke(Color.outlineVariant.opacity(0.22), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+                .appShadow(.subtle)
         )
         .padding(.horizontal, Spacing.appHorizontalMargin)
     }
@@ -163,6 +163,7 @@ struct ChatComposerDock: View {
             TapToTalkMicButton(
                 isEnabled: !isSending && !isVoiceActionInFlight && !isTranscribing,
                 isRecording: isRecording,
+                isTranscribing: isTranscribing,
                 isBusy: isVoiceActionInFlight && !isRecording,
                 size: 44,
                 action: onToggleVoiceRecording
@@ -212,12 +213,13 @@ struct ChatComposerDock: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .animation(.easeOut(duration: 0.2), value: isTranscribing)
-        .animation(.easeOut(duration: 0.2), value: isRecording)
+        .animation(AppMotion.subtle, value: isTranscribing)
+        .animation(AppMotion.subtle, value: isRecording)
     }
 }
 
 private struct RecordingIndicator: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPulsing = false
 
     var body: some View {
@@ -226,15 +228,25 @@ private struct RecordingIndicator: View {
                 Circle()
                     .fill(Color.statusDestructive.opacity(0.18))
                     .frame(width: 18, height: 18)
-                    .scaleEffect(isPulsing ? 1.3 : 0.9)
+                    .scaleEffect(reduceMotion ? 1.0 : (isPulsing ? 1.3 : 0.9))
 
                 Circle()
                     .fill(Color.statusDestructive)
                     .frame(width: 8, height: 8)
             }
             .onAppear {
-                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                guard !reduceMotion else { return }
+                withAnimation(AppMotion.voiceLevelPulse) {
                     isPulsing = true
+                }
+            }
+            .onChange(of: reduceMotion) { _, reduceMotion in
+                if reduceMotion {
+                    isPulsing = false
+                } else {
+                    withAnimation(AppMotion.voiceLevelPulse) {
+                        isPulsing = true
+                    }
                 }
             }
 

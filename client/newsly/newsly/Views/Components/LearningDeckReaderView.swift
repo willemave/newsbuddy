@@ -17,7 +17,7 @@ struct LearningDeckReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: LearningDeckReaderViewModel
-    @StateObject private var webController = LearningDeckReaderWebController()
+    @State private var webController = LearningDeckReaderWebController()
     @State private var showLandscapeChat = false
 
     let deck: LearningDeck
@@ -29,13 +29,13 @@ struct LearningDeckReaderView: View {
         deck: LearningDeck,
         viewerURL: URL?,
         onClose: (() -> Void)? = nil,
-        chatService: LearningDeckReaderChatServicing = ChatService.shared
+        chatService: (any LearningDeckReaderChatServicing)? = nil
     ) {
         self.deck = deck
         self.viewerURL = viewerURL
         self.onClose = onClose
         _viewModel = State(
-            initialValue: LearningDeckReaderViewModel(
+            initialValue: RootDependencyFactory.makeLearningDeckReaderViewModel(
                 deck: deck,
                 chatService: chatService
             )
@@ -108,7 +108,7 @@ struct LearningDeckReaderView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.easeOut(duration: 0.2), value: isLandscape)
+        .animation(AppMotion.subtle, value: isLandscape)
     }
 
     private func deckRegion(url: URL, isLandscape: Bool) -> some View {
@@ -256,7 +256,7 @@ struct LearningDeckReaderView: View {
             }
             .frame(width: 44, height: 44)
             .learningDeckReaderCircleSurface(tint: Color.surfacePrimary, isEnabled: true)
-            .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+            .appShadow(.subtle)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -278,7 +278,7 @@ struct LearningDeckReaderView: View {
         .padding(.horizontal, 4)
         .frame(height: 40)
         .learningDeckReaderCapsuleSurface(tint: Color.surfacePrimary, isEnabled: true)
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+        .appShadow(.subtle)
     }
 
     private func navButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
@@ -311,8 +311,8 @@ struct LearningDeckReaderView: View {
         .padding(.horizontal, 12)
         .frame(height: 32)
         .learningDeckReaderCapsuleSurface(tint: Color.surfacePrimary, isEnabled: false)
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 1)
-        .animation(.easeOut(duration: 0.2), value: progress.current)
+        .appShadow(.subtle)
+        .animation(AppMotion.subtle, value: progress.current)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Slide \(progress.current) of \(progress.total)")
     }

@@ -26,7 +26,7 @@ struct ContentCard: View {
         guard let urlString = displayUrl,
               urlString.count > 1
         else { return false }
-        return buildImageURL(from: urlString) != nil
+        return ServerImageURL.resolve(urlString) != nil
     }
 
     private var titleWeight: Font.Weight {
@@ -84,7 +84,7 @@ struct ContentCard: View {
         // Prefer thumbnail URL for faster loading, fall back to full image
         let displayUrl = content.thumbnailUrl ?? content.imageUrl
         if let imageUrlString = displayUrl,
-           let imageUrl = buildImageURL(from: imageUrlString) {
+           let imageUrl = ServerImageURL.resolve(imageUrlString) {
             CachedAsyncImage(
                 url: imageUrl,
                 targetSize: CGSize(width: thumbnailSize, height: thumbnailSize)
@@ -127,17 +127,4 @@ struct ContentCard: View {
         }
     }
 
-    /// Build a full URL for the image, handling relative paths
-    private func buildImageURL(from urlString: String) -> URL? {
-        // If it's already a full URL, use it
-        if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") {
-            return URL(string: urlString)
-        }
-
-        // Otherwise, it's a relative path - prepend base URL
-        // Use string concatenation instead of appendingPathComponent to preserve path structure
-        let baseURL = AppSettings.shared.baseURL
-        let fullURL = urlString.hasPrefix("/") ? baseURL + urlString : baseURL + "/" + urlString
-        return URL(string: fullURL)
-    }
 }

@@ -4,16 +4,42 @@
 //
 
 import Foundation
+import Observation
 
 @MainActor
-final class CustomNarrationLibraryViewModel: ObservableObject {
-    @Published private(set) var episodes: [AudioEpisode] = []
-    @Published private(set) var isLoading = false
-    @Published private(set) var sharingEpisodeIds: Set<Int> = []
-    @Published var errorMessage: String?
+@Observable
+final class CustomNarrationLibraryViewModel {
+    private(set) var episodes: [AudioEpisode] = []
+    private(set) var isLoading = false
+    private(set) var sharingEpisodeIds: Set<Int> = []
+    var errorMessage: String?
 
-    let playbackService = NarrationPlaybackService.shared
+    @ObservationIgnored
+    let playbackService: NarrationPlaybackService
+    @ObservationIgnored
+    private let audioService: any CustomNarrationAudioServicing
+    @ObservationIgnored
+    private let unreadCountService: UnreadCountService
+    @ObservationIgnored
+    private let toastPresenter: any ToastPresenting
+    @ObservationIgnored
+    private let readStateCache: ReadStateCache
+    @ObservationIgnored
     private var readNotifiedEpisodeIds: Set<Int> = []
+
+    init(
+        playbackService: NarrationPlaybackService,
+        audioService: any CustomNarrationAudioServicing,
+        unreadCountService: UnreadCountService,
+        toastPresenter: any ToastPresenting,
+        readStateCache: ReadStateCache? = nil
+    ) {
+        self.playbackService = playbackService
+        self.audioService = audioService
+        self.unreadCountService = unreadCountService
+        self.toastPresenter = toastPresenter
+        self.readStateCache = readStateCache ?? ReadStateCache()
+    }
 
     func load() async {
         guard !isLoading else { return }
@@ -21,7 +47,7 @@ final class CustomNarrationLibraryViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            episodes = try await AudioEpisodeService.shared.fetchCustomNarrationEpisodes()
+            episodes = try await audioService.fetchCustomNarrationEpisodes(limit: 20)
             errorMessage = nil
         } catch where isNetworkCancellation(error) {
             return
@@ -71,7 +97,7 @@ final class CustomNarrationLibraryViewModel: ObservableObject {
             try await playbackService.playStreamingNarration(
                 for: .audioEpisode(episode.id),
                 fetchStreamResource: {
-                    try await AudioEpisodeService.shared.streamResource(for: episode)
+                    try await self.audioService.streamResource(for: episode)
                 }
             )
             await markReadSourcesLocallyIfNeeded(episode)
@@ -88,21 +114,21 @@ final class CustomNarrationLibraryViewModel: ObservableObject {
         defer { sharingEpisodeIds.remove(episode.id) }
 
         do {
-            let response = try await AudioEpisodeService.shared.enableEpisodeShare(id: episode.id)
+            let response = try await audioService.enableEpisodeShare(id: episode.id)
             errorMessage = nil
             return response
         } catch where isNetworkCancellation(error) {
             return nil
         } catch {
             errorMessage = error.localizedDescription
-            ToastService.shared.showError("Failed to share narration: \(error.localizedDescription)")
+            toastPresenter.showError("Failed to share narration: \(error.localizedDescription)")
             return nil
         }
     }
 
     private func refresh(_ episode: AudioEpisode) async {
         do {
-            let latest = try await AudioEpisodeService.shared.fetchEpisode(id: episode.id)
+            let latest = try await audioService.fetchEpisode(id: episode.id)
             replace(latest)
         } catch where isNetworkCancellation(error) {
             return
@@ -124,21 +150,12 @@ final class CustomNarrationLibraryViewModel: ObservableObject {
         guard !contentIds.isEmpty || !newsItemIds.isEmpty else { return }
 
         readNotifiedEpisodeIds.insert(episode.id)
-        for contentId in contentIds {
-            postReadNotification(contentId: contentId, contentType: .article)
-        }
-        for newsItemId in newsItemIds {
-            postReadNotification(contentId: newsItemId, contentType: .news)
-        }
-        await UnreadCountService.shared.refreshCounts()
-    }
-
-    private func postReadNotification(contentId: Int, contentType: APIContentType) {
-        NotificationCenter.default.post(
-            name: .contentMarkedAsRead,
-            object: nil,
-            userInfo: ["contentId": contentId, "contentType": contentType.rawValue]
+        let readKeys = Set(
+            contentIds.map { ReadStateKey(id: $0, contentType: .article) }
+                + newsItemIds.map { ReadStateKey(id: $0, contentType: .news) }
         )
+        readStateCache.markReadLocally(readKeys, adjustUnreadCounts: false)
+        await unreadCountService.refreshCounts()
     }
 
     private func formattedNarrationDuration(_ seconds: Int) -> String {

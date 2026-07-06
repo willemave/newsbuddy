@@ -7,6 +7,7 @@
 
 import Foundation
 import AuthenticationServices
+import Observation
 import SwiftUI
 import os.log
 
@@ -21,19 +22,34 @@ enum AuthState: Equatable {
 
 /// View model managing authentication state
 @MainActor
-final class AuthenticationViewModel: ObservableObject {
-    @Published var authState: AuthState = .loading
-    @Published var errorMessage: String?
+@Observable
+final class AuthenticationViewModel {
+    var authState: AuthState = .loading
+    var errorMessage: String?
 
-    private let authService = AuthenticationService.shared
+    @ObservationIgnored
+    private let authService: any AuthenticationServicing
+    @ObservationIgnored
+    private let tokenStore: any AuthTokenStore
+    @ObservationIgnored
     private var lastKnownUser: User?
+    @ObservationIgnored
     private var hasAttemptedE2EAutoLogin = false
+    @ObservationIgnored
+    private var authenticationRequiredObserver: NSObjectProtocol?
 
-    init() {
+    init(
+        authService: any AuthenticationServicing,
+        tokenStore: any AuthTokenStore
+    ) {
+        self.authService = authService
+        self.tokenStore = tokenStore
+
         checkAuthStatus()
 
-        // Listen for authentication required notifications
-        NotificationCenter.default.addObserver(
+        // This is the single direct observer for APIClient's auth-failure signal.
+        // Other services should react to the logout notification emitted from here.
+        authenticationRequiredObserver = NotificationCenter.default.addObserver(
             forName: .authenticationRequired,
             object: nil,
             queue: .main
@@ -54,13 +70,19 @@ final class AuthenticationViewModel: ObservableObject {
         }
     }
 
+    deinit {
+        if let authenticationRequiredObserver {
+            NotificationCenter.default.removeObserver(authenticationRequiredObserver)
+        }
+    }
+
     /// Check if user is already authenticated on app launch
     func checkAuthStatus() {
         authState = .loading
         errorMessage = nil
 
-        let hasRefreshToken = KeychainManager.shared.getToken(key: .refreshToken) != nil
-        let hasAccessToken = KeychainManager.shared.getToken(key: .accessToken) != nil
+        let hasRefreshToken = tokenStore.getToken(key: .refreshToken) != nil
+        let hasAccessToken = tokenStore.getToken(key: .accessToken) != nil
 
         // No tokens at all -> user must sign in
         guard hasRefreshToken || hasAccessToken else {

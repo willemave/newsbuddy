@@ -6,7 +6,7 @@ final class ContentDetailViewModelTests: XCTestCase {
     func testAddRelevantLinkToReadLaterMarksLinkAsAddedOnSuccess() async {
         var receivedURL: URL?
         var receivedTitle: String?
-        let viewModel = ContentDetailViewModel(
+        let viewModel = makeViewModel(
             submitLinkToLongFormHandler: { url, title in
                 receivedURL = url
                 receivedTitle = title
@@ -30,7 +30,7 @@ final class ContentDetailViewModelTests: XCTestCase {
     func testAddDiscussionLinkToLongFormMarksLinkAsAddedOnSuccess() async {
         var receivedURL: URL?
         var receivedTitle: String?
-        let viewModel = ContentDetailViewModel(
+        let viewModel = makeViewModel(
             submitLinkToLongFormHandler: { url, title in
                 receivedURL = url
                 receivedTitle = title
@@ -51,7 +51,7 @@ final class ContentDetailViewModelTests: XCTestCase {
 
     func testAddDiscussionLinkToLongFormCanRetryAfterFailure() async {
         var attempts = 0
-        let viewModel = ContentDetailViewModel(
+        let viewModel = makeViewModel(
             submitLinkToLongFormHandler: { _, _ in
                 attempts += 1
                 if attempts == 1 {
@@ -75,7 +75,7 @@ final class ContentDetailViewModelTests: XCTestCase {
     }
 
     func testUpdateContentIdClearsDiscussionLinkState() async {
-        let viewModel = ContentDetailViewModel(
+        let viewModel = makeViewModel(
             submitLinkToLongFormHandler: { _, _ in
                 Self.submitResponse(alreadyExists: true, taskId: nil)
             }
@@ -173,10 +173,10 @@ final class ContentDetailViewModelTests: XCTestCase {
             }
             """
         )
-        let viewModel = ContentDetailViewModel()
-        viewModel.content = detail
-
-        let markdown = try XCTUnwrap(viewModel.markdownForShare(option: .medium))
+        let markdown = try XCTUnwrap(
+            ShareMarkdownBuilder(content: detail, contentBody: nil)
+                .markdown(for: .medium)
+        )
 
         XCTAssertTrue(markdown.contains("## Summary\nThis overview explains"), markdown)
         XCTAssertTrue(markdown.contains("## Takeaway\nJudge the claim by its evidence and tradeoffs."), markdown)
@@ -212,6 +212,85 @@ final class ContentDetailViewModelTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Link: https://example.com/longform-artifact"), markdown)
     }
 
+    func testShareMarkdownBuilderUsesLoadedBodyBeforeFallbackMarkdown() throws {
+        let detail = try Self.decodeDetail(
+            from: """
+            {
+              "id": 43,
+              "content_type": "article",
+              "url": "https://example.com/body-article",
+              "title": "Body Article",
+              "display_title": "Body Article",
+              "source": "Example",
+              "status": "completed",
+              "error_message": null,
+              "retry_count": 0,
+              "metadata": {},
+              "created_at": "2026-06-09T10:00:00Z",
+              "updated_at": null,
+              "processed_at": "2026-06-09T10:05:00Z",
+              "checked_out_by": null,
+              "checked_out_at": null,
+              "publication_date": null,
+              "is_read": false,
+              "is_saved_to_knowledge": false,
+              "summary": null,
+              "short_summary": null,
+              "summary_kind": null,
+              "summary_version": null,
+              "structured_summary": null,
+              "longform_artifact": null,
+              "feed_preview": null,
+              "artifact_type": null,
+              "preview_bullets": null,
+              "reason_to_read": null,
+              "bullet_points": [],
+              "quotes": [],
+              "topics": [],
+              "full_markdown": "Fallback markdown body",
+              "body_available": true,
+              "body_kind": "article",
+              "body_format": "markdown",
+              "news_article_url": null,
+              "news_discussion_url": null,
+              "news_key_points": [],
+              "news_summary": null,
+              "image_url": null,
+              "thumbnail_url": null,
+              "detected_feed": null,
+              "can_subscribe": false
+            }
+            """
+        )
+        let body = ContentBody(
+            contentId: detail.id,
+            variant: "reader",
+            kind: "article",
+            format: "markdown",
+            text: "Fetched article body.",
+            updatedAt: nil
+        )
+
+        let markdown = try XCTUnwrap(
+            ShareMarkdownBuilder(content: detail, contentBody: body)
+                .markdown(for: .full)
+        )
+
+        XCTAssertTrue(markdown.contains("## Full Article\n\nFetched article body."), markdown)
+        XCTAssertFalse(markdown.contains("Fallback markdown body"), markdown)
+    }
+
+    private func makeViewModel(
+        submitLinkToLongFormHandler: @escaping LinkSubmissionCoordinator.SubmitHandler
+    ) -> ContentDetailViewModel {
+        ContentDetailViewModel(
+            contentService: StubContentDetailService(),
+            feedSubscriptionService: StubDetectedFeedSubscriber(),
+            toastPresenter: StubToastPresenter(),
+            submitLinkToLongFormHandler: submitLinkToLongFormHandler
+        )
+    }
+
     nonisolated private static func submitResponse(
         alreadyExists: Bool = false,
         taskId: Int? = 99
@@ -242,4 +321,80 @@ final class ContentDetailViewModelTests: XCTestCase {
         let data = Data(json.utf8)
         return try JSONDecoder().decode(ContentDetail.self, from: data)
     }
+}
+
+private enum StubDetailServiceError: Error {
+    case unexpectedCall
+}
+
+private final class StubContentDetailService: ContentDetailServicing {
+    func submitContent(
+        url: URL,
+        contentType: String?,
+        title: String?,
+        platform: String?
+    ) async throws -> SubmitContentResponse {
+        throw StubDetailServiceError.unexpectedCall
+    }
+
+    func fetchContentDetail(id: Int) async throws -> ContentDetail {
+        throw StubDetailServiceError.unexpectedCall
+    }
+
+    func fetchNewsItemDetail(id: Int) async throws -> ContentDetail {
+        throw StubDetailServiceError.unexpectedCall
+    }
+
+    func fetchContentBody(
+        id: Int,
+        variant: String,
+        contentType: APIContentType?
+    ) async throws -> ContentBody {
+        throw StubDetailServiceError.unexpectedCall
+    }
+
+    func trackContentOpened(
+        contentId: Int,
+        surface: String,
+        contextData: [String: Any]
+    ) async throws -> TrackContentInteractionResponse {
+        throw StubDetailServiceError.unexpectedCall
+    }
+
+    func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
+        throw StubDetailServiceError.unexpectedCall
+    }
+
+    func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
+        throw StubDetailServiceError.unexpectedCall
+    }
+
+    func convertNewsToArticle(id: Int) async throws -> ConvertNewsResponse {
+        throw StubDetailServiceError.unexpectedCall
+    }
+
+    func convertNewsItemToArticle(id: Int) async throws -> ConvertNewsResponse {
+        throw StubDetailServiceError.unexpectedCall
+    }
+
+    func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse {
+        throw StubDetailServiceError.unexpectedCall
+    }
+}
+
+private final class StubDetectedFeedSubscriber: DetectedFeedSubscribing {
+    func subscribeFeed(
+        feedURL: String,
+        feedType: String,
+        displayName: String?
+    ) async throws -> ScraperConfig {
+        throw StubDetailServiceError.unexpectedCall
+    }
+}
+
+@MainActor
+private final class StubToastPresenter: ToastPresenting {
+    func show(_ message: String, type: ToastType, duration: TimeInterval) {}
+    func showError(_ message: String) {}
+    func showSuccess(_ message: String) {}
 }

@@ -6,7 +6,8 @@
 import SwiftUI
 
 struct LandingView: View {
-    @EnvironmentObject var authViewModel: AuthenticationViewModel
+    @Environment(AuthenticationViewModel.self) private var authViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if DEBUG && targetEnvironment(simulator)
     @State private var showingDebugMenu = false
     @State private var tapCount = 0
@@ -36,46 +37,62 @@ struct LandingView: View {
         #if DEBUG && targetEnvironment(simulator)
         .sheet(isPresented: $showingDebugMenu) {
             DebugMenuView()
-                .environmentObject(authViewModel)
+                .environment(authViewModel)
         }
         #endif
     }
 
     // MARK: - Title
 
+    @ViewBuilder
     private var titleSection: some View {
+        if reduceMotion {
+            staticTitleSection
+        } else {
+            animatedTitleSection
+        }
+    }
+
+    private var staticTitleSection: some View {
+        titleContent(yOffset: 0, glowColor: .onboardingAmbientPrimary)
+    }
+
+    private var animatedTitleSection: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let yOffset = WatercolorBackground.titleOscillation(time: t)
             let glowColor = WatercolorBackground.titleGlowColor(time: t)
 
-            VStack(spacing: 24) {
-                Image("Mascot")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 220, height: 220)
-                    #if DEBUG && targetEnvironment(simulator)
-                    .onTapGesture {
-                        handleLogoTap()
-                    }
-                    #endif
-                    .accessibilityLabel("Newsbuddy mascot")
-
-                VStack(spacing: 10) {
-                    Text("Newsbuddy")
-                        .font(.watercolorDisplay)
-                        .foregroundColor(.onboardingText)
-                        .shadow(color: glowColor.opacity(0.6), radius: 16, x: 0, y: 0)
-                        .shadow(color: glowColor.opacity(0.3), radius: 32, x: 0, y: 0)
-
-                    Text("Your cuddly news companion.\nQuiet clarity in a noisy world.")
-                        .font(.watercolorSubtitle)
-                        .foregroundColor(.onboardingText.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                }
-            }
-            .offset(y: yOffset)
+            titleContent(yOffset: yOffset, glowColor: glowColor)
         }
+    }
+
+    private func titleContent(yOffset: CGFloat, glowColor: Color) -> some View {
+        VStack(spacing: 24) {
+            Image("Mascot")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 220, height: 220)
+                #if DEBUG && targetEnvironment(simulator)
+                .onTapGesture {
+                    handleLogoTap()
+                }
+                #endif
+                .accessibilityLabel("Newsbuddy mascot")
+
+            VStack(spacing: 10) {
+                Text("Newsbuddy")
+                    .font(.watercolorDisplay)
+                    .foregroundColor(.onboardingText)
+                    .appShadow(.titleGlow(glowColor))
+
+                Text("Your cuddly news companion.\nQuiet clarity in a noisy world.")
+                    .font(.watercolorSubtitle)
+                    .foregroundColor(.onboardingText.opacity(0.7))
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .offset(y: yOffset)
     }
 
     // MARK: - Bottom Card

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Observation
 import OSLog
 
 private let rootTabFlowLogger = Logger(
@@ -37,13 +38,18 @@ enum RootTab: Hashable {
 }
 
 @MainActor
-final class TabCoordinatorViewModel: ObservableObject {
-    @Published var selectedTab: RootTab
+@Observable
+final class TabCoordinatorViewModel {
+    var selectedTab: RootTab
 
+    @ObservationIgnored
     let shortNewsVM: ShortNewsListViewModel
+    @ObservationIgnored
     let longContentVM: LongContentListViewModel
+    @ObservationIgnored
     let briefingVM: BriefingViewModel
 
+    @ObservationIgnored
     private var previousTab: RootTab
 
     init(
@@ -83,15 +89,15 @@ final class TabCoordinatorViewModel: ObservableObject {
         case .shortNews:
             if shortNewsVM.currentItems().isEmpty {
                 rootTabFlowLogger.info("tab content load requested | tab=fast_news")
-                shortNewsVM.refreshTrigger.send(())
+                Task { await shortNewsVM.refresh() }
             } else {
                 rootTabFlowLogger.info("tab content refresh requested | tab=fast_news")
-                shortNewsVM.refreshInBackground()
+                Task { await shortNewsVM.refreshInBackgroundAndWait() }
             }
         case .longContent:
             if longContentVM.currentItems().isEmpty {
                 rootTabFlowLogger.info("tab content load requested | tab=long_form")
-                longContentVM.refreshTrigger.send(())
+                Task { await longContentVM.refresh() }
             } else {
                 // Intentional asymmetry vs Fast News: long-form is not time-sensitive,
                 // so re-entering the tab keeps the loaded list (and the reader's

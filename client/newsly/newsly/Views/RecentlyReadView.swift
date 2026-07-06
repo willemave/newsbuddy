@@ -8,9 +8,21 @@
 import SwiftUI
 
 struct RecentlyReadView: View {
-    @StateObject private var viewModel = ContentListViewModel()
-    @ObservedObject private var settings = AppSettings.shared
+    let readStateCache: ReadStateCache
+
+    @State private var viewModel: ContentListViewModel
+    @State private var settings = AppSettings.shared
     @State private var showingFilters = false
+
+    init(readStateCache: ReadStateCache? = nil) {
+        let readStateCache = readStateCache ?? ReadStateCache()
+        self.readStateCache = readStateCache
+        self._viewModel = State(
+            initialValue: RootDependencyFactory.makeContentListViewModel(
+                readStateCache: readStateCache
+            )
+        )
+    }
 
     var body: some View {
         ZStack {
@@ -28,12 +40,15 @@ struct RecentlyReadView: View {
                         subtitle: "Items you've read will appear here, sorted by most recently read."
                     )
                 } else {
+                    let contentIds = viewModel.contents.map(\.id)
+
                     List {
                         ForEach(viewModel.contents) { content in
                             NavigationLink(destination: ContentDetailView(
                                     contentId: content.id,
-                                    allContentIds: viewModel.contents.map(\.id),
-                                    navigationSurface: .recentlyRead
+                                    allContentIds: contentIds,
+                                    navigationSurface: .recentlyRead,
+                                    readStateCache: readStateCache
                                 )) {
                                 ContentCard(content: content)
                             }
@@ -42,10 +57,7 @@ struct RecentlyReadView: View {
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 Button {
                                     Task {
-                                        try? await ContentService.shared.markContentAsUnread(id: content.id)
-                                        withAnimation(.easeOut(duration: 0.3)) {
-                                            viewModel.contents.removeAll { $0.id == content.id }
-                                        }
+                                        await viewModel.markAsUnreadAndRemove(content.id)
                                     }
                                 } label: {
                                     Label("Mark as Unread", systemImage: "circle")
@@ -65,11 +77,6 @@ struct RecentlyReadView: View {
                                 }
                                 .tint(Color.brandPrimary)
                             }
-                            .onAppear {
-                                if content.id == viewModel.contents.last?.id {
-                                    Task { await viewModel.loadMoreContent() }
-                                }
-                            }
                         }
 
                         if viewModel.isLoadingMore {
@@ -83,6 +90,9 @@ struct RecentlyReadView: View {
                         }
                     }
                     .listStyle(.plain)
+                    .onPaginationThresholdReached {
+                        await viewModel.loadMoreContent()
+                    }
                     .refreshable {
                         await viewModel.loadRecentlyRead()
                     }

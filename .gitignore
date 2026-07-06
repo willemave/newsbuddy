@@ -49,6 +49,9 @@ build/
 !tests/ios_e2e/baselines/
 !tests/ios_e2e/baselines/**/
 !tests/ios_e2e/baselines/**/*.png
+!tests/fixtures/images/
+!tests/fixtures/images/**/
+!tests/fixtures/images/**/*.png
 *.db-shm
 *.db-wal
 
@@ -79,6 +82,7 @@ certs/
 # Generated eval/report artifacts
 outputs/
 test-results/
+tmp/ios-performance-traces/
 .local_dumps/
 
 # Local agent/editor state

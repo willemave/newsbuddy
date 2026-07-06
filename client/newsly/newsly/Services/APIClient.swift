@@ -5,9 +5,17 @@
 //  Created by Assistant on 7/8/25.
 //
 
-import Combine
 import Foundation
 import os.log
+
+extension URLSession {
+    static let newslyDefault: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 60
+        return URLSession(configuration: configuration)
+    }()
+}
 
 private let logger = Logger(subsystem: "com.newsly", category: "APIClient")
 
@@ -95,7 +103,7 @@ class APIClient {
     private let tokenRefresher: TokenRefreshing
 
     init(
-        session: URLSession = .shared,
+        session: URLSession = .newslyDefault,
         decoder: JSONDecoder = JSONDecoder(),
         tokenStore: AuthTokenStore = KeychainManager.shared,
         tokenRefresher: TokenRefreshing = TokenRefreshService.shared
@@ -506,54 +514,4 @@ class APIClient {
 extension Notification.Name {
     static let authenticationRequired = Notification.Name("authenticationRequired")
     static let authDidLogOut = Notification.Name("authDidLogOut")
-}
-
-// MARK: - Combine bridge
-
-extension APIClient {
-    func publisher<T: Decodable>(
-        _ endpoint: String,
-        method: String = "GET",
-        body: Data? = nil,
-        queryItems: [URLQueryItem]? = nil
-    ) -> AnyPublisher<T, Error> {
-        Deferred {
-            Future { promise in
-                Task {
-                    do {
-                        let result: T = try await self.request(
-                            endpoint,
-                            method: method,
-                            body: body,
-                            queryItems: queryItems
-                        )
-                        promise(.success(result))
-                    } catch {
-                        promise(.failure(error))
-                    }
-                }
-            }
-        }
-        .eraseToAnyPublisher()
-    }
-
-    func publisherVoid(
-        _ endpoint: String,
-        method: String = "POST",
-        body: Data? = nil
-    ) -> AnyPublisher<Void, Error> {
-        Deferred {
-            Future { promise in
-                Task {
-                    do {
-                        try await self.requestVoid(endpoint, method: method, body: body)
-                        promise(.success(()))
-                    } catch {
-                        promise(.failure(error))
-                    }
-                }
-            }
-        }
-        .eraseToAnyPublisher()
-    }
 }

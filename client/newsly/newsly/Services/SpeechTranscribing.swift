@@ -13,6 +13,14 @@ enum SpeechStopReason: Equatable {
     case failure
 }
 
+enum SpeechTranscriptionEvent: Equatable {
+    case transcriptDelta(String)
+    case transcriptFinal(String)
+    case error(String)
+    case stateChange(SpeechTranscriptionState)
+    case stopReason(SpeechStopReason)
+}
+
 @MainActor
 protocol SpeechTranscribing: AnyObject {
     var onTranscriptDelta: ((String) -> Void)? { get set }
@@ -32,11 +40,38 @@ protocol SpeechTranscribing: AnyObject {
 }
 
 extension SpeechTranscribing {
+    func events() -> AsyncStream<SpeechTranscriptionEvent> {
+        AsyncStream { continuation in
+            onTranscriptDelta = { transcript in
+                continuation.yield(.transcriptDelta(transcript))
+            }
+            onTranscriptFinal = { transcript in
+                continuation.yield(.transcriptFinal(transcript))
+            }
+            onError = { message in
+                continuation.yield(.error(message))
+            }
+            onStateChange = { state in
+                continuation.yield(.stateChange(state))
+            }
+            onStopReason = { reason in
+                continuation.yield(.stopReason(reason))
+            }
+            continuation.onTermination = { @Sendable _ in
+                Task { @MainActor in
+                    self.onTranscriptDelta = nil
+                    self.onTranscriptFinal = nil
+                    self.onError = nil
+                    self.onStateChange = nil
+                    self.onStopReason = nil
+                }
+            }
+        }
+    }
+
     var isAvailable: Bool {
-        let accessToken = KeychainManager.shared.getToken(key: .accessToken)
-        let refreshToken = KeychainManager.shared.getToken(key: .refreshToken)
-        let hasAuthToken = !(accessToken?.isEmpty ?? true) || !(refreshToken?.isEmpty ?? true)
-        return hasAuthToken && AppSettings.shared.backendTranscriptionAvailable
+        TokenRefreshService.shared.hasStoredCredentialMaterial
+            && AppSettings.shared.backendTranscriptionAvailable
     }
 }
 

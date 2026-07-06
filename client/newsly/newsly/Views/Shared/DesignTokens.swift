@@ -86,11 +86,6 @@ extension Color {
         Color(ReaderPalette.selectedUIColor(\.outlineVariant))
     }
 
-    // Backward-compatible text aliases.
-    static var textPrimary: Color { Color.onSurface }
-    static var textSecondary: Color { Color.onSurfaceSecondary }
-    static var textTertiary: Color { Color.onSurfaceTertiary }
-
     // Border colors
     static var borderSubtle: Color {
         Color(ReaderPalette.selectedUIColor(\.borderSubtle))
@@ -112,11 +107,6 @@ extension Color {
         })
     }
 
-    // Editorial colors (Discovery redesign) — adaptive for dark mode
-    static var editorialText: Color { Color.onSurface }
-    static var editorialSub: Color { Color.onSurfaceSecondary }
-    static var editorialBorder: Color { Color.outlineVariant }
-
     // Adaptive accent (topic badges, knowledge saves) — neutral metadata, not a hue
     static var topicAccent: Color { Color.onSurfaceSecondary }
 
@@ -125,13 +115,6 @@ extension Color {
 
     // Day section delimiter text (quiet grey)
     static var sectionDelimiter: Color { Color.onSurfaceTertiary }
-
-    // Summary and artifact accents — single accent; section text is neutralized at call sites.
-    static var summaryPrimaryAccent: Color { Color.brandPrimary }
-    static var summarySecondaryAccent: Color { Color.brandPrimary }
-    static var summaryQuestionAccent: Color { Color.brandPrimary }
-    static var summaryCounterpointAccent: Color { Color.brandPrimary }
-    static var summaryQuoteAccent: Color { Color.brandPrimary }
 
     // Onboarding and ambient illustration roles.
     // Keep this independent from reader palettes so the first-run flow stays colorful.
@@ -163,7 +146,6 @@ extension Color {
                 : UIColor(red: 0.580, green: 0.680, blue: 0.820, alpha: 1.0)  // #94add1
         })
     }
-    static var onboardingAmbientSecondary: Color { Color.onboardingAmbientTertiary }
     static var onboardingAmbientTertiary: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
@@ -246,21 +228,8 @@ extension Font {
     static let sectionHeader = Font.appSans(size: 13, weight: .semibold)
     static let chipLabel = Font.appSans(size: 11, weight: .medium)
 
-    // Feed card typography
-    static let feedMeta = Font.appSans(size: 11)
-    static let feedHeadline = Font.appSerif(size: 18, weight: .semibold)
-    static let feedSnippet = Font.appSans(size: 13)
-    static let cardHeadline = Font.appSerif(size: 22, weight: .semibold)
-    static let cardDescription = Font.appSans(size: 14)
-    static let cardBadge = Font.appSans(size: 10, weight: .semibold)
-    static let cardFooter = Font.appSans(size: 11, weight: .medium)
-
-    // Editorial typography (Discovery redesign)
-    static let editorialDisplay = Font.appSerif(size: 34, weight: .semibold)
-    static let editorialHeadline = Font.appSerif(size: 20, weight: .semibold)
-    static let editorialBody = Font.appSans(size: 16)
+    // Editorial typography.
     static let editorialMeta = Font.appSans(size: 11, weight: .bold)
-    static let editorialSubMeta = Font.appSans(size: 11)
 
     // Watercolor typography (Landing & Onboarding) follows the app title/body split.
     static let watercolorDisplay = Font.appSerif(size: 54, weight: .semibold)
@@ -271,8 +240,6 @@ extension Font {
     static let terracottaHeadlineLarge = Font.appSerif(size: 28, weight: .semibold)
     static let terracottaHeadlineMedium = Font.appSerif(size: 22, weight: .semibold)
     static let terracottaHeadlineSmall = Font.appSerif(size: 18, weight: .semibold)
-    static let terracottaHeadlineCompact = Font.appSerif(size: 22, weight: .semibold)
-    static let terracottaHeadlineItalic = Font.appSerifItalic(size: 18)
 
     // Terracotta typography — body/labels/UI
     static let terracottaBodyLarge = Font.appSans(size: 16)
@@ -316,21 +283,6 @@ extension UIFont {
         return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: baseFont)
     }
 
-    static var appTerracottaHeadlineCompact: UIFont {
-        UIFont.appSerif(size: 22, weight: .semibold)
-    }
-
-    static var appEditorialHeadline: UIFont {
-        UIFont.appSerif(size: 28, weight: .semibold)
-    }
-
-    static var appEditorialSummary: UIFont {
-        UIFont.appSans(
-            size: ReaderContentStyle.summaryBodyFontSize,
-            weight: ReaderContentStyle.uiBodyFontWeight
-        )
-    }
-
     static var appReaderBody: UIFont {
         UIFont.appSans(
             size: ReaderContentStyle.bodyFontSize,
@@ -361,7 +313,6 @@ enum CornerRadius {
 // MARK: - Card Metrics
 
 enum CardMetrics {
-    static let heroImageHeight: CGFloat = 180
     static let cardCornerRadius: CGFloat = CornerRadius.card
     static let cardSpacing: CGFloat = 20
     static let textOverlapOffset: CGFloat = -40
@@ -468,6 +419,93 @@ enum RowMetrics {
     static let smallThumbnailSize: CGFloat = 40
 }
 
+// MARK: - Motion
+
+enum AppMotion {
+    static let press = Animation.spring(response: 0.28, dampingFraction: 0.82)
+    static let panel = Animation.spring(duration: 0.3, bounce: 0)
+    static let subtle = Animation.easeOut(duration: 0.2)
+    static let emphasized = Animation.spring(response: 0.42, dampingFraction: 0.86)
+    static let reduced = Animation.linear(duration: 0.01)
+
+    static let recordingPulse = Animation.easeInOut(duration: 1.2).repeatForever(autoreverses: true)
+    static let finalizingPulse = Animation.easeInOut(duration: 1.3).repeatForever(autoreverses: true)
+    static let voiceLevelPulse = Animation.easeInOut(duration: 0.8).repeatForever(autoreverses: true)
+    static let typingDotPulse = Animation.easeInOut(duration: 0.4).repeatForever(autoreverses: true)
+    static let loadingBubblePulse = Animation.easeInOut(duration: 0.5).repeatForever(autoreverses: true)
+    static let chatStatusPulse = Animation.easeInOut(duration: 1.5).repeatForever(autoreverses: true)
+    static let chatIllustrationPulse = Animation.easeInOut(duration: 2.0).repeatForever(autoreverses: true)
+    static let laneShimmer = Animation.linear(duration: 1.6).repeatForever(autoreverses: false)
+    static let lanePulse = Animation.easeOut(duration: 1.4).repeatForever(autoreverses: false)
+
+    static func respectingReduceMotion(_ reduceMotion: Bool, _ animation: Animation) -> Animation {
+        reduceMotion ? reduced : animation
+    }
+}
+
+// MARK: - Shadows
+
+struct ShadowLayer {
+    let color: Color
+    let radius: CGFloat
+    let x: CGFloat
+    let y: CGFloat
+}
+
+struct ShadowStyle {
+    let primary: ShadowLayer
+    let secondary: ShadowLayer?
+
+    init(
+        color: Color,
+        radius: CGFloat,
+        x: CGFloat = 0,
+        y: CGFloat = 0,
+        secondary: ShadowLayer? = nil
+    ) {
+        primary = ShadowLayer(color: color, radius: radius, x: x, y: y)
+        self.secondary = secondary
+    }
+
+    init(primary: ShadowLayer, secondary: ShadowLayer? = nil) {
+        self.primary = primary
+        self.secondary = secondary
+    }
+
+    static let subtle = ShadowStyle(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
+    static let card = ShadowStyle(color: .black.opacity(0.05), radius: 16, x: 0, y: 10)
+    static let elevated = ShadowStyle(color: .black.opacity(0.10), radius: 18, x: 0, y: 12)
+    static let floating = ShadowStyle(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
+    static let none = ShadowStyle(color: .clear, radius: 0)
+    static let overlayText = ShadowStyle(color: .black.opacity(0.4), radius: 3, x: 0, y: 1)
+    static let strongOverlayText = ShadowStyle(color: .black.opacity(0.5), radius: 4, x: 0, y: 1)
+
+    static let editorialCard = ShadowStyle(
+        primary: ShadowLayer(color: .black.opacity(0.04), radius: 2, x: 0, y: 1),
+        secondary: ShadowLayer(color: .black.opacity(0.06), radius: 24, x: 0, y: 8)
+    )
+
+    static let onboardingMic = ShadowStyle(
+        primary: ShadowLayer(color: Color.onboardingText.opacity(0.14), radius: 12, x: 10, y: 10),
+        secondary: ShadowLayer(color: .white.opacity(0.35), radius: 16, x: -8, y: -8)
+    )
+
+    static func titleGlow(_ color: Color) -> ShadowStyle {
+        ShadowStyle(
+            primary: ShadowLayer(color: color.opacity(0.6), radius: 16, x: 0, y: 0),
+            secondary: ShadowLayer(color: color.opacity(0.3), radius: 32, x: 0, y: 0)
+        )
+    }
+
+    static func voiceControl(tint: Color, isActive: Bool) -> ShadowStyle {
+        ShadowStyle(
+            color: tint.opacity(isActive ? 0.22 : 0.12),
+            radius: isActive ? 12 : 8,
+            y: 6
+        )
+    }
+}
+
 // MARK: - Row Family
 
 enum AppRowFamily {
@@ -512,6 +550,11 @@ extension View {
             .listRowBackground(Color.clear)
     }
 
+    /// Apply a named shadow preset from the app design tokens.
+    func appShadow(_ style: ShadowStyle) -> some View {
+        modifier(AppShadowModifier(style: style))
+    }
+
     /// Apply standard screen-level background.
     func screenContainer() -> some View {
         self.background(Color.surfacePrimary)
@@ -524,6 +567,36 @@ extension View {
             TopScreenEdgeFade(fadeHeight: fadeHeight)
                 .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
+        }
+    }
+}
+
+private struct AppShadowModifier: ViewModifier {
+    let style: ShadowStyle
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let secondary = style.secondary {
+            content
+                .shadow(
+                    color: style.primary.color,
+                    radius: style.primary.radius,
+                    x: style.primary.x,
+                    y: style.primary.y
+                )
+                .shadow(
+                    color: secondary.color,
+                    radius: secondary.radius,
+                    x: secondary.x,
+                    y: secondary.y
+                )
+        } else {
+            content.shadow(
+                color: style.primary.color,
+                radius: style.primary.radius,
+                x: style.primary.x,
+                y: style.primary.y
+            )
         }
     }
 }

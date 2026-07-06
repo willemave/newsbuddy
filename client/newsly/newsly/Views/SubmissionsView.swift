@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct SubmissionsView: View {
-    @ObservedObject var viewModel: SubmissionStatusViewModel
+    let viewModel: SubmissionStatusViewModel
 
     var body: some View {
         Group {
@@ -50,11 +50,6 @@ struct SubmissionsView: View {
                 }
                 .buttonStyle(.plain)
                 .appListRow()
-                .onAppear {
-                    if submission.id == viewModel.submissions.last?.id {
-                        Task { await viewModel.loadMore() }
-                    }
-                }
             }
 
             if viewModel.isLoadingMore {
@@ -69,6 +64,9 @@ struct SubmissionsView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .onPaginationThresholdReached {
+            await viewModel.loadMore()
+        }
         .refreshable {
             await viewModel.load()
         }
@@ -85,6 +83,6 @@ struct SubmissionsView: View {
 
 #Preview {
     NavigationStack {
-        SubmissionsView(viewModel: SubmissionStatusViewModel())
+        SubmissionsView(viewModel: RootDependencyFactory.makeSubmissionStatusViewModel())
     }
 }

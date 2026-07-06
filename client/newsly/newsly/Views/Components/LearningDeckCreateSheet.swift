@@ -12,7 +12,7 @@ struct LearningDeckCreateSheet: View {
     let onCreate: (_ url: String?, _ interestsPrompt: String?) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var focusRecorder = LearningDeckFocusRecorder()
+    @State private var focusRecorder = RootDependencyFactory.makeLearningDeckFocusRecorder()
     @State private var urlText = ""
     @State private var interestsText = ""
 
@@ -92,6 +92,7 @@ struct LearningDeckCreateSheet: View {
                         TapToTalkMicButton(
                             isEnabled: !isSubmitting && !focusRecorder.isTranscribing,
                             isRecording: focusRecorder.isRecording,
+                            isTranscribing: focusRecorder.isTranscribing,
                             isBusy: focusRecorder.isVoiceActionInFlight && !focusRecorder.isRecording,
                             size: 48,
                             action: {

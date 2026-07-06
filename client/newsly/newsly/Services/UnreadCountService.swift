@@ -5,8 +5,8 @@
 //  Created by Assistant on 7/8/25.
 //
 
-import Combine
 import Foundation
+import Observation
 import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "UnreadCountService")
@@ -14,12 +14,13 @@ private let logger = Logger(subsystem: "com.newsly", category: "UnreadCountServi
 typealias UnreadCountsResponse = APIUnreadCountsResponse
 
 @MainActor
-class UnreadCountService: ObservableObject {
+@Observable
+final class UnreadCountService {
     static let shared = UnreadCountService()
 
-    @Published var articleCount: Int = 0
-    @Published var podcastCount: Int = 0
-    @Published var newsCount: Int = 0
+    var articleCount: Int = 0
+    var podcastCount: Int = 0
+    var newsCount: Int = 0
 
     // Computed properties for convenience
     var longFormCount: Int {
@@ -30,6 +31,7 @@ class UnreadCountService: ObservableObject {
         newsCount
     }
 
+    @ObservationIgnored
     private let badgeStatsCoordinator = BadgeStatsRefreshCoordinator.shared
 
     private init() {
@@ -64,6 +66,10 @@ class UnreadCountService: ObservableObject {
         if resetCounts {
             applyCounts(UnreadCountsResponse(article: 0, podcast: 0, news: 0))
         }
+    }
+
+    func setPeriodicRefreshSuspended(_ isSuspended: Bool) {
+        badgeStatsCoordinator.setRefreshSuspended(isSuspended)
     }
     
     func decrementArticleCount(by amount: Int = 1) {

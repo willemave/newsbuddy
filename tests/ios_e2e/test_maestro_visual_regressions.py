@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import os
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from app.models.db import NewsItem
+from app.utils.image_paths import get_content_images_dir, get_thumbnails_dir
 
 pytestmark = [pytest.mark.integration, pytest.mark.ios_e2e, pytest.mark.ios_visual]
 
 IOS_E2E_DIR = Path(__file__).resolve().parent
+FIXTURES_DIR = IOS_E2E_DIR.parent / "fixtures" / "images"
 VISUAL_PROFILE = os.environ.get("NEWSLY_MAESTRO_VISUAL_PROFILE", "iphone17pro-dark")
 BASELINE_DIR = Path(
     os.environ.get(
@@ -100,6 +103,23 @@ def _apply_article_visual_timestamps(db_session, content):
     return content
 
 
+def _seed_article_visual_artwork(content) -> None:
+    """Copy deterministic visual-test artwork for the generated image URLs."""
+    content_images_dir = get_content_images_dir()
+    thumbnails_dir = get_thumbnails_dir()
+    content_images_dir.mkdir(parents=True, exist_ok=True)
+    thumbnails_dir.mkdir(parents=True, exist_ok=True)
+
+    shutil.copyfile(
+        FIXTURES_DIR / "visual-content-article.png",
+        content_images_dir / f"{content.id}.png",
+    )
+    shutil.copyfile(
+        FIXTURES_DIR / "visual-thumbnail-article.png",
+        thumbnails_dir / f"{content.id}.png",
+    )
+
+
 def _create_user_visible_news_item(
     db_session,
     *,
@@ -169,6 +189,7 @@ def test_primary_tabs_match_visual_baselines(
     _prepare_baselines("visual_main_screens")
     long_content = create_sample_content(sample_article_long)
     long_content = _apply_article_visual_timestamps(db_session, long_content)
+    _seed_article_visual_artwork(long_content)
     news_item = _create_user_visible_news_item(
         db_session,
         user_id=test_user.id,
@@ -196,6 +217,7 @@ def test_content_detail_modals_match_visual_baselines(
     _prepare_baselines("visual_content_modals")
     content = create_sample_content(sample_article_long)
     content = _apply_article_visual_timestamps(db_session, content)
+    _seed_article_visual_artwork(content)
 
     run_ios_flow(
         _flow_name("visual_content_modals"),

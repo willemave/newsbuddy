@@ -5,6 +5,7 @@
 
 import AVFoundation
 import Foundation
+import Observation
 import os.log
 
 private let narrationPlaybackLogger = Logger(subsystem: "com.newsly", category: "NarrationPlayback")
@@ -14,9 +15,10 @@ private func narrationElapsedMilliseconds(since start: Date) -> Int {
 }
 
 @MainActor
-final class NarrationPlaybackProgress: ObservableObject {
-    @Published private(set) var currentTime: TimeInterval = 0
-    @Published private(set) var duration: TimeInterval = 0
+@Observable
+final class NarrationPlaybackProgress {
+    private(set) var currentTime: TimeInterval = 0
+    private(set) var duration: TimeInterval = 0
 
     func update(
         currentTime nextCurrentTime: TimeInterval,
@@ -50,30 +52,56 @@ final class NarrationPlaybackProgress: ObservableObject {
 }
 
 @MainActor
-final class NarrationPlaybackService: ObservableObject {
+@Observable
+final class NarrationPlaybackService {
     static let shared = NarrationPlaybackService()
     nonisolated static let defaultPlaybackRate: Float = 1.0
     nonisolated static let longPressPlaybackRate: Float = 1.5
 
     let progress = NarrationPlaybackProgress()
 
-    @Published private(set) var isSpeaking = false
-    @Published private(set) var isPaused = false
-    @Published private(set) var playbackRate: Float
-    @Published private(set) var speakingTarget: NarrationTarget?
+    private(set) var isSpeaking = false
+    private(set) var isPaused = false
+    private(set) var playbackRate: Float
+    private(set) var speakingTarget: NarrationTarget?
 
+    @ObservationIgnored
     private let preferenceStore: NarrationPlaybackPreferenceStore
+
+    @ObservationIgnored
     private var streamPlayer: AVPlayer?
+
+    @ObservationIgnored
     private var streamEndObserver: NSObjectProtocol?
+
+    @ObservationIgnored
     private var streamFailureObserver: NSObjectProtocol?
+
+    @ObservationIgnored
     private var streamItemStatusObserver: NSKeyValueObservation?
+
+    @ObservationIgnored
     private var streamTimeControlObserver: NSKeyValueObservation?
+
+    @ObservationIgnored
     private var progressTimer: Timer?
+
+    @ObservationIgnored
     private var savedPlaybackPositions: [NarrationTarget: TimeInterval] = [:]
+
+    @ObservationIgnored
     private var playbackStartedAt: Date?
+
+    @ObservationIgnored
     private var playbackItemReadyLogged = false
+
+    @ObservationIgnored
     private var playbackTimeControlPlayingLogged = false
+
+    @ObservationIgnored
     private var playbackTimeControlWaitingLogged = false
+
+    @ObservationIgnored
     private var playbackFirstProgressLogged = false
 
     private init() {

@@ -10,7 +10,7 @@ import UIKit
 
 @main
 struct newslyApp: App {
-    @StateObject private var authViewModel = AuthenticationViewModel()
+    @State private var authViewModel = RootDependencyFactory.makeAuthenticationViewModel()
     @State private var cliLinkAlertMessage: String?
 
     private let cliLinkService = CLILinkService()
@@ -28,10 +28,10 @@ struct newslyApp: App {
                 switch authViewModel.authState {
                 case .authenticated(let user):
                     AuthenticatedRootView(user: user)
-                        .environmentObject(authViewModel)
+                        .environment(authViewModel)
                 case .unauthenticated:
                     LandingView()
-                        .environmentObject(authViewModel)
+                        .environment(authViewModel)
                 case .loading:
                     LoadingView()
                 }
