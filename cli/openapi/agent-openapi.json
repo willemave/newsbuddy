@@ -1072,6 +1072,54 @@
         "title": "BriefingDigSummarizeResponse",
         "type": "object"
       },
+      "BriefingDiscussionDto": {
+        "properties": {
+          "comment_count": {
+            "nullable": true,
+            "title": "Comment Count",
+            "type": "integer"
+          },
+          "external_url": {
+            "nullable": true,
+            "title": "External Url",
+            "type": "string"
+          },
+          "overview": {
+            "nullable": true,
+            "title": "Overview",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "summary_status": {
+            "title": "Summary Status",
+            "type": "string"
+          },
+          "top_comment_author": {
+            "nullable": true,
+            "title": "Top Comment Author",
+            "type": "string"
+          },
+          "top_comment_text": {
+            "nullable": true,
+            "title": "Top Comment Text",
+            "type": "string"
+          },
+          "updated_at": {
+            "nullable": true,
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "summary_status"
+        ],
+        "title": "BriefingDiscussionDto",
+        "type": "object"
+      },
       "BriefingIndexResponse": {
         "properties": {
           "generated_at": {
@@ -1350,6 +1398,10 @@
         "properties": {
           "content_type": {
             "$ref": "#/components/schemas/ContentType",
+            "nullable": true
+          },
+          "discussion": {
+            "$ref": "#/components/schemas/BriefingDiscussionDto",
             "nullable": true
           },
           "id": {

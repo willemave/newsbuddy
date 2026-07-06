@@ -60,6 +60,17 @@ class BriefingSegmentDto(BaseModel):
     source_keys: list[str] = Field(default_factory=list)
 
 
+class BriefingDiscussionDto(BaseModel):
+    platform: str
+    comment_count: int | None = None
+    summary_status: str
+    overview: str | None = None
+    top_comment_author: str | None = None
+    top_comment_text: str | None = None
+    external_url: str | None = None
+    updated_at: UTCDateTime | None = None
+
+
 class BriefingSourceDto(BaseModel):
     source_key: str
     kind: str
@@ -73,6 +84,7 @@ class BriefingSourceDto(BaseModel):
     published_at: UTCDateTime | None = None
     content_type: ContentType | None = None
     read: bool = False
+    discussion: BriefingDiscussionDto | None = None
 
 
 class BriefingLensResponse(BaseModel):

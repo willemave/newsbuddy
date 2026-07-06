@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.settings import get_settings
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
 from app.models.db import (
     Content,
     ContentReadStatus,
     ContentStatusEntry,
     NewsItem,
+    NewsItemDiscussion,
     NewsItemReadStatus,
 )
+from app.models.metadata.summaries import DiscussionSummary
 from app.services.briefing.source_keys import build_source_key, parse_source_key
 from app.services.news_feed import build_visible_news_item_filter, list_unread_visible_news_items
 from app.utils.image_urls import (
@@ -28,6 +32,31 @@ from app.utils.summary_utils import extract_short_summary
 BRIEFING_CONTEXT_MAX_CHARS = 2400
 BRIEFING_SOURCE_EXCERPT_MAX_CHARS = 900
 BRIEFING_CONTEXT_LIST_MAX_ITEMS = 6
+TERMINAL_DISCUSSION_REFRESH_STATUSES = frozenset({"gone", "unsupported"})
+
+
+@dataclass(frozen=True)
+class BriefingSourceDiscussion:
+    platform: str
+    comment_count: int | None
+    summary_status: str
+    overview: str | None
+    top_comment_author: str | None
+    top_comment_text: str | None
+    external_url: str | None
+    updated_at: datetime | None
+
+    def dto(self) -> dict[str, object]:
+        return {
+            "platform": self.platform,
+            "comment_count": self.comment_count,
+            "summary_status": self.summary_status,
+            "overview": self.overview,
+            "top_comment_author": self.top_comment_author,
+            "top_comment_text": self.top_comment_text,
+            "external_url": self.external_url,
+            "updated_at": self.updated_at,
+        }
 
 
 @dataclass(frozen=True)
@@ -48,6 +77,7 @@ class BriefingSource:
     topic_slug: str | None = None
     topic_title: str | None = None
     briefing_context: str | None = None
+    discussion: BriefingSourceDiscussion | None = None
 
     def dto(self, *, read: bool) -> dict[str, object]:
         return {
@@ -63,6 +93,7 @@ class BriefingSource:
             "published_at": self.published_at,
             "content_type": self.content_type,
             "read": read,
+            "discussion": self.discussion.dto() if self.discussion else None,
         }
 
 
@@ -202,10 +233,118 @@ def sources_for_keys(
     if news_ids:
         visible = build_visible_news_item_filter(db, user_id=user_id)
         news_rows = db.query(NewsItem).filter(NewsItem.id.in_(news_ids)).filter(visible).all()
+        discussions_by_news_id = _briefing_discussions_for_news_ids(db, news_ids=news_ids)
         for news_row in news_rows:
             source = _source_from_news_item(news_row)
+            source = replace(source, discussion=discussions_by_news_id.get(int(news_row.id or 0)))
             found[source.source_key] = source
     return found
+
+
+def _briefing_discussions_for_news_ids(
+    db: Session,
+    *,
+    news_ids: list[int],
+) -> dict[int, BriefingSourceDiscussion]:
+    if not get_settings().briefing_discussion_strip_enabled:
+        return {}
+
+    unique_ids = sorted({int(news_id) for news_id in news_ids})
+    if not unique_ids:
+        return {}
+
+    rows = (
+        db.query(NewsItemDiscussion).filter(NewsItemDiscussion.news_item_id.in_(unique_ids)).all()
+    )
+    discussions: dict[int, BriefingSourceDiscussion] = {}
+    for row in rows:
+        discussion = _briefing_discussion_from_row(row)
+        if discussion is None or row.news_item_id is None:
+            continue
+        discussions[int(row.news_item_id)] = discussion
+    return discussions
+
+
+def _briefing_discussion_from_row(
+    row: NewsItemDiscussion,
+) -> BriefingSourceDiscussion | None:
+    if row.last_refresh_status in TERMINAL_DISCUSSION_REFRESH_STATUSES:
+        return None
+    if row.summary is None and not (row.comment_count and row.comment_count > 0):
+        return None
+
+    summary = _parse_discussion_summary(row.summary)
+    status = _briefing_discussion_status(row, summary=summary)
+    overview = None
+    top_comment_author = None
+    top_comment_text = None
+    external_url = row.discussion_url
+    if status == "completed" and summary is not None:
+        overview = _truncate_discussion_overview(
+            summary.overview,
+            max_chars=get_settings().briefing_discussion_overview_max_chars,
+        )
+        if summary.representative_comments:
+            top_comment = summary.representative_comments[0]
+            top_comment_author = top_comment.author
+            top_comment_text = top_comment.text
+        external_url = summary.external_discussion_url or external_url
+
+    return BriefingSourceDiscussion(
+        platform=str(row.platform),
+        comment_count=row.comment_count,
+        summary_status=status,
+        overview=overview,
+        top_comment_author=top_comment_author,
+        top_comment_text=top_comment_text,
+        external_url=external_url,
+        updated_at=(
+            row.summary_generated_at or row.last_comments_fetched_at or row.last_count_checked_at
+        ),
+    )
+
+
+def _parse_discussion_summary(value: Any) -> DiscussionSummary | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        return DiscussionSummary.model_validate(value)
+    except ValidationError:
+        return None
+
+
+def _briefing_discussion_status(
+    row: NewsItemDiscussion,
+    *,
+    summary: DiscussionSummary | None,
+) -> str:
+    if row.summary_status == "completed" and summary is not None:
+        return "completed"
+    if row.summary_status == "failed" or row.last_refresh_status == "failed":
+        return "failed"
+    return "not_ready"
+
+
+def _truncate_discussion_overview(value: str, *, max_chars: int) -> str:
+    cleaned = " ".join(value.split()).strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    if max_chars <= 3:
+        return cleaned[:max_chars]
+
+    hard_limit = max_chars - 3
+    sentence_end = max(
+        cleaned.rfind(".", 0, hard_limit + 1),
+        cleaned.rfind("!", 0, hard_limit + 1),
+        cleaned.rfind("?", 0, hard_limit + 1),
+    )
+    if sentence_end >= max(24, int(max_chars * 0.45)):
+        return cleaned[: sentence_end + 1]
+
+    truncated = cleaned[:hard_limit].rsplit(" ", 1)[0].strip()
+    if not truncated:
+        truncated = cleaned[:hard_limit].strip()
+    return (truncated.rstrip(".,;:") + "...")[:max_chars]
 
 
 def read_source_keys(db: Session, *, user_id: int) -> set[str]:

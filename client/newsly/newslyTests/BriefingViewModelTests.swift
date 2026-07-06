@@ -200,6 +200,46 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.index?.version, 5)
     }
 
+    func testNewerIndexVersionRefetchesLoadedLens() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
+            .value(makeIndex(version: 2, lenses: [makeLensSummary(key: "today")]), etag: "etag-2")
+        ]
+        service.lensResponses["today"] = makeLens(key: "today", version: 1)
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitFor { viewModel.selectedLens?.version == 1 }
+
+        service.lensResponses["today"] = makeLens(
+            key: "today",
+            version: 2,
+            segments: [makeSegment(sourceKeys: ["news:2"])],
+            sources: [
+                APIBriefingSource(
+                    sourceKey: "news:2",
+                    kind: "news",
+                    id: 2,
+                    title: "Updated news item",
+                    summary: "News summary",
+                    read: false,
+                    discussion: APIBriefingDiscussion(
+                        platform: "hackernews",
+                        commentCount: 12,
+                        summaryStatus: "completed",
+                        overview: "Commenters focused on deployment risk."
+                    )
+                )
+            ]
+        )
+        await viewModel.refreshIndex()
+        await waitFor { viewModel.selectedLens?.version == 2 }
+
+        XCTAssertEqual(service.fetchLensKeys, ["today", "today"])
+        XCTAssertEqual(viewModel.source(for: "news:2")?.discussion?.overview, "Commenters focused on deployment risk.")
+    }
+
     func testStaleIndexResponseDoesNotOverwriteNewerVersion() async {
         let service = MockBriefingService()
         let segment = makeSegment(sourceKeys: ["content:1"])
@@ -207,7 +247,7 @@ final class BriefingViewModelTests: XCTestCase {
             .value(makeIndex(version: 4, lenses: [makeLensSummary(key: "today")]), etag: "etag-4"),
             .value(makeIndex(version: 3, lenses: []), etag: "etag-3")
         ]
-        service.lensResponses["today"] = makeLens(key: "today", segments: [segment])
+        service.lensResponses["today"] = makeLens(key: "today", version: 4, segments: [segment])
         service.readMarkResponse = APIBriefingReadMarkResponse(marked: 1, version: 8)
         let viewModel = BriefingViewModel(service: service)
 
@@ -376,13 +416,15 @@ private func makeLensSummary(
 
 private func makeLens(
     key: String,
-    segments: [APIBriefingSegment] = [makeSegment()]
+    version: Int = 1,
+    segments: [APIBriefingSegment] = [makeSegment()],
+    sources: [APIBriefingSource]? = nil
 ) -> APIBriefingLensResponse {
     APIBriefingLensResponse(
-        version: 1,
+        version: version,
         lens: makeLensSummary(key: key),
         segments: segments,
-        sources: [
+        sources: sources ?? [
             APIBriefingSource(
                 sourceKey: "content:1",
                 kind: "content",

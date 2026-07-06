@@ -21,6 +21,7 @@ from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
 from app.models.db import NewsItem, NewsItemDiscussion, User, UserScraperConfig
+from app.services.briefing.read_marks import bump_briefing_version_for_news_item
 from app.services.discussion_fetcher import (
     DiscussionFetchError,
     _clean_html_text,
@@ -1118,6 +1119,7 @@ def refresh_news_item_discussion(
         )
         store_seen_summary_tracking(row=row, summary_input=summary_input)
         summarized = True
+        bump_briefing_version_for_news_item(db, news_item_id=news_item_id)
 
     db.commit()
     return NewsItemDiscussionRefreshResult(

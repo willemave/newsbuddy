@@ -466,6 +466,17 @@ type BriefingSegment struct {
 	SourceKeys []string `json:"source_keys,omitempty"`
 }
 
+type BriefingDiscussion struct {
+	Platform string `json:"platform"`
+	CommentCount *int `json:"comment_count,omitempty"`
+	SummaryStatus string `json:"summary_status"`
+	Overview *string `json:"overview,omitempty"`
+	TopCommentAuthor *string `json:"top_comment_author,omitempty"`
+	TopCommentText *string `json:"top_comment_text,omitempty"`
+	ExternalURL *string `json:"external_url,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
 type BriefingSource struct {
 	SourceKey string `json:"source_key"`
 	Kind string `json:"kind"`
@@ -479,6 +490,7 @@ type BriefingSource struct {
 	PublishedAt *time.Time `json:"published_at,omitempty"`
 	ContentType *ContentType `json:"content_type,omitempty"`
 	Read *bool `json:"read,omitempty"`
+	Discussion *BriefingDiscussion `json:"discussion,omitempty"`
 }
 
 type BriefingReadMarkRequest struct {

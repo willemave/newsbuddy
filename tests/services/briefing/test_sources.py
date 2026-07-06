@@ -1,10 +1,14 @@
 from sqlalchemy.orm import Session
 
+from app.core.settings import get_settings
 from app.models.contracts import ContentClassification, ContentType
+from app.models.db import NewsItemDiscussion
 from app.services.briefing.sources import (
     BRIEFING_CONTEXT_MAX_CHARS,
+    _truncate_discussion_overview,
     list_unread_longform_sources,
     read_source_keys_for,
+    sources_for_keys,
 )
 
 
@@ -133,3 +137,125 @@ def test_list_unread_longform_sources_builds_rich_briefing_context(
     assert "Thesis: Agents are shifting from tools to operating model." in context
     assert "Source excerpt: Full article body" in context
     assert len(context) <= BRIEFING_CONTEXT_MAX_CHARS
+
+
+def test_sources_for_keys_attaches_completed_discussion_payload(
+    db_session: Session,
+    test_user,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    assert test_user.id is not None
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_discussion_overview_max_chars", 80)
+    item = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        summary_title="Discussed story",
+    )
+    db_session.add(
+        NewsItemDiscussion(
+            news_item_id=item.id,
+            platform="hackernews",
+            discussion_url="https://news.ycombinator.com/item?id=123",
+            comment_count=214,
+            summary_status="completed",
+            last_refresh_status="completed",
+            summary={
+                "overview": (
+                    "Commenters focused on the deployment risks. "
+                    "They also debated whether the benchmark was representative."
+                ),
+                "topics": [{"title": "Risk", "summary": "Deployment risk dominated."}],
+                "representative_comments": [
+                    {"author": "alice", "text": "The rollout plan is the hard part."}
+                ],
+                "external_discussion_url": "https://news.ycombinator.com/item?id=123",
+            },
+        )
+    )
+    db_session.commit()
+
+    source = sources_for_keys(
+        db_session,
+        user_id=test_user.id,
+        source_keys=[f"news:{item.id}"],
+    )[f"news:{item.id}"]
+    payload = source.dto(read=False)["discussion"]
+
+    assert payload == {
+        "platform": "hackernews",
+        "comment_count": 214,
+        "summary_status": "completed",
+        "overview": "Commenters focused on the deployment risks.",
+        "top_comment_author": "alice",
+        "top_comment_text": "The rollout plan is the hard part.",
+        "external_url": "https://news.ycombinator.com/item?id=123",
+        "updated_at": None,
+    }
+
+
+def test_sources_for_keys_attaches_count_only_discussion_and_skips_terminal_rows(
+    db_session: Session,
+    test_user,
+    news_item_factory,
+) -> None:
+    assert test_user.id is not None
+    count_only = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        summary_title="Count only story",
+    )
+    gone = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        summary_title="Gone story",
+    )
+    db_session.add_all(
+        [
+            NewsItemDiscussion(
+                news_item_id=count_only.id,
+                platform="reddit",
+                discussion_url="https://reddit.com/r/test/comments/abc/thread/",
+                comment_count=48,
+                summary_status="not_ready",
+                last_refresh_status="pending",
+            ),
+            NewsItemDiscussion(
+                news_item_id=gone.id,
+                platform="hackernews",
+                discussion_url="https://news.ycombinator.com/item?id=456",
+                comment_count=12,
+                summary_status="failed",
+                last_refresh_status="gone",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    sources = sources_for_keys(
+        db_session,
+        user_id=test_user.id,
+        source_keys=[f"news:{count_only.id}", f"news:{gone.id}"],
+    )
+
+    count_payload = sources[f"news:{count_only.id}"].dto(read=False)["discussion"]
+    assert isinstance(count_payload, dict)
+    assert count_payload["summary_status"] == "not_ready"
+    assert count_payload["comment_count"] == 48
+    assert count_payload["overview"] is None
+    assert sources[f"news:{gone.id}"].dto(read=False)["discussion"] is None
+
+
+def test_truncate_discussion_overview_uses_sentence_boundary_when_available() -> None:
+    overview = (
+        "The first sentence is useful and complete. "
+        "The second sentence should not leak into the strip when the cap is small."
+    )
+
+    assert _truncate_discussion_overview(overview, max_chars=58) == (
+        "The first sentence is useful and complete."
+    )
+    assert _truncate_discussion_overview("one two three four five six", max_chars=18) == (
+        "one two three..."
+    )

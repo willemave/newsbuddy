@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
+from app.core.settings import Settings, get_settings
 from app.models.db import BriefingSegment, BriefingState
 from app.repositories import read_status_repository
-from app.services.briefing.source_keys import parse_source_key
+from app.services.briefing.source_keys import build_source_key, parse_source_key
 from app.services.briefing.sources import read_source_keys_for
 from app.services.news_feed import bulk_mark_news_items_read
 
@@ -78,6 +80,42 @@ def retire_read_segments(db: Session, *, user_id: int) -> int:
             segment.status = "retired"
             retired += 1
     return retired
+
+
+def bump_briefing_version_for_news_item(
+    db: Session,
+    *,
+    news_item_id: int,
+    settings: Settings | None = None,
+) -> bool:
+    settings = settings or get_settings()
+    enabled_user_ids = sorted({int(user_id) for user_id in settings.briefing_enabled_user_ids})
+    if not enabled_user_ids:
+        return False
+
+    source_key = build_source_key("news", int(news_item_id))
+    matching_user_ids = (
+        db.execute(
+            select(BriefingSegment.user_id)
+            .where(BriefingSegment.user_id.in_(enabled_user_ids))
+            .where(BriefingSegment.status.in_(("active", "degraded")))
+            .where(BriefingSegment.source_keys.contains([source_key]))
+            .distinct()
+        )
+        .scalars()
+        .all()
+    )
+    matching_user_id_values = [
+        int(user_id) for user_id in matching_user_ids if user_id is not None
+    ]
+    if not matching_user_id_values:
+        return False
+
+    for user_id in matching_user_id_values:
+        state = _state_for_update(db, user_id=user_id)
+        state.version = int(state.version or 0) + 1
+    db.flush()
+    return True
 
 
 def _state_for_update(db: Session, *, user_id: int) -> BriefingState:

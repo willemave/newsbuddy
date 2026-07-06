@@ -7,6 +7,7 @@ struct BriefingView: View {
     @StateObject private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
     @StateObject private var playbackService = NarrationPlaybackService.shared
     @State private var activeSource: BriefingSourceSheetItem?
+    @State private var activeDiscussion: BriefingDiscussionSheetItem?
     @State private var preparingNarrationLensKeys: Set<String> = []
     @State private var narrationError: String?
 
@@ -57,6 +58,12 @@ struct BriefingView: View {
             .presentationContentInteraction(.resizes)
             .presentationDragIndicator(.visible)
         }
+        .sheet(item: $activeDiscussion) { item in
+            BriefingDiscussionSheet(item: item)
+                .presentationDetents([.fraction(0.75), .large])
+                .presentationContentInteraction(.resizes)
+                .presentationDragIndicator(.visible)
+        }
         .sheet(isPresented: digSheetPresented) {
             BriefingDigSheet(viewModel: digViewModel)
                 .presentationDetents([.fraction(0.75), .large])
@@ -80,6 +87,7 @@ struct BriefingView: View {
                         narrationSection(lensKey: lens.key, lensTitle: lens.title)
                     ),
                     onOpenSource: openSource,
+                    onOpenDiscussion: openDiscussion,
                     onDig: startDig
                 )
                 .tag(lens.key)
@@ -127,6 +135,10 @@ struct BriefingView: View {
     private func openSource(_ sourceKey: String) {
         guard let source = viewModel.source(for: sourceKey) else { return }
         activeSource = BriefingSourceSheetItem(source: source)
+    }
+
+    private func openDiscussion(_ source: APIBriefingSource) {
+        activeDiscussion = BriefingDiscussionSheetItem(source: source)
     }
 
     private func startDig(fragment: String, passageContext: String) {
@@ -279,6 +291,7 @@ private struct BriefingLensPageView: View {
     let mastheadDate: Date
     let narrationSection: AnyView
     let onOpenSource: (String) -> Void
+    let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
 
     @State private var isHeaderPinned = false
@@ -304,6 +317,7 @@ private struct BriefingLensPageView: View {
                                         segment: segment,
                                         sourceLookup: { viewModel.source(for: $0) },
                                         onOpenSource: onOpenSource,
+                                        onOpenDiscussion: onOpenDiscussion,
                                         onDig: onDig,
                                         onSourceKeysSeen: { sourceKeys in
                                             viewModel.markSourcesSeen(sourceKeys)
@@ -394,6 +408,7 @@ private struct BriefingSegmentView: View {
     let segment: APIBriefingSegment
     let sourceLookup: (String) -> APIBriefingSource?
     let onOpenSource: (String) -> Void
+    let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
     let onSourceKeysSeen: ([String]) -> Void
 
@@ -428,6 +443,13 @@ private struct BriefingSegmentView: View {
                     )
                 }
             }
+
+            if !discussionSources.isEmpty {
+                BriefingDiscussionStrip(
+                    sources: discussionSources,
+                    onOpenDiscussion: onOpenDiscussion
+                )
+            }
         }
         .padding(.vertical, 2)
         // Read segments recede without losing legibility.
@@ -440,6 +462,20 @@ private struct BriefingSegmentView: View {
     private var allSourcesRead: Bool {
         !segment.sourceKeys.isEmpty
             && segment.sourceKeys.allSatisfy { sourceLookup($0)?.read ?? true }
+    }
+
+    private var discussionSources: [APIBriefingSource] {
+        segment.sourceKeys
+            .compactMap(sourceLookup)
+            .filter { $0.kind == "news" && $0.discussion != nil }
+            .sorted { left, right in
+                let leftCount = left.discussion?.commentCount ?? 0
+                let rightCount = right.discussion?.commentCount ?? 0
+                if leftCount == rightCount {
+                    return left.title < right.title
+                }
+                return leftCount > rightCount
+            }
     }
 
     /// Inset figures adjacent to a meaty passage float inside it (text wraps);
@@ -748,6 +784,129 @@ private struct BriefingPullquoteView: View {
     }
 }
 
+private struct BriefingDiscussionStrip: View {
+    let sources: [APIBriefingSource]
+    let onOpenDiscussion: (APIBriefingSource) -> Void
+
+    private var visibleSources: [APIBriefingSource] {
+        Array(sources.prefix(2))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Rectangle()
+                .fill(Color.outlineVariant.opacity(0.45))
+                .frame(height: 0.5)
+
+            ForEach(visibleSources, id: \.sourceKey) { source in
+                if let discussion = source.discussion {
+                    Button {
+                        onOpenDiscussion(source)
+                    } label: {
+                        BriefingDiscussionStripRow(source: source, discussion: discussion)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if sources.count > visibleSources.count {
+                Text("+\(sources.count - visibleSources.count) more discussions")
+                    .font(.appCaption2.weight(.semibold))
+                    .foregroundStyle(Color.onSurfaceTertiary)
+                    .padding(.leading, 28)
+            }
+        }
+        .padding(.top, 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("briefing.discussion_strip")
+    }
+}
+
+private struct BriefingDiscussionStripRow: View {
+    let source: APIBriefingSource
+    let discussion: APIBriefingDiscussion
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.appSymbol(size: 14, weight: .semibold))
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .frame(width: 18, height: 18)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(countLabel)
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(Color.onSurface)
+                        .lineLimit(1)
+
+                    if discussion.summaryStatus == "completed" {
+                        Circle()
+                            .fill(Color.brandPrimary.opacity(0.7))
+                            .frame(width: 5, height: 5)
+                    }
+                }
+
+                if let overview = discussion.overview, !overview.isEmpty {
+                    Text(overview)
+                        .font(.appCaption)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let commentText = discussion.topCommentText, !commentText.isEmpty {
+                    Text(commentLabel(for: commentText))
+                        .font(.appCaption2)
+                        .foregroundStyle(Color.onSurfaceTertiary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.up")
+                .font(.appCaption2.weight(.bold))
+                .foregroundStyle(Color.onSurfaceTertiary)
+                .rotationEffect(.degrees(90))
+                .padding(.top, 2)
+        }
+        .contentShape(Rectangle())
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var countLabel: String {
+        if let count = discussion.commentCount {
+            return "\(count) \(count == 1 ? "comment" : "comments") on \(platformName)"
+        }
+        return "Discussion on \(platformName)"
+    }
+
+    private var platformName: String {
+        switch discussion.platform.lowercased() {
+        case "hackernews":
+            return "Hacker News"
+        case "reddit":
+            return "Reddit"
+        default:
+            return discussion.platform
+        }
+    }
+
+    private var accessibilityLabel: String {
+        "\(countLabel). \(source.title)"
+    }
+
+    private func commentLabel(for text: String) -> String {
+        if let author = discussion.topCommentAuthor, !author.isEmpty {
+            return "\(author): \(text)"
+        }
+        return text
+    }
+}
+
 private struct BriefingNarrationBar: View {
     let lensTitle: String
     let episode: AudioEpisode?
@@ -965,18 +1124,174 @@ struct BriefingSafariItem: Identifiable {
     }
 }
 
+struct BriefingDiscussionSheetItem: Identifiable {
+    let source: APIBriefingSource
+
+    var id: String {
+        source.sourceKey
+    }
+}
+
+private enum BriefingDiscussionLoadState {
+    case loading
+    case loaded(ContentDiscussion)
+    case error(String)
+}
+
+private struct BriefingDiscussionSheet: View {
+    let item: BriefingDiscussionSheetItem
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var state: BriefingDiscussionLoadState = .loading
+    @State private var safariItem: BriefingSafariItem?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    stateContent
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 12)
+                .padding(.bottom, 32)
+            }
+            .background(Color.surfacePrimary)
+            .navigationTitle("Discussion")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .task(id: item.id) {
+            await loadDiscussion()
+        }
+        .sheet(item: $safariItem) { item in
+            SafariView(url: item.url)
+                .ignoresSafeArea()
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Community Reaction")
+                .kicker()
+            Text(item.source.title)
+                .font(.appTitle3)
+                .foregroundStyle(Color.onSurface)
+                .fixedSize(horizontal: false, vertical: true)
+            if let discussion = item.source.discussion {
+                Text(countLabel(for: discussion))
+                    .font(.appCaption)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+            }
+        }
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+    }
+
+    @ViewBuilder
+    private var stateContent: some View {
+        switch state {
+        case .loading:
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Loading discussion...")
+                    .font(.appCallout)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+            }
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+        case .loaded(let discussion):
+            if discussion.summary != nil {
+                DiscussionSummaryView(discussion: discussion, onOpenURL: openURL)
+            } else {
+                unavailableContent(discussion.unavailableMessage)
+            }
+        case .error(let message):
+            unavailableContent(message)
+        }
+    }
+
+    private func unavailableContent(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(message)
+                .font(.appCallout)
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let rawURL = item.source.discussion?.externalUrl,
+               let url = URL(string: rawURL) {
+                Button {
+                    safariItem = BriefingSafariItem(url: url)
+                } label: {
+                    Label("Open thread", systemImage: "arrow.up.right.square")
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+    }
+
+    private func loadDiscussion() async {
+        state = .loading
+        do {
+            let discussion = try await ContentService.shared.fetchContentDiscussion(
+                id: item.source.id,
+                contentType: .news
+            )
+            state = .loaded(discussion)
+        } catch where isNetworkCancellation(error) {
+            return
+        } catch {
+            state = .error("Discussion could not be loaded right now.")
+        }
+    }
+
+    private func openURL(_ url: URL) {
+        safariItem = BriefingSafariItem(url: url)
+    }
+
+    private func countLabel(for discussion: APIBriefingDiscussion) -> String {
+        if let count = discussion.commentCount {
+            return "\(count) \(count == 1 ? "comment" : "comments") on \(platformName(for: discussion))"
+        }
+        return "Discussion on \(platformName(for: discussion))"
+    }
+
+    private func platformName(for discussion: APIBriefingDiscussion) -> String {
+        switch discussion.platform.lowercased() {
+        case "hackernews":
+            return "Hacker News"
+        case "reddit":
+            return "Reddit"
+        default:
+            return discussion.platform
+        }
+    }
+}
+
 private struct BriefingSourceSheet: View {
     let item: BriefingSourceSheetItem
     let contentIds: [Int]
 
     @Environment(\.dismiss) private var dismiss
     @State private var safariItem: BriefingSafariItem?
+    @State private var activeDiscussion: BriefingDiscussionSheetItem?
 
     var body: some View {
         sourceContent
             .sheet(item: $safariItem) { item in
                 SafariView(url: item.url)
                     .ignoresSafeArea()
+            }
+            .sheet(item: $activeDiscussion) { item in
+                BriefingDiscussionSheet(item: item)
+                    .presentationDetents([.fraction(0.75), .large])
+                    .presentationContentInteraction(.resizes)
+                    .presentationDragIndicator(.visible)
             }
     }
 
@@ -1048,6 +1363,19 @@ private struct BriefingSourceSheet: View {
                                     }
                                 }
                             }
+                        }
+
+                        if item.source.discussion != nil {
+                            Button {
+                                activeDiscussion = BriefingDiscussionSheetItem(source: item.source)
+                            } label: {
+                                Label("View discussion", systemImage: "bubble.left.and.bubble.right")
+                                    .font(.appCallout.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(Color.brandPrimary)
+                            .padding(.top, 4)
                         }
 
                         if let rawURL = item.source.url,

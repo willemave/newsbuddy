@@ -1336,6 +1336,90 @@
         "title": "BriefingDigSummarizeResponse",
         "type": "object"
       },
+      "BriefingDiscussionDto": {
+        "properties": {
+          "comment_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Count"
+          },
+          "external_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Url"
+          },
+          "overview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overview"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "summary_status": {
+            "title": "Summary Status",
+            "type": "string"
+          },
+          "top_comment_author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Comment Author"
+          },
+          "top_comment_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Comment Text"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "platform",
+          "summary_status"
+        ],
+        "title": "BriefingDiscussionDto",
+        "type": "object"
+      },
       "BriefingIndexResponse": {
         "properties": {
           "generated_at": {
@@ -1634,6 +1718,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ContentType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "discussion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BriefingDiscussionDto"
               },
               {
                 "type": "null"

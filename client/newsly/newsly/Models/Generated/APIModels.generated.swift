@@ -2105,6 +2105,79 @@ struct APIBriefingSegment: Codable {
     }
 }
 
+struct APIBriefingDiscussion: Codable {
+    let platform: String
+    let commentCount: Int?
+    let summaryStatus: String
+    let overview: String?
+    let topCommentAuthor: String?
+    let topCommentText: String?
+    let externalUrl: String?
+    let updatedAt: Date?
+
+    init(
+        platform: String,
+        commentCount: Int? = nil,
+        summaryStatus: String,
+        overview: String? = nil,
+        topCommentAuthor: String? = nil,
+        topCommentText: String? = nil,
+        externalUrl: String? = nil,
+        updatedAt: Date? = nil
+    ) {
+        self.platform = platform
+        self.commentCount = commentCount
+        self.summaryStatus = summaryStatus
+        self.overview = overview
+        self.topCommentAuthor = topCommentAuthor
+        self.topCommentText = topCommentText
+        self.externalUrl = externalUrl
+        self.updatedAt = updatedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case platform = "platform"
+        case commentCount = "comment_count"
+        case summaryStatus = "summary_status"
+        case overview = "overview"
+        case topCommentAuthor = "top_comment_author"
+        case topCommentText = "top_comment_text"
+        case externalUrl = "external_url"
+        case updatedAt = "updated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        platform = try container.decode(String.self, forKey: .platform)
+        commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount)
+        summaryStatus = try container.decode(String.self, forKey: .summaryStatus)
+        overview = try container.decodeIfPresent(String.self, forKey: .overview)
+        topCommentAuthor = try container.decodeIfPresent(String.self, forKey: .topCommentAuthor)
+        topCommentText = try container.decodeIfPresent(String.self, forKey: .topCommentText)
+        externalUrl = try container.decodeIfPresent(String.self, forKey: .externalUrl)
+        if let updatedAtRaw = try container.decodeIfPresent(String.self, forKey: .updatedAt) {
+            guard let updatedAtParsed = ServerDate.parse(updatedAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .updatedAt, in: container, debugDescription: "Unparseable date for updatedAt")
+            }
+            updatedAt = updatedAtParsed
+        } else {
+            updatedAt = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(platform, forKey: .platform)
+        try container.encodeIfPresent(commentCount, forKey: .commentCount)
+        try container.encode(summaryStatus, forKey: .summaryStatus)
+        try container.encodeIfPresent(overview, forKey: .overview)
+        try container.encodeIfPresent(topCommentAuthor, forKey: .topCommentAuthor)
+        try container.encodeIfPresent(topCommentText, forKey: .topCommentText)
+        try container.encodeIfPresent(externalUrl, forKey: .externalUrl)
+        try container.encodeIfPresent(updatedAt.map(ServerDate.format), forKey: .updatedAt)
+    }
+}
+
 struct APIBriefingSource: Codable {
     let sourceKey: String
     let kind: String
@@ -2118,6 +2191,7 @@ struct APIBriefingSource: Codable {
     let publishedAt: Date?
     let contentType: APIContentType?
     let read: Bool
+    let discussion: APIBriefingDiscussion?
 
     init(
         sourceKey: String,
@@ -2131,7 +2205,8 @@ struct APIBriefingSource: Codable {
         thumbnailUrl: String? = nil,
         publishedAt: Date? = nil,
         contentType: APIContentType? = nil,
-        read: Bool = false
+        read: Bool = false,
+        discussion: APIBriefingDiscussion? = nil
     ) {
         self.sourceKey = sourceKey
         self.kind = kind
@@ -2145,6 +2220,7 @@ struct APIBriefingSource: Codable {
         self.publishedAt = publishedAt
         self.contentType = contentType
         self.read = read
+        self.discussion = discussion
     }
 
     enum CodingKeys: String, CodingKey {
@@ -2160,6 +2236,7 @@ struct APIBriefingSource: Codable {
         case publishedAt = "published_at"
         case contentType = "content_type"
         case read = "read"
+        case discussion = "discussion"
     }
 
     init(from decoder: Decoder) throws {
@@ -2183,6 +2260,7 @@ struct APIBriefingSource: Codable {
         }
         contentType = try container.decodeIfPresent(APIContentType.self, forKey: .contentType)
         read = try container.decode(Bool.self, forKey: .read)
+        discussion = try container.decodeIfPresent(APIBriefingDiscussion.self, forKey: .discussion)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2199,6 +2277,7 @@ struct APIBriefingSource: Codable {
         try container.encodeIfPresent(publishedAt.map(ServerDate.format), forKey: .publishedAt)
         try container.encodeIfPresent(contentType, forKey: .contentType)
         try container.encode(read, forKey: .read)
+        try container.encodeIfPresent(discussion, forKey: .discussion)
     }
 }
 

@@ -8,11 +8,15 @@ from app.models.contracts import ContentClassification, ContentType, TaskStatus,
 from app.models.db import (
     BriefingLens,
     BriefingSegment,
+    BriefingState,
     Content,
     ProcessingTask,
 )
 from app.models.db.users import User
-from app.services.briefing.read_marks import mark_briefing_sources_read
+from app.services.briefing.read_marks import (
+    bump_briefing_version_for_news_item,
+    mark_briefing_sources_read,
+)
 from app.services.briefing.refresh import (
     enqueue_briefing_refresh_task,
     run_briefing_refresh,
@@ -298,6 +302,93 @@ def test_mark_read_retires_fully_read_segment_and_bumps_version(
     assert segment.status == "retired"
 
 
+def test_bump_briefing_version_for_news_item_only_updates_matching_enabled_active_segments(
+    db_session: Session,
+    user_factory,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    enabled_user = user_factory(email="briefing-enabled@example.com")
+    other_enabled_user = user_factory(email="briefing-other-enabled@example.com")
+    disabled_user = user_factory(email="briefing-disabled@example.com")
+    assert enabled_user.id is not None
+    assert other_enabled_user.id is not None
+    assert disabled_user.id is not None
+    item = news_item_factory(visibility_scope="user", owner_user_id=enabled_user.id)
+    settings = get_settings()
+    monkeypatch.setattr(
+        settings,
+        "briefing_enabled_user_ids",
+        [enabled_user.id, other_enabled_user.id],
+    )
+
+    matching_lens = _create_lens(db_session, user_id=enabled_user.id, key="news-enabled")
+    retired_lens = _create_lens(db_session, user_id=other_enabled_user.id, key="news-retired")
+    disabled_lens = _create_lens(db_session, user_id=disabled_user.id, key="news-disabled")
+    db_session.add_all(
+        [
+            BriefingSegment(
+                lens_id=matching_lens.id,
+                user_id=enabled_user.id,
+                blocks=[],
+                source_keys=[f"news:{item.id}"],
+                status="active",
+                model="test",
+                prompt_version="test",
+            ),
+            BriefingSegment(
+                lens_id=retired_lens.id,
+                user_id=other_enabled_user.id,
+                blocks=[],
+                source_keys=[f"news:{item.id}"],
+                status="retired",
+                model="test",
+                prompt_version="test",
+            ),
+            BriefingSegment(
+                lens_id=disabled_lens.id,
+                user_id=disabled_user.id,
+                blocks=[],
+                source_keys=[f"news:{item.id}"],
+                status="active",
+                model="test",
+                prompt_version="test",
+            ),
+            BriefingState(
+                user_id=enabled_user.id,
+                version=7,
+                masthead_title="The Unread Times",
+                masthead_deck="Existing",
+            ),
+            BriefingState(
+                user_id=other_enabled_user.id,
+                version=3,
+                masthead_title="The Unread Times",
+                masthead_deck="Existing",
+            ),
+            BriefingState(
+                user_id=disabled_user.id,
+                version=5,
+                masthead_title="The Unread Times",
+                masthead_deck="Existing",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    bumped = bump_briefing_version_for_news_item(
+        db_session,
+        news_item_id=item.id,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert bumped is True
+    assert _state_version(db_session, enabled_user.id) == 8
+    assert _state_version(db_session, other_enabled_user.id) == 3
+    assert _state_version(db_session, disabled_user.id) == 5
+
+
 def test_append_enqueue_coalesces_but_manual_refresh_pulls_pending_task_forward(
     db_session: Session,
     test_user: User,
@@ -355,6 +446,26 @@ def _create_unread_article(
     )
     status_entry_factory(user=user, content=content, status="inbox")
     return content
+
+
+def _create_lens(db_session: Session, *, user_id: int, key: str) -> BriefingLens:
+    lens = BriefingLens(
+        user_id=user_id,
+        key=key,
+        tier="news",
+        title=key.replace("-", " ").title(),
+        deck="News",
+        position=1,
+    )
+    db_session.add(lens)
+    db_session.flush()
+    return lens
+
+
+def _state_version(db_session: Session, user_id: int) -> int:
+    state = db_session.query(BriefingState).filter(BriefingState.user_id == user_id).one()
+    assert state.version is not None
+    return int(state.version)
 
 
 def _create_unread_podcast(

@@ -503,6 +503,16 @@ def test_refresh_news_item_discussion_stores_raw_summary_and_honors_ttl(
         "app.services.news_item_discussions._fetch_hackernews_comments",
         _fake_fetch,
     )
+    bumped_news_item_ids: list[int] = []
+
+    def _fake_bump(_db: object, *, news_item_id: int) -> bool:
+        bumped_news_item_ids.append(news_item_id)
+        return True
+
+    monkeypatch.setattr(
+        "app.services.news_item_discussions.bump_briefing_version_for_news_item",
+        _fake_bump,
+    )
     gateway = _FakeGateway()
     summarizer = _FakeSummarizer()
 
@@ -518,6 +528,7 @@ def test_refresh_news_item_discussion_stores_raw_summary_and_honors_ttl(
     assert result.summarized is True
     assert fetch_calls == 1
     assert summarizer.calls == 1
+    assert bumped_news_item_ids == [item.id]
 
     row = (
         db_session.query(NewsItemDiscussion)
@@ -548,6 +559,7 @@ def test_refresh_news_item_discussion_stores_raw_summary_and_honors_ttl(
     assert skipped.status == "skipped"
     assert fetch_calls == 1
     assert summarizer.calls == 1
+    assert bumped_news_item_ids == [item.id]
 
     refreshed_same_hash = refresh_news_item_discussion(
         db_session,
@@ -560,6 +572,7 @@ def test_refresh_news_item_discussion_stores_raw_summary_and_honors_ttl(
     assert refreshed_same_hash.success is True
     assert fetch_calls == 2
     assert summarizer.calls == 1
+    assert bumped_news_item_ids == [item.id]
 
 
 def test_refresh_news_item_discussion_marks_dead_hn_terminal(

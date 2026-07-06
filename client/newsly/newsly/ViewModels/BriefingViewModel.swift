@@ -100,6 +100,9 @@ final class BriefingViewModel: ObservableObject {
             guard let self else { return }
             do {
                 let response = try await service.fetchLens(key: key)
+                guard response.version >= (self.index?.version ?? 0) else {
+                    return
+                }
                 self.lenses[key] = response
                 self.loadedLensKeys.insert(key)
             } catch {
@@ -187,6 +190,9 @@ final class BriefingViewModel: ObservableObject {
                     state = orderedLenses.isEmpty ? .empty : .loaded
                     return
                 }
+                if let current = index, response.version > current.version {
+                    invalidateLoadedLenses()
+                }
                 index = response
                 // A missing ETag header must not discard the last known validator.
                 etag = responseEtag ?? etag
@@ -219,6 +225,14 @@ final class BriefingViewModel: ObservableObject {
         for neighborIndex in [index - 1, index + 1] where lenses.indices.contains(neighborIndex) {
             loadLensIfNeeded(key: lenses[neighborIndex].key)
         }
+    }
+
+    private func invalidateLoadedLenses() {
+        for task in lensLoadTasks.values {
+            task.cancel()
+        }
+        lensLoadTasks.removeAll()
+        loadedLensKeys.removeAll()
     }
 
     private func flushPendingReadMarks() async {
@@ -263,7 +277,8 @@ final class BriefingViewModel: ObservableObject {
                     thumbnailUrl: source.thumbnailUrl,
                     publishedAt: source.publishedAt,
                     contentType: source.contentType,
-                    read: true
+                    read: true,
+                    discussion: source.discussion
                 )
             }
             let readSourceKeys = Set(updatedSources.filter(\.read).map(\.sourceKey))

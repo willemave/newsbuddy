@@ -314,6 +314,8 @@ class Settings(BaseSettings):
     briefing_max_segments_per_lens: int = Field(default=12, ge=1, le=100)
     briefing_dig_hourly_limit: int = Field(default=60, ge=0, le=1000)
     briefing_narration_max_chars: int = Field(default=18_000, ge=500, le=100_000)
+    briefing_discussion_strip_enabled: bool = True
+    briefing_discussion_overview_max_chars: int = Field(default=280, ge=80, le=900)
 
     # External services
     openai_api_key: str | None = None
