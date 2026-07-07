@@ -132,8 +132,8 @@ def compose_window(
                 warnings.append(f"llm_invalid_layout_retry:{attempt}")
                 continue
             except Exception as exc:
-                logger.exception(
-                    "Briefing LLM composition failed",
+                logger.warning(
+                    "Briefing LLM composition failed; retrying or falling back",
                     extra={
                         "component": "briefing",
                         "operation": "compose_window",
@@ -148,8 +148,13 @@ def compose_window(
                             "error": str(exc),
                         },
                     },
+                    exc_info=True,
                 )
-                raise
+                if attempt >= MAX_COMPOSE_ATTEMPTS:
+                    fallback_reason = f"llm_error_fallback:{type(exc).__name__}"
+                    break
+                warnings.append(f"llm_error_retry:{attempt}")
+                continue
             if not _blocks_look_malformed(llm_blocks):
                 blocks = list(llm_blocks)
                 if usage:

@@ -1,3 +1,4 @@
+from concurrent.futures import Future, TimeoutError
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -18,10 +19,13 @@ from app.services.briefing.read_marks import (
     mark_briefing_sources_read,
 )
 from app.services.briefing.refresh import (
+    _compose_prepared_windows,
+    _PreparedWindow,
     _retire_finished_segments,
     enqueue_briefing_refresh_task,
     run_briefing_refresh,
 )
+from app.services.briefing.sources import BriefingSource
 
 
 def test_full_refresh_builds_segments_and_schedules_sweep(
@@ -157,6 +161,61 @@ def test_release_path_full_refresh_preserves_current_segments_when_compose_fails
 
     assert existing_segment.status == "active"
     assert db_session.query(BriefingSegment).count() == 1
+
+
+def test_parallel_compose_batch_timeout_uses_deterministic_fallback(monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_compose_parallelism", 2)
+    windows = [
+        _PreparedWindow(
+            lens_id=1,
+            lens_key="articles",
+            lens_title="Articles",
+            tier="longform",
+            window_index=0,
+            pending_row_ids=(1,),
+            sources=(_briefing_source(1),),
+        ),
+        _PreparedWindow(
+            lens_id=1,
+            lens_key="articles",
+            lens_title="Articles",
+            tier="longform",
+            window_index=1,
+            pending_row_ids=(2,),
+            sources=(_briefing_source(2),),
+        ),
+    ]
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers: int) -> None:
+            self.max_workers = max_workers
+
+        def submit(self, _fn, _window):  # noqa: ANN001
+            return Future()
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            assert wait is False
+            assert cancel_futures is True
+
+    def time_out(_futures, *, timeout: int):  # noqa: ANN001
+        assert timeout == settings.briefing_llm_timeout_seconds + 15
+        raise TimeoutError("2 (of 2) futures unfinished")
+
+    monkeypatch.setattr("app.services.briefing.refresh.ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr("app.services.briefing.refresh.as_completed", time_out)
+
+    composed = _compose_prepared_windows(
+        windows,
+        user_id=1,
+        task_id=99,
+        use_llm=True,
+        settings=settings,
+    )
+
+    assert [result.prepared.window_index for result in composed] == [0, 1]
+    assert all(result.segment.model == "deterministic" for result in composed)
+    assert all("llm_batch_timeout_fallback" in result.segment.warnings for result in composed)
 
 
 def test_release_path_append_without_pending_skips_planning(
@@ -561,6 +620,24 @@ def _create_lens(db_session: Session, *, user_id: int, key: str) -> BriefingLens
     db_session.add(lens)
     db_session.flush()
     return lens
+
+
+def _briefing_source(index: int) -> BriefingSource:
+    return BriefingSource(
+        source_key=f"content:{index}",
+        kind="content",
+        id=index,
+        tier="longform",
+        lens_key="articles",
+        title=f"Briefing source {index}",
+        summary=f"Summary {index}",
+        key_points=[f"Point {index}"],
+        url=f"https://example.com/{index}",
+        image_url=None,
+        thumbnail_url=None,
+        published_at=datetime.now(UTC).replace(tzinfo=None),
+        content_type=ContentType.ARTICLE,
+    )
 
 
 def _state_version(db_session: Session, user_id: int) -> int:

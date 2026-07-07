@@ -1,8 +1,6 @@
 import json
 from datetime import UTC, datetime
 
-import pytest
-
 from app.models.contracts import ContentType
 from app.services.briefing.composer import (
     _blocks_look_malformed,
@@ -25,21 +23,29 @@ WELL_FORMED_BLOCKS = [
 ]
 
 
-def test_compose_window_raises_llm_errors_without_deterministic_fallback(monkeypatch) -> None:
+def test_compose_window_falls_back_after_llm_errors(monkeypatch) -> None:
+    attempts: list[int] = []
+
     def fail_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
         raise TimeoutError("model stalled")
 
     monkeypatch.setattr("app.services.briefing.composer._compose_window_with_llm", fail_llm)
 
-    with pytest.raises(TimeoutError, match="model stalled"):
-        compose_window(
-            [_source()],
-            lens_key="articles",
-            lens_title="Articles",
-            tier="longform",
-            window_index=1,
-            use_llm=True,
-        )
+    segment = compose_window(
+        [_source()],
+        lens_key="articles",
+        lens_title="Articles",
+        tier="longform",
+        window_index=1,
+        use_llm=True,
+    )
+
+    assert len(attempts) == 2
+    assert segment.model == "deterministic"
+    assert "llm_error_retry:1" in segment.warnings
+    assert "llm_error_fallback:TimeoutError" in segment.warnings
+    assert segment.blocks
 
 
 def test_blocks_look_malformed_detects_weight_dump() -> None:

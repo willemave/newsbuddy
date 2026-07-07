@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -572,16 +572,58 @@ def _compose_prepared_windows(
         futures = {executor.submit(compose_one, window): window for window in batch}
         try:
             batch_results: list[_ComposedWindow] = []
-            for future in as_completed(futures, timeout=batch_timeout):
-                batch_results.append(future.result())
-            if len(batch_results) != len(batch):
-                raise TimeoutError(
-                    f"Briefing composition batch timed out after {batch_timeout} seconds"
+            timed_out = False
+            try:
+                for future in as_completed(futures, timeout=batch_timeout):
+                    batch_results.append(future.result())
+            except TimeoutError as exc:
+                timed_out = True
+                logger.warning(
+                    "Briefing composition batch timed out; using deterministic fallback",
+                    extra={
+                        "component": "briefing",
+                        "operation": "compose_batch",
+                        "item_id": user_id,
+                        "task_id": task_id,
+                        "context_data": {
+                            "batch_start": start,
+                            "batch_size": len(batch),
+                            "completed": len(batch_results),
+                            "unfinished": len(batch) - len(batch_results),
+                            "timeout_seconds": batch_timeout,
+                            "error": str(exc),
+                        },
+                    },
                 )
+            if len(batch_results) != len(batch):
+                timed_out = True
             result_by_key = {
                 (result.prepared.lens_id, result.prepared.window_index): result
                 for result in batch_results
             }
+            if timed_out:
+                for window in batch:
+                    key = (window.lens_id, window.window_index)
+                    if key in result_by_key:
+                        continue
+                    segment = compose_window(
+                        list(window.sources),
+                        lens_key=window.lens_key,
+                        lens_title=window.lens_title,
+                        tier=window.tier,
+                        window_index=window.window_index,
+                        task_id=task_id,
+                        user_id=user_id,
+                        use_llm=False,
+                        settings=settings,
+                    )
+                    result_by_key[key] = _ComposedWindow(
+                        prepared=window,
+                        segment=replace(
+                            segment,
+                            warnings=[*segment.warnings, "llm_batch_timeout_fallback"],
+                        ),
+                    )
             composed.extend(
                 result_by_key[(window.lens_id, window.window_index)] for window in batch
             )
