@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_ai.agent import AgentRunResult
 
 from app.core.logging import get_logger
@@ -93,9 +93,10 @@ def compose_window(
     warnings: list[str] = []
     input_tokens: int | None = None
     output_tokens: int | None = None
-    blocks: list[dict[str, Any] | ComposerBlock]
+    blocks: list[dict[str, Any] | ComposerBlock] = []
 
     if use_llm:
+        fallback_reason: str | None = None
         for attempt in range(1, MAX_COMPOSE_ATTEMPTS + 1):
             try:
                 llm_blocks, usage = _compose_window_with_llm(
@@ -107,6 +108,29 @@ def compose_window(
                     task_id=task_id,
                     user_id=user_id,
                 )
+            except (json.JSONDecodeError, ValidationError) as exc:
+                logger.warning(
+                    "Briefing LLM returned invalid layout JSON",
+                    extra={
+                        "component": "briefing",
+                        "operation": "compose_window",
+                        "task_id": task_id,
+                        "item_id": user_id,
+                        "context_data": {
+                            "lens_key": lens_key,
+                            "tier": tier,
+                            "window_index": window_index,
+                            "attempt": attempt,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                    },
+                )
+                if attempt >= MAX_COMPOSE_ATTEMPTS:
+                    fallback_reason = f"llm_invalid_layout_fallback:{type(exc).__name__}"
+                    break
+                warnings.append(f"llm_invalid_layout_retry:{attempt}")
+                continue
             except Exception as exc:
                 logger.exception(
                     "Briefing LLM composition failed",
@@ -127,6 +151,10 @@ def compose_window(
                 )
                 raise
             if not _blocks_look_malformed(llm_blocks):
+                blocks = list(llm_blocks)
+                if usage:
+                    input_tokens = usage.get("input_tokens")
+                    output_tokens = usage.get("output_tokens")
                 break
             # Some OpenRouter providers return blocks with all content fields empty
             # (prose dumped into `weight`); repair cannot recover those, so retry.
@@ -146,15 +174,28 @@ def compose_window(
                 },
             )
             if attempt >= MAX_COMPOSE_ATTEMPTS:
-                raise RuntimeError(
-                    "Briefing LLM returned malformed layout blocks after "
-                    f"{MAX_COMPOSE_ATTEMPTS} attempts"
-                )
+                fallback_reason = "llm_malformed_layout_fallback"
+                break
             warnings.append(f"llm_malformed_retry:{attempt}")
-        blocks = list(llm_blocks)
-        if usage:
-            input_tokens = usage.get("input_tokens")
-            output_tokens = usage.get("output_tokens")
+        if fallback_reason is not None:
+            logger.warning(
+                "Briefing LLM composition fell back to deterministic layout",
+                extra={
+                    "component": "briefing",
+                    "operation": "compose_window",
+                    "task_id": task_id,
+                    "item_id": user_id,
+                    "context_data": {
+                        "lens_key": lens_key,
+                        "tier": tier,
+                        "window_index": window_index,
+                        "fallback_reason": fallback_reason,
+                    },
+                },
+            )
+            blocks = list(deterministic_layout(sources, lens_title=lens_title, tier=tier).blocks)
+            model_spec = "deterministic"
+            warnings.append(fallback_reason)
     else:
         blocks = list(deterministic_layout(sources, lens_title=lens_title, tier=tier).blocks)
         model_spec = "deterministic"
