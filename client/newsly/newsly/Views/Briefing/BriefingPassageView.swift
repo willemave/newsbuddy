@@ -4,13 +4,16 @@ import UIKit
 struct BriefingPassageView: UIViewRepresentable {
     let block: APIBriefingBlock
     var floatingExclusionSize: CGSize? = nil
+    var discussionChips: [String: BriefingDiscussionChip] = [:]
     let onOpenSource: (String) -> Void
+    var onOpenDiscussion: (String) -> Void = { _ in }
     let onDig: (String, String) -> Void
     var onSourceLinkPositionsChange: ([BriefingSourceLinkPosition]) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onOpenSource: onOpenSource,
+            onOpenDiscussion: onOpenDiscussion,
             onDig: onDig,
             onSourceLinkPositionsChange: onSourceLinkPositionsChange
         )
@@ -46,11 +49,16 @@ struct BriefingPassageView: UIViewRepresentable {
 
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
         context.coordinator.onOpenSource = onOpenSource
+        context.coordinator.onOpenDiscussion = onOpenDiscussion
         context.coordinator.onDig = onDig
         context.coordinator.onSourceLinkPositionsChange = onSourceLinkPositionsChange
         uiView.floatingExclusionSize = floatingExclusionSize
         let builder = BriefingAttributedTextBuilder()
-        let result = builder.build(paragraphs: block.paragraphs ?? [], weight: block.weight)
+        let result = builder.build(
+            paragraphs: block.paragraphs ?? [],
+            weight: block.weight,
+            discussionChips: discussionChips
+        )
         if !uiView.attributedText.isEqual(to: result.attributedText) {
             uiView.attributedText = result.attributedText
             uiView.invalidateIntrinsicContentSize()
@@ -81,6 +89,7 @@ struct BriefingPassageView: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var onOpenSource: (String) -> Void
+        var onOpenDiscussion: (String) -> Void
         var onDig: (String, String) -> Void
         var onSourceLinkPositionsChange: ([BriefingSourceLinkPosition]) -> Void
         weak var textView: DigDeeperTextView?
@@ -88,10 +97,12 @@ struct BriefingPassageView: UIViewRepresentable {
 
         init(
             onOpenSource: @escaping (String) -> Void,
+            onOpenDiscussion: @escaping (String) -> Void,
             onDig: @escaping (String, String) -> Void,
             onSourceLinkPositionsChange: @escaping ([BriefingSourceLinkPosition]) -> Void
         ) {
             self.onOpenSource = onOpenSource
+            self.onOpenDiscussion = onOpenDiscussion
             self.onDig = onDig
             self.onSourceLinkPositionsChange = onSourceLinkPositionsChange
         }
@@ -110,6 +121,10 @@ struct BriefingPassageView: UIViewRepresentable {
             in characterRange: NSRange,
             interaction: UITextItemInteraction
         ) -> Bool {
+            if let sourceKey = discussionSourceKey(from: URL) {
+                onOpenDiscussion(sourceKey)
+                return false
+            }
             if let sourceKey = sourceKey(from: URL) {
                 onOpenSource(sourceKey)
                 return false
@@ -133,10 +148,15 @@ struct BriefingPassageView: UIViewRepresentable {
                 fractionOfDistanceBetweenInsertionPoints: nil
             )
             guard index < attributedText.length else { return }
-            if let link = attributedText.attribute(.link, at: index, effectiveRange: nil),
-               let sourceKey = sourceKey(from: link) {
-                onOpenSource(sourceKey)
-                return
+            if let link = attributedText.attribute(.link, at: index, effectiveRange: nil) {
+                if let sourceKey = discussionSourceKey(from: link) {
+                    onOpenDiscussion(sourceKey)
+                    return
+                }
+                if let sourceKey = sourceKey(from: link) {
+                    onOpenSource(sourceKey)
+                    return
+                }
             }
             var effectiveRange = NSRange(location: 0, length: 0)
             let insight = attributedText.attribute(
@@ -202,12 +222,27 @@ struct BriefingPassageView: UIViewRepresentable {
             return "\(components[0]):\(components[1])"
         }
 
+        private func discussionSourceKey(from url: URL) -> String? {
+            guard url.scheme == "newsly", url.host == "briefing" else { return nil }
+            let components = url.pathComponents.filter { $0 != "/" }
+            guard components.count == 3, components[0] == "discussion" else { return nil }
+            return "\(components[1]):\(components[2])"
+        }
+
         private func sourceKey(from link: Any) -> String? {
+            resolveURL(from: link).flatMap { sourceKey(from: $0) }
+        }
+
+        private func discussionSourceKey(from link: Any) -> String? {
+            resolveURL(from: link).flatMap { discussionSourceKey(from: $0) }
+        }
+
+        private func resolveURL(from link: Any) -> URL? {
             if let url = link as? URL {
-                return sourceKey(from: url)
+                return url
             }
-            if let rawURL = link as? String, let url = URL(string: rawURL) {
-                return sourceKey(from: url)
+            if let rawURL = link as? String {
+                return URL(string: rawURL)
             }
             return nil
         }
