@@ -37,6 +37,28 @@ def test_normalize_layout_parses_source_links_and_insight_runs() -> None:
     assert any(run["insight_id"] == "why" for run in runs)
 
 
+def test_normalize_layout_unwraps_bold_markers_around_source_links() -> None:
+    layout = normalize_layout(
+        [
+            {
+                "type": "passage",
+                "weight": "feature",
+                "markdown": (
+                    "**[Linear Digressions](newsly://briefing/content/7)** is going quiet."
+                ),
+            }
+        ],
+        source_keys={"content:7"},
+    )
+
+    runs = layout.blocks[0]["paragraphs"][0]["runs"]
+    assert not any("**" in run["text"] for run in runs)
+    assert any(
+        run["kind"] == BriefingRunKind.SOURCE_LINK.value and run["text"] == "Linear Digressions"
+        for run in runs
+    )
+
+
 def test_close_unpaired_insights_and_source_key_extraction_are_stable() -> None:
     markdown = (
         "[One](newsly://briefing/news/3) starts. "

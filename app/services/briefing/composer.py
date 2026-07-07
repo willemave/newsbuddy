@@ -21,8 +21,13 @@ from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
 
-PROMPT_VERSION = "briefing-v1"
+PROMPT_VERSION = "briefing-v2"
 MAX_COMPOSE_ATTEMPTS = 2
+LAYOUT_PROMPTS_BY_TIER = {
+    "audio": "briefing/layout_audio",
+    "longform": "briefing/layout_longform",
+    "news": "briefing/layout_news",
+}
 logger = get_logger(__name__)
 
 
@@ -276,11 +281,11 @@ def _compose_window_with_llm(
     task_id: int | None,
     user_id: int | None,
 ) -> tuple[list[dict[str, Any]], dict[str, int | None] | None]:
-    system_prompt = _system_prompt(tier)
+    prompt_name = _layout_prompt_name(tier)
+    system_prompt = render_prompt(f"{prompt_name}#system")
     user_prompt = render_prompt(
-        "briefing/layout#window",
+        f"{prompt_name}#window",
         lens_title=lens_title,
-        tier=tier,
         source_payload_json=json.dumps(
             [_source_payload(source) for source in sources],
             ensure_ascii=False,
@@ -438,8 +443,11 @@ def _run_agent(
     return agent.run_sync(user_prompt, model_settings={"timeout": timeout_seconds})
 
 
-def _system_prompt(tier: str) -> str:
-    return render_prompt("briefing/layout#system", tier=tier)
+def _layout_prompt_name(tier: str) -> str:
+    prompt_name = LAYOUT_PROMPTS_BY_TIER.get(tier)
+    if prompt_name is None:
+        raise ValueError(f"No briefing layout prompt for tier: {tier}")
+    return prompt_name
 
 
 def _source_payload(source: BriefingSource) -> dict[str, Any]:

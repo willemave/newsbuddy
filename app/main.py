@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.admin_web.auth import router as admin_auth_router
 from app.admin_web.router import router as admin_web_router
+from app.core.compression import PathScopedGZipMiddleware
 from app.core.db import get_engine, init_db
 from app.core.deps import AdminAuthRequired
 from app.core.logging import setup_logging
@@ -334,6 +335,14 @@ app.add_middleware(
     allow_origins=settings.cors_allow_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Briefing lens payloads are large text-heavy JSON; audio streaming and SSE
+# routes stay uncompressed.
+app.add_middleware(
+    PathScopedGZipMiddleware,
+    path_prefixes=("/api/briefing",),
+    minimum_size=1024,
 )
 
 # Mount generated content images and packaged admin web assets.

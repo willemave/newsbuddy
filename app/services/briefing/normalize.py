@@ -13,6 +13,9 @@ INSIGHT_CLOSE = "{{/insight}}"
 MARKER_RE = re.compile(r"\{\{/?insight(?::[a-zA-Z0-9_.:-]+)?\}\}")
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
+# Bold markers wrapping a source link (**[title](url)**) are not representable
+# as runs — links already render emphasized — so unwrap them before parsing.
+BOLD_LINK_RE = re.compile(r"\*\*\s*(\[[^\]]+\]\([^)]+\))\s*\*\*")
 
 
 @dataclass(frozen=True)
@@ -185,6 +188,7 @@ def _runs_from_markdown(
     *,
     source_keys: set[str],
 ) -> list[dict[str, Any]]:
+    markdown = BOLD_LINK_RE.sub(lambda match: match.group(1), markdown)
     runs: list[dict[str, Any]] = []
     index = 0
     insight_id: str | None = None
