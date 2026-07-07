@@ -18,6 +18,7 @@ from app.services.briefing.read_marks import (
     mark_briefing_sources_read,
 )
 from app.services.briefing.refresh import (
+    _retire_finished_segments,
     enqueue_briefing_refresh_task,
     run_briefing_refresh,
 )
@@ -366,6 +367,40 @@ def test_mark_read_retires_fully_read_segment_and_bumps_version(
     assert result.marked == 3
     assert result.version == refresh.version + 1
     assert segment.status == "retired"
+
+
+def test_old_unread_news_segment_stays_active(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+) -> None:
+    assert test_user.id is not None
+    user_id = test_user.id
+    published_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
+    item = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=user_id,
+        published_at=published_at,
+    )
+    lens = _create_lens(db_session, user_id=user_id, key="news-old")
+    segment = BriefingSegment(
+        lens_id=lens.id,
+        user_id=user_id,
+        blocks=[],
+        source_keys=[f"news:{item.id}"],
+        status="active",
+        model="test",
+        prompt_version="test",
+    )
+    db_session.add(segment)
+    db_session.commit()
+
+    retired = _retire_finished_segments(db_session, user_id=user_id, settings=get_settings())
+    db_session.commit()
+    db_session.refresh(segment)
+
+    assert retired == 0
+    assert segment.status == "active"
 
 
 def test_bump_briefing_version_for_news_item_only_updates_matching_enabled_active_segments(

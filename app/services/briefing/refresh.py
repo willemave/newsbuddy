@@ -27,7 +27,6 @@ from app.services.briefing.lenses import (
     ensure_base_lenses,
     retire_idle_lenses,
 )
-from app.services.briefing.source_keys import parse_source_key
 from app.services.briefing.sources import (
     BriefingSource,
     list_bootstrap_sources,
@@ -752,23 +751,11 @@ def _retire_finished_segments(db: Session, *, user_id: int, settings: Settings) 
         .all()
     )
     retired = 0
-    now = datetime.now(UTC).replace(tzinfo=None)
-    news_cutoff = now - timedelta(days=settings.briefing_news_max_age_days)
     for segment in active:
         source_keys = [str(key) for key in (segment.source_keys or [])]
         if source_keys and set(source_keys).issubset(read_keys):
             segment.status = "retired"
             retired += 1
-            continue
-        parsed = [parse_source_key(key) for key in source_keys]
-        if parsed and all(key and key.kind == "news" for key in parsed):
-            source_map = sources_for_keys(db, user_id=user_id, source_keys=source_keys)
-            if source_map and all(
-                source.published_at is not None and source.published_at < news_cutoff
-                for source in source_map.values()
-            ):
-                segment.status = "retired"
-                retired += 1
     return retired
 
 

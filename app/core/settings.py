@@ -316,7 +316,6 @@ class Settings(BaseSettings):
     briefing_debounce_seconds: int = Field(default=900, ge=0, le=86_400)
     briefing_sweep_seconds: int = Field(default=3600, ge=60, le=86_400)
     briefing_pending_max_age_seconds: int = Field(default=2700, ge=60, le=86_400)
-    briefing_news_max_age_days: int = Field(default=4, ge=1, le=30)
     briefing_max_segments_per_lens: int = Field(default=12, ge=1, le=100)
     briefing_dig_hourly_limit: int = Field(default=60, ge=0, le=1000)
     briefing_narration_max_chars: int = Field(default=18_000, ge=500, le=100_000)
