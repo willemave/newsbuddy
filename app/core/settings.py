@@ -299,6 +299,15 @@ class Settings(BaseSettings):
     briefing_category_embedding_timeout_seconds: int = Field(default=30, ge=1, le=120)
     briefing_centroid_assignment_enabled: bool = False
     briefing_new_lens_min_items: int = Field(default=4, ge=2, le=20)
+    briefing_max_news_lenses: int = Field(default=10, ge=3, le=30)
+    briefing_category_absorb_similarity: float = Field(default=0.45, ge=0.0, le=1.0)
+    briefing_centroid_max_weight: int = Field(default=32, ge=4, le=500)
+    briefing_taxonomy_planner_enabled: bool = True
+    briefing_taxonomy_model: str | None = None
+    briefing_taxonomy_sources_per_lens: int = Field(default=7, ge=1, le=12)
+    briefing_taxonomy_min_interval_seconds: int = Field(default=21_600, ge=900, le=604_800)
+    briefing_taxonomy_candidate_cluster_limit: int = Field(default=3, ge=1, le=20)
+    briefing_taxonomy_llm_timeout_seconds: int = Field(default=300, ge=30, le=600)
     briefing_lens_idle_days: int = Field(default=7, ge=1, le=90)
     briefing_window_min: int = Field(default=3, ge=1, le=12)
     briefing_window_max: int = Field(default=6, ge=1, le=12)

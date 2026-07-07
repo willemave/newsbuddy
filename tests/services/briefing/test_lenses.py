@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import pytest
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
@@ -280,9 +281,86 @@ def test_semantic_category_assignment_uses_existing_lens_profile(
     assert changed == 1
     assert pending.lens_key == "news-ai"
     assert existing.centroid == [1.0, 0.0]
+    assert existing.centroid_weight == 1
+    assert existing.centroid_model == settings.briefing_category_embedding_model
 
 
-def test_semantic_category_assignment_falls_back_when_lens_naming_fails(
+def test_topic_slug_does_not_create_missing_news_lens(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_semantic_category_assignment_enabled", False)
+    monkeypatch.setattr(settings, "briefing_new_lens_min_items", 4)
+    assert test_user.id is not None
+    user_id = test_user.id
+    item = news_item_factory(
+        raw_metadata={"aggregator": {"topic": "ai", "topic_title": "AI"}},
+        visibility_scope="user",
+        owner_user_id=user_id,
+        article_title="AI startup launches new tool",
+        summary_title="AI startup launches new tool",
+    )
+    pending = BriefingPendingSource(
+        user_id=user_id,
+        source_kind="news",
+        source_id=item.id,
+    )
+    db_session.add(pending)
+    db_session.flush()
+
+    changed = assign_pending_lenses(db_session, user_id=user_id, settings=settings)
+
+    assert changed == 0
+    assert pending.lens_key is None
+    assert db_session.query(BriefingLens).filter(BriefingLens.user_id == user_id).count() == 0
+
+
+def test_topic_slug_assigns_existing_active_news_lens(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_semantic_category_assignment_enabled", False)
+    assert test_user.id is not None
+    user_id = test_user.id
+    db_session.add(
+        BriefingLens(
+            user_id=user_id,
+            key="news-ai",
+            tier="news",
+            title="AI",
+            deck="Artificial intelligence stories.",
+            position=2,
+            status="active",
+        )
+    )
+    item = news_item_factory(
+        raw_metadata={"aggregator": {"topic": "ai", "topic_title": "AI"}},
+        visibility_scope="user",
+        owner_user_id=user_id,
+        article_title="AI startup launches new tool",
+        summary_title="AI startup launches new tool",
+    )
+    pending = BriefingPendingSource(
+        user_id=user_id,
+        source_kind="news",
+        source_id=item.id,
+    )
+    db_session.add(pending)
+    db_session.flush()
+
+    changed = assign_pending_lenses(db_session, user_id=user_id, settings=settings)
+
+    assert changed == 1
+    assert pending.lens_key == "news-ai"
+
+
+def test_semantic_category_assignment_raises_when_lens_naming_fails(
     db_session: Session,
     test_user: User,
     news_item_factory,
@@ -337,17 +415,22 @@ def test_semantic_category_assignment_falls_back_when_lens_naming_fails(
         fake_encode,
     )
 
-    changed = assign_pending_lenses(
-        db_session,
-        user_id=user_id,
-        naming_fn=fail_naming,
-        settings=settings,
-    )
+    with pytest.raises(RuntimeError, match="structured lens naming failed"):
+        assign_pending_lenses(
+            db_session,
+            user_id=user_id,
+            naming_fn=fail_naming,
+            settings=settings,
+        )
 
-    assert changed == 2
-    lens = db_session.query(BriefingLens).filter(BriefingLens.user_id == user_id).one()
-    assert lens.key == "news-soatok-s"
-    assert lens.title == "Soatok's desk"
+    assert (
+        db_session.query(BriefingPendingSource)
+        .filter(BriefingPendingSource.user_id == user_id)
+        .filter(BriefingPendingSource.lens_key.is_(None))
+        .count()
+        == 2
+    )
+    assert db_session.query(BriefingLens).filter(BriefingLens.user_id == user_id).count() == 0
 
 
 def test_semantic_category_assignment_makes_duplicate_named_lens_keys_unique(

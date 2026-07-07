@@ -5,10 +5,11 @@ import math
 import re
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
+import httpx
+from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -17,11 +18,14 @@ from app.core.settings import Settings, get_settings
 from app.models.db import BriefingLens, BriefingPendingSource, BriefingSegment
 from app.services.briefing.sources import BriefingSource, sources_for_keys
 from app.services.llm_agents import get_basic_agent
+from app.services.llm_models import OPENROUTER_PROVIDER_SORT, OPENROUTER_REASONING_CONFIG
 from app.services.news_embeddings import encode_news_texts, encode_texts_with_embedding_model
 from app.services.prompt_library import render_prompt
+from app.services.vendor_costs import record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
 
 logger = get_logger(__name__)
+LENS_NAMING_ATTEMPTS = 2
 
 FIXED_LENSES = (
     ("podcasts", "audio", "Podcasts", "Unheard episodes ready for a focused listen.", 0),
@@ -133,17 +137,11 @@ def assign_pending_lenses(
             continue
         if source.kind == "news" and source.topic_slug:
             lens_key = f"news-{source.topic_slug}"
-            _get_or_create_lens(
-                db,
-                user_id=user_id,
-                key=lens_key,
-                tier="news",
-                title=source.topic_title or source.topic_slug.replace("-", " ").title(),
-                deck=f"Fast reads around {source.topic_title or source.topic_slug}.",
-                position=_next_news_position(db, user_id=user_id),
-            )
-            row.lens_key = lens_key
-            changed += 1
+            if _active_lens_exists(db, user_id=user_id, lens_key=lens_key):
+                row.lens_key = lens_key
+                changed += 1
+            else:
+                unassigned_news.append((row, source))
         elif source.kind == "news":
             unassigned_news.append((row, source))
 
@@ -242,6 +240,9 @@ def _get_or_create_lens(
     deck: str,
     position: int,
     centroid: list[float] | None = None,
+    centroid_weight: int = 0,
+    centroid_model: str | None = None,
+    routing_rule: str | None = None,
 ) -> BriefingLens:
     lens = (
         db.query(BriefingLens)
@@ -262,6 +263,9 @@ def _get_or_create_lens(
         position=position,
         status="active",
         centroid=centroid,
+        centroid_weight=centroid_weight,
+        centroid_model=centroid_model,
+        routing_rule=routing_rule,
     )
     db.add(lens)
     db.flush()
@@ -321,7 +325,12 @@ def _assign_by_centroid(
         best_centroid = best_lens.centroid
         if not isinstance(best_centroid, list):
             continue
-        best_lens.centroid = _running_mean([float(value) for value in best_centroid], vector)
+        _update_lens_centroid(
+            best_lens,
+            vector,
+            settings=settings,
+            model_spec=settings.news_embedding_model,
+        )
         changed += 1
     return changed
 
@@ -386,6 +395,7 @@ def _assign_by_semantic_categories(
         lenses,
         lens_profile_vectors=lens_profile_vectors,
         vector_size=vector_size,
+        settings=settings,
     )
 
     changed = _assign_sources_to_existing_lenses(
@@ -393,6 +403,7 @@ def _assign_by_semantic_categories(
         source_vectors=source_vectors,
         lens_vectors=lens_vectors,
         similarity_threshold=settings.briefing_category_similarity,
+        settings=settings,
     )
     remaining = [
         (row, source, vector)
@@ -420,81 +431,58 @@ def _assign_by_semantic_categories(
             )
         )
 
-    names = _name_clusters_or_defaults(
-        ready_clusters,
-        naming_fn=naming_fn,
-        user_id=user_id,
-        max_workers=settings.briefing_compose_parallelism,
-        news_window_max=settings.briefing_news_window_max,
+    ready_clusters.sort(
+        key=lambda cluster: (
+            -len(cluster.sources),
+            min((row.enqueued_at for row in cluster.rows if row.enqueued_at), default=datetime.min),
+        )
     )
-    for cluster, raw_name in zip(ready_clusters, names, strict=True):
-        name = _unique_lens_name(
-            db,
-            user_id=user_id,
-            name=raw_name,
-        )
-        lens = _get_or_create_lens(
-            db,
-            user_id=user_id,
-            key=name.key,
-            tier="news",
-            title=name.title,
-            deck=name.deck,
-            position=_next_news_position(db, user_id=user_id),
-            centroid=cluster.centroid,
-        )
-        for row in cluster.rows:
-            row.lens_key = lens.key
-            changed += 1
-    return changed
-
-
-def _name_clusters_or_defaults(
-    clusters: list[_SemanticCluster],
-    *,
-    naming_fn: Callable[[list[BriefingSource]], LensName],
-    user_id: int,
-    max_workers: int,
-    news_window_max: int,
-) -> list[LensName]:
-    if not clusters:
-        return []
-    workers = min(max(max_workers, 1), len(clusters))
-    if workers <= 1:
-        return [
-            _name_cluster_or_default(
-                cluster.sources[:news_window_max],
+    for cluster in ready_clusters:
+        if _active_news_lens_count(db, user_id=user_id) < settings.briefing_max_news_lenses:
+            raw_name = _name_cluster_or_default(
+                cluster.sources[: settings.briefing_news_window_max],
                 naming_fn=naming_fn,
                 user_id=user_id,
             )
-            for cluster in clusters
-        ]
-
-    names: list[LensName | None] = [None] * len(clusters)
-
-    def name_one(index: int, cluster: _SemanticCluster) -> tuple[int, LensName]:
-        return (
-            index,
-            _name_cluster_or_default(
-                cluster.sources[:news_window_max],
-                naming_fn=naming_fn,
+            name = _unique_lens_name(
+                db,
                 user_id=user_id,
-            ),
-        )
-
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(name_one, index, cluster): index
-            for index, cluster in enumerate(clusters)
-        }
-        for future in as_completed(futures):
-            index, name = future.result()
-            names[index] = name
-
-    return [
-        name if name is not None else _default_lens_name(cluster.sources[:news_window_max])
-        for name, cluster in zip(names, clusters, strict=True)
-    ]
+                name=raw_name,
+            )
+            lens = _get_or_create_lens(
+                db,
+                user_id=user_id,
+                key=name.key,
+                tier="news",
+                title=name.title,
+                deck=name.deck,
+                position=_next_news_position(db, user_id=user_id),
+                centroid=cluster.centroid,
+                centroid_weight=len(cluster.sources),
+                centroid_model=settings.briefing_category_embedding_model,
+            )
+            lens_vectors.append((lens, cluster.centroid))
+            for row in cluster.rows:
+                row.lens_key = lens.key
+                changed += 1
+            continue
+        best_lens, best_score = _best_lens_for_cluster(cluster, lens_vectors)
+        if best_lens is not None and best_score >= settings.briefing_category_absorb_similarity:
+            for row, vector in zip(cluster.rows, cluster.vectors, strict=True):
+                row.lens_key = best_lens.key
+                _update_lens_centroid(best_lens, vector, settings=settings)
+                changed += 1
+            continue
+        misc_lens = _get_or_create_misc_lens_if_allowed(db, user_id=user_id, settings=settings)
+        fallback_lens = misc_lens or best_lens
+        if fallback_lens is None:
+            continue
+        for row, vector in zip(cluster.rows, cluster.vectors, strict=True):
+            row.lens_key = fallback_lens.key
+            if fallback_lens is best_lens:
+                _update_lens_centroid(fallback_lens, vector, settings=settings)
+            changed += 1
+    return changed
 
 
 def _name_cluster_or_default(
@@ -503,19 +491,27 @@ def _name_cluster_or_default(
     naming_fn: Callable[[list[BriefingSource]], LensName],
     user_id: int,
 ) -> LensName:
-    try:
-        return naming_fn(sources)
-    except Exception:
-        logger.exception(
-            "Briefing lens naming failed; using fallback lens name",
-            extra={
-                "component": "briefing",
-                "operation": "name_semantic_cluster",
-                "item_id": user_id,
-                "context_data": {"source_count": len(sources)},
-            },
-        )
-        return _default_lens_name(sources)
+    last_error: Exception | None = None
+    for attempt in range(1, LENS_NAMING_ATTEMPTS + 1):
+        try:
+            return naming_fn(sources)
+        except Exception as exc:
+            last_error = exc
+            logger.exception(
+                "Briefing lens naming failed",
+                extra={
+                    "component": "briefing",
+                    "operation": "name_semantic_cluster",
+                    "item_id": user_id,
+                    "context_data": {
+                        "source_count": len(sources),
+                        "attempt": attempt,
+                        "max_attempts": LENS_NAMING_ATTEMPTS,
+                    },
+                },
+            )
+    assert last_error is not None
+    raise last_error
 
 
 def _split_ready_clusters(
@@ -614,6 +610,7 @@ def _assign_sources_to_existing_lenses(
     source_vectors: list[list[float]],
     lens_vectors: list[tuple[BriefingLens, list[float]]],
     similarity_threshold: float,
+    settings: Settings,
 ) -> int:
     if not lens_vectors:
         return 0
@@ -629,12 +626,7 @@ def _assign_sources_to_existing_lenses(
         if best_lens is None or best_score < similarity_threshold:
             continue
         row.lens_key = best_lens.key
-        current = best_lens.centroid
-        best_lens.centroid = (
-            _running_mean([float(value) for value in current], vector)
-            if isinstance(current, list) and len(current) == len(vector)
-            else vector
-        )
+        _update_lens_centroid(best_lens, vector, settings=settings)
         changed += 1
     return changed
 
@@ -667,11 +659,16 @@ def _resolve_lens_vectors(
     *,
     lens_profile_vectors: list[list[float]],
     vector_size: int,
+    settings: Settings,
 ) -> list[tuple[BriefingLens, list[float]]]:
     lens_vectors: list[tuple[BriefingLens, list[float]]] = []
     for lens, profile_vector in zip(lenses, lens_profile_vectors, strict=True):
         centroid = lens.centroid
-        if isinstance(centroid, list) and len(centroid) == vector_size:
+        if (
+            isinstance(centroid, list)
+            and len(centroid) == vector_size
+            and lens.centroid_model == settings.briefing_category_embedding_model
+        ):
             lens_vectors.append((lens, [float(value) for value in centroid]))
             continue
         lens_vectors.append((lens, profile_vector))
@@ -696,7 +693,9 @@ def _assign_stale_misc_lens(
     if (now - oldest).total_seconds() < 86_400:
         return 0
 
-    lens = _get_or_create_misc_lens(db, user_id=user_id)
+    lens = _get_or_create_misc_lens_if_allowed(db, user_id=user_id, settings=settings)
+    if lens is None:
+        return 0
     for row, _source in unassigned:
         row.lens_key = lens.key
     return len(unassigned)
@@ -720,9 +719,12 @@ def _assign_new_or_misc_lens(
     )
     age_seconds = (now - oldest).total_seconds()
     should_make_new = len(unassigned) >= settings.briefing_new_lens_min_items
-    if should_make_new:
+    under_cap = _active_news_lens_count(db, user_id=user_id) < settings.briefing_max_news_lenses
+    lens: BriefingLens | None
+    if should_make_new and under_cap:
         sources = [source for _row, source in unassigned[: settings.briefing_news_window_max]]
         name = naming_fn(sources) if naming_fn else _default_lens_name(sources)
+        centroid = _centroid_for_sources(sources, settings=settings)
         lens = _get_or_create_lens(
             db,
             user_id=user_id,
@@ -731,13 +733,19 @@ def _assign_new_or_misc_lens(
             title=name.title,
             deck=name.deck,
             position=_next_news_position(db, user_id=user_id),
-            centroid=_centroid_for_sources(sources, settings=settings),
+            centroid=centroid,
+            centroid_weight=len(sources) if centroid is not None else 0,
+            centroid_model=settings.news_embedding_model if centroid is not None else None,
         )
-    elif age_seconds >= 86_400:
-        lens = _get_or_create_misc_lens(db, user_id=user_id)
+    elif should_make_new or age_seconds >= 86_400:
+        lens = _get_or_create_misc_lens_if_allowed(db, user_id=user_id, settings=settings)
+        if lens is None:
+            return 0
     else:
         return 0
 
+    if lens is None:
+        return 0
     for row, _source in unassigned:
         row.lens_key = lens.key
     return len(unassigned)
@@ -753,6 +761,26 @@ def _get_or_create_misc_lens(db: Session, *, user_id: int) -> BriefingLens:
         deck="A mixed desk of fast reads that did not form a larger category yet.",
         position=_next_news_position(db, user_id=user_id),
     )
+
+
+def _get_or_create_misc_lens_if_allowed(
+    db: Session,
+    *,
+    user_id: int,
+    settings: Settings,
+) -> BriefingLens | None:
+    existing = (
+        db.query(BriefingLens)
+        .filter(BriefingLens.user_id == user_id)
+        .filter(BriefingLens.key == MISC_LENS_KEY)
+        .filter(BriefingLens.status == "active")
+        .first()
+    )
+    if existing is not None:
+        return existing
+    if _active_news_lens_count(db, user_id=user_id) >= settings.briefing_max_news_lenses:
+        return None
+    return _get_or_create_misc_lens(db, user_id=user_id)
 
 
 def _default_lens_name(sources: list[BriefingSource]) -> LensName:
@@ -789,6 +817,19 @@ def _name_lens_with_llm(
             indent=2,
         ),
     )
+    if model_spec.startswith("openrouter:"):
+        return _name_lens_with_openrouter(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_spec=model_spec,
+            timeout_seconds=settings.briefing_llm_timeout_seconds,
+            settings=settings,
+            task_id=task_id,
+            user_id=user_id,
+            source_count=len(sources),
+            generation_started_at=started_at,
+        )
+
     agent = get_basic_agent(model_spec, LensNameOutput, system_prompt)
     result = agent.run_sync(
         user_prompt,
@@ -815,6 +856,112 @@ def _name_lens_with_llm(
         title=result.output.title,
         deck=result.output.deck,
     )
+
+
+def _name_lens_with_openrouter(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    model_spec: str,
+    timeout_seconds: int,
+    settings: Settings,
+    task_id: int | None,
+    user_id: int | None,
+    source_count: int,
+    generation_started_at: float,
+) -> LensName:
+    api_key = settings.openrouter_api_key
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not configured in settings.")
+    model_name = model_spec.split(":", 1)[1]
+    request_timeout = httpx.Timeout(
+        timeout_seconds,
+        connect=10.0,
+        read=float(timeout_seconds),
+        write=10.0,
+        pool=10.0,
+    )
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        timeout=request_timeout,
+        max_retries=0,
+        http_client=httpx.Client(timeout=request_timeout),
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "LensNameOutput",
+                    "strict": True,
+                    "schema": LensNameOutput.model_json_schema(),
+                },
+            },
+            extra_body={
+                "provider": {
+                    "require_parameters": True,
+                    "sort": OPENROUTER_PROVIDER_SORT,
+                },
+                "reasoning": OPENROUTER_REASONING_CONFIG,
+            },
+            timeout=request_timeout,
+        )
+    finally:
+        client.close()
+    content = response.choices[0].message.content
+    if not content:
+        raise RuntimeError("OpenRouter returned an empty lens name response")
+    output = LensNameOutput.model_validate_json(_strip_json_code_fence(content))
+    usage = _usage_from_openrouter_response(response)
+    record_vendor_usage_out_of_band(
+        provider="openrouter",
+        model=model_spec,
+        feature="briefing_lens_naming",
+        operation="briefing.name_lens",
+        source="queue" if task_id else "api",
+        usage=usage,
+        task_id=task_id,
+        user_id=user_id,
+        metadata={
+            "source_count": source_count,
+            "generation_ms": round((time.perf_counter() - generation_started_at) * 1000),
+        },
+    )
+    return LensName(key=output.key, title=output.title, deck=output.deck)
+
+
+def _strip_json_code_fence(content: str) -> str:
+    stripped = content.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if not lines or not lines[0].strip().startswith("```"):
+        return stripped
+    if lines[-1].strip() != "```":
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _usage_from_openrouter_response(response: object) -> dict[str, int | None] | None:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return None
+    input_tokens = getattr(usage, "prompt_tokens", None)
+    output_tokens = getattr(usage, "completion_tokens", None)
+    total_tokens = getattr(usage, "total_tokens", None)
+    if input_tokens is None and output_tokens is None and total_tokens is None:
+        return None
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
 
 
 def _source_payload(source: BriefingSource) -> dict[str, object]:
@@ -864,13 +1011,83 @@ def _next_news_position(db: Session, *, user_id: int) -> int:
     return max(positions, default=1) + 1
 
 
+def _active_lens_exists(db: Session, *, user_id: int, lens_key: str) -> bool:
+    return (
+        db.query(BriefingLens.id)
+        .filter(BriefingLens.user_id == user_id)
+        .filter(BriefingLens.key == lens_key)
+        .filter(BriefingLens.status == "active")
+        .first()
+        is not None
+    )
+
+
+def _active_news_lens_count(db: Session, *, user_id: int) -> int:
+    return int(
+        db.query(BriefingLens.id)
+        .filter(BriefingLens.user_id == user_id)
+        .filter(BriefingLens.tier == "news")
+        .filter(BriefingLens.status == "active")
+        .count()
+    )
+
+
+def _best_lens_for_cluster(
+    cluster: _SemanticCluster,
+    lens_vectors: list[tuple[BriefingLens, list[float]]],
+) -> tuple[BriefingLens | None, float]:
+    best_lens = None
+    best_score = -1.0
+    for lens, lens_vector in lens_vectors:
+        score = _cosine(cluster.centroid, lens_vector)
+        if score > best_score:
+            best_lens = lens
+            best_score = score
+    return best_lens, best_score
+
+
+def _update_lens_centroid(
+    lens: BriefingLens,
+    vector: list[float],
+    *,
+    settings: Settings,
+    model_spec: str | None = None,
+) -> None:
+    centroid_model = model_spec or settings.briefing_category_embedding_model
+    current = lens.centroid
+    if not isinstance(current, list) or len(current) != len(vector):
+        lens.centroid = vector
+        lens.centroid_weight = 1
+        lens.centroid_model = centroid_model
+        return
+    if lens.centroid_model != centroid_model:
+        lens.centroid = vector
+        lens.centroid_weight = 1
+        lens.centroid_model = centroid_model
+        return
+    current_vector = [float(value) for value in current]
+    weight = max(int(lens.centroid_weight or 0), 1)
+    capped_weight = min(weight, settings.briefing_centroid_max_weight)
+    denominator = capped_weight + 1
+    lens.centroid = [
+        ((current_value * capped_weight) + new_value) / denominator
+        for current_value, new_value in zip(current_vector, vector, strict=True)
+    ]
+    lens.centroid_weight = min(weight + 1, settings.briefing_centroid_max_weight)
+    lens.centroid_model = centroid_model
+
+
 def _embedding_text(source: BriefingSource) -> str:
     parts = [source.title, source.summary or "", " ".join(source.key_points)]
     return "\n".join(part for part in parts if part)
 
 
 def _lens_profile_text(lens: BriefingLens) -> str:
-    return "\n".join(part for part in [str(lens.title or ""), str(lens.deck or "")] if part)
+    return "\n".join(
+        part
+        for part in [str(lens.title or ""), str(lens.deck or ""), str(lens.routing_rule or "")]
+        if part
+    )
 
 
 def _centroid_for_sources(
@@ -904,12 +1121,6 @@ def _cosine(left: list[float], right: list[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return -1.0
     return numerator / (left_norm * right_norm)
-
-
-def _running_mean(current: list[float], vector: list[float]) -> list[float]:
-    if len(current) != len(vector):
-        return vector
-    return [(a + b) / 2.0 for a, b in zip(current, vector, strict=True)]
 
 
 def _mean_vector(vectors: list[list[float]]) -> list[float]:

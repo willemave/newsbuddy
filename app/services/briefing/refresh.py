@@ -34,6 +34,7 @@ from app.services.briefing.sources import (
     read_source_keys,
     sources_for_keys,
 )
+from app.services.briefing.taxonomy import apply_taxonomy_if_needed
 
 RefreshMode = Literal["append", "sweep", "full"]
 COMPACTION_WINDOW_INDEX = 99
@@ -212,6 +213,15 @@ def run_briefing_refresh(
     assigned = assign_pending_lenses(db, user_id=user_id, naming_fn=naming_fn, settings=settings)
     if assigned:
         db.flush()
+    taxonomized = apply_taxonomy_if_needed(
+        db,
+        user_id=user_id,
+        settings=settings,
+        task_id=task_id,
+        use_llm=use_llm,
+    )
+    if taxonomized:
+        db.flush()
     appended = _append_ready_windows(
         db,
         user_id=user_id,
@@ -230,7 +240,7 @@ def run_briefing_refresh(
     )
     retired += retire_idle_lenses(db, user_id=user_id, idle_days=settings.briefing_lens_idle_days)
     state.last_sweep_at = datetime.now(UTC).replace(tzinfo=None)
-    mutated = bool(pending_added or assigned or appended or retired or compacted)
+    mutated = bool(pending_added or assigned or taxonomized or appended or retired or compacted)
     if appended:
         state.last_append_at = datetime.now(UTC).replace(tzinfo=None)
         state.masthead_deck = _masthead_deck(db, user_id=user_id)
@@ -303,6 +313,15 @@ def _run_refresh_releasing_db(
     assigned = assign_pending_lenses(db, user_id=user_id, naming_fn=naming_fn, settings=settings)
     if assigned:
         db.flush()
+    taxonomized = apply_taxonomy_if_needed(
+        db,
+        user_id=user_id,
+        settings=settings,
+        task_id=task_id,
+        use_llm=use_llm,
+    )
+    if taxonomized:
+        db.flush()
     prepared_windows = _plan_ready_windows(db, user_id=user_id, mode=mode, settings=settings)
     db.commit()
 
@@ -325,7 +344,7 @@ def _run_refresh_releasing_db(
     compacted = 0
     retired += retire_idle_lenses(db, user_id=user_id, idle_days=settings.briefing_lens_idle_days)
     state.last_sweep_at = datetime.now(UTC).replace(tzinfo=None)
-    mutated = bool(pending_added or assigned or appended or retired or compacted)
+    mutated = bool(pending_added or assigned or taxonomized or appended or retired or compacted)
     if appended:
         state.last_append_at = datetime.now(UTC).replace(tzinfo=None)
         state.masthead_deck = _masthead_deck(db, user_id=user_id)
