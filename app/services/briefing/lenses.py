@@ -418,6 +418,14 @@ def _assign_by_semantic_categories(
     ]
     if not remaining:
         return changed
+    if _active_news_lens_count(db, user_id=user_id) >= settings.briefing_max_news_lenses:
+        return changed + _assign_remaining_to_capped_news_lenses(
+            db,
+            user_id=user_id,
+            remaining=remaining,
+            lens_vectors=lens_vectors,
+            settings=settings,
+        )
 
     clusters = _cluster_sources_by_embedding(
         remaining,
@@ -1042,14 +1050,57 @@ def _best_lens_for_cluster(
     cluster: _SemanticCluster,
     lens_vectors: list[tuple[BriefingLens, list[float]]],
 ) -> tuple[BriefingLens | None, float]:
+    return _best_lens_for_vector(cluster.centroid, lens_vectors)
+
+
+def _best_lens_for_vector(
+    vector: list[float],
+    lens_vectors: list[tuple[BriefingLens, list[float]]],
+) -> tuple[BriefingLens | None, float]:
     best_lens = None
     best_score = -1.0
     for lens, lens_vector in lens_vectors:
-        score = _cosine(cluster.centroid, lens_vector)
+        score = _cosine(vector, lens_vector)
         if score > best_score:
             best_lens = lens
             best_score = score
     return best_lens, best_score
+
+
+def _assign_remaining_to_capped_news_lenses(
+    db: Session,
+    *,
+    user_id: int,
+    remaining: list[tuple[BriefingPendingSource, BriefingSource, list[float]]],
+    lens_vectors: list[tuple[BriefingLens, list[float]]],
+    settings: Settings,
+) -> int:
+    """Assign remaining sources without clustering when no new news lens can be created."""
+
+    changed = 0
+    misc_lens: BriefingLens | None = None
+    for row, _source, vector in remaining:
+        best_lens, best_score = _best_lens_for_vector(vector, lens_vectors)
+        if best_lens is not None and best_score >= settings.briefing_category_absorb_similarity:
+            row.lens_key = best_lens.key
+            _update_lens_centroid(best_lens, vector, settings=settings)
+            changed += 1
+            continue
+
+        if misc_lens is None:
+            misc_lens = _get_or_create_misc_lens_if_allowed(
+                db,
+                user_id=user_id,
+                settings=settings,
+            )
+        fallback_lens = misc_lens or best_lens
+        if fallback_lens is None:
+            continue
+        row.lens_key = fallback_lens.key
+        if fallback_lens is best_lens:
+            _update_lens_centroid(fallback_lens, vector, settings=settings)
+        changed += 1
+    return changed
 
 
 def _update_lens_centroid(

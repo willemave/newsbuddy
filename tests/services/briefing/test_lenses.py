@@ -285,6 +285,117 @@ def test_semantic_category_assignment_uses_existing_lens_profile(
     assert existing.centroid_model == settings.briefing_category_embedding_model
 
 
+def test_semantic_category_assignment_skips_clustering_when_news_lens_cap_reached(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_semantic_category_assignment_enabled", True)
+    monkeypatch.setattr(settings, "briefing_max_news_lenses", 2)
+    monkeypatch.setattr(settings, "briefing_category_similarity", 0.95)
+    monkeypatch.setattr(settings, "briefing_category_absorb_similarity", 0.45)
+    assert test_user.id is not None
+    user_id = test_user.id
+    db_session.add_all(
+        [
+            BriefingLens(
+                user_id=user_id,
+                key="news-ai",
+                tier="news",
+                title="AI",
+                deck="Artificial intelligence stories.",
+                position=2,
+                status="active",
+            ),
+            BriefingLens(
+                user_id=user_id,
+                key="news-markets",
+                tier="news",
+                title="Markets",
+                deck="Markets and economy stories.",
+                position=3,
+                status="active",
+            ),
+        ]
+    )
+    items = [
+        news_item_factory(
+            raw_metadata={},
+            visibility_scope="user",
+            owner_user_id=user_id,
+            article_title=title,
+            summary_title=title,
+        )
+        for title in [
+            "AI infrastructure demand grows",
+            "Bond market volatility rises",
+            "Mixed technology policy update",
+        ]
+    ]
+    for item in items:
+        db_session.add(
+            BriefingPendingSource(
+                user_id=user_id,
+                source_kind="news",
+                source_id=item.id,
+            )
+        )
+    db_session.flush()
+
+    def fake_encode(
+        texts: list[str],
+        *,
+        model_spec: str,
+        batch_size: int,
+        timeout_seconds: int,
+    ) -> np.ndarray:
+        del model_spec, batch_size, timeout_seconds
+        assert len(texts) == 5
+        return np.asarray(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [0.5, 0.5],
+                [1.0, 0.0],
+                [0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+
+    def fail_naming(_sources):  # noqa: ANN001
+        raise AssertionError("capped news assignment should not name new lenses")
+
+    def fail_clustering(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("capped news assignment should not cluster remaining sources")
+
+    monkeypatch.setattr(
+        "app.services.briefing.lenses.encode_texts_with_embedding_model",
+        fake_encode,
+    )
+    monkeypatch.setattr(
+        "app.services.briefing.lenses._cluster_sources_by_embedding",
+        fail_clustering,
+    )
+
+    changed = assign_pending_lenses(
+        db_session,
+        user_id=user_id,
+        naming_fn=fail_naming,
+        settings=settings,
+    )
+
+    assert changed == 3
+    assert {
+        row.lens_key
+        for row in db_session.query(BriefingPendingSource).filter(
+            BriefingPendingSource.user_id == user_id
+        )
+    } == {"news-ai", "news-markets"}
+    assert db_session.query(BriefingLens).filter(BriefingLens.user_id == user_id).count() == 2
+
+
 def test_topic_slug_does_not_create_missing_news_lens(
     db_session: Session,
     test_user: User,
