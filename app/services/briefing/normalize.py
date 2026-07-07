@@ -7,7 +7,7 @@ from typing import Any
 from app.models.contracts import BriefingBlockType, BriefingRunKind
 from app.services.briefing.source_keys import build_source_key
 
-LINK_RE = re.compile(r"\[([^\]]+)\]\((newsly://briefing/(content|news)/(\d+))\)")
+LINK_RE = re.compile(r"\[([^\]]+)\]\(((?:newsly|news)://briefing/(content|news)/(\d+))\)")
 INSIGHT_OPEN_RE = re.compile(r"\{\{insight:([a-zA-Z0-9_.:-]+)\}\}")
 INSIGHT_CLOSE = "{{/insight}}"
 MARKER_RE = re.compile(r"\{\{/?insight(?::[a-zA-Z0-9_.:-]+)?\}\}")

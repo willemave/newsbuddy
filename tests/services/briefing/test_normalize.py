@@ -59,6 +59,26 @@ def test_normalize_layout_unwraps_bold_markers_around_source_links() -> None:
     )
 
 
+def test_normalize_layout_accepts_legacy_news_scheme_source_links() -> None:
+    markdown = "[Story](news://briefing/news/8) explains the useful claim."
+    layout = normalize_layout(
+        [
+            {
+                "type": "passage",
+                "markdown": markdown,
+            }
+        ],
+        source_keys={"news:8"},
+    )
+
+    assert layout.warnings == []
+    assert layout.narration_text == "Story explains the useful claim."
+    assert source_keys_in_markdown(markdown) == {"news:8"}
+    runs = layout.blocks[0]["paragraphs"][0]["runs"]
+    assert any(run["kind"] == BriefingRunKind.SOURCE_LINK.value for run in runs)
+    assert any(run["text"] == "Story" and run["source_key"] == "news:8" for run in runs)
+
+
 def test_close_unpaired_insights_and_source_key_extraction_are_stable() -> None:
     markdown = (
         "[One](newsly://briefing/news/3) starts. "

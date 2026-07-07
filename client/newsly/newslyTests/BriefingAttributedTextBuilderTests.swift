@@ -43,6 +43,31 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         XCTAssertEqual(link.absoluteString, "newsly://briefing/content/42")
     }
 
+    func testBuildConvertsStoredMarkdownSourceLinksInTextRuns() throws {
+        let builder = BriefingAttributedTextBuilder()
+        let result = builder.build(
+            paragraphs: [
+                APIBriefingParagraph(
+                    runs: [
+                        APIBriefingRun(
+                            kind: .text,
+                            text: "Read [Story](news://briefing/news/8) today."
+                        )
+                    ]
+                )
+            ],
+            weight: nil
+        )
+
+        XCTAssertEqual(result.plainText, "Read Story today.")
+        let storyRange = (result.attributedText.string as NSString).range(of: "Story")
+        let link = try XCTUnwrap(
+            result.attributedText.attribute(.link, at: storyRange.location, effectiveRange: nil)
+                as? URL
+        )
+        XCTAssertEqual(link.absoluteString, "newsly://briefing/news/8")
+    }
+
     func testBuildAppendsDiscussionChipAfterFirstSourceLinkOnly() throws {
         let builder = BriefingAttributedTextBuilder()
         let linkRun = APIBriefingRun(

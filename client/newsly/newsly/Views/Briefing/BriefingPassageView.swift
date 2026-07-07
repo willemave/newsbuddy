@@ -216,14 +216,18 @@ struct BriefingPassageView: UIViewRepresentable {
         }
 
         private func sourceKey(from url: URL) -> String? {
-            guard url.scheme == "newsly", url.host == "briefing" else { return nil }
+            guard (url.scheme == "newsly" || url.scheme == "news"), url.host == "briefing" else {
+                return nil
+            }
             let components = url.pathComponents.filter { $0 != "/" }
             guard components.count == 2 else { return nil }
             return "\(components[0]):\(components[1])"
         }
 
         private func discussionSourceKey(from url: URL) -> String? {
-            guard url.scheme == "newsly", url.host == "briefing" else { return nil }
+            guard (url.scheme == "newsly" || url.scheme == "news"), url.host == "briefing" else {
+                return nil
+            }
             let components = url.pathComponents.filter { $0 != "/" }
             guard components.count == 3, components[0] == "discussion" else { return nil }
             return "\(components[1]):\(components[2])"

@@ -10,6 +10,10 @@ struct BriefingDiscussionChip: Equatable {
 }
 
 struct BriefingAttributedTextBuilder {
+    private static let markdownSourceLinkRegex = try! NSRegularExpression(
+        pattern: #"\[([^\]]+)\]\(((?:newsly|news)://briefing/(content|news)/(\d+))\)"#
+    )
+
     struct Result {
         let attributedText: NSAttributedString
         let plainText: String
@@ -54,7 +58,11 @@ struct BriefingAttributedTextBuilder {
                 }
                 let text = Self.sanitizedRunText(for: run, at: runIndex, in: runs)
                 guard !text.isEmpty else { continue }
-                output.append(NSAttributedString(string: text, attributes: attributes))
+                if run.kind == .source_link {
+                    output.append(NSAttributedString(string: text, attributes: attributes))
+                } else {
+                    appendText(text, attributes: attributes, to: output)
+                }
 
                 if run.kind == .source_link,
                    let sourceKey = run.sourceKey,
@@ -116,6 +124,67 @@ struct BriefingAttributedTextBuilder {
             ))
         }
         return output
+    }
+
+    private func appendText(
+        _ text: String,
+        attributes: [NSAttributedString.Key: Any],
+        to output: NSMutableAttributedString
+    ) {
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        let matches = Self.markdownSourceLinkRegex.matches(in: text, range: fullRange)
+        guard !matches.isEmpty else {
+            output.append(NSAttributedString(string: text, attributes: attributes))
+            return
+        }
+
+        var cursor = 0
+        for match in matches {
+            if match.range.location > cursor {
+                output.append(NSAttributedString(
+                    string: nsText.substring(with: NSRange(
+                        location: cursor,
+                        length: match.range.location - cursor
+                    )),
+                    attributes: attributes
+                ))
+            }
+
+            if let url = Self.sourceURL(from: match, in: nsText) {
+                var linkAttributes = attributes
+                linkAttributes[.link] = url
+                linkAttributes[.foregroundColor] = UIColor.appAccent
+                linkAttributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                output.append(NSAttributedString(
+                    string: nsText.substring(with: match.range(at: 1)),
+                    attributes: linkAttributes
+                ))
+            } else {
+                output.append(NSAttributedString(
+                    string: nsText.substring(with: match.range),
+                    attributes: attributes
+                ))
+            }
+            cursor = NSMaxRange(match.range)
+        }
+
+        if cursor < nsText.length {
+            output.append(NSAttributedString(
+                string: nsText.substring(with: NSRange(
+                    location: cursor,
+                    length: nsText.length - cursor
+                )),
+                attributes: attributes
+            ))
+        }
+    }
+
+    private static func sourceURL(from match: NSTextCheckingResult, in text: NSString) -> URL? {
+        guard match.numberOfRanges >= 5 else { return nil }
+        let kind = text.substring(with: match.range(at: 3))
+        let id = text.substring(with: match.range(at: 4))
+        return URL(string: "newsly://briefing/\(kind)/\(id)")
     }
 
     /// Older stored briefings can carry leftover `**` markers where the
