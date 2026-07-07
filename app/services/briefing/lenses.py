@@ -754,7 +754,11 @@ def _assign_new_or_misc_lens(
     elif should_make_new or age_seconds >= 86_400:
         lens = _get_or_create_misc_lens_if_allowed(db, user_id=user_id, settings=settings)
         if lens is None:
-            return 0
+            return _assign_to_existing_news_lenses(
+                db,
+                user_id=user_id,
+                pending_sources=unassigned,
+            )
     else:
         return 0
 
@@ -763,6 +767,31 @@ def _assign_new_or_misc_lens(
     for row, _source in unassigned:
         row.lens_key = lens.key
     return len(unassigned)
+
+
+def _assign_to_existing_news_lenses(
+    db: Session,
+    *,
+    user_id: int,
+    pending_sources: list[tuple[BriefingPendingSource, BriefingSource]],
+) -> int:
+    lenses = (
+        db.query(BriefingLens)
+        .filter(BriefingLens.user_id == user_id)
+        .filter(BriefingLens.tier == "news")
+        .filter(BriefingLens.status == "active")
+        .order_by(BriefingLens.position.asc(), BriefingLens.id.asc())
+        .all()
+    )
+    if not lenses:
+        return 0
+    changed = 0
+    for index, (row, _source) in enumerate(pending_sources):
+        if row.lens_key is not None:
+            continue
+        row.lens_key = lenses[index % len(lenses)].key
+        changed += 1
+    return changed
 
 
 def _get_or_create_misc_lens(db: Session, *, user_id: int) -> BriefingLens:

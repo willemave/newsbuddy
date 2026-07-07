@@ -471,6 +471,86 @@ def test_topic_slug_assigns_existing_active_news_lens(
     assert pending.lens_key == "news-ai"
 
 
+def test_no_llm_capped_news_assignment_uses_existing_news_lenses(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_semantic_category_assignment_enabled", False)
+    monkeypatch.setattr(settings, "briefing_centroid_assignment_enabled", False)
+    monkeypatch.setattr(settings, "briefing_new_lens_min_items", 2)
+    monkeypatch.setattr(settings, "briefing_max_news_lenses", 2)
+    assert test_user.id is not None
+    user_id = test_user.id
+    db_session.add_all(
+        [
+            BriefingLens(
+                user_id=user_id,
+                key="news-ai",
+                tier="news",
+                title="AI",
+                deck="Artificial intelligence stories.",
+                position=2,
+                status="active",
+            ),
+            BriefingLens(
+                user_id=user_id,
+                key="news-markets",
+                tier="news",
+                title="Markets",
+                deck="Markets and economy stories.",
+                position=3,
+                status="active",
+            ),
+        ]
+    )
+    items = [
+        news_item_factory(
+            raw_metadata={},
+            visibility_scope="user",
+            owner_user_id=user_id,
+            article_title=f"Capped story {index}",
+            summary_title=f"Capped story {index}",
+        )
+        for index in range(5)
+    ]
+    for item in items:
+        db_session.add(
+            BriefingPendingSource(
+                user_id=user_id,
+                source_kind="news",
+                source_id=item.id,
+            )
+        )
+    db_session.flush()
+
+    def fail_encode(_texts):  # noqa: ANN001
+        raise AssertionError("no-llm capped assignment should not embed")
+
+    monkeypatch.setattr("app.services.briefing.lenses.encode_news_texts", fail_encode)
+
+    changed = assign_pending_lenses(db_session, user_id=user_id, settings=settings)
+
+    assert changed == 5
+    assigned = [
+        row.lens_key
+        for row in db_session.query(BriefingPendingSource)
+        .filter(BriefingPendingSource.user_id == user_id)
+        .order_by(BriefingPendingSource.id.asc())
+        .all()
+    ]
+    assert assigned == [
+        "news-ai",
+        "news-markets",
+        "news-ai",
+        "news-markets",
+        "news-ai",
+    ]
+    assert db_session.query(BriefingLens).filter(BriefingLens.user_id == user_id).count() == 2
+
+
 def test_semantic_category_assignment_raises_when_lens_naming_fails(
     db_session: Session,
     test_user: User,
