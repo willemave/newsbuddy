@@ -77,8 +77,8 @@
 				Services/KeychainManager.swift,
 				Services/TokenRefreshService.swift,
 				Shared/ReaderPalette.swift,
-				Shared/ShareExtensionStyle.swift,
 				Shared/SharedContainer.swift,
+				Shared/ShareExtensionStyle.swift,
 			);
 			target = E61B938D2EF910AC0006676A /* ShareExtension */;
 		};

@@ -6,6 +6,7 @@ final class BriefingViewModel: ObservableObject {
     private enum TaskKey: Hashable {
         case lens(String)
         case readFlush
+        case snapshotSave
     }
 
     enum LoadState: Equatable {
@@ -22,8 +23,12 @@ final class BriefingViewModel: ObservableObject {
     @Published private(set) var state: LoadState = .idle
     @Published var selectedLensKey: String?
     @Published private(set) var narrationEpisodes: [String: AudioEpisode] = [:]
+    /// True while the selected lens is scrolled into reading — the masthead
+    /// above the pager collapses to hand the space to the content.
+    @Published private(set) var isMastheadCompact = false
 
     private let service: BriefingServicing
+    private let snapshotStore: BriefingSnapshotStoring?
     private var etag: String?
     private var indexLoadTask: Task<Void, Never>?
     private var loadedLensKeys: Set<String> = []
@@ -31,12 +36,9 @@ final class BriefingViewModel: ObservableObject {
     private var pendingReadKeys: Set<String> = []
     private var headerPinnedLensKeys: Set<String> = []
 
-    /// True when the lens we just navigated away from had its category strip
-    /// pinned — the incoming page should start with its strip pinned too.
-    private(set) var carryHeaderPinned = false
-
-    init(service: BriefingServicing) {
+    init(service: BriefingServicing, snapshotStore: BriefingSnapshotStoring? = nil) {
         self.service = service
+        self.snapshotStore = snapshotStore
     }
 
     deinit {
@@ -54,6 +56,12 @@ final class BriefingViewModel: ObservableObject {
 
     func loadIndexIfNeeded() async {
         guard index == nil else {
+            await refreshIndex()
+            return
+        }
+        // Cold start: paint the last briefing immediately, then revalidate
+        // against the server via ETag; a version bump refetches the lenses.
+        if restoreFromSnapshot() {
             await refreshIndex()
             return
         }
@@ -76,10 +84,9 @@ final class BriefingViewModel: ObservableObject {
 
     func selectLens(key: String) {
         guard selectedLensKey != key else { return }
-        carryHeaderPinned = selectedLensKey.map(headerPinnedLensKeys.contains) ?? false
         selectedLensKey = key
+        refreshMastheadCompact()
         loadLensIfNeeded(key: key)
-        prefetchNeighbors(around: key)
     }
 
     func setHeaderPinned(_ pinned: Bool, forLens key: String) {
@@ -88,10 +95,13 @@ final class BriefingViewModel: ObservableObject {
         } else {
             headerPinnedLensKeys.remove(key)
         }
+        refreshMastheadCompact()
     }
 
-    func headerPinned(forLens key: String) -> Bool {
-        headerPinnedLensKeys.contains(key)
+    private func refreshMastheadCompact() {
+        let compact = selectedLensKey.map(headerPinnedLensKeys.contains) ?? false
+        guard isMastheadCompact != compact else { return }
+        isMastheadCompact = compact
     }
 
     func loadLensIfNeeded(key: String) {
@@ -105,8 +115,12 @@ final class BriefingViewModel: ObservableObject {
                 }
                 self.lenses[key] = response
                 self.loadedLensKeys.insert(key)
+                self.scheduleSnapshotSave()
             } catch {
-                if !isNetworkCancellation(error) {
+                // Background prefetch failures stay silent — the page retries
+                // on appear. Only the lens the reader is looking at may take
+                // the whole tab into an error state.
+                if !isNetworkCancellation(error), key == self.selectedLensKey {
                     self.state = .error(error.localizedDescription)
                 }
             }
@@ -184,11 +198,11 @@ final class BriefingViewModel: ObservableObject {
             case .notModified:
                 state = orderedLenses.isEmpty ? .empty : .loaded
             case .value(let response, let responseEtag):
-                guard shouldApply(response) else {
+                guard shouldApply(response, force: force) else {
                     state = orderedLenses.isEmpty ? .empty : .loaded
                     return
                 }
-                if let current = index, response.version > current.version {
+                if let current = index, response.version != current.version {
                     invalidateLoadedLenses()
                 }
                 index = response
@@ -198,31 +212,73 @@ final class BriefingViewModel: ObservableObject {
                 state = response.lenses.isEmpty ? .empty : .loaded
                 if selectedLensKey == nil || !response.lenses.contains(where: { $0.key == selectedLensKey }) {
                     selectedLensKey = orderedLenses.first?.key
+                    refreshMastheadCompact()
                 }
                 if let selectedLensKey {
                     loadLensIfNeeded(key: selectedLensKey)
-                    prefetchNeighbors(around: selectedLensKey)
                 }
+                prefetchRemainingLenses()
+                scheduleSnapshotSave()
             }
         } catch {
-            if !isNetworkCancellation(error) {
+            // With restored or previously loaded content on screen, a failed
+            // revalidation stays silent instead of replacing the briefing
+            // with a full-screen error (e.g. offline cold start).
+            if !isNetworkCancellation(error), orderedLenses.isEmpty {
                 state = .error(error.localizedDescription)
             }
         }
     }
 
     // A read-mark can bump the version while an index fetch is in flight; never
-    // let the older snapshot overwrite the newer state.
-    private func shouldApply(_ response: APIBriefingIndexResponse) -> Bool {
-        guard let current = index else { return true }
+    // let the older snapshot overwrite the newer state. Forced loads (initial
+    // load, pull-to-refresh) accept the server as truth even if its version is
+    // lower — e.g. after the backing state was rebuilt.
+    private func shouldApply(_ response: APIBriefingIndexResponse, force: Bool) -> Bool {
+        guard !force, let current = index else { return true }
         return response.version >= current.version
     }
 
-    private func prefetchNeighbors(around key: String) {
-        let lenses = orderedLenses
-        guard let index = lenses.firstIndex(where: { $0.key == key }) else { return }
-        for neighborIndex in [index - 1, index + 1] where lenses.indices.contains(neighborIndex) {
-            loadLensIfNeeded(key: lenses[neighborIndex].key)
+    /// Warm every lens in the background so swiping between categories never
+    /// shows a loading page. Payloads are small and requests share the
+    /// connection, so this is cheaper than it looks.
+    private func prefetchRemainingLenses() {
+        for lens in orderedLenses where lens.key != selectedLensKey {
+            loadLensIfNeeded(key: lens.key)
+        }
+    }
+
+    /// Applies the persisted briefing so the tab renders without waiting on
+    /// the network. Returns false when there is nothing usable to restore.
+    private func restoreFromSnapshot() -> Bool {
+        guard let snapshot = snapshotStore?.load(),
+              !snapshot.index.lenses.isEmpty
+        else { return false }
+        index = snapshot.index
+        orderedLenses = Self.sortedLenses(snapshot.index.lenses)
+        lenses = snapshot.lenses
+        loadedLensKeys = Set(snapshot.lenses.keys)
+        etag = snapshot.etag
+        state = .loaded
+        if selectedLensKey == nil || !snapshot.index.lenses.contains(where: { $0.key == selectedLensKey }) {
+            selectedLensKey = orderedLenses.first?.key
+        }
+        return true
+    }
+
+    private func scheduleSnapshotSave() {
+        guard snapshotStore != nil else { return }
+        tasks.runReplacing(.snapshotSave) { [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let self, !Task.isCancelled, let index = self.index else { return }
+            self.snapshotStore?.save(
+                BriefingSnapshot(
+                    index: index,
+                    etag: self.etag,
+                    lenses: self.lenses,
+                    savedAt: AppClock.now
+                )
+            )
         }
     }
 
@@ -253,6 +309,7 @@ final class BriefingViewModel: ObservableObject {
                 index = currentIndex
                 orderedLenses = Self.sortedLenses(currentIndex.lenses)
             }
+            scheduleSnapshotSave()
         } catch {
             pendingReadKeys.formUnion(keys)
         }
@@ -313,6 +370,7 @@ final class BriefingViewModel: ObservableObject {
             index = currentIndex
             orderedLenses = Self.sortedLenses(currentIndex.lenses)
         }
+        scheduleSnapshotSave()
     }
 
     private static func sortedLenses(_ lenses: [APIBriefingLensSummary]) -> [APIBriefingLensSummary] {

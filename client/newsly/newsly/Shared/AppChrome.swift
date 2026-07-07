@@ -310,7 +310,8 @@ enum RootDependencyFactory {
             readStateCache: readStateCache
         )
         let briefingViewModel = BriefingViewModel(
-            service: LiveBriefingService()
+            service: LiveBriefingService(),
+            snapshotStore: BriefingSnapshotStore.shared
         )
 
         return TabCoordinatorViewModel(

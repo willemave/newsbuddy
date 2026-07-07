@@ -282,7 +282,7 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.index?.lenses.isEmpty, false)
     }
 
-    func testSelectLensCarriesPinnedHeaderStateFromPreviousLens() async {
+    func testMastheadCompactTracksScrolledStateOfSelectedLens() async {
         let service = MockBriefingService()
         service.indexResults = [
             .value(
@@ -298,14 +298,22 @@ final class BriefingViewModelTests: XCTestCase {
         await waitFor { viewModel.selectedLens != nil }
         // Equal positions sort by key, so "articles" is auto-selected first.
         XCTAssertEqual(viewModel.selectedLensKey, "articles")
+        XCTAssertFalse(viewModel.isMastheadCompact)
 
+        // Scrolling the selected lens collapses the masthead.
         viewModel.setHeaderPinned(true, forLens: "articles")
-        viewModel.selectLens(key: "podcasts")
-        XCTAssertTrue(viewModel.carryHeaderPinned)
+        XCTAssertTrue(viewModel.isMastheadCompact)
 
-        viewModel.setHeaderPinned(false, forLens: "podcasts")
+        // Swiping to a lens still at its top brings the masthead back.
+        viewModel.selectLens(key: "podcasts")
+        XCTAssertFalse(viewModel.isMastheadCompact)
+
+        // Returning to the scrolled lens collapses it again; scrolling that
+        // lens back to the top restores it.
         viewModel.selectLens(key: "articles")
-        XCTAssertFalse(viewModel.carryHeaderPinned)
+        XCTAssertTrue(viewModel.isMastheadCompact)
+        viewModel.setHeaderPinned(false, forLens: "articles")
+        XCTAssertFalse(viewModel.isMastheadCompact)
     }
 
     func testCitationLinkedMarkdownWrapsBracketNumbers() {
