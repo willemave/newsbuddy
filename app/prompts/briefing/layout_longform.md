@@ -49,7 +49,7 @@ $source_payload_json
 Compose one readable briefing window. Cover every source at least once. Use above writing guidance.
 
 Treat each article as a full source, not a headline. Use the provided `briefing_context` when
-present. Give each article its own substantive treatment, one to two paragraphs, roughly 100-200
+present. Give each article its own substantive treatment, target 3-5 sentences, roughly 100-200
 words, covering the thesis, keypoints, the concrete supporting details, and why it matters to the reader.
 You may compare articles after each one has been developed. Give every article that has
 an image its own `figure` block adjacent to its passage.
