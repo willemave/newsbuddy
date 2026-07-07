@@ -367,7 +367,7 @@ def _assign_by_semantic_categories(
         )
     except Exception:
         logger.exception(
-            "Briefing semantic category embedding failed",
+            "Briefing semantic category embedding failed; falling back to non-semantic assignment",
             extra={
                 "component": "briefing",
                 "operation": "assign_semantic_categories",
@@ -379,7 +379,13 @@ def _assign_by_semantic_categories(
                 },
             },
         )
-        raise
+        return _assign_new_or_misc_lens(
+            db,
+            user_id=user_id,
+            pending_sources=sources,
+            naming_fn=naming_fn,
+            settings=settings,
+        )
     if vectors.size == 0:
         return 0
 

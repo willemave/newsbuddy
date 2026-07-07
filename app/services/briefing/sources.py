@@ -140,12 +140,12 @@ def list_unread_longform_sources(
     *,
     user_id: int,
     content_type: ContentType,
-    limit: int,
+    limit: int | None,
 ) -> list[BriefingSource]:
     """Return unread completed non-skipped content rows for one long-form tier."""
 
     read_clause = _content_is_read_clause(user_id=user_id)
-    rows = (
+    query = (
         db.query(Content)
         .join(
             ContentStatusEntry,
@@ -162,9 +162,10 @@ def list_unread_longform_sources(
             Content.created_at.desc(),
             Content.id.desc(),
         )
-        .limit(limit)
-        .all()
     )
+    if limit is not None:
+        query = query.limit(max(1, limit))
+    rows = query.all()
     return [_source_from_content(row) for row in rows]
 
 
@@ -172,7 +173,7 @@ def list_unread_news_sources(
     db: Session,
     *,
     user_id: int,
-    limit: int,
+    limit: int | None,
 ) -> list[BriefingSource]:
     rows, _total = list_unread_visible_news_items(db, user_id=user_id, limit=limit)
     return [_source_from_news_item(item) for item in rows]
@@ -182,9 +183,9 @@ def list_bootstrap_sources(
     db: Session,
     *,
     user_id: int,
-    audio_limit: int,
-    longform_limit: int,
-    news_limit: int,
+    audio_limit: int | None,
+    longform_limit: int | None,
+    news_limit: int | None,
 ) -> list[BriefingSource]:
     sources: list[BriefingSource] = []
     sources.extend(

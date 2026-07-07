@@ -246,6 +246,36 @@ def test_list_unread_visible_news_items_uses_visible_unread_rows(
     assert [item.id for item in rows] == [visible_unread.id]
 
 
+def test_list_unread_visible_news_items_can_return_all_visible_unread_rows(
+    db_session, test_user, base_time
+) -> None:
+    user_id = test_user.id
+    assert user_id is not None
+
+    item_count = 225
+    for i in range(item_count):
+        _global_news_item(
+            db_session,
+            ingest_key=f"hn-unread-all-{i:03d}",
+            platform="hackernews",
+            title=f"Unread story {i}",
+            article_url=f"https://example.com/unread-all-{i}",
+            ingested_at=base_time + timedelta(minutes=i),
+        )
+    _add_aggregator_subscription(db_session, user_id=user_id, key="hackernews")
+
+    rows, total = list_unread_visible_news_items(
+        db_session,
+        user_id=user_id,
+        limit=None,
+    )
+
+    assert total == item_count
+    assert len(rows) == item_count
+    assert rows[0].summary_title == f"Unread story {item_count - 1}"
+    assert rows[-1].summary_title == "Unread story 0"
+
+
 def test_visibility_filters_brutalist_topics(db_session, test_user, base_time) -> None:
     user_id = test_user.id
     assert user_id is not None

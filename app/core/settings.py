@@ -288,9 +288,6 @@ class Settings(BaseSettings):
     briefing_enabled_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [1])
     briefing_model: str = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
     briefing_masthead_title: str = "The Unread Times"
-    briefing_backlog_limit_audio: int = Field(default=12, ge=1, le=100)
-    briefing_backlog_limit_longform: int = Field(default=20, ge=1, le=100)
-    briefing_backlog_limit_news: int = Field(default=40, ge=1, le=200)
     briefing_category_similarity: float = Field(default=0.55, ge=0.0, le=1.0)
     briefing_category_cluster_similarity: float = Field(default=0.62, ge=0.0, le=1.0)
     briefing_semantic_category_assignment_enabled: bool = True

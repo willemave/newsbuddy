@@ -438,9 +438,9 @@ def _seed_pending_from_unread(
     sources = list_bootstrap_sources(
         db,
         user_id=user_id,
-        audio_limit=settings.briefing_backlog_limit_audio,
-        longform_limit=settings.briefing_backlog_limit_longform,
-        news_limit=settings.briefing_backlog_limit_news,
+        audio_limit=None,
+        longform_limit=None,
+        news_limit=None,
     )
     added = 0
     for source in sources:

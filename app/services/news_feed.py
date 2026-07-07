@@ -230,15 +230,17 @@ def list_unread_visible_news_items(
     db: Session,
     *,
     user_id: int,
-    limit: int,
+    limit: int | None,
 ) -> tuple[list[NewsItem], int]:
     """Return unread visible representative news rows."""
-    normalized_limit = max(1, min(limit, 200))
     is_read = _news_item_is_read_clause(user_id=user_id)
     sort_expr = _news_item_sort_timestamp_expr()
     query = _visible_news_item_query(db, user_id=user_id).filter(~is_read)
     total = int(query.with_entities(func.count(NewsItem.id)).scalar() or 0)
-    rows = query.order_by(sort_expr.desc(), NewsItem.id.desc()).limit(normalized_limit).all()
+    rows_query = query.order_by(sort_expr.desc(), NewsItem.id.desc())
+    if limit is not None:
+        rows_query = rows_query.limit(max(1, min(limit, 200)))
+    rows = rows_query.all()
     return rows, total
 
 

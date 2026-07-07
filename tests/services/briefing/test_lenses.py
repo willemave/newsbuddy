@@ -433,6 +433,75 @@ def test_semantic_category_assignment_raises_when_lens_naming_fails(
     assert db_session.query(BriefingLens).filter(BriefingLens.user_id == user_id).count() == 0
 
 
+def test_semantic_category_assignment_falls_back_when_embedding_fails(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_semantic_category_assignment_enabled", True)
+    monkeypatch.setattr(settings, "briefing_new_lens_min_items", 2)
+    assert test_user.id is not None
+    user_id = test_user.id
+    items = [
+        news_item_factory(
+            raw_metadata={},
+            visibility_scope="user",
+            owner_user_id=user_id,
+            article_title=f"Fallback story {index}",
+            summary_title=f"Fallback story {index}",
+        )
+        for index in range(2)
+    ]
+    for item in items:
+        db_session.add(
+            BriefingPendingSource(
+                user_id=user_id,
+                source_kind="news",
+                source_id=item.id,
+            )
+        )
+    db_session.flush()
+
+    def fail_encode(
+        texts: list[str],
+        *,
+        model_spec: str,
+        batch_size: int,
+        timeout_seconds: int,
+    ) -> np.ndarray:
+        del texts, model_spec, batch_size, timeout_seconds
+        raise TypeError("'NoneType' object is not iterable")
+
+    def naming_fn(_sources):  # noqa: ANN001
+        return LensName(
+            key="news-fallback",
+            title="Fallback",
+            deck="Fallback assignment when embeddings are unavailable.",
+        )
+
+    monkeypatch.setattr(
+        "app.services.briefing.lenses.encode_texts_with_embedding_model",
+        fail_encode,
+    )
+
+    changed = assign_pending_lenses(
+        db_session,
+        user_id=user_id,
+        naming_fn=naming_fn,
+        settings=settings,
+    )
+
+    assert changed == 2
+    assert {
+        row.lens_key
+        for row in db_session.query(BriefingPendingSource).filter(
+            BriefingPendingSource.user_id == user_id
+        )
+    } == {"news-fallback"}
+
+
 def test_semantic_category_assignment_makes_duplicate_named_lens_keys_unique(
     db_session: Session,
     test_user: User,

@@ -264,6 +264,72 @@ def test_append_backfills_uncovered_unclassified_podcasts_after_existing_segment
     ]
 
 
+def test_append_seeds_uncovered_podcasts_beyond_existing_top_slice(
+    db_session: Session,
+    test_user: User,
+    content_factory,
+    status_entry_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    podcasts = [
+        _create_unread_podcast(
+            content_factory,
+            status_entry_factory,
+            test_user,
+            index=index,
+        )
+        for index in range(5)
+    ]
+    lens = BriefingLens(
+        user_id=user_id,
+        key="podcasts",
+        tier="audio",
+        title="Podcasts",
+        deck="Existing podcasts.",
+        position=0,
+    )
+    db_session.add(lens)
+    db_session.flush()
+    db_session.add(
+        BriefingSegment(
+            lens_id=lens.id,
+            user_id=user_id,
+            blocks=[],
+            source_keys=[f"content:{podcast.id}" for podcast in podcasts[-2:]],
+            status="active",
+            model="test",
+            prompt_version="test",
+        )
+    )
+    db_session.commit()
+
+    result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="append",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert result.pending_added == 3
+    assert result.appended_segments == 1
+    source_key_sets = [
+        set(segment.source_keys or [])
+        for segment in db_session.query(BriefingSegment)
+        .filter(BriefingSegment.lens_id == lens.id)
+        .order_by(BriefingSegment.id)
+    ]
+    assert source_key_sets == [
+        {f"content:{podcast.id}" for podcast in podcasts[-2:]},
+        {f"content:{podcast.id}" for podcast in podcasts[:3]},
+    ]
+
+
 def test_mark_read_retires_fully_read_segment_and_bumps_version(
     db_session: Session,
     test_user: User,
