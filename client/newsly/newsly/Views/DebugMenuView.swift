@@ -227,16 +227,19 @@ struct DebugMenuView: View {
     }
 
     private func saveTokensManually() {
-        guard !accessToken.isEmpty else {
+        let normalizedAccessToken = normalizeManualToken(accessToken)
+        let normalizedRefreshToken = normalizeManualToken(refreshToken)
+
+        guard !normalizedAccessToken.isEmpty else {
             alertMessage = "Access token required"
             showingAlert = true
             return
         }
 
         // Save tokens to keychain
-        KeychainManager.shared.saveToken(accessToken, key: .accessToken)
+        KeychainManager.shared.saveToken(normalizedAccessToken, key: .accessToken)
         // Also save to shared UserDefaults for extension access
-        SharedContainer.userDefaults.set(accessToken, forKey: "accessToken")
+        SharedContainer.userDefaults.set(normalizedAccessToken, forKey: "accessToken")
         SharedContainer.userDefaults.synchronize()  // Force sync to disk
         print("🔐 [Main] Saved token to SharedDefaults (group: \(SharedContainer.appGroupId ?? "nil"))")
         print("🔐 [Main] Verify read back: \(SharedContainer.userDefaults.string(forKey: "accessToken")?.prefix(20) ?? "nil")...")
@@ -246,8 +249,8 @@ struct DebugMenuView: View {
             print("🔐 [Main] Container URL: \(containerURL?.path ?? "nil")")
         }
 
-        if !refreshToken.isEmpty {
-            KeychainManager.shared.saveToken(refreshToken, key: .refreshToken)
+        if !normalizedRefreshToken.isEmpty {
+            KeychainManager.shared.saveToken(normalizedRefreshToken, key: .refreshToken)
         }
 
         showingTokenInput = false
@@ -279,6 +282,7 @@ struct DebugMenuView: View {
                     }
                 } else {
                     await MainActor.run {
+                        KeychainManager.shared.saveToken(String(user.id), key: .userId)
                         authViewModel.authState = .authenticated(user)
                         forceOnboardingAfterTokenSave = false
                     }
@@ -294,6 +298,28 @@ struct DebugMenuView: View {
                 }
             }
         }
+    }
+
+    private func normalizeManualToken(_ input: String) -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        let firstLine = trimmed
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? trimmed
+
+        let value: String
+        if let separator = firstLine.firstIndex(of: "=") {
+            value = String(firstLine[firstLine.index(after: separator)...])
+        } else {
+            value = firstLine
+        }
+
+        return value.trimmingCharacters(in: CharacterSet(charactersIn: "\"' ").union(.whitespacesAndNewlines))
     }
 
     private func createNewOnboardingUser() {

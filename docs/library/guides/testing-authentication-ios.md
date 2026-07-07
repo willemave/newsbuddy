@@ -23,17 +23,28 @@ cd /path/to/news_app
 
 This script will:
 - Generate valid JWT access and refresh tokens
-- Output tokens you can paste into the iOS Debug Menu
-- Include the configured token expiry values
+- Label the access token and refresh token for Debug Menu entry
+- Keep each token on its own line for copy/paste
 
 **Example Output:**
 ```
-USER_ID=1
-ACCESS_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-REFRESH_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-ACCESS_TOKEN_EXPIRES_MINUTES=30
-REFRESH_TOKEN_EXPIRES_DAYS=90
+Newsly auth tokens for user 1
+
+Paste these into Debug Menu > Set Tokens:
+
+ACCESS TOKEN
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+REFRESH TOKEN
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+Access token expires in 10080 minutes.
+Refresh token expires in 90 days.
 ```
+
+Paste the line below `ACCESS TOKEN` into the Access Token field and the line
+below `REFRESH TOKEN` into the Refresh Token field. Use `--shell` if you want
+labeled `KEY=value` output.
 
 ### Step 2: Open iOS Simulator
 

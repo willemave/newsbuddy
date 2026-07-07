@@ -37,7 +37,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Print tokens as JSON instead of shell-style lines.",
+        help="Print tokens as JSON instead of raw lines.",
+    )
+    parser.add_argument(
+        "--shell",
+        action="store_true",
+        help="Print shell-style KEY=value lines.",
     )
     return parser.parse_args()
 
@@ -63,11 +68,28 @@ def main() -> None:
         )
         return
 
-    print(f"USER_ID={args.user_id}")
-    print(f"ACCESS_TOKEN={access_token}")
-    print(f"REFRESH_TOKEN={refresh_token}")
-    print(f"ACCESS_TOKEN_EXPIRES_MINUTES={settings.ACCESS_TOKEN_EXPIRE_MINUTES}")
-    print(f"REFRESH_TOKEN_EXPIRES_DAYS={settings.REFRESH_TOKEN_EXPIRE_DAYS}")
+    if args.shell:
+        print(f"USER_ID={args.user_id}")
+        print(f"ACCESS_TOKEN={access_token}")
+        print(f"REFRESH_TOKEN={refresh_token}")
+        print(f"ACCESS_TOKEN_EXPIRES_MINUTES={settings.ACCESS_TOKEN_EXPIRE_MINUTES}")
+        print(f"REFRESH_TOKEN_EXPIRES_DAYS={settings.REFRESH_TOKEN_EXPIRE_DAYS}")
+        return
+
+    print(f"Newsly auth tokens for user {args.user_id}")
+    print()
+    print("Paste these into Debug Menu > Set Tokens:")
+    print()
+    print("ACCESS TOKEN")
+    print(access_token)
+    print()
+    print("REFRESH TOKEN")
+    print(refresh_token)
+    print()
+    print(f"Access token expires in {settings.ACCESS_TOKEN_EXPIRE_MINUTES} minutes.")
+    print(f"Refresh token expires in {settings.REFRESH_TOKEN_EXPIRE_DAYS} days.")
+    print()
+    print("Use --json for machine-readable output or --shell for KEY=value output.")
 
 
 if __name__ == "__main__":
