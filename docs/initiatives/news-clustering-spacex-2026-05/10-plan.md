@@ -17,8 +17,8 @@ Use a local restore of the production database to explain whether the SpaceX row
 
 ## Execution Steps
 
-1. Pull a production Postgres dump with `scripts/pull_production_db.sh`.
-2. Restore the dump locally with `scripts/load_production_snapshot.py --target-db newsly_prod --force`.
+1. Copy production state locally with `scripts/sync_production_state.py --target-db newsly_prod --skip-assets --no-restart-server`.
+2. Query the restored local snapshot through the target DB selected by that sync command.
 3. Query SpaceX-related `news_items` around the visible feed window, expanding to adjacent ingestion windows if needed.
 4. Export title, source, domain, URL, status, visibility, representative, cluster size, ingestion time, processed time, and cluster metadata for each candidate row.
 5. Reconstruct the relation matcher decision path for the SpaceX rows:

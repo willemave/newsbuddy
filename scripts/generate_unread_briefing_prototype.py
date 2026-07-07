@@ -1,7 +1,7 @@
 """Generate a one-off source-linked unread briefing prototype.
 
 This script is intentionally experimental. It can refresh a production snapshot
-into the local ``newsly_prod`` database, freeze one user's unread news and
+into the local app database, freeze one user's unread news and
 long-form rows, ask an LLM for one cohesive scrolling briefing, and write JSON,
 Markdown, and HTML artifacts for product review.
 """
@@ -47,7 +47,7 @@ from app.services.vendor_costs import (
 from app.utils.summary_utils import extract_summary_text
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_TARGET_DB = "newsly_prod"
+DEFAULT_TARGET_DB = "newsly"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "unread_briefing_prototype"
 SNAPSHOT_WARNING = (
     "This prototype freezes the fetched unread set. It does not mark local rows read or "
@@ -246,7 +246,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--database-url",
         default=None,
         help=(
-            "SQLAlchemy database URL to read. Defaults to local newsly_prod unless "
+            "SQLAlchemy database URL to read. Defaults to local newsly unless "
             "DATABASE_URL is explicitly set."
         ),
     )
@@ -254,12 +254,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--refresh-production-data",
         action="store_true",
-        help="Run scripts/pull_production_db.sh and load the dump into --target-db first.",
+        help=(
+            "Run scripts/sync_production_state.py first. This refreshes the local DB "
+            "and recent file-backed assets."
+        ),
     )
     parser.add_argument(
         "--force-load-production",
         action="store_true",
-        help="Allow dropping/recreating --target-db when loading a production dump.",
+        help="Deprecated; production refresh is destructive by default.",
     )
     parser.add_argument("--news-limit", type=int, default=35)
     parser.add_argument("--long-limit", type=int, default=8)
@@ -515,28 +518,20 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def refresh_production_data(*, target_db: str, force_load: bool) -> None:
-    """Pull a full production dump and restore it into a local target DB."""
-    dump_dir = PROJECT_ROOT / ".local_dumps"
-    dump_dir.mkdir(parents=True, exist_ok=True)
-    dump_path = dump_dir / f"newsly_prod_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.dump"
-
-    subprocess.run(
-        ["bash", str(PROJECT_ROOT / "scripts" / "pull_production_db.sh"), str(dump_path)],
-        cwd=PROJECT_ROOT,
-        check=True,
-    )
-
-    load_cmd = [
+    """Refresh local production state before generating the prototype."""
+    sync_cmd = [
         sys.executable,
-        str(PROJECT_ROOT / "scripts" / "load_production_snapshot.py"),
-        "--dump-path",
-        str(dump_path),
-        "--target-db",
-        target_db,
+        str(PROJECT_ROOT / "scripts" / "sync_production_state.py"),
+        "--no-restart-server",
     ]
+    if target_db:
+        sync_cmd.extend(["--target-db", target_db])
     if force_load:
-        load_cmd.append("--force")
-    subprocess.run(load_cmd, cwd=PROJECT_ROOT, check=True)
+        print(
+            "NOTE: --force-load-production is deprecated; production sync is destructive by default.",
+            file=sys.stderr,
+        )
+    subprocess.run(sync_cmd, cwd=PROJECT_ROOT, check=True)
 
 
 def default_local_database_url(target_db: str) -> str:

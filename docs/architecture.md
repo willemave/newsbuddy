@@ -1451,13 +1451,14 @@ Server mode intentionally starts only API/bootstrap processes.
 - `scripts/check_and_run_migrations.sh`
 - Alembic migrations under `migrations/alembic/`
 - `scripts/setup_local_postgres.sh`
-- `scripts/load_production_snapshot.py`
+- `scripts/sync_production_state.py` for copying production state into localhost
 
 ### 21.5 Discovery and sync
 
 - `scripts/run_feed_discovery.py`
 - `scripts/run_integration_sync.py`
 - `scripts/run_twitter_sync.py`
+- `scripts/sync_production_state.py`
 
 ### 21.6 Queue and content maintenance
 
@@ -1492,7 +1493,6 @@ Server mode intentionally starts only API/bootstrap processes.
 - `scripts/build_prompt_debug_report.py`
 - `scripts/generate_eval_html_report.py`
 - `scripts/sync_logs_from_server.sh`
-- `scripts/pull_production_db.sh`
 - `scripts/deploy/push_envs.sh`
 
 ## 22. Testing Strategy

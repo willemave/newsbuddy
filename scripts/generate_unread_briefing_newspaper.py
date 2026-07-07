@@ -473,7 +473,7 @@ def freeze_podcast_sources(*, user_id: int, refresh: bool) -> list[dict[str, Any
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    engine = create_engine(default_local_database_url("newsly_prod"), pool_pre_ping=True)
+    engine = create_engine(default_local_database_url("newsly"), pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     with session_factory() as db:
         rows, total = list_unread_long_form_content(

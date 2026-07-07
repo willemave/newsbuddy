@@ -63,6 +63,10 @@ Production debug:
 4. Prefer DB, log, runtime, and queue evidence over local speculation.
 5. Do not patch production directly unless explicitly asked.
 
+Production state sync:
+
+- Use `scripts/sync_production_state.py` as the only supported prod-to-local sync entrypoint. It overwrites the local DB/env by default, syncs recent file-backed assets, and restarts the local API without workers. Do not add separate DB-only prod copy scripts.
+
 ## Code Rules
 
 - Prefer functions over classes unless stateful objects clearly improve the design.
