@@ -8,6 +8,7 @@ from app.core.settings import get_settings
 from app.models.contracts import ContentClassification, ContentType, TaskStatus, TaskType
 from app.models.db import (
     BriefingLens,
+    BriefingPendingSource,
     BriefingSegment,
     BriefingState,
     Content,
@@ -265,6 +266,64 @@ def test_release_path_append_without_pending_skips_planning(
     assert result.pending_added == 0
     assert result.retired_segments == 0
     assert result.compacted_segments == 0
+
+
+def test_append_composes_low_volume_uncovered_sources_immediately(
+    db_session: Session,
+    test_user: User,
+    content_factory,
+    status_entry_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    for index in range(3):
+        _create_unread_article(
+            content_factory,
+            status_entry_factory,
+            test_user,
+            index=index,
+        )
+    run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="full",
+        use_llm=False,
+        release_db_during_compose=True,
+        settings=settings,
+    )
+    db_session.commit()
+    new_article = _create_unread_article(
+        content_factory,
+        status_entry_factory,
+        test_user,
+        index=99,
+    )
+    db_session.commit()
+
+    result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="append",
+        use_llm=False,
+        release_db_during_compose=True,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert result.pending_added == 1
+    assert result.appended_segments == 1
+    assert db_session.query(BriefingPendingSource).filter_by(user_id=user_id).count() == 0
+    latest_segment = (
+        db_session.query(BriefingSegment)
+        .filter(BriefingSegment.user_id == user_id)
+        .order_by(BriefingSegment.id.desc())
+        .first()
+    )
+    assert latest_segment is not None
+    assert latest_segment.source_keys == [f"content:{new_article.id}"]
 
 
 def test_append_backfills_uncovered_unclassified_podcasts_after_existing_segment(

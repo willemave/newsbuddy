@@ -483,12 +483,6 @@ def _plan_ready_windows(
         )
         if not pending_rows:
             continue
-        oldest = pending_rows[0].enqueued_at or datetime.now(UTC).replace(tzinfo=None)
-        old_enough = (
-            datetime.now(UTC).replace(tzinfo=None) - oldest
-        ).total_seconds() >= settings.briefing_pending_max_age_seconds
-        if len(pending_rows) < settings.briefing_window_min and mode != "full" and not old_enough:
-            continue
         source_keys = [f"{row.source_kind}:{row.source_id}" for row in pending_rows]
         source_map = sources_for_keys(db, user_id=user_id, source_keys=source_keys)
         for row, key in zip(pending_rows, source_keys, strict=True):
@@ -706,12 +700,6 @@ def _append_ready_windows(
             .all()
         )
         if not pending_rows:
-            continue
-        oldest = pending_rows[0].enqueued_at or datetime.now(UTC).replace(tzinfo=None)
-        old_enough = (
-            datetime.now(UTC).replace(tzinfo=None) - oldest
-        ).total_seconds() >= settings.briefing_pending_max_age_seconds
-        if len(pending_rows) < settings.briefing_window_min and mode != "full" and not old_enough:
             continue
         source_keys = [f"{row.source_kind}:{row.source_id}" for row in pending_rows]
         source_map = sources_for_keys(db, user_id=user_id, source_keys=source_keys)
