@@ -119,6 +119,32 @@ def test_parse_composer_layout_json_accepts_fenced_root_block_array() -> None:
     assert layout.blocks[0].markdown == "A useful brief."
 
 
+def test_parse_composer_layout_json_coerces_passage_content_field() -> None:
+    layout = _parse_composer_layout_json(
+        '{"blocks":[{"type":"passage","weight":"feature","content":"A useful brief."}]}'
+    )
+
+    assert len(layout.blocks) == 1
+    assert layout.blocks[0].type == "passage"
+    assert layout.blocks[0].markdown == "A useful brief."
+
+
+def test_parse_composer_layout_json_coerces_non_passage_content_fields() -> None:
+    layout = _parse_composer_layout_json(
+        """
+        {
+          "blocks": [
+            {"type": "pullquote", "content": "A concise quote."},
+            {"type": "figure", "source_key": "content:1", "content": "A figure caption."}
+          ]
+        }
+        """
+    )
+
+    assert layout.blocks[0].text == "A concise quote."
+    assert layout.blocks[1].caption == "A figure caption."
+
+
 def test_source_payload_includes_briefing_context_when_available() -> None:
     payload = _source_payload(_source_with_context("Long-form source detail."))
 

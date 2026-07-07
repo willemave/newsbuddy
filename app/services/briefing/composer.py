@@ -398,8 +398,32 @@ def _compose_window_with_openrouter(
 def _parse_composer_layout_json(content: str) -> ComposerLayout:
     payload = json.loads(_strip_json_code_fence(content))
     if isinstance(payload, list):
-        return ComposerLayout(blocks=payload)
+        return ComposerLayout(blocks=[_coerce_composer_block(block) for block in payload])
+    if isinstance(payload, dict):
+        blocks = payload.get("blocks")
+        if isinstance(blocks, list):
+            payload = {
+                **payload,
+                "blocks": [_coerce_composer_block(block) for block in blocks],
+            }
     return ComposerLayout.model_validate(payload)
+
+
+def _coerce_composer_block(block: Any) -> Any:
+    if not isinstance(block, dict):
+        return block
+    coerced = dict(block)
+    content = coerced.pop("content", None)
+    if not isinstance(content, str) or not content.strip():
+        return coerced
+    block_type = str(coerced.get("type") or "").strip().lower()
+    if block_type == "pullquote" and not coerced.get("text"):
+        coerced["text"] = content
+    elif block_type == "figure" and not coerced.get("caption"):
+        coerced["caption"] = content
+    elif not coerced.get("markdown"):
+        coerced["markdown"] = content
+    return coerced
 
 
 def _strip_json_code_fence(content: str) -> str:
