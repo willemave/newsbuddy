@@ -132,6 +132,7 @@ enum E2ETestLaunch {
     static let fakeSpeechEnabledKey = "newslyE2EFakeSpeechEnabled"
     static let fakeSpeechTranscriptKey = "newslyE2EFakeSpeechTranscript"
     static let visualNowKey = "newslyE2EVisualNow"
+    static let readingExperienceKey = "newslyE2EReadingExperience"
 
     static var isEnabled: Bool {
         bool(for: enabledKey)
@@ -206,6 +207,11 @@ enum E2ETestLaunch {
     static var visualNow: Date? {
         guard isEnabled else { return nil }
         return date(for: visualNowKey)
+    }
+
+    static var readingExperience: String? {
+        guard isEnabled else { return nil }
+        return string(for: readingExperienceKey)
     }
 }
 

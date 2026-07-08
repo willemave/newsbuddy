@@ -1,0 +1,40 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EVisualNow: "${VISUAL_NOW}"
+      newslyE2EReadingExperience: briefing
+- extendedWaitUntil:
+    visible:
+      id: briefing.screen
+    timeout: 15000
+- assertVisible:
+    id: briefing.lens_page.articles
+- assertVisible:
+    id: briefing.segment.${ARTICLE_SEGMENT_ID}
+- takeScreenshot:
+    path: "${BASELINE_DIR}/briefing-articles"
+    cropOn:
+      id: briefing.screen
+- tapOn:
+    id: briefing.tier.news
+- extendedWaitUntil:
+    visible:
+      id: briefing.lens_page.ai-hardware
+    timeout: 10000
+- assertVisible:
+    id: briefing.segment.${NEWS_SEGMENT_ID}
+- takeScreenshot:
+    path: "${BASELINE_DIR}/briefing-news"
+    cropOn:
+      id: briefing.screen

@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from app.models.db import NewsItem
+from app.models.db import BriefingLens, BriefingSegment, BriefingState, NewsItem
+from app.services.briefing.source_keys import build_source_key
 from app.utils.image_paths import get_content_images_dir, get_thumbnails_dir
 
 pytestmark = [pytest.mark.integration, pytest.mark.ios_e2e, pytest.mark.ios_visual]
@@ -30,6 +31,10 @@ BASELINE_FILES = {
         "main-fast.png",
         "main-knowledge.png",
         "main-more.png",
+    ],
+    "visual_briefing": [
+        "briefing-articles.png",
+        "briefing-news.png",
     ],
     "visual_content_modals": [
         "detail-article.png",
@@ -178,6 +183,180 @@ def _create_user_visible_news_item(
     return item
 
 
+def _seed_visual_briefing(
+    db_session,
+    *,
+    user_id: int,
+    content,
+    news_item: NewsItem,
+) -> tuple[int, int]:
+    state = BriefingState(
+        user_id=user_id,
+        version=7,
+        masthead_title="Briefing",
+        masthead_deck="A stable visual-test edition for the new briefing experience.",
+        last_append_at=_utc_naive(VISUAL_NOW),
+    )
+    articles_lens = BriefingLens(
+        user_id=user_id,
+        key="articles",
+        tier="longform",
+        title="Articles",
+        deck="Long reads with enough context to decide what deserves time.",
+        position=10,
+        status="active",
+    )
+    news_lens = BriefingLens(
+        user_id=user_id,
+        key="ai-hardware",
+        tier="news",
+        title="AI Hardware",
+        deck="Chips, servers, and the supply chain around model deployment.",
+        position=20,
+        status="active",
+    )
+    db_session.add_all([state, articles_lens, news_lens])
+    db_session.flush()
+
+    assert content.id is not None
+    assert news_item.id is not None
+    assert articles_lens.id is not None
+    assert news_lens.id is not None
+    content_key = build_source_key("content", content.id)
+    news_key = build_source_key("news", news_item.id)
+    article_segment = BriefingSegment(
+        lens_id=articles_lens.id,
+        user_id=user_id,
+        blocks=[
+            {
+                "type": "passage",
+                "weight": "lead",
+                "paragraphs": [
+                    {
+                        "runs": [
+                            {
+                                "kind": "text",
+                                "text": "Start with ",
+                            },
+                            {
+                                "kind": "source_link",
+                                "text": content.title,
+                                "source_key": content_key,
+                            },
+                            {
+                                "kind": "text",
+                                "text": (
+                                    ": the piece connects small-team tooling, evaluation loops, "
+                                    "and the decisions that make AI products feel less brittle."
+                                ),
+                            },
+                        ]
+                    }
+                ],
+            },
+            {
+                "type": "figure",
+                "source_key": content_key,
+                "caption": "A compact systems map from the article.",
+                "placement": "full",
+            },
+            {
+                "type": "pullquote",
+                "source_key": content_key,
+                "text": "The best systems make the next review easier than the first one.",
+            },
+            {
+                "type": "passage",
+                "paragraphs": [
+                    {
+                        "runs": [
+                            {
+                                "kind": "text",
+                                "text": (
+                                    "The useful bit for today is operational: treat evaluation, "
+                                    "routing, and human review as one product surface."
+                                ),
+                            }
+                        ]
+                    }
+                ],
+            },
+        ],
+        markdown_raw=f"[{content.title}](newsly://briefing/content/{content.id})",
+        narration_text="A compact briefing about product evaluation loops.",
+        source_keys=[content_key],
+        status="active",
+        model="visual-fixture",
+        prompt_version="test",
+        created_at=_utc_naive(VISUAL_NOW - timedelta(minutes=18)),
+        updated_at=_utc_naive(VISUAL_NOW - timedelta(minutes=18)),
+    )
+    news_segment = BriefingSegment(
+        lens_id=news_lens.id,
+        user_id=user_id,
+        blocks=[
+            {
+                "type": "passage",
+                "weight": "lead",
+                "paragraphs": [
+                    {
+                        "runs": [
+                            {
+                                "kind": "source_link",
+                                "text": news_item.summary_title,
+                                "source_key": news_key,
+                            },
+                            {
+                                "kind": "text",
+                                "text": (
+                                    " keeps the hardware story grounded in practical bottlenecks: "
+                                    "storage, power draw, networking, and small-cluster costs."
+                                ),
+                            },
+                        ]
+                    }
+                ],
+            },
+            {
+                "type": "pullquote",
+                "source_key": news_key,
+                "text": "Small boxes are becoming credible infrastructure, not just hobby gear.",
+            },
+            {
+                "type": "passage",
+                "paragraphs": [
+                    {
+                        "runs": [
+                            {
+                                "kind": "text",
+                                "text": (
+                                    "Watch whether these boards stay niche or become the default "
+                                    "edge lab for teams testing retrieval-heavy workloads."
+                                ),
+                            }
+                        ]
+                    }
+                ],
+            },
+        ],
+        markdown_raw=f"[{news_item.summary_title}](newsly://briefing/news/{news_item.id})",
+        narration_text="A short briefing about compact AI hardware.",
+        source_keys=[news_key],
+        status="active",
+        model="visual-fixture",
+        prompt_version="test",
+        created_at=_utc_naive(VISUAL_NOW - timedelta(minutes=9)),
+        updated_at=_utc_naive(VISUAL_NOW - timedelta(minutes=9)),
+    )
+    db_session.add_all([article_segment, news_segment])
+    db_session.commit()
+    db_session.refresh(article_segment)
+    db_session.refresh(news_segment)
+    assert article_segment.id is not None
+    assert news_segment.id is not None
+    return int(article_segment.id), int(news_segment.id)
+
+
 def test_primary_tabs_match_visual_baselines(
     run_ios_flow,
     create_sample_content,
@@ -203,6 +382,41 @@ def test_primary_tabs_match_visual_baselines(
             **_baseline_env(),
             "LONG_CONTENT_ID": str(long_content.id),
             "NEWS_ITEM_ID": str(news_item.id),
+        },
+    )
+
+
+def test_briefing_experience_matches_visual_baselines(
+    run_ios_flow,
+    create_sample_content,
+    sample_article_long,
+    db_session,
+    test_user,
+) -> None:
+    """Briefing article and news lenses should keep their known visual shape."""
+    _prepare_baselines("visual_briefing")
+    content = create_sample_content(sample_article_long)
+    content = _apply_article_visual_timestamps(db_session, content)
+    _seed_article_visual_artwork(content)
+    news_item = _create_user_visible_news_item(
+        db_session,
+        user_id=test_user.id,
+        ingest_key="ios-visual-briefing-news",
+        title="Compact AI Hardware Turns Homelab Boards Into Real Test Beds",
+    )
+    article_segment_id, news_segment_id = _seed_visual_briefing(
+        db_session,
+        user_id=test_user.id,
+        content=content,
+        news_item=news_item,
+    )
+
+    run_ios_flow(
+        _flow_name("visual_briefing"),
+        extra_env={
+            **_baseline_env(),
+            "ARTICLE_SEGMENT_ID": str(article_segment_id),
+            "NEWS_SEGMENT_ID": str(news_segment_id),
         },
     )
 

@@ -79,6 +79,10 @@ enum ServerConfigurationDefaults {
             userDefaults.set(useHTTPS, forKey: useHTTPSKey)
         }
 
+        if let readingExperience = E2ETestLaunch.readingExperience {
+            userDefaults.set(readingExperience, forKey: "readingExperience")
+        }
+
         appSettingsLogger.notice(
             "Applied E2E launch overrides host=\(userDefaults.string(forKey: hostKey) ?? "unset", privacy: .public) port=\(userDefaults.string(forKey: portKey) ?? "unset", privacy: .public)"
         )
