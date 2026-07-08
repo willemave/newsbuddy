@@ -484,11 +484,10 @@ def _parse_composer_layout_json(content: str) -> ComposerLayout:
         return ComposerLayout(blocks=[_coerce_composer_block(block) for block in payload])
     if isinstance(payload, dict):
         blocks = payload.get("blocks")
+        if blocks is None:
+            blocks = payload.get("layout")
         if isinstance(blocks, list):
-            payload = {
-                **payload,
-                "blocks": [_coerce_composer_block(block) for block in blocks],
-            }
+            payload = {"blocks": [_coerce_composer_block(block) for block in blocks]}
     return ComposerLayout.model_validate(payload)
 
 

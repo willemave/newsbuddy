@@ -155,6 +155,16 @@ def test_parse_composer_layout_json_accepts_object_wrapper() -> None:
     assert layout.blocks[0].markdown == "A useful brief."
 
 
+def test_parse_composer_layout_json_accepts_layout_wrapper() -> None:
+    layout = _parse_composer_layout_json(
+        '{"layout":[{"type":"passage","weight":"feature","markdown":"A useful brief."}]}'
+    )
+
+    assert len(layout.blocks) == 1
+    assert layout.blocks[0].type == "passage"
+    assert layout.blocks[0].markdown == "A useful brief."
+
+
 def test_parse_composer_layout_json_accepts_root_block_array() -> None:
     layout = _parse_composer_layout_json(
         '[{"type":"passage","weight":"feature","markdown":"A useful brief."}]'
