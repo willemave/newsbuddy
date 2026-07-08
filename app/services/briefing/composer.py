@@ -23,7 +23,7 @@ from app.services.vendor_costs import extract_usage_from_result, record_vendor_u
 from app.services.vendor_usage import record_model_usage
 
 PROMPT_VERSION = "briefing-v2"
-MAX_COMPOSE_ATTEMPTS = 2
+MAX_COMPOSE_ATTEMPTS = 4
 LAYOUT_PROMPTS_BY_TIER = {
     "audio": "briefing/layout_audio",
     "longform": "briefing/layout_longform",

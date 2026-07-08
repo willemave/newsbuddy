@@ -5,6 +5,7 @@ import pytest
 
 from app.models.contracts import ContentType
 from app.services.briefing.composer import (
+    MAX_COMPOSE_ATTEMPTS,
     BriefingCompositionError,
     BriefingCompositionInvalidOutput,
     _blocks_look_malformed,
@@ -45,7 +46,7 @@ def test_compose_window_falls_back_after_llm_unavailable(monkeypatch) -> None:
         use_llm=True,
     )
 
-    assert len(attempts) == 2
+    assert len(attempts) == MAX_COMPOSE_ATTEMPTS
     assert segment.model == "deterministic"
     assert "llm_error_retry:1" in segment.warnings
     assert "llm_unavailable_fallback:TimeoutError" in segment.warnings
@@ -72,7 +73,7 @@ def test_compose_window_raises_after_non_availability_errors(monkeypatch) -> Non
             use_llm=True,
         )
 
-    assert len(attempts) == 2
+    assert len(attempts) == MAX_COMPOSE_ATTEMPTS
 
 
 def test_blocks_look_malformed_detects_weight_dump() -> None:
@@ -142,7 +143,7 @@ def test_compose_window_raises_when_layout_json_stays_invalid(monkeypatch) -> No
             use_llm=True,
         )
 
-    assert len(attempts) == 2
+    assert len(attempts) == MAX_COMPOSE_ATTEMPTS
 
 
 def test_parse_composer_layout_json_accepts_object_wrapper() -> None:
