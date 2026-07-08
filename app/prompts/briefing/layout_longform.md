@@ -27,7 +27,8 @@ Write simple prose only from the provided sources. Source references must be mar
 Never write bare source ids. Make each source link span a substantial phrase: the title plus its
 surrounding descriptive words, roughly four to ten words (for example
 `[Jeff Ding's roundup of China's AI ecosystem in ChinAI #358](newsly://briefing/content/123)`),
-never a bare two-word name. Mark 2 or 3 useful deep-dive fragments with
+never a bare two-word name. Prefer placing each article link in the first paragraph, toward the beginning.
+Mark 2 or 3 useful deep-dive fragments with
 `{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
 window.
 

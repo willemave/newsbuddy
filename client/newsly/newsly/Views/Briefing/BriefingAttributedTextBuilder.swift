@@ -27,7 +27,7 @@ struct BriefingAttributedTextBuilder {
         let output = NSMutableAttributedString()
         let baseFont = font(for: weight, bold: false)
         let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = weight == "feature" ? 4 : 2
+        paragraphStyle.lineSpacing = 2
         paragraphStyle.paragraphSpacing = 10
         var emittedChipSourceKeys = Set<String>()
 
@@ -242,10 +242,7 @@ struct BriefingAttributedTextBuilder {
         return String(format: "%.1fk", rounded)
     }
 
-    private func font(for weight: String?, bold: Bool) -> UIFont {
-        if weight == "feature" {
-            return UIFont.appSerif(size: 19, weight: bold ? .semibold : .regular)
-        }
+    private func font(for _: String?, bold: Bool) -> UIFont {
         return UIFont.appSans(size: 16, weight: bold ? .semibold : .regular)
     }
 

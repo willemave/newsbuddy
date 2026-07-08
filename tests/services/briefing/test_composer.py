@@ -50,6 +50,7 @@ def test_compose_window_falls_back_after_llm_unavailable(monkeypatch) -> None:
     assert "llm_error_retry:1" in segment.warnings
     assert "llm_unavailable_fallback:TimeoutError" in segment.warnings
     assert segment.blocks
+    assert segment.blocks[0]["weight"] == "brief"
 
 
 def test_compose_window_raises_after_non_availability_errors(monkeypatch) -> None:

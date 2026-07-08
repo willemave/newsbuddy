@@ -25,6 +25,7 @@ Formatting:
 Write simple prose only from the provided sources. Source references must be markdown links like
 `[Title](newsly://briefing/content/123)`. Never write bare source ids. Make each source link span a substantial phrase:
 the title plus its surrounding descriptive words, roughly four to ten words.
+Prefer placing each podcast link in the first paragraph, toward the beginning.
 Mark 2 or 3 useful deep-dive fragments with
 `{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
 window.

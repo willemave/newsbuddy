@@ -317,9 +317,7 @@ def deterministic_layout(
     source_label = "source" if len(sources) == 1 else "sources"
     intro = f"**{lens_title}** opens with {len(sources)} unread {source_label}."
     markdown = intro + " " + " ".join(sentences)
-    blocks: list[ComposerBlock] = [
-        ComposerBlock(type="passage", weight="feature", markdown=markdown)
-    ]
+    blocks: list[ComposerBlock] = [ComposerBlock(type="passage", markdown=markdown)]
     first_image = next(
         (source for source in sources if source.image_url or source.thumbnail_url), None
     )

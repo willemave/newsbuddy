@@ -18,6 +18,32 @@ final class BriefingSentenceRangeTests: XCTestCase {
 }
 
 final class BriefingAttributedTextBuilderTests: XCTestCase {
+    func testFeaturePassagesUseBodyTypography() throws {
+        let builder = BriefingAttributedTextBuilder()
+        let result = builder.build(
+            paragraphs: [
+                APIBriefingParagraph(
+                    runs: [
+                        APIBriefingRun(kind: .text, text: "Feature-weight payload uses body text.")
+                    ]
+                )
+            ],
+            weight: "feature"
+        )
+
+        let font = try XCTUnwrap(
+            result.attributedText.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        )
+        XCTAssertEqual(font.pointSize, 16, accuracy: 0.01)
+        XCTAssertTrue(font.fontName.localizedCaseInsensitiveContains("Lato"))
+
+        let paragraphStyle = try XCTUnwrap(
+            result.attributedText.attribute(.paragraphStyle, at: 0, effectiveRange: nil)
+                as? NSParagraphStyle
+        )
+        XCTAssertEqual(paragraphStyle.lineSpacing, 2, accuracy: 0.01)
+    }
+
     func testBuildCreatesSourceLinksAndPlainText() throws {
         let builder = BriefingAttributedTextBuilder()
         let result = builder.build(
