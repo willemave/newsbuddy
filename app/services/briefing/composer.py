@@ -197,8 +197,8 @@ def compose_window(
                     input_tokens = usage.get("input_tokens")
                     output_tokens = usage.get("output_tokens")
                 break
-            # Some OpenRouter providers return blocks with all content fields empty
-            # (prose dumped into `weight`); repair cannot recover those, so retry.
+            # If malformed blocks survive parser coercion, retry the LLM. Repair
+            # cannot recover blocks with no usable content or source reference.
             logger.warning(
                 "Briefing LLM returned malformed layout blocks",
                 extra={
@@ -497,6 +497,7 @@ def _coerce_composer_block(block: Any) -> Any:
         return block
     coerced = dict(block)
     content = coerced.pop("content", None)
+    _recover_weight_payload(coerced)
     if not isinstance(content, str) or not content.strip():
         return coerced
     block_type = str(coerced.get("type") or "").strip().lower()
@@ -507,6 +508,33 @@ def _coerce_composer_block(block: Any) -> Any:
     elif not coerced.get("markdown"):
         coerced["markdown"] = content
     return coerced
+
+
+def _recover_weight_payload(block: dict[str, Any]) -> None:
+    raw_weight = block.get("weight")
+    if not isinstance(raw_weight, str) or not raw_weight.strip():
+        return
+    if raw_weight.strip().lower() in {"feature", "brief"}:
+        return
+    if _has_block_content(block):
+        return
+
+    block_type = str(block.get("type") or "").strip().lower()
+    if block_type == "pullquote":
+        block["text"] = raw_weight.strip()
+    elif block_type == "figure":
+        block["caption"] = raw_weight.strip()
+    else:
+        block["markdown"] = raw_weight.strip()
+    block.pop("weight", None)
+
+
+def _has_block_content(block: dict[str, Any]) -> bool:
+    for key in ("markdown", "text", "source_key", "caption"):
+        value = block.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
 
 
 def _strip_json_code_fence(content: str) -> str:

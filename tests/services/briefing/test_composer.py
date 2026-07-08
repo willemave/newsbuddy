@@ -185,6 +185,27 @@ def test_parse_composer_layout_json_coerces_passage_content_field() -> None:
     assert layout.blocks[0].markdown == "A useful brief."
 
 
+def test_parse_composer_layout_json_recovers_weight_dumped_prose() -> None:
+    layout = _parse_composer_layout_json(
+        """
+        {
+          "blocks": [
+            {
+              "type": "passage",
+              "weight": "[One source](newsly://briefing/content/1) explains the useful point."
+            }
+          ]
+        }
+        """
+    )
+
+    assert layout.blocks[0].weight is None
+    assert (
+        layout.blocks[0].markdown
+        == "[One source](newsly://briefing/content/1) explains the useful point."
+    )
+
+
 def test_parse_composer_layout_json_coerces_non_passage_content_fields() -> None:
     layout = _parse_composer_layout_json(
         """
