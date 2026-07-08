@@ -7,11 +7,8 @@ struct BriefingView: View {
     @StateObject private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
     @State private var playbackService = NarrationPlaybackService.shared
     @State private var activeSource: BriefingSourceSheetItem?
-    @State private var activeDiscussion: BriefingDiscussionSheetItem?
     @State private var preparingNarrationLensKeys: Set<String> = []
     @State private var narrationError: String?
-    // Last measured heights of the chrome that hides on scroll; pages use the
-    // sum to decide whether collapsing would leave them enough scroll range.
     @State private var mastheadHeight: CGFloat = 170
     @State private var categoryStripHeight: CGFloat = 90
 
@@ -31,6 +28,10 @@ struct BriefingView: View {
             get: { viewModel.selectedLensKey ?? viewModel.orderedLenses.first?.key ?? "" },
             set: { viewModel.selectLens(key: $0) }
         )
+    }
+
+    private var collapsibleChromeHeight: CGFloat {
+        mastheadHeight + (viewModel.isCategoryStripExpanded ? categoryStripHeight : 0)
     }
 
     var body: some View {
@@ -61,12 +62,6 @@ struct BriefingView: View {
             .presentationDetents([.fraction(0.75), .large])
             .presentationContentInteraction(.resizes)
             .presentationDragIndicator(.visible)
-        }
-        .sheet(item: $activeDiscussion) { item in
-            BriefingDiscussionSheet(item: item)
-                .presentationDetents([.fraction(0.75), .large])
-                .presentationContentInteraction(.resizes)
-                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: digSheetPresented) {
             BriefingDigSheet(viewModel: digViewModel)
@@ -122,7 +117,7 @@ struct BriefingView: View {
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.height
                 } action: { _, height in
-                    mastheadHeight = height
+                    mastheadHeight = max(height, 0)
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -139,12 +134,12 @@ struct BriefingView: View {
                         viewModel.selectLens(key: key)
                     }
                 }
+                .transition(.move(edge: .top).combined(with: .opacity))
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.height
                 } action: { _, height in
-                    categoryStripHeight = height
+                    categoryStripHeight = max(height, 0)
                 }
-                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             if let lensKey = viewModel.selectedLensKey {
@@ -165,12 +160,6 @@ struct BriefingView: View {
         viewModel.selectedLensKey.map { lensKey in
             AnyView(listenAccessory(lensKey: lensKey))
         }
-    }
-
-    /// Vertical space the chrome hands back when the reader scrolls into a
-    /// page — what the masthead (and category strip, in news) occupy now.
-    private var collapsibleChromeHeight: CGFloat {
-        mastheadHeight + (viewModel.isCategoryStripExpanded ? categoryStripHeight : 0)
     }
 
     private func listenAccessory(lensKey: String) -> some View {
@@ -245,7 +234,10 @@ struct BriefingView: View {
     }
 
     private func openDiscussion(_ source: APIBriefingSource) {
-        activeDiscussion = BriefingDiscussionSheetItem(source: source)
+        activeSource = BriefingSourceSheetItem(
+            source: source,
+            initialScrollTarget: .comments
+        )
     }
 
     private func startDig(fragment: String, passageContext: String) {
@@ -511,7 +503,9 @@ private struct BriefingLensPageView: View {
                                 }
                             )
                             .id(segment.id)
-                            // Seen = the segment's bottom scrolled past the top edge.
+                            // Segment-level backstop: sources are only seen
+                            // after the whole segment has moved above the
+                            // viewport, unless their own block exited first.
                             .onGeometryChange(for: Bool.self) { proxy in
                                 proxy.frame(in: .scrollView).maxY < 0
                             } action: { _, exitedTop in
@@ -535,19 +529,14 @@ private struct BriefingLensPageView: View {
                     let scrollableRange = geometry.contentSize.height - geometry.containerSize.height
                     return ScrollProbe(
                         step: Int((offset / Self.scrollStep).rounded(.down)),
-                        // Collapsing hands the chrome's height to this scroll
-                        // view; without at least that much range to spare, the
-                        // offset would clamp back under the threshold and
-                        // bounce the chrome right back in.
-                        hasCollapseHeadroom: scrollableRange
-                            >= collapsibleChromeHeight + 2 * Self.scrollStep
+                        hasCollapseHeadroom: scrollableRange >= collapsibleChromeHeight + 2 * Self.scrollStep
                     )
                 } action: { oldProbe, probe in
                     if probe.step > oldProbe.step, probe.step >= 1 {
                         viewModel.noteScrolledDown(forLens: lensSummary.key)
                     }
-                    // Headroom gates only the collapse; once collapsed, the
-                    // shrunken range must not read as a reason to expand.
+                    // Collapse only when the page has enough scrollable
+                    // content to clear the chrome without trapping short pages.
                     let pinned = probe.step >= 1 && (isPinned || probe.hasCollapseHeadroom)
                     isPinned = pinned
                     viewModel.setHeaderPinned(pinned, forLens: lensSummary.key)
@@ -804,7 +793,6 @@ private struct BriefingPassageReadMarker: View {
     let onDig: (String, String) -> Void
     let onSourceKeysSeen: ([String]) -> Void
 
-    @State private var sourceLinkPositions: [BriefingSourceLinkPosition] = []
     @State private var markedSourceKeys = Set<String>()
 
     var body: some View {
@@ -814,21 +802,10 @@ private struct BriefingPassageReadMarker: View {
             discussionChips: discussionChips,
             onOpenSource: onOpenSource,
             onOpenDiscussion: onOpenDiscussion,
-            onDig: onDig,
-            onSourceLinkPositionsChange: { positions in
-                sourceLinkPositions = positions
-            }
+            onDig: onDig
         )
         .onGeometryChange(for: [String].self) { proxy in
-            let frame = proxy.frame(in: .scrollView)
-            let exitedLinkKeys = sourceLinkPositions.compactMap { position -> String? in
-                frame.minY + position.maxY < 0 ? position.sourceKey : nil
-            }
-            let directKeys = frame.maxY < 0 ? block.briefingDirectSourceKeys : []
-            let fallbackLinkKeys = sourceLinkPositions.isEmpty && frame.maxY < 0
-                ? block.briefingSourceLinkKeys
-                : []
-            return uniqueBriefingSourceKeys(exitedLinkKeys + directKeys + fallbackLinkKeys)
+            proxy.frame(in: .scrollView).maxY < 0 ? block.briefingFallbackReadSourceKeys : []
         } action: { _, sourceKeys in
             let newSourceKeys = sourceKeys.filter { markedSourceKeys.insert($0).inserted }
             guard !newSourceKeys.isEmpty else { return }
@@ -923,12 +900,12 @@ private struct BriefingFloatingFigurePassage: View {
             .buttonStyle(.plain)
             .opacity(figureOpacity)
             .animation(.easeInOut(duration: 0.35), value: figureOpacity)
-            .briefingSourceReadMarker(
-                sourceKeys: figure.briefingDirectSourceKeys,
-                onSourceKeysSeen: onSourceKeysSeen
-            )
             .accessibilityLabel(source?.title ?? "Article image")
         }
+        .briefingSourceReadMarker(
+            sourceKeys: figure.briefingDirectSourceKeys,
+            onSourceKeysSeen: onSourceKeysSeen
+        )
     }
 }
 
@@ -1184,6 +1161,15 @@ private struct BriefingDigSheet: View {
 
 struct BriefingSourceSheetItem: Identifiable {
     let source: APIBriefingSource
+    let initialScrollTarget: ContentDetailScrollTarget?
+
+    init(
+        source: APIBriefingSource,
+        initialScrollTarget: ContentDetailScrollTarget? = nil
+    ) {
+        self.source = source
+        self.initialScrollTarget = initialScrollTarget
+    }
 
     var id: String {
         source.sourceKey
@@ -1195,144 +1181,6 @@ struct BriefingSafariItem: Identifiable {
 
     var id: String {
         url.absoluteString
-    }
-}
-
-struct BriefingDiscussionSheetItem: Identifiable {
-    let source: APIBriefingSource
-
-    var id: String {
-        source.sourceKey
-    }
-}
-
-private enum BriefingDiscussionLoadState {
-    case loading
-    case loaded(ContentDiscussion)
-    case error(String)
-}
-
-private struct BriefingDiscussionSheet: View {
-    let item: BriefingDiscussionSheetItem
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var state: BriefingDiscussionLoadState = .loading
-    @State private var safariItem: BriefingSafariItem?
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
-                    stateContent
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 12)
-                .padding(.bottom, 32)
-            }
-            .background(Color.surfacePrimary)
-            .navigationTitle("Discussion")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .task(id: item.id) {
-            await loadDiscussion()
-        }
-        .sheet(item: $safariItem) { item in
-            SafariView(url: item.url)
-                .ignoresSafeArea()
-        }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Community Reaction")
-                .kicker()
-            Text(item.source.title)
-                .font(.appTitle3)
-                .foregroundStyle(Color.onSurface)
-                .fixedSize(horizontal: false, vertical: true)
-            if let discussion = item.source.discussion {
-                Text(countLabel(for: discussion))
-                    .font(.appCaption)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-            }
-        }
-        .padding(.horizontal, Spacing.appHorizontalMargin)
-    }
-
-    @ViewBuilder
-    private var stateContent: some View {
-        switch state {
-        case .loading:
-            HStack(spacing: 10) {
-                ProgressView()
-                Text("Loading discussion...")
-                    .font(.appCallout)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-            }
-            .padding(.horizontal, Spacing.appHorizontalMargin)
-        case .loaded(let discussion):
-            if discussion.summary != nil {
-                DiscussionSummaryView(discussion: discussion, onOpenURL: openURL)
-            } else {
-                unavailableContent(discussion.unavailableMessage)
-            }
-        case .error(let message):
-            unavailableContent(message)
-        }
-    }
-
-    private func unavailableContent(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(message)
-                .font(.appCallout)
-                .foregroundStyle(Color.onSurfaceSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let rawURL = item.source.discussion?.externalUrl,
-               let url = URL(string: rawURL) {
-                Button {
-                    safariItem = BriefingSafariItem(url: url)
-                } label: {
-                    Label("Open thread", systemImage: "arrow.up.right.square")
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-        .padding(.horizontal, Spacing.appHorizontalMargin)
-    }
-
-    private func loadDiscussion() async {
-        state = .loading
-        do {
-            let discussion = try await ContentService.shared.fetchContentDiscussion(
-                id: item.source.id,
-                contentType: .news
-            )
-            state = .loaded(discussion)
-        } catch where isNetworkCancellation(error) {
-            return
-        } catch {
-            state = .error("Discussion could not be loaded right now.")
-        }
-    }
-
-    private func openURL(_ url: URL) {
-        safariItem = BriefingSafariItem(url: url)
-    }
-
-    private func countLabel(for discussion: APIBriefingDiscussion) -> String {
-        if let count = discussion.commentCount {
-            return "\(count) \(count == 1 ? "comment" : "comments") on \(briefingPlatformName(discussion.platform))"
-        }
-        return "Discussion on \(briefingPlatformName(discussion.platform))"
     }
 }
 
@@ -1350,7 +1198,8 @@ private struct BriefingSourceSheet: View {
                 contentId: item.source.id,
                 contentType: item.source.contentType,
                 allContentIds: contentIds,
-                navigationSurface: .briefing
+                navigationSurface: .briefing,
+                initialScrollTarget: item.initialScrollTarget
             )
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

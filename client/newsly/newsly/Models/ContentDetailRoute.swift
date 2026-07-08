@@ -12,35 +12,41 @@ struct ContentDetailRoute: Hashable, Codable {
     let contentType: APIContentType
     let allContentIds: [Int]
     let navigationSurface: ContentDetailNavigationSurface
+    let initialScrollTarget: ContentDetailScrollTarget?
 
     enum CodingKeys: String, CodingKey {
         case contentId
         case contentType
         case allContentIds
         case navigationSurface
+        case initialScrollTarget
     }
 
     init(
         contentId: Int,
         contentType: APIContentType,
         allContentIds: [Int],
-        navigationSurface: ContentDetailNavigationSurface = .direct
+        navigationSurface: ContentDetailNavigationSurface = .direct,
+        initialScrollTarget: ContentDetailScrollTarget? = nil
     ) {
         self.contentId = contentId
         self.contentType = contentType
         self.allContentIds = allContentIds
         self.navigationSurface = navigationSurface
+        self.initialScrollTarget = initialScrollTarget
     }
 
     init(
         summary: ContentSummary,
         allContentIds: [Int],
-        navigationSurface: ContentDetailNavigationSurface = .direct
+        navigationSurface: ContentDetailNavigationSurface = .direct,
+        initialScrollTarget: ContentDetailScrollTarget? = nil
     ) {
         self.contentId = summary.id
         self.contentType = summary.contentType
         self.allContentIds = allContentIds
         self.navigationSurface = navigationSurface
+        self.initialScrollTarget = initialScrollTarget
     }
 
     init(from decoder: Decoder) throws {
@@ -52,5 +58,9 @@ struct ContentDetailRoute: Hashable, Codable {
             ContentDetailNavigationSurface.self,
             forKey: .navigationSurface
         ) ?? .direct
+        initialScrollTarget = try container.decodeIfPresent(
+            ContentDetailScrollTarget.self,
+            forKey: .initialScrollTarget
+        )
     }
 }

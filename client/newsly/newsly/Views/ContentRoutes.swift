@@ -21,6 +21,7 @@ extension View {
                 contentType: route.contentType,
                 allContentIds: route.allContentIds,
                 navigationSurface: route.navigationSurface,
+                initialScrollTarget: route.initialScrollTarget,
                 readStateCache: readStateCache
             )
             .dynamicTypeSize(contentTextSize)

@@ -58,8 +58,8 @@ struct DetailActionBar: View {
                     actionIcon("bubble.left.and.bubble.right")
                 }
                 .detailActionBarSegment()
-                .accessibilityIdentifier("content.discussion.open")
-                .accessibilityLabel("Open comments")
+                .accessibilityIdentifier("content.discussion.scroll_to_comments")
+                .accessibilityLabel("Show comments summary")
             }
 
             Button(action: onShare) {

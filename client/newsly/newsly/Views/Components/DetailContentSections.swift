@@ -20,7 +20,7 @@ struct DetailContentSections: View {
     let onOpenURL: (URL) -> Void
     let linkStateForLink: (String) -> LinkReadLaterState
     let onAddRelevantLink: (RelevantLink) -> Void
-    let onOpenDiscussion: (URL) -> Void
+    let onOpenFullDiscussion: (URL) -> Void
     let onDigDeeper: (String) -> Void
 
     var body: some View {
@@ -63,9 +63,10 @@ struct DetailContentSections: View {
         if let inlineDiscussion {
             CommunityDiscussionSummarySection(
                 discussion: inlineDiscussion,
-                onOpenComments: onOpenDiscussion,
+                onOpenComments: onOpenFullDiscussion,
                 onOpenURL: onOpenURL
             )
+            .id(ContentDetailScrollTarget.comments)
             .padding(.horizontal, DetailContentSectionsDesign.horizontalPadding)
             .padding(.top, 16)
         }

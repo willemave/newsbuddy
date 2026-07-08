@@ -575,7 +575,7 @@ struct CommunityDiscussionSummarySection: View {
                         headerIcon("bubble.left.and.bubble.right")
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Open comments")
+                    .accessibilityLabel("View full discussion")
                     .accessibilityIdentifier("content.discussion.open")
 
                     Button {

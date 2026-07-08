@@ -1,10 +1,4 @@
-import CoreGraphics
 import Foundation
-
-struct BriefingSourceLinkPosition: Equatable {
-    let sourceKey: String
-    let maxY: CGFloat
-}
 
 func uniqueBriefingSourceKeys(_ sourceKeys: [String]) -> [String] {
     var seen = Set<String>()

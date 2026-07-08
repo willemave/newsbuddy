@@ -16,6 +16,41 @@ protocol ContentDiscussionServicing: AnyObject {
 
 extension ContentService: ContentDiscussionServicing {}
 
+enum DiscussionCommentsDestination: Equatable {
+    case inlineSummary
+    case sheet
+}
+
+enum DiscussionCommentsNavigationAction: Equatable {
+    case none
+    case waitForPayload
+    case scrollInlineSummary
+    case presentSheet
+}
+
+struct DiscussionCommentsNavigationState: Equatable {
+    private let requestID: UUID
+    var contentId: Int?
+    var fallbackURL: URL?
+
+    init(
+        contentId: Int? = nil,
+        fallbackURL: URL? = nil,
+        requestID: UUID = UUID()
+    ) {
+        self.requestID = requestID
+        self.contentId = contentId
+        self.fallbackURL = fallbackURL
+    }
+
+    func refreshed() -> DiscussionCommentsNavigationState {
+        DiscussionCommentsNavigationState(
+            contentId: contentId,
+            fallbackURL: fallbackURL
+        )
+    }
+}
+
 @MainActor
 @Observable
 final class DiscussionSheetCoordinator {
@@ -25,8 +60,10 @@ final class DiscussionSheetCoordinator {
     var unavailableMessage: String?
     var selectedTab: DiscussionTab = .comments
     var collapsedCommentIDs: Set<String> = []
+    var commentsNavigationState = DiscussionCommentsNavigationState()
 
     private var requestToken = UUID()
+    private var pendingCommentsNavigation: DiscussionCommentsNavigationState?
     private let contentService: any ContentDiscussionServicing
 
     init(contentService: any ContentDiscussionServicing) {
@@ -56,6 +93,106 @@ final class DiscussionSheetCoordinator {
         unavailableMessage = nil
     }
 
+    func requestCommentsNavigation(content: ContentDetail, fallbackURL: URL) {
+        let state = DiscussionCommentsNavigationState(
+            contentId: content.id,
+            fallbackURL: fallbackURL
+        )
+        pendingCommentsNavigation = state
+        commentsNavigationState = state
+        prepareForPresentation(fallbackURL: fallbackURL)
+    }
+
+    func cancelCommentsNavigation() {
+        pendingCommentsNavigation = nil
+        commentsNavigationState = DiscussionCommentsNavigationState()
+    }
+
+    func resolveCommentsDestination(
+        content: ContentDetail,
+        fallbackURL: URL,
+        currentContentId: Int?
+    ) async -> DiscussionCommentsDestination {
+        prepareForPresentation(fallbackURL: fallbackURL)
+
+        if let discussion = cachedPayload(for: content), discussion.hasRenderableContent {
+            applyPayload(discussion)
+            return discussion.summary == nil ? .sheet : .inlineSummary
+        }
+
+        await load(
+            content: content,
+            fallbackURL: fallbackURL,
+            currentContentId: currentContentId
+        )
+
+        while isLoading {
+            guard !Task.isCancelled else { return .sheet }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+
+        guard !Task.isCancelled,
+              let discussion = cachedPayload(for: content),
+              discussion.hasRenderableContent else {
+            return .sheet
+        }
+        return discussion.summary == nil ? .sheet : .inlineSummary
+    }
+
+    func loadPendingCommentsNavigation(
+        content: ContentDetail,
+        currentContentId: Int?
+    ) async {
+        guard let pendingCommentsNavigation,
+              pendingCommentsNavigation.contentId == content.id,
+              let fallbackURL = pendingCommentsNavigation.fallbackURL else {
+            return
+        }
+
+        if let discussion = cachedPayload(for: content), discussion.hasRenderableContent {
+            applyPayload(discussion)
+            commentsNavigationState = pendingCommentsNavigation.refreshed()
+            return
+        }
+
+        await load(
+            content: content,
+            fallbackURL: fallbackURL,
+            currentContentId: currentContentId
+        )
+        commentsNavigationState = pendingCommentsNavigation.refreshed()
+    }
+
+    func commentsNavigationAction(for content: ContentDetail?) -> DiscussionCommentsNavigationAction {
+        guard let pendingCommentsNavigation else {
+            return .none
+        }
+        guard let content,
+              pendingCommentsNavigation.contentId == content.id else {
+            return .none
+        }
+
+        if isLoading {
+            return .waitForPayload
+        }
+
+        guard let discussion = cachedPayload(for: content) else {
+            if unavailableMessage == nil {
+                return .waitForPayload
+            }
+            self.pendingCommentsNavigation = nil
+            return .presentSheet
+        }
+
+        guard discussion.hasRenderableContent else {
+            self.pendingCommentsNavigation = nil
+            return .presentSheet
+        }
+
+        self.pendingCommentsNavigation = nil
+        return discussion.summary == nil ? .presentSheet : .scrollInlineSummary
+    }
+
     func reset(fallbackURL: URL? = nil) {
         requestToken = UUID()
         payload = nil
@@ -64,6 +201,7 @@ final class DiscussionSheetCoordinator {
         unavailableMessage = nil
         selectedTab = .comments
         collapsedCommentIDs = []
+        cancelCommentsNavigation()
     }
 
     func inlineSummaryPayload(for content: ContentDetail) -> ContentDiscussion? {

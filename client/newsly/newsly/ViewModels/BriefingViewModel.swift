@@ -1,6 +1,9 @@
 import Foundation
 import SwiftUI
 
+private let briefingReadFlushDebounceNanoseconds: UInt64 = 300_000_000
+private let briefingReadFlushRetryNanoseconds: UInt64 = 2_000_000_000
+
 @MainActor
 final class BriefingViewModel: ObservableObject {
     private enum TaskKey: Hashable {
@@ -35,9 +38,9 @@ final class BriefingViewModel: ObservableObject {
     private let snapshotStore: BriefingSnapshotStoring?
     private var etag: String?
     private var indexLoadTask: Task<Void, Never>?
-    private var loadedLensKeys: Set<String> = []
     private let tasks = TaskBag<TaskKey>()
     private var pendingReadKeys: Set<String> = []
+    private var staleLensKeys: Set<String> = []
     private var headerPinnedLensKeys: Set<String> = []
     /// The news category to return to when the reader re-enters the news tier.
     private var lastNewsLensKey: String?
@@ -113,6 +116,8 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func pullToRefresh() async {
+        tasks.cancel(.readFlush)
+        await flushPendingReadMarks()
         do {
             _ = try await service.requestRefresh()
             try? await Task.sleep(nanoseconds: 350_000_000)
@@ -188,7 +193,10 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func loadLensIfNeeded(key: String) {
-        guard !loadedLensKeys.contains(key), !tasks.isRunning(.lens(key)) else { return }
+        guard (lenses[key] == nil || staleLensKeys.contains(key)),
+              !tasks.isRunning(.lens(key)) else {
+            return
+        }
         tasks.runReplacing(.lens(key)) { [weak self] in
             guard let self else { return }
             do {
@@ -197,7 +205,7 @@ final class BriefingViewModel: ObservableObject {
                     return
                 }
                 self.lenses[key] = response
-                self.loadedLensKeys.insert(key)
+                self.staleLensKeys.remove(key)
                 self.scheduleSnapshotSave()
             } catch {
                 // Background prefetch failures stay silent — the page retries
@@ -223,10 +231,7 @@ final class BriefingViewModel: ObservableObject {
         // and failed flushes re-queue, so local state stays eventually consistent.
         markSourcesReadLocally(unreadKeys)
         pendingReadKeys.formUnion(unreadKeys)
-        tasks.runReplacing(.readFlush) { [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            await self?.flushPendingReadMarks()
-        }
+        scheduleReadFlush()
     }
 
     func requestNarration(for lensKey: String) async -> AudioEpisode? {
@@ -280,14 +285,13 @@ final class BriefingViewModel: ObservableObject {
             switch result {
             case .notModified:
                 state = orderedLenses.isEmpty ? .empty : .loaded
+                loadSelectedAndRemainingLenses()
             case .value(let response, let responseEtag):
                 guard shouldApply(response, force: force) else {
                     state = orderedLenses.isEmpty ? .empty : .loaded
                     return
                 }
-                if let current = index, response.version != current.version {
-                    invalidateLoadedLenses()
-                }
+                markLensesStale(validLensKeys: Set(response.lenses.map(\.key)))
                 index = response
                 orderedLenses = Self.sortedLenses(response.lenses)
                 // A missing ETag header must not discard the last known validator.
@@ -297,10 +301,7 @@ final class BriefingViewModel: ObservableObject {
                     selectedLensKey = orderedLenses.first?.key
                 }
                 noteSelectionChanged()
-                if let selectedLensKey {
-                    loadLensIfNeeded(key: selectedLensKey)
-                }
-                prefetchRemainingLenses()
+                loadSelectedAndRemainingLenses()
                 scheduleSnapshotSave()
             }
         } catch {
@@ -331,6 +332,13 @@ final class BriefingViewModel: ObservableObject {
         }
     }
 
+    private func loadSelectedAndRemainingLenses() {
+        if let selectedLensKey {
+            loadLensIfNeeded(key: selectedLensKey)
+        }
+        prefetchRemainingLenses()
+    }
+
     /// Applies the persisted briefing so the tab renders without waiting on
     /// the network. Returns false when there is nothing usable to restore.
     private func restoreFromSnapshot() -> Bool {
@@ -340,7 +348,7 @@ final class BriefingViewModel: ObservableObject {
         index = snapshot.index
         orderedLenses = Self.sortedLenses(snapshot.index.lenses)
         lenses = snapshot.lenses
-        loadedLensKeys = Set(snapshot.lenses.keys)
+        staleLensKeys.removeAll()
         etag = snapshot.etag
         state = .loaded
         if selectedLensKey == nil || !snapshot.index.lenses.contains(where: { $0.key == selectedLensKey }) {
@@ -359,21 +367,38 @@ final class BriefingViewModel: ObservableObject {
                 BriefingSnapshot(
                     index: index,
                     etag: self.etag,
-                    lenses: self.lenses,
+                    lenses: self.lenses.filter { !self.staleLensKeys.contains($0.key) },
                     savedAt: AppClock.now
                 )
             )
         }
     }
 
-    private func invalidateLoadedLenses() {
-        let knownLensKeys = Set(loadedLensKeys)
+    private func markLensesStale(validLensKeys: Set<String>) {
+        let oldLensKeys = Set(index?.lenses.map(\.key) ?? [])
+        let knownLensKeys = validLensKeys
+            .union(oldLensKeys)
             .union(lenses.keys)
-            .union(index?.lenses.map(\.key) ?? [])
+            .union(staleLensKeys)
         for key in knownLensKeys {
             tasks.cancel(.lens(key))
         }
-        loadedLensKeys.removeAll()
+        lenses = lenses.filter { validLensKeys.contains($0.key) }
+        staleLensKeys.formIntersection(validLensKeys)
+        staleLensKeys.formUnion(validLensKeys)
+    }
+
+    private func scheduleReadFlush(
+        delayNanoseconds: UInt64 = briefingReadFlushDebounceNanoseconds
+    ) {
+        tasks.runReplacing(.readFlush) { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: delayNanoseconds)
+            } catch {
+                return
+            }
+            await self?.flushPendingReadMarks()
+        }
     }
 
     private func flushPendingReadMarks() async {
@@ -382,6 +407,7 @@ final class BriefingViewModel: ObservableObject {
         guard !keys.isEmpty else { return }
         do {
             let response = try await service.markRead(sourceKeys: keys)
+            markCachedLensesStale(containing: keys)
             if var currentIndex = index {
                 currentIndex = APIBriefingIndexResponse(
                     version: response.version,
@@ -396,6 +422,23 @@ final class BriefingViewModel: ObservableObject {
             scheduleSnapshotSave()
         } catch {
             pendingReadKeys.formUnion(keys)
+            scheduleReadFlush(delayNanoseconds: briefingReadFlushRetryNanoseconds)
+        }
+    }
+
+    private func markCachedLensesStale(containing sourceKeys: [String]) {
+        let keySet = Set(sourceKeys)
+        guard !keySet.isEmpty else { return }
+        let affectedLensKeys = lenses.compactMap { lensKey, lens -> String? in
+            let lensSourceKeys = lens.segments.flatMap(\.sourceKeys)
+            if !keySet.isDisjoint(with: lensSourceKeys) {
+                return lensKey
+            }
+            return nil
+        }
+        for lensKey in affectedLensKeys {
+            tasks.cancel(.lens(lensKey))
+            staleLensKeys.insert(lensKey)
         }
     }
 

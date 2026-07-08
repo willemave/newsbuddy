@@ -18,22 +18,29 @@ enum ContentDetailNavigationSurface: String, Codable, Hashable {
     case briefing
 }
 
+enum ContentDetailScrollTarget: String, Codable, Hashable {
+    case comments
+}
+
 struct ContentDetailNavigationContext {
     let initialContentId: Int
     let initialContentType: APIContentType?
     let contentIds: [Int]
     let surface: ContentDetailNavigationSurface
+    let initialScrollTarget: ContentDetailScrollTarget?
 
     init(
         initialContentId: Int,
         initialContentType: APIContentType?,
         contentIds: [Int],
-        surface: ContentDetailNavigationSurface
+        surface: ContentDetailNavigationSurface,
+        initialScrollTarget: ContentDetailScrollTarget? = nil
     ) {
         self.initialContentId = initialContentId
         self.initialContentType = initialContentType
         self.contentIds = contentIds.contains(initialContentId) ? contentIds : [initialContentId]
         self.surface = surface
+        self.initialScrollTarget = initialScrollTarget
     }
 
     var initialIndex: Int {

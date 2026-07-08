@@ -39,6 +39,7 @@ struct ContentDetailView: View {
     @State private var showLearningDeckHint = false
     @State private var learningDeckHintBounce = false
     @State private var discussionCoordinator: DiscussionSheetCoordinator
+    @State private var pendingScrollTarget: ContentDetailScrollTarget?
     @State private var detailScrollOffsetY: CGFloat = 0
     // Transcript/Full Article collapsed state
     @State private var isTranscriptExpanded: Bool = false
@@ -48,6 +49,7 @@ struct ContentDetailView: View {
         contentType: APIContentType? = nil,
         allContentIds: [Int] = [],
         navigationSurface: ContentDetailNavigationSurface = .direct,
+        initialScrollTarget: ContentDetailScrollTarget? = nil,
         readStateCache: ReadStateCache? = nil
     ) {
         let readStateCache = readStateCache ?? ReadStateCache()
@@ -55,7 +57,8 @@ struct ContentDetailView: View {
             initialContentId: contentId,
             initialContentType: contentType,
             contentIds: allContentIds,
-            surface: navigationSurface
+            surface: navigationSurface,
+            initialScrollTarget: initialScrollTarget
         )
         self.navigationContext = context
         self._currentIndex = State(initialValue: context.initialIndex)
@@ -69,6 +72,7 @@ struct ContentDetailView: View {
         self._chatCoordinator = State(initialValue: RootDependencyFactory.makeDetailChatCoordinator())
         self._podcastAudioController = State(initialValue: RootDependencyFactory.makePodcastAudioController())
         self._discussionCoordinator = State(initialValue: RootDependencyFactory.makeDiscussionSheetCoordinator())
+        self._pendingScrollTarget = State(initialValue: context.initialScrollTarget)
     }
     
     var body: some View {
@@ -83,115 +87,124 @@ struct ContentDetailView: View {
             onNext: navigateToNext,
             onPrevious: navigateToPrevious
         ) {
-            ScrollView {
-                VStack(spacing: 0) {
-                    if viewModel.isLoading {
-                        ContentDetailSkeletonView()
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        if viewModel.isLoading {
+                            ContentDetailSkeletonView()
+                                .frame(minHeight: 400)
+                        } else if let error = viewModel.errorMessage {
+                            ErrorView(message: error) {
+                                Task { await viewModel.loadContent() }
+                            }
                             .frame(minHeight: 400)
-                    } else if let error = viewModel.errorMessage {
-                        ErrorView(message: error) {
-                            Task { await viewModel.loadContent() }
-                        }
-                        .frame(minHeight: 400)
-                    } else if let content = viewModel.content {
-                        VStack(alignment: .leading, spacing: 0) {
-                            // Parallax hero header (image + title + action bar)
-                            heroHeader(content: content)
+                        } else if let content = viewModel.content {
+                            VStack(alignment: .leading, spacing: 0) {
+                                // Parallax hero header (image + title + action bar)
+                                heroHeader(content: content, scrollProxy: scrollProxy)
 
-                            Divider()
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
+                                Divider()
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
 
-                            // Chat status banner (inline, under header)
-                            if let activeSession = chatCoordinator.activeSession(for: content) {
-                                ChatStatusBanner(
-                                    session: activeSession,
-                                    onTap: {
-                                        chatCoordinator.openChatSession(
-                                            sessionId: activeSession.id,
-                                            content: content
+                                // Chat status banner (inline, under header)
+                                if let activeSession = chatCoordinator.activeSession(for: content) {
+                                    ChatStatusBanner(
+                                        session: activeSession,
+                                        onTap: {
+                                            chatCoordinator.openChatSession(
+                                                sessionId: activeSession.id,
+                                                content: content
+                                            )
+                                        },
+                                        onDismiss: {
+                                            chatCoordinator.markSessionViewed(sessionId: activeSession.id)
+                                        },
+                                        style: .inline
+                                    )
+                                    .padding(.horizontal, DetailDesign.horizontalPadding)
+                                    .padding(.top, 12)
+                                }
+
+                                DetailContentSections(
+                                    content: content,
+                                    contentBodyText: viewModel.contentBody?.text,
+                                    inlineDiscussion: discussionCoordinator.inlineSummaryPayload(for: content),
+                                    isSubscribingToFeed: viewModel.isSubscribingToFeed,
+                                    feedSubscriptionSuccess: viewModel.feedSubscriptionSuccess,
+                                    feedSubscriptionError: viewModel.feedSubscriptionError,
+                                    isTranscriptExpanded: $isTranscriptExpanded,
+                                    startTopicSession: { topic in
+                                        try await chatCoordinator.startTopicSession(
+                                            content: content,
+                                            topic: topic
                                         )
                                     },
-                                    onDismiss: {
-                                        chatCoordinator.markSessionViewed(sessionId: activeSession.id)
+                                    onSummaryAppear: { section, bulletPointCount, insightCount in
+                                        logSummarySection(
+                                            content: content,
+                                            section: section,
+                                            bulletPointCount: bulletPointCount,
+                                            insightCount: insightCount
+                                        )
                                     },
-                                    style: .inline
+                                    onSubscribeToDetectedFeed: {
+                                        Task { await viewModel.subscribeToDetectedFeed() }
+                                    },
+                                    onOpenURL: openInAppBrowser,
+                                    linkStateForLink: { viewModel.relevantLinkReadLaterState(for: $0) },
+                                    onAddRelevantLink: { link in
+                                        Task { await viewModel.addRelevantLinkToReadLater(link) }
+                                    },
+                                    onOpenFullDiscussion: { discussionURL in
+                                        presentDiscussionSheet(content: content, fallbackURL: discussionURL)
+                                    },
+                                    onDigDeeper: { selectedText in
+                                        chatCoordinator.handleReaderDigDeeper(
+                                            selectedText: selectedText,
+                                            content: content,
+                                            visibleContentIds: allContentIds
+                                        )
+                                    }
                                 )
-                                .padding(.horizontal, DetailDesign.horizontalPadding)
-                                .padding(.top, 12)
+
+                                // Bottom spacing
+                                Spacer()
+                                    .frame(height: 40)
                             }
-
-                            DetailContentSections(
-                                content: content,
-                                contentBodyText: viewModel.contentBody?.text,
-                                inlineDiscussion: discussionCoordinator.inlineSummaryPayload(for: content),
-                                isSubscribingToFeed: viewModel.isSubscribingToFeed,
-                                feedSubscriptionSuccess: viewModel.feedSubscriptionSuccess,
-                                feedSubscriptionError: viewModel.feedSubscriptionError,
-                                isTranscriptExpanded: $isTranscriptExpanded,
-                                startTopicSession: { topic in
-                                    try await chatCoordinator.startTopicSession(
-                                        content: content,
-                                        topic: topic
-                                    )
-                                },
-                                onSummaryAppear: { section, bulletPointCount, insightCount in
-                                    logSummarySection(
-                                        content: content,
-                                        section: section,
-                                        bulletPointCount: bulletPointCount,
-                                        insightCount: insightCount
-                                    )
-                                },
-                                onSubscribeToDetectedFeed: {
-                                    Task { await viewModel.subscribeToDetectedFeed() }
-                                },
-                                onOpenURL: openInAppBrowser,
-                                linkStateForLink: { viewModel.relevantLinkReadLaterState(for: $0) },
-                                onAddRelevantLink: { link in
-                                    Task { await viewModel.addRelevantLinkToReadLater(link) }
-                                },
-                                onOpenDiscussion: { discussionURL in
-                                    handleDiscussionTap(content: content, fallbackURL: discussionURL)
-                                },
-                                onDigDeeper: { selectedText in
-                                    chatCoordinator.handleReaderDigDeeper(
-                                        selectedText: selectedText,
-                                        content: content,
-                                        visibleContentIds: allContentIds
-                                    )
-                                }
-                            )
-
-                            // Bottom spacing
-                            Spacer()
-                                .frame(height: 40)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ContentDetailSkeletonView()
+                                .frame(minHeight: 400)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        ContentDetailSkeletonView()
-                            .frame(minHeight: 400)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .coordinateSpace(name: "detailScroll")
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                max(geometry.contentOffset.y, 0)
-            } action: { _, offsetY in
-                detailScrollOffsetY = offsetY
-            }
-            .scrollClipDisabled()
-            .textSelection(.enabled)
-            .accessibilityIdentifier("content.detail.screen")
-            .overlay(alignment: .topLeading) {
-                GeometryReader { proxy in
-                    VStack(alignment: .leading, spacing: 0) {
-                        floatingBackButton
-                            .opacity(floatingBackOpacity)
-                            .scaleEffect(floatingBackScale)
-                            .padding(.leading, 16)
-                            .padding(.top, floatingBackTopPadding(for: proxy))
-                        Spacer(minLength: 0)
+                .coordinateSpace(name: "detailScroll")
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    max(geometry.contentOffset.y, 0)
+                } action: { _, offsetY in
+                    detailScrollOffsetY = offsetY
+                }
+                .scrollClipDisabled()
+                .textSelection(.enabled)
+                .accessibilityIdentifier("content.detail.screen")
+                .task(id: viewModel.content?.id) {
+                    await Task.yield()
+                    await requestInitialCommentsScrollIfNeeded()
+                }
+                .onChange(of: discussionCoordinator.commentsNavigationState) { _, _ in
+                    resolvePendingCommentsNavigation(scrollProxy: scrollProxy)
+                }
+                .overlay(alignment: .topLeading) {
+                    GeometryReader { proxy in
+                        VStack(alignment: .leading, spacing: 0) {
+                            floatingBackButton
+                                .opacity(floatingBackOpacity)
+                                .scaleEffect(floatingBackScale)
+                                .padding(.leading, 16)
+                                .padding(.top, floatingBackTopPadding(for: proxy))
+                            Spacer(minLength: 0)
+                        }
                     }
                 }
             }
@@ -213,6 +226,9 @@ struct ContentDetailView: View {
             viewModel.updateContentId(idToLoad, contentType: initialContentType)
             await viewModel.loadContent()
         }
+        .onChange(of: currentIndex) { _, _ in
+            pendingScrollTarget = nil
+        }
         .onChange(of: viewModel.content?.id) { oldValue, newValue in
             if let oldValue, oldValue != newValue {
                 podcastAudioController.stopIfSpeaking(forContentId: oldValue)
@@ -224,7 +240,7 @@ struct ContentDetailView: View {
             discussionCoordinator.reset(fallbackURL: discussionCoordinator.discussionURL(for: content))
             readingStateStore.setCurrent(contentId: id, type: content.contentType)
             logSummarySnapshot(content: content, context: "content_change")
-            if content.contentType == .news {
+            if pendingScrollTarget != .comments && content.contentType == .news {
                 Task {
                     await discussionCoordinator.prefetchStoredDiscussion(
                         for: content,
@@ -450,13 +466,13 @@ struct ContentDetailView: View {
     }
 
     @ViewBuilder
-    private func heroHeader(content: ContentDetail) -> some View {
+    private func heroHeader(content: ContentDetail, scrollProxy: ScrollViewProxy) -> some View {
         DetailHeroHeader(
             content: content,
             reduceMotion: reduceMotion,
             showsPodcastPlaybackControls: podcastAudioController.shouldShowControls(for: content)
         ) { overlaid in
-            actionBar(content: content, overlaid: overlaid)
+            actionBar(content: content, overlaid: overlaid, scrollProxy: scrollProxy)
         } podcastPlaybackControls: {
             podcastPlaybackControls(for: content)
         }
@@ -501,7 +517,11 @@ struct ContentDetailView: View {
 
     // MARK: - Modern Action Bar (Minimal, Twitter-inspired)
     @ViewBuilder
-    private func actionBar(content: ContentDetail, overlaid: Bool = false) -> some View {
+    private func actionBar(
+        content: ContentDetail,
+        overlaid: Bool = false,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
         DetailActionBar(
             content: content,
             overlaid: overlaid,
@@ -521,7 +541,12 @@ struct ContentDetailView: View {
             learningDeckHintBounce: $learningDeckHintBounce,
             onOpenExternal: openInAppBrowser,
             onOpenDiscussion: { discussionURL in
-                handleDiscussionTap(content: content, fallbackURL: discussionURL)
+                Task { @MainActor in
+                    await requestCommentsScroll(
+                        content: content,
+                        fallbackURL: discussionURL
+                    )
+                }
             },
             onShare: { activeSheet = .share },
             readerTransitionNamespace: readerTransitionNamespace,
@@ -662,7 +687,52 @@ struct ContentDetailView: View {
         }
     }
 
-    private func handleDiscussionTap(content: ContentDetail, fallbackURL: URL) {
+    @MainActor
+    private func requestInitialCommentsScrollIfNeeded() async {
+        guard pendingScrollTarget == .comments,
+              let content = viewModel.content else {
+            return
+        }
+        pendingScrollTarget = nil
+        guard let fallbackURL = discussionCoordinator.discussionURL(for: content) else {
+            return
+        }
+        await requestCommentsScroll(content: content, fallbackURL: fallbackURL)
+    }
+
+    @MainActor
+    private func requestCommentsScroll(
+        content: ContentDetail,
+        fallbackURL: URL
+    ) async {
+        pendingScrollTarget = .comments
+        discussionCoordinator.requestCommentsNavigation(
+            content: content,
+            fallbackURL: fallbackURL
+        )
+        await discussionCoordinator.loadPendingCommentsNavigation(
+            content: content,
+            currentContentId: viewModel.content?.id
+        )
+    }
+
+    @MainActor
+    private func resolvePendingCommentsNavigation(scrollProxy: ScrollViewProxy) {
+        switch discussionCoordinator.commentsNavigationAction(for: viewModel.content) {
+        case .none, .waitForPayload:
+            return
+        case .scrollInlineSummary:
+            pendingScrollTarget = nil
+            withAnimation(.easeInOut(duration: 0.28)) {
+                scrollProxy.scrollTo(ContentDetailScrollTarget.comments, anchor: .top)
+            }
+        case .presentSheet:
+            pendingScrollTarget = nil
+            activeSheet = .discussion
+        }
+    }
+
+    private func presentDiscussionSheet(content: ContentDetail, fallbackURL: URL) {
         discussionCoordinator.prepareForPresentation(fallbackURL: fallbackURL)
         activeSheet = .discussion
         Task {
