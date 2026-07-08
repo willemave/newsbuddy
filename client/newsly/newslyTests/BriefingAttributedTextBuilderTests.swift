@@ -68,6 +68,57 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         XCTAssertEqual(link.absoluteString, "newsly://briefing/news/8")
     }
 
+    func testBuildAppendsDiscussionChipAfterStoredMarkdownSourceLink() throws {
+        let builder = BriefingAttributedTextBuilder()
+        let result = builder.build(
+            paragraphs: [
+                APIBriefingParagraph(
+                    runs: [
+                        APIBriefingRun(
+                            kind: .text,
+                            text: "Read [Story](news://briefing/news/8) today."
+                        )
+                    ]
+                )
+            ],
+            weight: nil,
+            discussionChips: [
+                "news:8": BriefingDiscussionChip(sourceKey: "news:8", commentCount: 64)
+            ]
+        )
+
+        var discussionLinkRanges: [NSRange] = []
+        let fullRange = NSRange(location: 0, length: result.attributedText.length)
+        result.attributedText.enumerateAttribute(.link, in: fullRange) { value, range, _ in
+            guard let url = value as? URL,
+                  url.absoluteString == "newsly://briefing/discussion/news/8"
+            else { return }
+            discussionLinkRanges.append(range)
+        }
+
+        XCTAssertEqual(discussionLinkRanges.count, 1)
+        XCTAssertTrue(result.plainText.contains("64"))
+    }
+
+    func testBriefingSourceLinkKeysIncludesStoredMarkdownSourceLinks() {
+        let block = APIBriefingBlock(
+            type: .passage,
+            paragraphs: [
+                APIBriefingParagraph(
+                    runs: [
+                        APIBriefingRun(
+                            kind: .text,
+                            text: "Read [Story](news://briefing/news/8) "
+                                + "and [Article](newsly://briefing/content/42)."
+                        )
+                    ]
+                )
+            ]
+        )
+
+        XCTAssertEqual(block.briefingSourceLinkKeys, ["news:8", "content:42"])
+    }
+
     func testBuildAppendsDiscussionChipAfterFirstSourceLinkOnly() throws {
         let builder = BriefingAttributedTextBuilder()
         let linkRun = APIBriefingRun(

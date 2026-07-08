@@ -7,11 +7,19 @@
 
 import SwiftUI
 
+enum MastheadAccessoryAlignment {
+    /// Pinned to the top-right corner, level with the date kicker.
+    case top
+    /// Centered on the title line.
+    case title
+}
+
 struct EditorialMastheadHeader: View {
     let title: String
     var subtitle: String? = nil
     var date: Date = AppClock.now
     var trailingAccessory: AnyView? = nil
+    var accessoryAlignment: MastheadAccessoryAlignment = .top
 
     private static let mastheadFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -30,10 +38,16 @@ struct EditorialMastheadHeader: View {
                 Text(dateLabel)
                     .kicker()
 
-                Text(title)
-                    .font(.terracottaDisplayLarge)
-                    .foregroundStyle(Color.onSurface)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .center, spacing: 12) {
+                    Text(title)
+                        .font(.terracottaDisplayLarge)
+                        .foregroundStyle(Color.onSurface)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if accessoryAlignment == .title, let trailingAccessory {
+                        trailingAccessory
+                    }
+                }
 
                 if let subtitle {
                     Text(subtitle)
@@ -46,7 +60,7 @@ struct EditorialMastheadHeader: View {
 
             // Pin the accessory to the top-right corner so it reads as an
             // upper-right affordance rather than sitting on the title baseline.
-            if let trailingAccessory {
+            if accessoryAlignment == .top, let trailingAccessory {
                 trailingAccessory
             }
         }

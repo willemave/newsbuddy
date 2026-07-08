@@ -23,9 +23,14 @@ extension APIBriefingBlock {
     var briefingSourceLinkKeys: [String] {
         uniqueBriefingSourceKeys(
             (paragraphs ?? []).flatMap { paragraph in
-                paragraph.runs.compactMap { run in
-                    guard run.kind == .source_link else { return nil }
-                    return run.sourceKey
+                paragraph.runs.flatMap { run -> [String] in
+                    if run.kind == .source_link, let sourceKey = run.sourceKey {
+                        return [sourceKey]
+                    }
+                    if run.kind == .text {
+                        return BriefingAttributedTextBuilder.sourceKeys(in: run.text)
+                    }
+                    return []
                 }
             }
         )

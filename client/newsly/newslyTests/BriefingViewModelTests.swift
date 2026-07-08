@@ -316,6 +316,105 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isMastheadCompact)
     }
 
+    func testLensesGroupByTierAndPagerScopesToNewsCategories() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(lenses: [
+                    makeLensSummary(key: "news-tech", title: "Tech", position: 1),
+                    makeLensSummary(key: "news-world", title: "World", position: 2),
+                    makeLensSummary(key: "podcasts", title: "Podcasts", position: 3, tier: .audio),
+                    makeLensSummary(key: "articles", title: "Articles", position: 4, tier: .longform)
+                ]),
+                etag: nil
+            )
+        ]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitFor { viewModel.selectedLens != nil }
+
+        XCTAssertEqual(viewModel.newsLenses.map(\.key), ["news-tech", "news-world"])
+        XCTAssertEqual(viewModel.fixedLenses.map(\.key), ["podcasts", "articles"])
+        XCTAssertEqual(viewModel.newsUnreadSourceCount, 4)
+        XCTAssertTrue(viewModel.isNewsTierSelected)
+        // In the news tier the pager swipes through categories only.
+        XCTAssertEqual(viewModel.pagerLenses.map(\.key), ["news-tech", "news-world"])
+
+        // A fixed lens pages alone — swiping never crosses tiers.
+        viewModel.selectLens(key: "podcasts")
+        XCTAssertFalse(viewModel.isNewsTierSelected)
+        XCTAssertEqual(viewModel.pagerLenses.map(\.key), ["podcasts"])
+    }
+
+    func testSelectNewsTierPicksFirstCategoryThenRemembersLastRead() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(lenses: [
+                    makeLensSummary(key: "podcasts", title: "Podcasts", position: 0, tier: .audio),
+                    makeLensSummary(key: "news-tech", title: "Tech", position: 1),
+                    makeLensSummary(key: "news-world", title: "World", position: 2)
+                ]),
+                etag: nil
+            )
+        ]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitFor { viewModel.selectedLens != nil }
+        XCTAssertEqual(viewModel.selectedLensKey, "podcasts")
+        XCTAssertFalse(viewModel.isCategoryStripExpanded)
+
+        // First News tap lands on the first category and reveals the strip.
+        viewModel.selectNewsTier()
+        XCTAssertEqual(viewModel.selectedLensKey, "news-tech")
+        XCTAssertTrue(viewModel.isCategoryStripExpanded)
+
+        // Leaving news and coming back restores the last-read category.
+        viewModel.selectLens(key: "news-world")
+        viewModel.selectLens(key: "podcasts")
+        XCTAssertFalse(viewModel.isCategoryStripExpanded)
+        viewModel.selectNewsTier()
+        XCTAssertEqual(viewModel.selectedLensKey, "news-world")
+    }
+
+    func testCategoryStripCollapsesOnScrollAndReopensOnNewsTap() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(lenses: [
+                    makeLensSummary(key: "news-tech", title: "Tech", position: 1),
+                    makeLensSummary(key: "news-world", title: "World", position: 2)
+                ]),
+                etag: nil
+            )
+        ]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitFor { viewModel.selectedLens != nil }
+        XCTAssertTrue(viewModel.isCategoryStripExpanded)
+
+        // Scrolling into the page collapses the strip with the masthead.
+        viewModel.setHeaderPinned(true, forLens: "news-tech")
+        XCTAssertTrue(viewModel.isMastheadCompact)
+        XCTAssertFalse(viewModel.isCategoryStripExpanded)
+
+        // Tapping News mid-read reopens it without leaving the category…
+        viewModel.selectNewsTier()
+        XCTAssertEqual(viewModel.selectedLensKey, "news-tech")
+        XCTAssertTrue(viewModel.isCategoryStripExpanded)
+
+        // …and the next scroll-down puts it away again.
+        viewModel.noteScrolledDown(forLens: "news-tech")
+        XCTAssertFalse(viewModel.isCategoryStripExpanded)
+
+        // Back at the top the strip returns on its own.
+        viewModel.setHeaderPinned(false, forLens: "news-tech")
+        XCTAssertTrue(viewModel.isCategoryStripExpanded)
+    }
+
     func testCitationLinkedMarkdownWrapsBracketNumbers() {
         let summary = "Fact one [1]. **Bold** fact [12]."
 
@@ -357,6 +456,9 @@ final class BriefingViewModelTests: XCTestCase {
     }
 }
 
+// Main-actor isolated: the view model prefetches every lens concurrently, so
+// an unisolated mock races on its recording arrays (fetchLensKeys & co).
+@MainActor
 private final class MockBriefingService: BriefingServicing {
     var indexResults: [BriefingIndexFetchResult] = []
     var indexEtags: [String?] = []
@@ -431,11 +533,12 @@ private func makeIndex(
 private func makeLensSummary(
     key: String,
     title: String = "Today",
-    position: Int = 0
+    position: Int = 0,
+    tier: APIBriefingTier = .news
 ) -> APIBriefingLensSummary {
     APIBriefingLensSummary(
         key: key,
-        tier: .news,
+        tier: tier,
         title: title,
         deck: "Latest unread reporting",
         position: position,

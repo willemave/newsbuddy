@@ -61,7 +61,14 @@ struct BriefingAttributedTextBuilder {
                 if run.kind == .source_link {
                     output.append(NSAttributedString(string: text, attributes: attributes))
                 } else {
-                    appendText(text, attributes: attributes, to: output)
+                    appendText(
+                        text,
+                        attributes: attributes,
+                        discussionChips: discussionChips,
+                        emittedChipSourceKeys: &emittedChipSourceKeys,
+                        paragraphStyle: paragraphStyle,
+                        to: output
+                    )
                 }
 
                 if run.kind == .source_link,
@@ -129,6 +136,9 @@ struct BriefingAttributedTextBuilder {
     private func appendText(
         _ text: String,
         attributes: [NSAttributedString.Key: Any],
+        discussionChips: [String: BriefingDiscussionChip],
+        emittedChipSourceKeys: inout Set<String>,
+        paragraphStyle: NSParagraphStyle,
         to output: NSMutableAttributedString
     ) {
         let nsText = text as NSString
@@ -151,7 +161,8 @@ struct BriefingAttributedTextBuilder {
                 ))
             }
 
-            if let url = Self.sourceURL(from: match, in: nsText) {
+            if let sourceKey = Self.sourceKey(from: match, in: nsText),
+               let url = url(for: sourceKey) {
                 var linkAttributes = attributes
                 linkAttributes[.link] = url
                 linkAttributes[.foregroundColor] = UIColor.appAccent
@@ -160,6 +171,10 @@ struct BriefingAttributedTextBuilder {
                     string: nsText.substring(with: match.range(at: 1)),
                     attributes: linkAttributes
                 ))
+                if let chip = discussionChips[sourceKey],
+                   emittedChipSourceKeys.insert(sourceKey).inserted {
+                    output.append(discussionChipText(for: chip, paragraphStyle: paragraphStyle))
+                }
             } else {
                 output.append(NSAttributedString(
                     string: nsText.substring(with: match.range),
@@ -180,11 +195,19 @@ struct BriefingAttributedTextBuilder {
         }
     }
 
-    private static func sourceURL(from match: NSTextCheckingResult, in text: NSString) -> URL? {
+    static func sourceKeys(in text: String) -> [String] {
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        return markdownSourceLinkRegex
+            .matches(in: text, range: fullRange)
+            .compactMap { sourceKey(from: $0, in: nsText) }
+    }
+
+    private static func sourceKey(from match: NSTextCheckingResult, in text: NSString) -> String? {
         guard match.numberOfRanges >= 5 else { return nil }
         let kind = text.substring(with: match.range(at: 3))
         let id = text.substring(with: match.range(at: 4))
-        return URL(string: "newsly://briefing/\(kind)/\(id)")
+        return "\(kind):\(id)"
     }
 
     /// Older stored briefings can carry leftover `**` markers where the

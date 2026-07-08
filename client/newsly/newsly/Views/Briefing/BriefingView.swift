@@ -10,6 +10,10 @@ struct BriefingView: View {
     @State private var activeDiscussion: BriefingDiscussionSheetItem?
     @State private var preparingNarrationLensKeys: Set<String> = []
     @State private var narrationError: String?
+    // Last measured heights of the chrome that hides on scroll; pages use the
+    // sum to decide whether collapsing would leave them enough scroll range.
+    @State private var mastheadHeight: CGFloat = 170
+    @State private var categoryStripHeight: CGFloat = 90
 
     private var digSheetPresented: Binding<Bool> {
         Binding(
@@ -77,24 +81,15 @@ struct BriefingView: View {
 
     private var briefingContent: some View {
         VStack(spacing: 0) {
-            // The masthead lives above the pager so lens swipes slide only the
-            // category strip and content; it collapses once the reader
-            // scrolls into a lens and returns at the top. Today's date (not
-            // the generation timestamp) keeps the kicker identical to the
-            // Knowledge tab's masthead when switching tabs.
-            if !viewModel.isMastheadCompact {
-                EditorialMastheadHeader(title: "Briefing")
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
+            headerChrome
 
             TabView(selection: selectedLensBinding) {
-                ForEach(viewModel.orderedLenses, id: \.key) { lens in
+                ForEach(viewModel.pagerLenses, id: \.key) { lens in
                     BriefingLensPageView(
                         lensSummary: lens,
                         lens: viewModel.lenses[lens.key],
                         viewModel: viewModel,
-                        listenAccessory: AnyView(listenAccessory(lensKey: lens.key)),
-                        listenPanel: AnyView(listenPanel(lensKey: lens.key)),
+                        collapsibleChromeHeight: collapsibleChromeHeight,
                         onOpenSource: openSource,
                         onOpenDiscussion: openDiscussion,
                         onDig: startDig
@@ -103,9 +98,79 @@ struct BriefingView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            // Tier switches swap the whole page set; re-identifying the pager
+            // rebuilds it cleanly instead of animating across stale pages.
+            .id(viewModel.isNewsTierSelected ? "tier:news" : "lens:\(viewModel.selectedLensKey ?? "")")
             .accessibilityIdentifier("briefing.lens_pager")
         }
         .animation(.easeInOut(duration: 0.22), value: viewModel.isMastheadCompact)
+        .animation(.easeInOut(duration: 0.22), value: viewModel.isCategoryStripExpanded)
+    }
+
+    /// Everything above the pager — masthead, tier strip, category strip, and
+    /// the playback panel — stays pinned while pages swipe underneath. The
+    /// masthead collapses on scroll; today's date (not the generation
+    /// timestamp) keeps the kicker identical to the Knowledge tab's masthead.
+    private var headerChrome: some View {
+        VStack(spacing: 0) {
+            if !viewModel.isMastheadCompact {
+                EditorialMastheadHeader(
+                    title: "Briefing",
+                    trailingAccessory: mastheadListenAccessory,
+                    accessoryAlignment: .title
+                )
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { _, height in
+                    mastheadHeight = height
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            BriefingTierStrip(
+                viewModel: viewModel,
+                onSelectNews: { viewModel.selectNewsTier() },
+                onSelectLens: { key in viewModel.selectLens(key: key) }
+            )
+
+            if viewModel.isCategoryStripExpanded {
+                BriefingCategoryStrip(viewModel: viewModel) { key in
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        viewModel.selectLens(key: key)
+                    }
+                }
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { _, height in
+                    categoryStripHeight = height
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if let lensKey = viewModel.selectedLensKey {
+                listenPanel(lensKey: lensKey)
+            }
+        }
+        .background(Color.surfacePrimary)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.outlineVariant.opacity(viewModel.isMastheadCompact ? 0.5 : 0))
+                .frame(height: 0.5)
+        }
+        .shadow(color: .black.opacity(viewModel.isMastheadCompact ? 0.12 : 0), radius: 10, y: 5)
+        .zIndex(1)
+    }
+
+    private var mastheadListenAccessory: AnyView? {
+        viewModel.selectedLensKey.map { lensKey in
+            AnyView(listenAccessory(lensKey: lensKey))
+        }
+    }
+
+    /// Vertical space the chrome hands back when the reader scrolls into a
+    /// page — what the masthead (and category strip, in news) occupy now.
+    private var collapsibleChromeHeight: CGFloat {
+        mastheadHeight + (viewModel.isCategoryStripExpanded ? categoryStripHeight : 0)
     }
 
     private func listenAccessory(lensKey: String) -> some View {
@@ -118,8 +183,8 @@ struct BriefingView: View {
         )
     }
 
-    /// Expands beneath the lens header only while narration for this lens is
-    /// preparing or active, so the resting layout stays a single quiet row.
+    /// Expands beneath the pinned strips only while narration for the selected
+    /// lens is preparing or active, so the resting chrome stays quiet.
     @ViewBuilder
     private func listenPanel(lensKey: String) -> some View {
         let isPreparing = preparingNarrationLensKeys.contains(lensKey)
@@ -151,6 +216,8 @@ struct BriefingView: View {
                     }
                 }
             }
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.bottom, 10)
         }
     }
 
@@ -255,55 +322,129 @@ private enum BriefingNarrationError: LocalizedError {
     }
 }
 
-private struct BriefingLensStrip: View {
+/// Top-level pills: one aggregate "News" pill plus every fixed (podcasts /
+/// articles) lens. Lives above the pager so it stays put while pages swipe.
+private struct BriefingTierStrip: View {
     @ObservedObject var viewModel: BriefingViewModel
-    let isPinned: Bool
+    let onSelectNews: () -> Void
+    let onSelectLens: (String) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(viewModel.orderedLenses, id: \.key) { lens in
-                    BriefingLensPill(
-                        lens: lens,
-                        isSelected: lens.key == viewModel.selectedLensKey
+                if !viewModel.newsLenses.isEmpty {
+                    BriefingStripPill(
+                        title: "News",
+                        unreadCount: viewModel.newsUnreadSourceCount,
+                        isSelected: viewModel.isNewsTierSelected,
+                        accessibilityId: "briefing.tier.news",
+                        action: onSelectNews
+                    )
+                }
+
+                ForEach(viewModel.fixedLenses, id: \.key) { lens in
+                    BriefingStripPill(
+                        title: lens.title,
+                        unreadCount: lens.unreadSourceCount,
+                        isSelected: lens.key == viewModel.selectedLensKey,
+                        accessibilityId: "briefing.lens.\(lens.key)"
                     ) {
-                        viewModel.selectLens(key: lens.key)
+                        onSelectLens(lens.key)
                     }
                 }
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 10)
         }
-        .background(Color.surfacePrimary)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.outlineVariant.opacity(isPinned ? 0.5 : 0))
-                .frame(height: 0.5)
-        }
-        .shadow(color: .black.opacity(isPinned ? 0.12 : 0), radius: 10, y: 5)
         .accessibilityIdentifier("briefing.lenses")
     }
 }
 
-private struct BriefingLensPill: View {
-    let lens: APIBriefingLensSummary
+/// News categories revealed by the News pill, stacked into two packed rows
+/// that scroll together; the pager swipes through exactly these, so the
+/// selected pill follows the swipe.
+private struct BriefingCategoryStrip: View {
+    @ObservedObject var viewModel: BriefingViewModel
+    let onSelectLens: (String) -> Void
+
+    /// Even indices on top, odd below, so neighbors in swipe order sit next
+    /// to each other. A handful of categories stays on a single row.
+    private var rows: [[APIBriefingLensSummary]] {
+        let lenses = viewModel.newsLenses
+        guard lenses.count >= 4 else { return [lenses] }
+        var top: [APIBriefingLensSummary] = []
+        var bottom: [APIBriefingLensSummary] = []
+        for (index, lens) in lenses.enumerated() {
+            if index.isMultiple(of: 2) {
+                top.append(lens)
+            } else {
+                bottom.append(lens)
+            }
+        }
+        return [top, bottom]
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: 8) {
+                            ForEach(row, id: \.key) { lens in
+                                BriefingStripPill(
+                                    title: lens.title,
+                                    unreadCount: lens.unreadSourceCount,
+                                    isSelected: lens.key == viewModel.selectedLensKey,
+                                    accessibilityId: "briefing.lens.\(lens.key)",
+                                    minHeight: 30
+                                ) {
+                                    onSelectLens(lens.key)
+                                }
+                                .id(lens.key)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.bottom, 10)
+            }
+            .onAppear {
+                guard let selectedKey = viewModel.selectedLensKey else { return }
+                proxy.scrollTo(selectedKey, anchor: .center)
+            }
+            .onChange(of: viewModel.selectedLensKey) { _, selectedKey in
+                guard let selectedKey else { return }
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    proxy.scrollTo(selectedKey, anchor: .center)
+                }
+            }
+        }
+        .accessibilityIdentifier("briefing.categories")
+    }
+}
+
+private struct BriefingStripPill: View {
+    let title: String
+    let unreadCount: Int
     let isSelected: Bool
+    let accessibilityId: String
+    var minHeight: CGFloat = 36
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Text(lens.title)
+                Text(title)
                     .font(.appCaption.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
 
-                if lens.unreadSourceCount > 0 {
-                    Text("\(lens.unreadSourceCount)")
+                if unreadCount > 0 {
+                    Text("\(unreadCount)")
                         .font(.appCaption2.weight(.bold).monospacedDigit())
                         .foregroundStyle(isSelected ? Color.surfacePrimary : Color.brandPrimary)
                         .contentTransition(.numericText(countsDown: true))
-                        .animation(.easeInOut(duration: 0.3), value: lens.unreadSourceCount)
+                        .animation(.easeInOut(duration: 0.3), value: unreadCount)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
@@ -313,7 +454,7 @@ private struct BriefingLensPill: View {
                 }
             }
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurface)
-            .frame(minHeight: 36)
+            .frame(minHeight: minHeight)
             .padding(.horizontal, 12)
             .background(
                 Capsule()
@@ -321,8 +462,8 @@ private struct BriefingLensPill: View {
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(lens.title), \(lens.unreadSourceCount) unread sources")
-        .accessibilityIdentifier("briefing.lens.\(lens.key)")
+        .accessibilityLabel("\(title), \(unreadCount) unread sources")
+        .accessibilityIdentifier(accessibilityId)
     }
 }
 
@@ -330,70 +471,86 @@ private struct BriefingLensPageView: View {
     let lensSummary: APIBriefingLensSummary
     let lens: APIBriefingLensResponse?
     @ObservedObject var viewModel: BriefingViewModel
-    let listenAccessory: AnyView
-    let listenPanel: AnyView
+    let collapsibleChromeHeight: CGFloat
     let onOpenSource: (String) -> Void
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
 
-    @State private var isHeaderPinned = false
+    @State private var isPinned = false
+
+    // Scroll position quantized to 64pt steps: crossing the first step
+    // collapses the masthead, and any step increase collapses a tap-opened
+    // category strip — without streaming raw offsets into the view model.
+    private static let scrollStep: CGFloat = 64
+
+    /// The scroll facts the chrome cares about, coarse enough that the
+    /// closure below fires on step boundaries instead of every frame.
+    private struct ScrollProbe: Equatable {
+        var step = 0
+        var hasCollapseHeadroom = false
+    }
 
     var body: some View {
         Group {
             if let lens {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 24, pinnedViews: [.sectionHeaders]) {
-                        Section {
-                            lensHeader(lens.lens)
-
-                            let sourcesByKey = Dictionary(
-                                lens.sources.map { ($0.sourceKey, $0) },
-                                uniquingKeysWith: { current, _ in current }
-                            )
-                            ForEach(lens.segments, id: \.id) { segment in
-                                BriefingSegmentView(
-                                    segment: segment,
-                                    sourcesByKey: sourcesByKey,
-                                    onOpenSource: onOpenSource,
-                                    onOpenDiscussion: onOpenDiscussion,
-                                    onDig: onDig,
-                                    onSourceKeysSeen: { sourceKeys in
-                                        viewModel.markSourcesSeen(sourceKeys)
-                                    }
-                                )
-                                .id(segment.id)
-                                // Seen = the segment's bottom scrolled past the top edge.
-                                .onGeometryChange(for: Bool.self) { proxy in
-                                    proxy.frame(in: .scrollView).maxY < 0
-                                } action: { _, exitedTop in
-                                    guard exitedTop else { return }
-                                    viewModel.markSegmentSeen(segment)
+                    LazyVStack(alignment: .leading, spacing: 24) {
+                        let sourcesByKey = Dictionary(
+                            lens.sources.map { ($0.sourceKey, $0) },
+                            uniquingKeysWith: { current, _ in current }
+                        )
+                        ForEach(lens.segments, id: \.id) { segment in
+                            BriefingSegmentView(
+                                segment: segment,
+                                sourcesByKey: sourcesByKey,
+                                onOpenSource: onOpenSource,
+                                onOpenDiscussion: onOpenDiscussion,
+                                onDig: onDig,
+                                onSourceKeysSeen: { sourceKeys in
+                                    viewModel.markSourcesSeen(sourceKeys)
                                 }
-                                .padding(.horizontal, Spacing.appHorizontalMargin)
+                            )
+                            .id(segment.id)
+                            // Seen = the segment's bottom scrolled past the top edge.
+                            .onGeometryChange(for: Bool.self) { proxy in
+                                proxy.frame(in: .scrollView).maxY < 0
+                            } action: { _, exitedTop in
+                                guard exitedTop else { return }
+                                viewModel.markSegmentSeen(segment)
                             }
-
-                            Color.clear
-                                .frame(height: 24)
-                                .accessibilityHidden(true)
-                        } header: {
-                            // The strip starts at the top of the page and pins
-                            // there; the masthead above the pager stays put
-                            // while pages swipe underneath it.
-                            BriefingLensStrip(viewModel: viewModel, isPinned: isHeaderPinned)
+                            .padding(.horizontal, Spacing.appHorizontalMargin)
                         }
+
+                        Color.clear
+                            .frame(height: 24)
+                            .accessibilityHidden(true)
                     }
                     .padding(.top, 4)
                 }
                 .refreshable {
                     await viewModel.pullToRefresh()
                 }
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentOffset.y + geometry.contentInsets.top > 64
-                } action: { _, pinned in
-                    viewModel.setHeaderPinned(pinned, forLens: lensSummary.key)
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        isHeaderPinned = pinned
+                .onScrollGeometryChange(for: ScrollProbe.self) { geometry in
+                    let offset = geometry.contentOffset.y + geometry.contentInsets.top
+                    let scrollableRange = geometry.contentSize.height - geometry.containerSize.height
+                    return ScrollProbe(
+                        step: Int((offset / Self.scrollStep).rounded(.down)),
+                        // Collapsing hands the chrome's height to this scroll
+                        // view; without at least that much range to spare, the
+                        // offset would clamp back under the threshold and
+                        // bounce the chrome right back in.
+                        hasCollapseHeadroom: scrollableRange
+                            >= collapsibleChromeHeight + 2 * Self.scrollStep
+                    )
+                } action: { oldProbe, probe in
+                    if probe.step > oldProbe.step, probe.step >= 1 {
+                        viewModel.noteScrolledDown(forLens: lensSummary.key)
                     }
+                    // Headroom gates only the collapse; once collapsed, the
+                    // shrunken range must not read as a reason to expand.
+                    let pinned = probe.step >= 1 && (isPinned || probe.hasCollapseHeadroom)
+                    isPinned = pinned
+                    viewModel.setHeaderPinned(pinned, forLens: lensSummary.key)
                 }
                 .accessibilityIdentifier("briefing.lens_page.\(lensSummary.key)")
             } else {
@@ -403,24 +560,6 @@ private struct BriefingLensPageView: View {
                     }
             }
         }
-    }
-
-    private func lensHeader(_ lens: APIBriefingLensSummary) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Text(lens.deck)
-                    .font(.appCallout)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                listenAccessory
-            }
-
-            listenPanel
-        }
-        .padding(.horizontal, Spacing.appHorizontalMargin)
-        .padding(.bottom, 2)
     }
 }
 
@@ -433,7 +572,6 @@ private struct BriefingSegmentView: View {
     let onSourceKeysSeen: ([String]) -> Void
     private let displayBlocks: [DisplayBlock]
     private let discussionChipsByBlockIndex: [Int: [String: BriefingDiscussionChip]]
-    private let fallbackDiscussionSources: [APIBriefingSource]
     private let allSourcesRead: Bool
 
     private enum DisplayBlock: Identifiable {
@@ -468,12 +606,6 @@ private struct BriefingSegmentView: View {
             sourcesByKey: sourcesByKey
         )
         self.discussionChipsByBlockIndex = chipsByBlockIndex
-        let inlineChipSourceKeys = Set(chipsByBlockIndex.values.flatMap(\.keys))
-        self.fallbackDiscussionSources = Self.discussionSources(
-            for: segment.sourceKeys,
-            sourcesByKey: sourcesByKey
-        )
-        .filter { !inlineChipSourceKeys.contains($0.sourceKey) }
         self.allSourcesRead = Self.allSourcesRead(segment.sourceKeys, sourcesByKey: sourcesByKey)
     }
 
@@ -498,13 +630,6 @@ private struct BriefingSegmentView: View {
                     )
                 }
             }
-
-            if !fallbackDiscussionSources.isEmpty {
-                BriefingDiscussionLinkList(
-                    sources: fallbackDiscussionSources,
-                    onOpenDiscussion: onOpenDiscussion
-                )
-            }
         }
         .padding(.vertical, 2)
         // Read segments recede without losing legibility.
@@ -520,23 +645,6 @@ private struct BriefingSegmentView: View {
     ) -> Bool {
         !sourceKeys.isEmpty
             && sourceKeys.allSatisfy { sourcesByKey[$0]?.read ?? true }
-    }
-
-    private static func discussionSources(
-        for sourceKeys: [String],
-        sourcesByKey: [String: APIBriefingSource]
-    ) -> [APIBriefingSource] {
-        sourceKeys
-            .compactMap { sourcesByKey[$0] }
-            .filter { $0.kind == "news" && $0.discussion != nil }
-            .sorted { left, right in
-                let leftCount = left.discussion?.commentCount ?? 0
-                let rightCount = right.discussion?.commentCount ?? 0
-                if leftCount == rightCount {
-                    return left.title < right.title
-                }
-                return leftCount > rightCount
-            }
     }
 
     /// Inset figures adjacent to a meaty passage float inside it (text wraps);
@@ -905,46 +1013,6 @@ private struct BriefingPullquoteView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Quote from \(source?.title ?? "source")")
-    }
-}
-
-/// Fallback for discussion sources the composed text never links to:
-/// one quiet line per source, mirroring the inline chip affordance.
-private struct BriefingDiscussionLinkList: View {
-    let sources: [APIBriefingSource]
-    let onOpenDiscussion: (APIBriefingSource) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(sources.prefix(3), id: \.sourceKey) { source in
-                if let discussion = source.discussion {
-                    Button {
-                        onOpenDiscussion(source)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "bubble.left.and.bubble.right.fill")
-                                .font(.appSymbol(size: 11, weight: .semibold))
-                            Text(label(for: discussion))
-                                .font(.appCaption.weight(.semibold))
-                                .lineLimit(1)
-                        }
-                        .foregroundStyle(Color.brandPrimary)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(label(for: discussion)). \(source.title)")
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("briefing.discussion_strip")
-    }
-
-    private func label(for discussion: APIBriefingDiscussion) -> String {
-        if let count = discussion.commentCount {
-            return "\(count) \(count == 1 ? "comment" : "comments") on \(briefingPlatformName(discussion.platform))"
-        }
-        return "Discussion on \(briefingPlatformName(discussion.platform))"
     }
 }
 

@@ -26,6 +26,10 @@ final class BriefingViewModel: ObservableObject {
     /// True while the selected lens is scrolled into reading — the masthead
     /// above the pager collapses to hand the space to the content.
     @Published private(set) var isMastheadCompact = false
+    /// True while the news category strip is showing beneath the tier strip.
+    /// Expanded at the top of a news page (or after tapping News while
+    /// reading); collapses as soon as the reader scrolls down.
+    @Published private(set) var isCategoryStripExpanded = false
 
     private let service: BriefingServicing
     private let snapshotStore: BriefingSnapshotStoring?
@@ -35,6 +39,11 @@ final class BriefingViewModel: ObservableObject {
     private let tasks = TaskBag<TaskKey>()
     private var pendingReadKeys: Set<String> = []
     private var headerPinnedLensKeys: Set<String> = []
+    /// The news category to return to when the reader re-enters the news tier.
+    private var lastNewsLensKey: String?
+    /// Keeps the category strip open after an explicit News tap while the
+    /// masthead is compact; cleared on the next scroll-down.
+    private var categoryStripPinnedOpen = false
 
     init(service: BriefingServicing, snapshotStore: BriefingSnapshotStoring? = nil) {
         self.service = service
@@ -48,6 +57,37 @@ final class BriefingViewModel: ObservableObject {
     var selectedLens: APIBriefingLensResponse? {
         guard let selectedLensKey else { return nil }
         return lenses[selectedLensKey]
+    }
+
+    var newsLenses: [APIBriefingLensSummary] {
+        orderedLenses.filter { $0.tier == .news }
+    }
+
+    /// Podcasts / articles — every non-news lens keeps its own pill.
+    var fixedLenses: [APIBriefingLensSummary] {
+        orderedLenses.filter { $0.tier != .news }
+    }
+
+    var isNewsTierSelected: Bool {
+        selectedLensSummary?.tier == .news
+    }
+
+    var newsUnreadSourceCount: Int {
+        newsLenses.reduce(0) { $0 + $1.unreadSourceCount }
+    }
+
+    /// Pages the content pager swipes through: all news categories while the
+    /// news tier is active, otherwise just the selected fixed lens — swiping
+    /// never crosses from a category into podcasts or articles.
+    var pagerLenses: [APIBriefingLensSummary] {
+        if isNewsTierSelected {
+            return newsLenses
+        }
+        return selectedLensSummary.map { [$0] } ?? []
+    }
+
+    private var selectedLensSummary: APIBriefingLensSummary? {
+        orderedLenses.first { $0.key == selectedLensKey }
     }
 
     func handleTabEntered() {
@@ -85,8 +125,17 @@ final class BriefingViewModel: ObservableObject {
     func selectLens(key: String) {
         guard selectedLensKey != key else { return }
         selectedLensKey = key
-        refreshMastheadCompact()
+        noteSelectionChanged()
         loadLensIfNeeded(key: key)
+    }
+
+    /// Tapping the single News pill: return to the last-read category, or the
+    /// first one on the first visit, and reveal the category strip.
+    func selectNewsTier() {
+        guard let targetKey = resolvedNewsLensKey() else { return }
+        categoryStripPinnedOpen = true
+        selectLens(key: targetKey)
+        refreshHeaderChrome()
     }
 
     func setHeaderPinned(_ pinned: Bool, forLens key: String) {
@@ -95,13 +144,47 @@ final class BriefingViewModel: ObservableObject {
         } else {
             headerPinnedLensKeys.remove(key)
         }
-        refreshMastheadCompact()
+        // Back at the top the strip shows on its own; drop the tap override
+        // so the next scroll-down collapses it again.
+        if !pinned, key == selectedLensKey {
+            categoryStripPinnedOpen = false
+        }
+        refreshHeaderChrome()
     }
 
-    private func refreshMastheadCompact() {
+    /// Any downward scroll retires a tap-opened category strip.
+    func noteScrolledDown(forLens key: String) {
+        guard key == selectedLensKey, categoryStripPinnedOpen else { return }
+        categoryStripPinnedOpen = false
+        refreshHeaderChrome()
+    }
+
+    private func noteSelectionChanged() {
+        if selectedLensSummary?.tier == .news {
+            lastNewsLensKey = selectedLensKey
+        } else {
+            categoryStripPinnedOpen = false
+        }
+        refreshHeaderChrome()
+    }
+
+    private func resolvedNewsLensKey() -> String? {
+        if let lastNewsLensKey, newsLenses.contains(where: { $0.key == lastNewsLensKey }) {
+            return lastNewsLensKey
+        }
+        return newsLenses.first?.key
+    }
+
+    private func refreshHeaderChrome() {
         let compact = selectedLensKey.map(headerPinnedLensKeys.contains) ?? false
-        guard isMastheadCompact != compact else { return }
-        isMastheadCompact = compact
+        if isMastheadCompact != compact {
+            isMastheadCompact = compact
+        }
+        let expanded = isNewsTierSelected && !newsLenses.isEmpty
+            && (!compact || categoryStripPinnedOpen)
+        if isCategoryStripExpanded != expanded {
+            isCategoryStripExpanded = expanded
+        }
     }
 
     func loadLensIfNeeded(key: String) {
@@ -212,8 +295,8 @@ final class BriefingViewModel: ObservableObject {
                 state = response.lenses.isEmpty ? .empty : .loaded
                 if selectedLensKey == nil || !response.lenses.contains(where: { $0.key == selectedLensKey }) {
                     selectedLensKey = orderedLenses.first?.key
-                    refreshMastheadCompact()
                 }
+                noteSelectionChanged()
                 if let selectedLensKey {
                     loadLensIfNeeded(key: selectedLensKey)
                 }
@@ -263,6 +346,7 @@ final class BriefingViewModel: ObservableObject {
         if selectedLensKey == nil || !snapshot.index.lenses.contains(where: { $0.key == selectedLensKey }) {
             selectedLensKey = orderedLenses.first?.key
         }
+        noteSelectionChanged()
         return true
     }
 
