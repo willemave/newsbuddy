@@ -1,4 +1,4 @@
-from concurrent.futures import Future, TimeoutError
+from concurrent.futures import Future
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -15,6 +15,7 @@ from app.models.db import (
     ProcessingTask,
 )
 from app.models.db.users import User
+from app.services.briefing.composer import ComposedSegment
 from app.services.briefing.read_marks import (
     bump_briefing_version_for_news_item,
     mark_briefing_sources_read,
@@ -164,7 +165,7 @@ def test_release_path_full_refresh_preserves_current_segments_when_compose_fails
     assert db_session.query(BriefingSegment).count() == 1
 
 
-def test_parallel_compose_batch_timeout_uses_deterministic_fallback(monkeypatch) -> None:
+def test_parallel_compose_uses_context_managed_executor(monkeypatch) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "briefing_compose_parallelism", 2)
     windows = [
@@ -188,23 +189,42 @@ def test_parallel_compose_batch_timeout_uses_deterministic_fallback(monkeypatch)
         ),
     ]
 
+    executors = []
+
     class FakeExecutor:
         def __init__(self, *, max_workers: int) -> None:
             self.max_workers = max_workers
+            self.did_exit = False
+            executors.append(self)
 
-        def submit(self, _fn, _window):  # noqa: ANN001
-            return Future()
+        def __enter__(self):
+            return self
 
-        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
-            assert wait is False
-            assert cancel_futures is True
+        def __exit__(self, *_args) -> None:  # noqa: ANN002
+            self.did_exit = True
 
-    def time_out(_futures, *, timeout: int):  # noqa: ANN001
-        assert timeout == settings.briefing_llm_timeout_seconds + 15
-        raise TimeoutError("2 (of 2) futures unfinished")
+        def submit(self, fn, window):  # noqa: ANN001
+            future: Future = Future()
+            future.set_result(fn(window))
+            return future
+
+    def fake_compose_window(sources, **_kwargs):  # noqa: ANN001, ANN003
+        source = sources[0]
+        return ComposedSegment(
+            blocks=[{"type": "passage", "source_keys": [source.source_key]}],
+            markdown_raw=source.title,
+            narration_text=source.title,
+            status="active",
+            model="deterministic",
+            prompt_version="test",
+            input_tokens=None,
+            output_tokens=None,
+            generation_ms=1,
+            warnings=[],
+        )
 
     monkeypatch.setattr("app.services.briefing.refresh.ThreadPoolExecutor", FakeExecutor)
-    monkeypatch.setattr("app.services.briefing.refresh.as_completed", time_out)
+    monkeypatch.setattr("app.services.briefing.refresh.compose_window", fake_compose_window)
 
     composed = _compose_prepared_windows(
         windows,
@@ -215,8 +235,8 @@ def test_parallel_compose_batch_timeout_uses_deterministic_fallback(monkeypatch)
     )
 
     assert [result.prepared.window_index for result in composed] == [0, 1]
-    assert all(result.segment.model == "deterministic" for result in composed)
-    assert all("llm_batch_timeout_fallback" in result.segment.warnings for result in composed)
+    assert len(executors) == 1
+    assert executors[0].did_exit
 
 
 def test_release_path_append_without_pending_skips_planning(

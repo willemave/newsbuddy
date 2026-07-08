@@ -16,6 +16,7 @@ from app.services.briefing.normalize import NormalizedLayout, normalize_layout
 from app.services.briefing.repair import repair_layout
 from app.services.briefing.sources import BriefingSource
 from app.services.llm_agents import get_basic_agent
+from app.services.llm_errors import is_llm_unavailable_error
 from app.services.llm_models import OPENROUTER_REASONING_CONFIG, openrouter_provider_config
 from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
@@ -29,6 +30,14 @@ LAYOUT_PROMPTS_BY_TIER = {
     "news": "briefing/layout_news",
 }
 logger = get_logger(__name__)
+
+
+class BriefingCompositionError(RuntimeError):
+    """Base error for briefing composition failures that should fail the task."""
+
+
+class BriefingCompositionInvalidOutput(BriefingCompositionError):
+    """The LLM returned output that cannot produce a valid briefing segment."""
 
 
 class ComposerBlock(BaseModel):
@@ -127,9 +136,32 @@ def compose_window(
                     },
                 )
                 if attempt >= MAX_COMPOSE_ATTEMPTS:
-                    fallback_reason = f"llm_invalid_layout_fallback:{type(exc).__name__}"
-                    break
+                    raise BriefingCompositionInvalidOutput(
+                        "Briefing LLM returned invalid layout JSON after retries"
+                    ) from exc
                 warnings.append(f"llm_invalid_layout_retry:{attempt}")
+                continue
+            except BriefingCompositionInvalidOutput as exc:
+                logger.warning(
+                    "Briefing LLM returned invalid layout output",
+                    extra={
+                        "component": "briefing",
+                        "operation": "compose_window",
+                        "task_id": task_id,
+                        "item_id": user_id,
+                        "context_data": {
+                            "lens_key": lens_key,
+                            "tier": tier,
+                            "window_index": window_index,
+                            "attempt": attempt,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                    },
+                )
+                if attempt >= MAX_COMPOSE_ATTEMPTS:
+                    raise
+                warnings.append(f"llm_invalid_output_retry:{attempt}")
                 continue
             except Exception as exc:
                 logger.warning(
@@ -151,8 +183,12 @@ def compose_window(
                     exc_info=True,
                 )
                 if attempt >= MAX_COMPOSE_ATTEMPTS:
-                    fallback_reason = f"llm_error_fallback:{type(exc).__name__}"
-                    break
+                    if is_llm_unavailable_error(exc):
+                        fallback_reason = f"llm_unavailable_fallback:{type(exc).__name__}"
+                        break
+                    raise BriefingCompositionError(
+                        "Briefing LLM composition failed after retries"
+                    ) from exc
                 warnings.append(f"llm_error_retry:{attempt}")
                 continue
             if not _blocks_look_malformed(llm_blocks):
@@ -179,8 +215,9 @@ def compose_window(
                 },
             )
             if attempt >= MAX_COMPOSE_ATTEMPTS:
-                fallback_reason = "llm_malformed_layout_fallback"
-                break
+                raise BriefingCompositionInvalidOutput(
+                    "Briefing LLM returned malformed layout blocks after retries"
+                )
             warnings.append(f"llm_malformed_retry:{attempt}")
         if fallback_reason is not None:
             logger.warning(
@@ -231,7 +268,9 @@ def compose_window(
     status = "active" if normalized.blocks else "degraded"
     if status == "degraded":
         if use_llm:
-            raise RuntimeError("Briefing LLM composition produced no normalized blocks")
+            raise BriefingCompositionInvalidOutput(
+                "Briefing LLM composition produced no normalized blocks"
+            )
         normalized = normalize_layout(
             deterministic_layout(sources, lens_title=lens_title, tier=tier).model_dump(mode="json")[
                 "blocks"
@@ -422,7 +461,7 @@ def _compose_window_with_openrouter(
         client.close()
     content = response.choices[0].message.content
     if not content:
-        raise RuntimeError("OpenRouter returned an empty briefing response")
+        raise BriefingCompositionInvalidOutput("OpenRouter returned an empty briefing response")
     layout = _parse_composer_layout_json(content)
     usage = _usage_from_openrouter_response(response)
     record_vendor_usage_out_of_band(

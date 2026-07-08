@@ -303,7 +303,6 @@ def briefing_refresh(
     *,
     user_id: int,
     mode: str = "append",
-    use_llm: bool = True,
 ) -> dict[str, Any]:
     """Run a briefing refresh directly against the runtime database."""
 
@@ -324,7 +323,6 @@ def briefing_refresh(
                 session,
                 user_id=user_id,
                 mode=refresh_mode,
-                use_llm=use_llm,
                 release_db_during_compose=True,
             )
             session.commit()

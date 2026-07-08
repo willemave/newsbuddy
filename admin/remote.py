@@ -143,7 +143,6 @@ def _dispatch(action: str, *, context: RemoteContext, payload: dict[str, Any]) -
             context,
             user_id=int(payload["user_id"]),
             mode=str(payload.get("mode", "append")),
-            use_llm=bool(payload.get("use_llm", True)),
         )
     if action == "briefing.costs":
         return briefing_costs(

@@ -311,7 +311,7 @@ class Settings(BaseSettings):
     briefing_news_window_max: int = Field(default=8, ge=1, le=16)
     briefing_max_figures_deep: int = Field(default=12, ge=0, le=50)
     briefing_max_figures_news: int = Field(default=6, ge=0, le=50)
-    briefing_llm_timeout_seconds: int = Field(default=120, ge=1, le=300)
+    briefing_llm_timeout_seconds: int = Field(default=300, ge=1, le=600)
     briefing_compose_parallelism: int = Field(default=12, ge=1, le=16)
     briefing_debounce_seconds: int = Field(default=900, ge=0, le=86_400)
     briefing_sweep_seconds: int = Field(default=3600, ge=60, le=86_400)

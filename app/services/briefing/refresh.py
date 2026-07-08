@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
-from dataclasses import dataclass, replace
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -544,7 +544,6 @@ def _compose_prepared_windows(
         return [compose_one(window) for window in prepared_windows]
 
     composed: list[_ComposedWindow] = []
-    batch_timeout = settings.briefing_llm_timeout_seconds + 15
     for start in range(0, len(prepared_windows), max_workers):
         batch = prepared_windows[start : start + max_workers]
         logger.info(
@@ -558,66 +557,18 @@ def _compose_prepared_windows(
                     "batch_start": start,
                     "batch_size": len(batch),
                     "window_count": len(prepared_windows),
-                    "timeout_seconds": batch_timeout,
                 },
             },
         )
-        executor = ThreadPoolExecutor(max_workers=len(batch))
-        futures = {executor.submit(compose_one, window): window for window in batch}
-        try:
+        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
+            futures = {executor.submit(compose_one, window): window for window in batch}
             batch_results: list[_ComposedWindow] = []
-            timed_out = False
-            try:
-                for future in as_completed(futures, timeout=batch_timeout):
-                    batch_results.append(future.result())
-            except TimeoutError as exc:
-                timed_out = True
-                logger.warning(
-                    "Briefing composition batch timed out; using deterministic fallback",
-                    extra={
-                        "component": "briefing",
-                        "operation": "compose_batch",
-                        "item_id": user_id,
-                        "task_id": task_id,
-                        "context_data": {
-                            "batch_start": start,
-                            "batch_size": len(batch),
-                            "completed": len(batch_results),
-                            "unfinished": len(batch) - len(batch_results),
-                            "timeout_seconds": batch_timeout,
-                            "error": str(exc),
-                        },
-                    },
-                )
-            if len(batch_results) != len(batch):
-                timed_out = True
+            for future in as_completed(futures):
+                batch_results.append(future.result())
             result_by_key = {
                 (result.prepared.lens_id, result.prepared.window_index): result
                 for result in batch_results
             }
-            if timed_out:
-                for window in batch:
-                    key = (window.lens_id, window.window_index)
-                    if key in result_by_key:
-                        continue
-                    segment = compose_window(
-                        list(window.sources),
-                        lens_key=window.lens_key,
-                        lens_title=window.lens_title,
-                        tier=window.tier,
-                        window_index=window.window_index,
-                        task_id=task_id,
-                        user_id=user_id,
-                        use_llm=False,
-                        settings=settings,
-                    )
-                    result_by_key[key] = _ComposedWindow(
-                        prepared=window,
-                        segment=replace(
-                            segment,
-                            warnings=[*segment.warnings, "llm_batch_timeout_fallback"],
-                        ),
-                    )
             composed.extend(
                 result_by_key[(window.lens_id, window.window_index)] for window in batch
             )
@@ -635,8 +586,6 @@ def _compose_prepared_windows(
                     },
                 },
             )
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
     return composed
 
 

@@ -271,7 +271,6 @@ def _handle_briefing(args: argparse.Namespace, *, config: AdminConfig) -> Comman
     elif args.briefing_command == "refresh":
         payload["user_id"] = args.user_id
         payload["mode"] = "full" if args.full else "append"
-        payload["use_llm"] = not bool(args.no_llm)
         action = "briefing.refresh"
     elif args.briefing_command == "costs":
         payload["user_id"] = args.user_id
@@ -730,11 +729,6 @@ def _build_briefing_parser(subparsers: argparse._SubParsersAction[AdminArgumentP
     refresh_parser = briefing_subparsers.add_parser("refresh", help="Run a briefing refresh")
     refresh_parser.add_argument("--user-id", required=True, type=int)
     refresh_parser.add_argument("--full", action="store_true", help="Rebuild from unread backlog")
-    refresh_parser.add_argument(
-        "--no-llm",
-        action="store_true",
-        help="Use deterministic fallback generation for local verification",
-    )
 
     costs_parser = briefing_subparsers.add_parser("costs", help="Summarize briefing LLM usage")
     costs_parser.add_argument("--user-id", type=int, default=None)
