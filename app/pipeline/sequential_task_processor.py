@@ -43,7 +43,7 @@ from app.pipeline.handlers.transcribe import TranscribeHandler
 from app.pipeline.handlers.transcribe_tweet_video import TranscribeTweetVideoHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_handler import TaskHandler
-from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.pipeline.task_models import TaskEnvelope, TaskResult, task_will_retry
 from app.pipeline.task_specs import get_task_spec
 from app.pipeline.worker import get_llm_service
 from app.services.gateways.task_queue_gateway import TaskQueueGateway
@@ -453,7 +453,11 @@ class SequentialTaskProcessor:
         """Persist task completion/retry state without crashing the worker loop."""
         retry_count = task.retry_count
         max_retries = self.settings.queue.max_retries
-        should_retry = not result.success and result.retryable and retry_count < max_retries
+        should_retry = task_will_retry(
+            result,
+            retry_count=retry_count,
+            max_retries=max_retries,
+        )
         retry_delay_seconds = None
         if should_retry:
             retry_delay_seconds = result.retry_delay_seconds or min(60 * (2**retry_count), 3600)

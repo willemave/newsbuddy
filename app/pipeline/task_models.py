@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.pipeline.retry_policy import retry_will_be_scheduled
 from app.services.queue import TaskType
 
 
@@ -69,3 +70,19 @@ class TaskResult(BaseModel):
             retryable=retryable,
             retry_delay_seconds=retry_delay_seconds,
         )
+
+
+def task_will_retry(
+    result: TaskResult,
+    *,
+    retry_count: int,
+    max_retries: int,
+) -> bool:
+    """Return whether the queue will schedule another attempt for this result."""
+
+    return retry_will_be_scheduled(
+        success=result.success,
+        retryable=result.retryable,
+        retry_count=retry_count,
+        max_retries=max_retries,
+    )

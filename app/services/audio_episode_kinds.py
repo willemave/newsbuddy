@@ -7,9 +7,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from app.core.model_defaults import ARTICLE_PODCAST_SUMMARY_MODEL_SPEC, CHEAP_GOOGLE_MODEL_SPEC
+from app.core.model_defaults import OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+from app.services.audio_episode_errors import AudioEpisodeInputError
 from app.services.custom_narrations import (
-    CUSTOM_NARRATION_DIALOGUE_TEXT_CHAR_LIMIT,
     CUSTOM_NARRATION_KIND,
     build_custom_narration_prompt,
 )
@@ -21,9 +21,9 @@ CONTENT_COUNCIL_DISCUSSION_KIND: Literal["content_council_discussion"] = (
 )
 NEWS_ITEM_DISCUSSION_KIND: Literal["news_item_discussion"] = "news_item_discussion"
 BRIEFING_NARRATION_KIND: Literal["briefing_narration"] = "briefing_narration"
-AUDIO_EPISODE_MODEL = ARTICLE_PODCAST_SUMMARY_MODEL_SPEC
-CUSTOM_NARRATION_MODEL = CHEAP_GOOGLE_MODEL_SPEC
-DIALOGUE_TEXT_CHAR_LIMIT = 1_100
+AUDIO_EPISODE_MODEL = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+CUSTOM_NARRATION_MODEL = AUDIO_EPISODE_MODEL
+AudioEpisodeScriptMode = Literal["generated_dialogue", "preauthored"]
 
 
 @dataclass(frozen=True)
@@ -31,8 +31,8 @@ class AudioEpisodeKindSpec:
     """Generation policy for one audio episode kind."""
 
     default_model: str
-    dialogue_text_char_limit: int
-    build_prompt: Callable[[dict[str, Any]], str]
+    build_prompt: Callable[[dict[str, Any]], str] | None = None
+    script_mode: AudioEpisodeScriptMode = "generated_dialogue"
     marks_sources_read_on_play: bool = False
 
 
@@ -40,13 +40,12 @@ def audio_episode_kind_spec(kind: str) -> AudioEpisodeKindSpec:
     try:
         return AUDIO_EPISODE_KIND_SPECS[kind]
     except KeyError:
-        raise ValueError(f"Unsupported audio episode kind: {kind}") from None
+        raise AudioEpisodeInputError(f"Unsupported audio episode kind: {kind}") from None
 
 
 def _build_fast_news_prompt(source_snapshot: dict[str, Any]) -> str:
     return render_prompt(
         "audio/episode_scripts#fast_news_digest_user",
-        dialogue_text_char_limit=DIALOGUE_TEXT_CHAR_LIMIT,
         source_snapshot_json=json.dumps(source_snapshot, ensure_ascii=False, indent=2),
     )
 
@@ -56,7 +55,6 @@ def _build_content_council_prompt(source_snapshot: dict[str, Any]) -> str:
     return render_prompt(
         "audio/episode_scripts#content_council_discussion_user",
         source_label=source_label,
-        dialogue_text_char_limit=DIALOGUE_TEXT_CHAR_LIMIT,
         source_snapshot_json=json.dumps(source_snapshot, ensure_ascii=False, indent=2),
     )
 
@@ -64,41 +62,31 @@ def _build_content_council_prompt(source_snapshot: dict[str, Any]) -> str:
 def _build_news_item_discussion_prompt(source_snapshot: dict[str, Any]) -> str:
     return render_prompt(
         "audio/episode_scripts#news_item_discussion_user",
-        dialogue_text_char_limit=DIALOGUE_TEXT_CHAR_LIMIT,
         source_snapshot_json=json.dumps(source_snapshot, ensure_ascii=False, indent=2),
     )
-
-
-def _build_briefing_narration_prompt(source_snapshot: dict[str, Any]) -> str:
-    return str(source_snapshot.get("script_text") or "")
 
 
 AUDIO_EPISODE_KIND_SPECS: dict[str, AudioEpisodeKindSpec] = {
     FAST_NEWS_DIGEST_KIND: AudioEpisodeKindSpec(
         default_model=AUDIO_EPISODE_MODEL,
-        dialogue_text_char_limit=DIALOGUE_TEXT_CHAR_LIMIT,
         build_prompt=_build_fast_news_prompt,
     ),
     CONTENT_COUNCIL_DISCUSSION_KIND: AudioEpisodeKindSpec(
         default_model=AUDIO_EPISODE_MODEL,
-        dialogue_text_char_limit=DIALOGUE_TEXT_CHAR_LIMIT,
         build_prompt=_build_content_council_prompt,
     ),
     NEWS_ITEM_DISCUSSION_KIND: AudioEpisodeKindSpec(
         default_model=AUDIO_EPISODE_MODEL,
-        dialogue_text_char_limit=DIALOGUE_TEXT_CHAR_LIMIT,
         build_prompt=_build_news_item_discussion_prompt,
     ),
     CUSTOM_NARRATION_KIND: AudioEpisodeKindSpec(
         default_model=CUSTOM_NARRATION_MODEL,
-        dialogue_text_char_limit=CUSTOM_NARRATION_DIALOGUE_TEXT_CHAR_LIMIT,
         build_prompt=build_custom_narration_prompt,
         marks_sources_read_on_play=True,
     ),
     BRIEFING_NARRATION_KIND: AudioEpisodeKindSpec(
-        default_model=CUSTOM_NARRATION_MODEL,
-        dialogue_text_char_limit=CUSTOM_NARRATION_DIALOGUE_TEXT_CHAR_LIMIT,
-        build_prompt=_build_briefing_narration_prompt,
+        default_model="deterministic",
+        script_mode="preauthored",
         marks_sources_read_on_play=True,
     ),
 }

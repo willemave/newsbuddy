@@ -24,7 +24,6 @@ from app.utils.news_titles import resolve_news_display_title
 
 CUSTOM_NARRATION_KIND: Literal["custom_narration"] = "custom_narration"
 CUSTOM_NARRATION_MAX_SOURCES = CUSTOM_NARRATION_MAX_CONTENT_IDS
-CUSTOM_NARRATION_DIALOGUE_TEXT_CHAR_LIMIT = 4_500
 CUSTOM_NARRATION_SOURCE_TOTAL_CHAR_LIMIT = 24_000
 CUSTOM_NARRATION_SOURCE_MIN_CHARS = 2_000
 
@@ -221,7 +220,6 @@ def custom_narration_title(source_snapshot: dict[str, Any], *, title: str | None
 def build_custom_narration_prompt(source_snapshot: dict[str, Any]) -> str:
     return render_prompt(
         "audio/episode_scripts#custom_narration_user",
-        dialogue_text_char_limit=CUSTOM_NARRATION_DIALOGUE_TEXT_CHAR_LIMIT,
         source_snapshot_json=json.dumps(source_snapshot, ensure_ascii=False, indent=2),
     )
 

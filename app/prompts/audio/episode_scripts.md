@@ -2,7 +2,7 @@
 id: audio/episode_scripts
 description: Sectioned prompts for generating structured audio episode scripts from content snapshots.
 used_by:
-  system: app/services/audio_episodes/__init__.py:_generate_script_with_model
+  system: app/services/audio_episodes/scripting.py:generate_script_with_model
   system_description: "System prompt for turning an audio episode source prompt into structured spoken dialogue."
   fast_news_digest_user: app/services/audio_episode_kinds.py:_build_fast_news_prompt
   fast_news_digest_user_description: "User prompt template for creating a one-minute quick-hit audio episode from unread Fast Reads."
@@ -37,8 +37,7 @@ Goal:
 
 Shape:
 - 110-150 spoken words.
-- Hard cap: $dialogue_text_char_limit characters across all spoken turn text.
-- 6-8 turns.
+- Use as many natural turns as the conversation needs. Do not pad or split thoughts to hit a turn count.
 - Start with the top 2-3 headlines and why they matter.
 - End with one short "what to watch next" close.
 
@@ -59,8 +58,7 @@ Goal:
 
 Shape:
 - 110-150 spoken words.
-- Hard cap: $dialogue_text_char_limit characters across all spoken turn text.
-- 6-8 turns.
+- Use as many natural turns as the conversation needs. Let each speaker finish a complete thought.
 - Use speaker='host' for framing, speaker='cohost' for synthesis, and
   speaker='expert' for sharper analysis.
 - End with a concise takeaway and why the piece is worth remembering.
@@ -81,8 +79,7 @@ Goal:
 
 Shape:
 - 110-150 spoken words.
-- Hard cap: $dialogue_text_char_limit characters across all spoken turn text.
-- 6-8 turns.
+- Use as many natural turns as the conversation needs. Let each speaker finish a complete thought.
 - Use speaker='host' for framing, speaker='cohost' for synthesis, and
   speaker='expert' for sharper analysis.
 - End with a concise takeaway.
@@ -105,8 +102,8 @@ Goal:
 
 Shape:
 - 500-700 spoken words.
-- Hard cap: $dialogue_text_char_limit characters across all spoken turn text.
-- 10-14 turns.
+- Use as many natural turns as the material needs. Do not truncate source-grounded analysis or
+  pad the conversation to hit a turn count.
 - Use speaker='host' for setup and transitions, speaker='cohost' for synthesis, and
   speaker='expert' for sharper analysis.
 - Start by framing why these sources belong together.

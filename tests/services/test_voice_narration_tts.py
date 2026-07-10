@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.models.db import VendorUsageRecord
 from app.services.voice import narration_tts
 
@@ -30,6 +32,11 @@ def test_content_narration_tts_sets_speed_voice_setting(monkeypatch) -> None:
     monkeypatch.setattr(narration_tts, "ElevenLabs", FakeElevenLabs)
     monkeypatch.setattr(narration_tts, "VoiceSettings", FakeVoiceSettings)
     monkeypatch.setattr(narration_tts, "find_spec", lambda _name: object())
+    monkeypatch.setattr(
+        narration_tts,
+        "record_vendor_usage_out_of_band",
+        lambda **_kwargs: None,
+    )
     monkeypatch.setattr(
         narration_tts,
         "get_settings",
@@ -179,6 +186,29 @@ def test_dialogue_tts_parallelizes_turn_synthesis(monkeypatch) -> None:
         assert voice_settings.speed == 1.0
 
 
+def test_dialogue_tts_chunks_long_turns_losslessly_at_provider_boundary() -> None:
+    target = narration_tts.DIALOGUE_TTS_CHUNK_TARGET_CHARS
+    natural_text = (
+        "A complete sentence with natural pacing.\n\n"
+        "A follow-up keeps its pause,\t  including repeated spaces. " * 100
+    ).strip()
+    pathological_token = "x" * (target * 2 + 17)
+
+    provider_turns = narration_tts._normalize_dialogue_turns(
+        [
+            {"speaker": "host", "text": natural_text},
+            {"speaker": "expert", "text": pathological_token},
+        ]
+    )
+
+    assert provider_turns
+    assert all(len(turn["text"]) <= target for turn in provider_turns)
+    host_chunks = [turn["text"] for turn in provider_turns if turn["speaker"] == "host"]
+    guest_chunks = [turn["text"] for turn in provider_turns if turn["speaker"] == "guest"]
+    assert "".join(host_chunks) == natural_text
+    assert "".join(guest_chunks) == pathological_token
+
+
 def test_dialogue_tts_stitches_turns_with_ffmpeg(monkeypatch) -> None:
     """Parallel dialogue turn audio should be re-encoded into one valid MP3 asset."""
 
@@ -219,3 +249,16 @@ def test_dialogue_tts_stitches_turns_with_ffmpeg(monkeypatch) -> None:
         "-i",
     ]
     assert captured_cmd["cmd"][-5:-1] == ["-codec:a", "libmp3lame", "-b:a", "128k"]
+
+
+def test_dialogue_tts_missing_ffmpeg_is_typed_configuration_failure(monkeypatch) -> None:
+    service = narration_tts.ContentNarrationTtsService.__new__(
+        narration_tts.ContentNarrationTtsService
+    )
+    monkeypatch.setattr(narration_tts.shutil, "which", lambda _name: None)
+
+    with pytest.raises(
+        narration_tts.NarrationTtsConfigurationError,
+        match="ffmpeg is required",
+    ):
+        service._stitch_dialogue_turns_mp3([b"turn-one", b"turn-two"])

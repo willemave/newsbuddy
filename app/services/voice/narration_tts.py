@@ -25,6 +25,19 @@ except Exception:  # pragma: no cover - gracefully handled at runtime
     ElevenLabs = None  # type: ignore[misc,assignment]
 
 logger = get_logger(__name__)
+DIALOGUE_TTS_CHUNK_TARGET_CHARS = 3_500
+
+
+class PermanentNarrationTtsError(ValueError):
+    """Raised when retrying cannot repair local TTS input or configuration."""
+
+
+class NarrationTtsInputError(PermanentNarrationTtsError):
+    """Raised when a narration request has no speakable input."""
+
+
+class NarrationTtsConfigurationError(PermanentNarrationTtsError):
+    """Raised when the local ElevenLabs integration is not usable."""
 
 
 def _duration_ms(started_at: float) -> float:
@@ -60,7 +73,7 @@ class ContentNarrationTtsService:
 
         normalized = text.strip()
         if not normalized:
-            raise ValueError("Narration text is empty")
+            raise NarrationTtsInputError("Narration text is empty")
         self._require_elevenlabs_config()
 
         started_at = time.perf_counter()
@@ -158,7 +171,7 @@ class ContentNarrationTtsService:
 
         normalized_turns = _normalize_dialogue_turns(turns)
         if not normalized_turns:
-            raise ValueError("Dialogue turns are empty")
+            raise NarrationTtsInputError("Dialogue turns are empty")
         self._require_elevenlabs_config()
 
         host_voice_id = (
@@ -170,7 +183,7 @@ class ContentNarrationTtsService:
             or self._settings.elevenlabs_tts_voice_id
         )
         if not host_voice_id or not guest_voice_id:
-            raise ValueError("ElevenLabs podcast voice ids are not configured")
+            raise NarrationTtsConfigurationError("ElevenLabs podcast voice ids are not configured")
         model_id = self._settings.elevenlabs_narration_tts_model
         output_format = self._settings.elevenlabs_narration_tts_output_format
         max_workers = min(
@@ -333,7 +346,9 @@ class ContentNarrationTtsService:
 
         ffmpeg_binary = shutil.which("ffmpeg")
         if ffmpeg_binary is None:
-            raise RuntimeError("ffmpeg is required to stitch audio episode dialogue turns")
+            raise NarrationTtsConfigurationError(
+                "ffmpeg is required to stitch audio episode dialogue turns"
+            )
 
         started_at = time.perf_counter()
         with tempfile.TemporaryDirectory(prefix="newsly-audio-episode-") as temp_dir_name:
@@ -426,7 +441,7 @@ class ContentNarrationTtsService:
 
         normalized_turns = _normalize_dialogue_turns(turns)
         if not normalized_turns:
-            raise ValueError("Dialogue turns are empty")
+            raise NarrationTtsInputError("Dialogue turns are empty")
         self._require_elevenlabs_config()
 
         host_voice_id = (
@@ -438,9 +453,9 @@ class ContentNarrationTtsService:
             or self._settings.elevenlabs_tts_voice_id
         )
         if not host_voice_id or not guest_voice_id:
-            raise ValueError("ElevenLabs podcast voice ids are not configured")
+            raise NarrationTtsConfigurationError("ElevenLabs podcast voice ids are not configured")
         if DialogueInput is None:
-            raise ValueError("ElevenLabs dialogue SDK is not installed")
+            raise NarrationTtsConfigurationError("ElevenLabs dialogue SDK is not installed")
 
         model_id = self._settings.elevenlabs_dialogue_tts_model
         output_format = self._settings.elevenlabs_narration_tts_output_format
@@ -604,11 +619,11 @@ class ContentNarrationTtsService:
         """Raise a user-facing config error if ElevenLabs cannot be used."""
 
         if not self._settings.elevenlabs_api_key:
-            raise ValueError("ElevenLabs API key is not configured")
+            raise NarrationTtsConfigurationError("ElevenLabs API key is not configured")
         if not self._settings.elevenlabs_tts_voice_id:
-            raise ValueError("ElevenLabs TTS voice id is not configured")
+            raise NarrationTtsConfigurationError("ElevenLabs TTS voice id is not configured")
         if find_spec("elevenlabs") is None or ElevenLabs is None or VoiceSettings is None:
-            raise ValueError("ElevenLabs SDK is not installed")
+            raise NarrationTtsConfigurationError("ElevenLabs SDK is not installed")
 
     @staticmethod
     def _collect_audio(audio_iterator: Iterable[bytes]) -> bytearray:
@@ -626,13 +641,40 @@ def _normalize_dialogue_turns(turns: Iterable[Mapping[str, str]]) -> list[dict[s
         if not text:
             continue
         speaker = str(turn.get("speaker") or "guest").strip().lower()
-        normalized.append(
-            {
-                "speaker": "host" if speaker == "host" else "guest",
-                "text": text,
-            }
+        normalized_speaker = "host" if speaker == "host" else "guest"
+        normalized.extend(
+            {"speaker": normalized_speaker, "text": chunk} for chunk in _chunk_dialogue_text(text)
         )
     return normalized
+
+
+def _chunk_dialogue_text(text: str) -> list[str]:
+    """Split provider-bound dialogue without changing its text or whitespace."""
+
+    remaining = text
+    chunks: list[str] = []
+    while len(remaining) > DIALOGUE_TTS_CHUNK_TARGET_CHARS:
+        window = remaining[: DIALOGUE_TTS_CHUNK_TARGET_CHARS + 1]
+        sentence_cut = max(
+            (
+                index
+                for index in range(1, len(window))
+                if window[index - 1] in ".!?" and window[index].isspace()
+            ),
+            default=0,
+        )
+        word_cut = max(
+            (index for index, character in enumerate(window[:-1], start=1) if character.isspace()),
+            default=0,
+        )
+        cut = sentence_cut or word_cut
+        if cut <= 0:
+            cut = DIALOGUE_TTS_CHUNK_TARGET_CHARS
+        chunks.append(remaining[:cut])
+        remaining = remaining[cut:]
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
 
 def _ffmpeg_concat_line(path: Path) -> str:

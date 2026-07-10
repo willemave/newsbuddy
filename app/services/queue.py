@@ -12,6 +12,7 @@ from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
 from app.models.db import ProcessingTask
+from app.pipeline.retry_policy import retry_will_be_scheduled
 from app.pipeline.task_specs import TASK_SPECS, get_task_spec
 
 logger = get_logger(__name__)
@@ -579,8 +580,11 @@ class QueueService:
     ) -> dict[str, Any] | None:
         """Persist one terminal or retry transition for a processed task."""
         with get_db() as db:
-            should_retry = (
-                not success and retryable and current_retry_count < max(int(max_retries), 0)
+            should_retry = retry_will_be_scheduled(
+                success=success,
+                retryable=retryable,
+                retry_count=current_retry_count,
+                max_retries=max_retries,
             )
             resolved_delay_seconds = retry_delay_seconds if should_retry else None
             task = db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()

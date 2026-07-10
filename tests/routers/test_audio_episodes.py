@@ -82,7 +82,7 @@ def test_create_fast_news_inline_delivery_generates_before_response(
         return episode
 
     monkeypatch.setattr(
-        "app.services.audio_episodes.generate_audio_episode",
+        "app.services.audio_episodes.presentation.generate_audio_episode",
         fake_generate_audio_episode,
     )
 
@@ -239,7 +239,7 @@ def test_custom_narration_marks_sources_read_when_audio_is_played(
         return episode
 
     monkeypatch.setattr(
-        "app.services.audio_episodes.generate_audio_episode",
+        "app.services.audio_episodes.presentation.generate_audio_episode",
         fake_generate_audio_episode,
     )
 
@@ -314,7 +314,7 @@ def test_custom_narration_playback_marks_fast_reads_but_not_long_reads_by_defaul
         return episode
 
     monkeypatch.setattr(
-        "app.services.audio_episodes.generate_audio_episode",
+        "app.services.audio_episodes.presentation.generate_audio_episode",
         fake_generate_audio_episode,
     )
 

@@ -5,11 +5,16 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from app.core.model_defaults import OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
 from app.models.contracts import ContentType
 from app.models.db import AudioEpisode, ContentKnowledgeSave, NewsItemReadStatus
 from app.services import audio_episodes as service
-from app.services.audio_episode_kinds import CUSTOM_NARRATION_MODEL
+from app.services.audio_episode_kinds import (
+    AUDIO_EPISODE_KIND_SPECS,
+    CUSTOM_NARRATION_MODEL,
+)
 from app.services.audio_episode_sources import LONGFORM_BODY_MAX_CHARS, excerpt_longform_source_text
+from app.services.audio_episodes import generation, scripting, streaming
 from tests.support.builders import create_content_status_entry_row, create_news_item_row
 
 
@@ -283,7 +288,7 @@ def test_create_custom_narration_episode_rejects_invalid_ids(db_session, test_us
     assert "positive" in str(exc_info.value.detail)
 
 
-def test_custom_narration_prompt_uses_gemini_flash_lite_and_bounded_excerpts(
+def test_custom_narration_prompt_uses_deepseek_flash_and_bounded_excerpts(
     monkeypatch,
 ) -> None:
     full_text = "Opening. " + ("Long source paragraph. " * 1_000) + "CLOSING_MARKER."
@@ -338,10 +343,10 @@ def test_custom_narration_prompt_uses_gemini_flash_lite_and_bounded_excerpts(
             ],
         },
     )
-    monkeypatch.setattr(service, "get_basic_agent", fake_get_basic_agent)
-    monkeypatch.setattr(service, "extract_usage_from_result", lambda _result: None)
+    monkeypatch.setattr(scripting, "get_basic_agent", fake_get_basic_agent)
+    monkeypatch.setattr(scripting, "extract_usage_from_result", lambda _result: None)
 
-    generated = service._generate_script(episode)
+    generated = scripting.generate_script(episode)
 
     assert generated.model == CUSTOM_NARRATION_MODEL
     assert captured["model"] == CUSTOM_NARRATION_MODEL
@@ -383,14 +388,62 @@ def test_generate_script_uses_audio_episode_model(monkeypatch) -> None:
         kind=service.FAST_NEWS_DIGEST_KIND,
         source_snapshot={"kind": service.FAST_NEWS_DIGEST_KIND, "items": []},
     )
-    monkeypatch.setattr(service, "get_basic_agent", fake_get_basic_agent)
-    monkeypatch.setattr(service, "extract_usage_from_result", lambda _result: None)
+    monkeypatch.setattr(scripting, "get_basic_agent", fake_get_basic_agent)
+    monkeypatch.setattr(scripting, "extract_usage_from_result", lambda _result: None)
 
-    generated = service._generate_script(episode)
+    generated = scripting.generate_script(episode)
 
     assert generated.script == script
     assert generated.model == service.AUDIO_EPISODE_MODEL
     assert attempts == [service.AUDIO_EPISODE_MODEL]
+
+
+def test_generate_script_accepts_natural_long_provider_turn(monkeypatch) -> None:
+    script = service.AudioEpisodeScript(
+        title="Unbounded Script",
+        estimated_duration_seconds=60,
+        turns=[
+            service.AudioEpisodeTurn(
+                speaker="host",
+                text="x" * 3_501,
+            )
+        ],
+    )
+
+    class FakeAgent:
+        def run_sync(self, _message, model_settings=None):  # noqa: ANN001
+            del model_settings
+            return SimpleNamespace(output=script)
+
+    monkeypatch.setattr(scripting, "get_basic_agent", lambda *_args: FakeAgent())
+    monkeypatch.setattr(scripting, "extract_usage_from_result", lambda _result: None)
+    episode = AudioEpisode(
+        id=99,
+        user_id=123,
+        kind=service.FAST_NEWS_DIGEST_KIND,
+        source_snapshot={"kind": service.FAST_NEWS_DIGEST_KIND, "items": []},
+    )
+
+    generated = scripting.generate_script_with_model(
+        episode,
+        "Generate a natural script.",
+        service.AUDIO_EPISODE_MODEL,
+    )
+
+    assert generated.turns[0].text == "x" * 3_501
+
+
+def test_all_generated_audio_episode_kinds_use_deepseek_flash() -> None:
+    generated_specs = [
+        spec
+        for spec in AUDIO_EPISODE_KIND_SPECS.values()
+        if spec.script_mode == "generated_dialogue"
+    ]
+
+    assert generated_specs
+    assert {spec.default_model for spec in generated_specs} == {
+        OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+    }
 
 
 def test_generate_audio_episode_persists_script_and_audio(
@@ -411,6 +464,7 @@ def test_generate_audio_episode_persists_script_and_audio(
     db_session.add(episode)
     db_session.commit()
     db_session.refresh(episode)
+    assert episode.id is not None
     assert episode.id is not None
 
     script = service.AudioEpisodeScript(
@@ -435,19 +489,23 @@ def test_generate_audio_episode_persists_script_and_audio(
             return b"fake-mp3"
 
     monkeypatch.setattr(
-        service,
-        "_generate_script",
+        scripting,
+        "generate_script",
         lambda _episode: service.AudioEpisodeScriptGeneration(
             script=script,
             model="test:model",
         ),
     )
     monkeypatch.setattr(
-        service,
+        generation,
         "get_content_narration_tts_service",
         lambda: FakeTtsService(),
     )
-    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(media_base_dir=tmp_path))
+    monkeypatch.setattr(
+        generation,
+        "get_settings",
+        lambda: SimpleNamespace(media_base_dir=tmp_path),
+    )
 
     generated = service.generate_audio_episode(db_session, audio_episode_id=episode.id)
     db_session.commit()
@@ -465,9 +523,8 @@ def test_generate_audio_episode_persists_script_and_audio(
     assert captured_turns[0] == {"speaker": "host", "text": "Here is the setup."}
 
 
-def test_stream_audio_episode_chunks_persists_streamed_audio(
+def test_generation_failure_waits_for_caller_retry_disposition(
     db_session,
-    tmp_path,
     monkeypatch,
 ) -> None:
     episode = AudioEpisode(
@@ -475,7 +532,7 @@ def test_stream_audio_episode_chunks_persists_streamed_audio(
         kind=service.FAST_NEWS_DIGEST_KIND,
         status="pending",
         title="Fast Reads Brief",
-        input_hash="stream",
+        input_hash="generation-disposition",
         source_item_ids=[1],
         source_snapshot={"kind": service.FAST_NEWS_DIGEST_KIND, "items": []},
         prompt_version=service.PROMPT_VERSION,
@@ -485,55 +542,59 @@ def test_stream_audio_episode_chunks_persists_streamed_audio(
     db_session.refresh(episode)
     assert episode.id is not None
 
-    script = service.AudioEpisodeScript(
-        title="Fast Reads Stream",
-        estimated_duration_seconds=90,
-        turns=[
-            service.AudioEpisodeTurn(speaker="host", text="Here is the setup."),
-            service.AudioEpisodeTurn(speaker="cohost", text="Here is why it matters."),
-            service.AudioEpisodeTurn(speaker="expert", text="Here is the sharper read."),
-            service.AudioEpisodeTurn(speaker="host", text="That is the takeaway."),
-            service.AudioEpisodeTurn(speaker="cohost", text="Watch the follow-up."),
-            service.AudioEpisodeTurn(speaker="expert", text="Keep an eye on adoption."),
-        ],
+    def fail_script(_episode):
+        raise RuntimeError("script boom")
+
+    monkeypatch.setattr(scripting, "generate_script", fail_script)
+
+    with pytest.raises(RuntimeError, match="script boom"):
+        generation.generate_audio_episode(db_session, audio_episode_id=episode.id)
+
+    assert episode.status == "processing"
+    assert episode.error_message is None
+    assert episode.completed_at is None
+
+    generation.finalize_audio_episode_failure(
+        db_session,
+        audio_episode_id=episode.id,
+        error=RuntimeError("script boom"),
+        retry_scheduled=True,
     )
 
-    class FakeTtsService:
-        def stream_dialogue_mp3(self, *, turns, item_id=None, user_id=None):
-            assert item_id == episode.id
-            assert user_id == 123
-            assert list(turns)[0] == {"speaker": "host", "text": "Here is the setup."}
-            yield b"fake-"
-            yield b"stream"
+    assert episode.status == "pending"
+    assert episode.error_message == "script boom"
+    assert episode.started_at is None
 
-    monkeypatch.setattr(
-        service,
-        "_generate_script",
-        lambda _episode: service.AudioEpisodeScriptGeneration(
-            script=script,
-            model="test:model",
-        ),
+
+def test_inline_delivery_finalizes_generation_failure(
+    db_session,
+    monkeypatch,
+) -> None:
+    episode = AudioEpisode(
+        user_id=123,
+        kind=service.FAST_NEWS_DIGEST_KIND,
+        status="pending",
+        title="Fast Reads Brief",
+        input_hash="inline-terminal-failure",
+        source_item_ids=[1],
+        source_snapshot={"kind": service.FAST_NEWS_DIGEST_KIND, "items": []},
+        prompt_version=service.PROMPT_VERSION,
     )
-    monkeypatch.setattr(
-        service,
-        "get_content_narration_tts_service",
-        lambda: FakeTtsService(),
-    )
-    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(media_base_dir=tmp_path))
+    db_session.add(episode)
 
-    chunks = list(service.stream_audio_episode_chunks(audio_episode_id=episode.id, user_id=123))
+    def fail_script(_episode):
+        raise ValueError("invalid local script")
 
-    assert chunks == [b"fake-", b"stream"]
+    monkeypatch.setattr(scripting, "generate_script", fail_script)
+
+    with pytest.raises(ValueError, match="invalid local script"):
+        service.commit_audio_episode_delivery(db_session, episode, delivery="inline")
+
     db_session.expire_all()
-    generated = db_session.query(AudioEpisode).filter(AudioEpisode.id == episode.id).one()
-    assert generated.status == "completed"
-    assert generated.script_text is not None
-    assert generated.script_text.startswith("Fast Reads Stream")
-    assert generated.model == "test:model"
-    audio_path = tmp_path / "audio_episodes" / f"audio-episode-{episode.id}.mp3"
-    assert generated.audio_storage_path == str(audio_path)
-    assert audio_path.read_bytes() == b"fake-stream"
-    assert not (tmp_path / "audio_episodes" / f"audio-episode-{episode.id}.mp3.part").exists()
+    persisted = db_session.query(AudioEpisode).filter(AudioEpisode.id == episode.id).one()
+    assert persisted.status == "failed"
+    assert persisted.error_message == "invalid local script"
+    assert persisted.completed_at is not None
 
 
 def test_follow_audio_episode_stream_waits_for_pending_generation(
@@ -568,49 +629,125 @@ def test_follow_audio_episode_stream_waits_for_pending_generation(
     db_session.refresh(episode)
     assert episode.id is not None
 
-    monkeypatch.setattr(service, "AUDIO_EPISODE_FOLLOW_TIMEOUT_SECONDS", 0.01)
-    monkeypatch.setattr(service, "AUDIO_EPISODE_FOLLOW_POLL_SECONDS", 0.001)
+    monkeypatch.setattr(streaming, "AUDIO_EPISODE_FOLLOW_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(streaming, "AUDIO_EPISODE_FOLLOW_POLL_SECONDS", 0.001)
 
     with pytest.raises(service.AudioEpisodeAlreadyProcessingError):
         list(service.follow_audio_episode_stream_chunks(audio_episode_id=episode.id, user_id=123))
 
 
-def test_fit_script_to_dialogue_limit_trims_overlong_turns() -> None:
+def test_persist_audio_episode_script_keeps_natural_long_dialogue(db_session) -> None:
+    long_text = "A complete, naturally paced thought. " * 180
     script = service.AudioEpisodeScript(
-        title="Too Long",
-        estimated_duration_seconds=90,
+        title="Long Conversation",
+        estimated_duration_seconds=1_200,
         turns=[
-            service.AudioEpisodeTurn(speaker="host", text="One sentence. " + ("x" * 200)),
-            service.AudioEpisodeTurn(speaker="cohost", text="Another sentence. " + ("x" * 200)),
-            service.AudioEpisodeTurn(speaker="expert", text="Third sentence. " + ("x" * 200)),
-            service.AudioEpisodeTurn(speaker="host", text="Fourth sentence. " + ("x" * 200)),
-            service.AudioEpisodeTurn(speaker="cohost", text="Fifth sentence. " + ("x" * 200)),
-            service.AudioEpisodeTurn(speaker="expert", text="Sixth sentence. " + ("x" * 200)),
+            service.AudioEpisodeTurn(speaker="host", text=long_text),
         ],
     )
+    episode = AudioEpisode(
+        user_id=123,
+        kind=service.FAST_NEWS_DIGEST_KIND,
+        status="pending",
+        title="Long Conversation",
+        input_hash="long-dialogue",
+        source_item_ids=[],
+        source_snapshot={"kind": service.FAST_NEWS_DIGEST_KIND},
+        prompt_version=service.PROMPT_VERSION,
+    )
+    db_session.add(episode)
+    db_session.flush()
 
-    fitted = service._fit_script_to_dialogue_limit(script)
-
-    assert sum(len(turn.text) for turn in fitted.turns) <= service.DIALOGUE_TEXT_CHAR_LIMIT
-    assert len(fitted.turns) == len(script.turns)
-    assert all(turn.text for turn in fitted.turns)
-
-
-def test_fit_script_to_dialogue_limit_respects_cap_with_sixteen_turns() -> None:
-    script = service.AudioEpisodeScript(
-        title="Many Turns",
-        estimated_duration_seconds=240,
-        turns=[
-            service.AudioEpisodeTurn(
-                speaker="host" if index % 2 == 0 else "cohost",
-                text=f"Turn {index}. " + ("long detail " * 50),
-            )
-            for index in range(16)
-        ],
+    persisted = scripting.persist_audio_episode_script(
+        db_session,
+        episode,
+        script,
+        model="test:model",
     )
 
-    fitted = service._fit_script_to_dialogue_limit(script)
+    assert persisted.turns == script.turns
+    assert persisted.turns[0].text == long_text
+    assert episode.script is not None
+    assert episode.script["turns"][0]["text"] == long_text
+    assert long_text.strip() in str(episode.script_text)
 
-    assert sum(len(turn.text) for turn in fitted.turns) <= service.DIALOGUE_TEXT_CHAR_LIMIT
-    assert len(fitted.turns) == 16
-    assert all(turn.text for turn in fitted.turns)
+
+@pytest.mark.parametrize("char_count", [24, 1_000, 18_000])
+def test_background_briefing_narration_never_uses_llm_and_preserves_text(
+    db_session,
+    tmp_path,
+    monkeypatch,
+    char_count: int,
+) -> None:
+    text = ("Briefing narration sentence with complete context. " * 500)[:char_count]
+    episode = AudioEpisode(
+        user_id=123,
+        kind=service.BRIEFING_NARRATION_KIND,
+        status="pending",
+        title="Articles briefing",
+        input_hash=f"briefing-{char_count}",
+        source_item_ids=[],
+        source_snapshot={
+            "kind": service.BRIEFING_NARRATION_KIND,
+            "script_text": text,
+        },
+        script={"legacy": "payload that no longer validates"},
+        script_text=text,
+        prompt_version=1,
+        model="legacy-model",
+    )
+    db_session.add(episode)
+    db_session.commit()
+    db_session.refresh(episode)
+    assert episode.id is not None
+    captured_turns: list[dict[str, str]] = []
+
+    class FakeTtsService:
+        def synthesize_dialogue_mp3(self, *, turns, item_id=None, user_id=None):
+            captured_turns.extend(turns)
+            return b"briefing-mp3"
+
+    monkeypatch.setattr(
+        scripting,
+        "generate_script",
+        lambda _episode: pytest.fail("preauthored narration must not call the LLM"),
+    )
+    monkeypatch.setattr(
+        generation,
+        "get_content_narration_tts_service",
+        lambda: FakeTtsService(),
+    )
+    monkeypatch.setattr(
+        generation,
+        "get_settings",
+        lambda: SimpleNamespace(media_base_dir=tmp_path),
+    )
+
+    generated = service.generate_audio_episode(db_session, audio_episode_id=episode.id)
+
+    assert generated.status == "completed"
+    assert generated.model == "deterministic"
+    assert generated.script_text == text
+    assert captured_turns == [{"speaker": "host", "text": text}]
+
+
+def test_present_audio_episode_sanitizes_internal_failure(db_session) -> None:
+    episode = AudioEpisode(
+        user_id=123,
+        kind=service.FAST_NEWS_DIGEST_KIND,
+        status="failed",
+        title="Failed audio",
+        input_hash="failed-public-error",
+        source_item_ids=[],
+        source_snapshot={"kind": service.FAST_NEWS_DIGEST_KIND},
+        prompt_version=service.PROMPT_VERSION,
+        error_message="status_code: 404, secret provider diagnostics",
+    )
+    db_session.add(episode)
+    db_session.commit()
+    db_session.refresh(episode)
+
+    response = service.present_audio_episode(episode)
+
+    assert response.error_message == service.PUBLIC_AUDIO_EPISODE_ERROR_MESSAGE
+    assert "404" not in response.error_message
