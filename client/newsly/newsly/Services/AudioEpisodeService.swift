@@ -18,6 +18,72 @@ enum AudioEpisodeDelivery: String {
     case inline
 }
 
+enum AudioEpisodeServiceError: LocalizedError, Equatable {
+    case generationFailed
+    case preparationTimedOut
+    case missingStreamResource
+
+    var userFacingMessage: String {
+        switch self {
+        case .generationFailed:
+            return "Couldn't prepare audio. Please try again."
+        case .preparationTimedOut:
+            return "Audio is taking longer than expected. Please try again."
+        case .missingStreamResource:
+            return "No audio stream is available."
+        }
+    }
+
+    var errorDescription: String? {
+        userFacingMessage
+    }
+}
+
+struct AudioEpisodePoller {
+    typealias FetchEpisode = (Int) async throws -> AudioEpisode
+
+    private let fetchEpisode: FetchEpisode
+
+    init(fetchEpisode: @escaping FetchEpisode) {
+        self.fetchEpisode = fetchEpisode
+    }
+
+    func waitForCompletedEpisode(
+        _ episode: AudioEpisode,
+        pollIntervalNanoseconds: UInt64,
+        maxAttempts: Int
+    ) async throws -> AudioEpisode {
+        let startedAt = Date()
+        var current = episode
+        audioEpisodeLogger.info(
+            "Wait episode started | episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) maxAttempts=\(maxAttempts)"
+        )
+        var attempts = 0
+        while true {
+            if current.isCompleted {
+                audioEpisodeLogger.info(
+                    "Wait episode completed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
+                )
+                return current
+            }
+            if current.isFailed {
+                audioEpisodeLogger.error(
+                    "Wait episode failed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(current.errorMessage ?? "unknown", privacy: .private)"
+                )
+                throw AudioEpisodeServiceError.generationFailed
+            }
+            guard attempts < maxAttempts else { break }
+            try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+            current = try await fetchEpisode(current.id)
+            attempts += 1
+        }
+        audioEpisodeLogger.error(
+            "Wait episode timed out | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) attempts=\(maxAttempts)"
+        )
+        throw AudioEpisodeServiceError.preparationTimedOut
+    }
+}
+
 final class AudioEpisodeService {
     static let shared = AudioEpisodeService()
 
@@ -44,7 +110,7 @@ final class AudioEpisodeService {
             return episode
         } catch {
             audioEpisodeLogger.error(
-                "Create episode failed | kind=fast_news_digest elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+                "Create episode failed | kind=fast_news_digest elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .private)"
             )
             throw error
         }
@@ -70,7 +136,7 @@ final class AudioEpisodeService {
             return episode
         } catch {
             audioEpisodeLogger.error(
-                "Create episode failed | kind=content_council_discussion contentId=\(contentId) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+                "Create episode failed | kind=content_council_discussion contentId=\(contentId) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .private)"
             )
             throw error
         }
@@ -96,7 +162,7 @@ final class AudioEpisodeService {
             return episode
         } catch {
             audioEpisodeLogger.error(
-                "Create episode failed | kind=news_item_discussion newsItemId=\(newsItemId) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+                "Create episode failed | kind=news_item_discussion newsItemId=\(newsItemId) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .private)"
             )
             throw error
         }
@@ -133,7 +199,7 @@ final class AudioEpisodeService {
             return episode
         } catch {
             audioEpisodeLogger.error(
-                "Create episode failed | kind=custom_narration elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+                "Create episode failed | kind=custom_narration elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .private)"
             )
             throw error
         }
@@ -190,11 +256,7 @@ final class AudioEpisodeService {
             audioEpisodeLogger.error(
                 "Stream resource missing | episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public)"
             )
-            throw NSError(
-                domain: "AudioEpisodeService",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "No audio stream is available."]
-            )
+            throw AudioEpisodeServiceError.missingStreamResource
         }
         audioEpisodeLogger.info(
             "Stream resource started | episodeId=\(episode.id) endpoint=\(endpoint, privacy: .public)"
@@ -207,7 +269,7 @@ final class AudioEpisodeService {
             return resource
         } catch {
             audioEpisodeLogger.error(
-                "Stream resource failed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+                "Stream resource failed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .private)"
             )
             throw error
         }
@@ -218,41 +280,10 @@ final class AudioEpisodeService {
         pollIntervalNanoseconds: UInt64 = 1_500_000_000,
         maxAttempts: Int = 120
     ) async throws -> AudioEpisode {
-        let startedAt = Date()
-        var current = episode
-        audioEpisodeLogger.info(
-            "Wait episode started | episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) maxAttempts=\(maxAttempts)"
-        )
-        for _ in 0..<maxAttempts {
-            if current.isCompleted {
-                audioEpisodeLogger.info(
-                    "Wait episode completed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
-                )
-                return current
-            }
-            if current.isFailed {
-                audioEpisodeLogger.error(
-                    "Wait episode failed | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(current.errorMessage ?? "unknown", privacy: .public)"
-                )
-                throw NSError(
-                    domain: "AudioEpisodeService",
-                    code: 1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey: current.errorMessage
-                            ?? "Audio episode generation failed."
-                    ]
-                )
-            }
-            try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
-            current = try await fetchEpisode(id: current.id)
-        }
-        audioEpisodeLogger.error(
-            "Wait episode timed out | episodeId=\(episode.id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) attempts=\(maxAttempts)"
-        )
-        throw NSError(
-            domain: "AudioEpisodeService",
-            code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "Audio episode is still preparing."]
+        try await AudioEpisodePoller(fetchEpisode: fetchEpisode).waitForCompletedEpisode(
+            episode,
+            pollIntervalNanoseconds: pollIntervalNanoseconds,
+            maxAttempts: maxAttempts
         )
     }
 }

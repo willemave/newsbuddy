@@ -600,19 +600,6 @@ final class BriefingViewModelTests: XCTestCase {
         )
     }
 
-    func testRequestNarrationStoresEpisodeByLens() async {
-        let service = MockBriefingService()
-        let episode = makeAudioEpisode(id: 42)
-        service.narrationEpisode = episode
-        let viewModel = BriefingViewModel(service: service)
-
-        let returned = await viewModel.requestNarration(for: "today")
-
-        XCTAssertEqual(returned?.id, 42)
-        XCTAssertEqual(viewModel.narrationEpisode(for: "today")?.id, 42)
-        XCTAssertEqual(service.narrationLensKeys, ["today"])
-    }
-
     private func waitFor(
         timeoutNanoseconds: UInt64 = 500_000_000,
         condition: @escaping @MainActor () -> Bool,
@@ -633,7 +620,7 @@ final class BriefingViewModelTests: XCTestCase {
 // Main-actor isolated: the view model prefetches every lens concurrently, so
 // an unisolated mock races on its recording arrays (fetchLensKeys & co).
 @MainActor
-private final class MockBriefingService: BriefingServicing {
+final class MockBriefingService: BriefingServicing {
     var indexResults: [BriefingIndexFetchResult] = []
     var indexEtags: [String?] = []
     var fetchIndexDelayNanoseconds: UInt64?
@@ -644,7 +631,12 @@ private final class MockBriefingService: BriefingServicing {
     var readMarkResponse = APIBriefingReadMarkResponse(marked: 0, version: 1)
     var markReadError: Error?
     var narrationEpisode: AudioEpisode?
+    var narrationEpisodes: [AudioEpisode] = []
+    var narrationError: Error?
+    var narrationRequestDelayNanoseconds: UInt64?
+    var narrationWaitsForCancellation = false
     var narrationLensKeys: [String] = []
+    private(set) var narrationCancellationCount = 0
 
     func fetchIndex(ifNoneMatch etag: String?) async throws -> BriefingIndexFetchResult {
         indexEtags.append(etag)
@@ -692,11 +684,61 @@ private final class MockBriefingService: BriefingServicing {
 
     func requestNarration(lensKey: String) async throws -> AudioEpisode {
         narrationLensKeys.append(lensKey)
+        if let narrationRequestDelayNanoseconds {
+            try await Task.sleep(nanoseconds: narrationRequestDelayNanoseconds)
+        }
+        if narrationWaitsForCancellation {
+            do {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                narrationCancellationCount += 1
+                throw error
+            }
+        }
+        if let narrationError {
+            throw narrationError
+        }
+        if !narrationEpisodes.isEmpty {
+            return narrationEpisodes.removeFirst()
+        }
         return narrationEpisode ?? makeAudioEpisode(id: 1)
     }
 }
 
-private final class MockBriefingSnapshotStore: BriefingSnapshotStoring {
+@MainActor
+final class MockBriefingAudioEpisodeService: BriefingAudioEpisodeServicing {
+    var waitResults: [Result<AudioEpisode, Error>] = []
+    private(set) var waitedEpisodeIDs: [Int] = []
+
+    func waitForCompletedEpisode(
+        _ episode: AudioEpisode,
+        pollIntervalNanoseconds: UInt64,
+        maxAttempts: Int
+    ) async throws -> AudioEpisode {
+        waitedEpisodeIDs.append(episode.id)
+        guard !waitResults.isEmpty else { return episode }
+        return try waitResults.removeFirst().get()
+    }
+
+    func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource {
+        throw AudioEpisodeServiceError.missingStreamResource
+    }
+}
+
+extension BriefingViewModel {
+    convenience init(
+        service: BriefingServicing,
+        snapshotStore: BriefingSnapshotStoring? = nil
+    ) {
+        self.init(
+            service: service,
+            audioEpisodeService: MockBriefingAudioEpisodeService(),
+            snapshotStore: snapshotStore
+        )
+    }
+}
+
+final class MockBriefingSnapshotStore: BriefingSnapshotStoring {
     var snapshotToLoad: BriefingSnapshot?
     private(set) var savedSnapshots: [BriefingSnapshot] = []
     private(set) var clearCalls = 0
@@ -715,7 +757,7 @@ private final class MockBriefingSnapshotStore: BriefingSnapshotStoring {
     }
 }
 
-private func makeIndex(
+func makeIndex(
     version: Int = 1,
     lenses: [APIBriefingLensSummary]
 ) -> APIBriefingIndexResponse {
@@ -728,7 +770,7 @@ private func makeIndex(
     )
 }
 
-private func makeLensSummary(
+func makeLensSummary(
     key: String,
     title: String = "Today",
     position: Int = 0,
@@ -745,7 +787,7 @@ private func makeLensSummary(
     )
 }
 
-private func makeLens(
+func makeLens(
     key: String,
     version: Int = 1,
     position: Int = 0,
@@ -778,7 +820,7 @@ private func makeLens(
     )
 }
 
-private func makeSegment(
+func makeSegment(
     id: Int = 10,
     sourceKeys: [String] = ["content:1"]
 ) -> APIBriefingSegment {
@@ -804,14 +846,19 @@ private func makeSegment(
     )
 }
 
-private func makeAudioEpisode(id: Int) -> AudioEpisode {
+func makeAudioEpisode(
+    id: Int,
+    status: APIAudioEpisodeStatus = .completed,
+    errorMessage: String? = nil
+) -> AudioEpisode {
     AudioEpisode(
         id: id,
         kind: .briefing_narration,
-        status: .completed,
+        status: status,
         title: "Briefing",
         sourceCount: 1,
         sourceTitles: ["Long report"],
+        errorMessage: errorMessage,
         createdAt: Date(timeIntervalSince1970: 1_800_000_200)
     )
 }

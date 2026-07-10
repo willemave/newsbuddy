@@ -95,8 +95,9 @@ final class CustomNarrationCreationViewModel {
         } catch where isNetworkCancellation(error) {
             return false
         } catch {
-            errorMessage = error.localizedDescription
-            toastPresenter.showError("Failed to create narration: \(error.localizedDescription)")
+            let message = userFacingMessage(for: error)
+            errorMessage = message
+            toastPresenter.showError("Failed to create narration: \(message)")
             return false
         }
     }
@@ -123,24 +124,32 @@ final class CustomNarrationCreationViewModel {
     }
 
     private func handlePollError(_ error: Error, episodeId: Int) async {
-        let nsError = error as NSError
-        if nsError.domain == "AudioEpisodeService", nsError.code == 1 {
-            let latest = try? await audioService.fetchEpisode(id: episodeId)
-            episode = latest
-            errorMessage = latest?.errorMessage ?? error.localizedDescription
-            toastPresenter.showError(errorMessage ?? "Narration generation failed.")
+        guard let serviceError = error as? AudioEpisodeServiceError else {
+            errorMessage = userFacingMessage(for: error)
+            episode = nil
             return
         }
 
-        if nsError.domain == "AudioEpisodeService", nsError.code == 2 {
+        switch serviceError {
+        case .generationFailed:
+            let latest = try? await audioService.fetchEpisode(id: episodeId)
+            episode = latest
+            errorMessage = serviceError.userFacingMessage
+            toastPresenter.showError(serviceError.userFacingMessage)
+        case .preparationTimedOut:
             let timeoutMessage = "Narration is still generating. Check Knowledge for status."
             errorMessage = timeoutMessage
             episode = nil
             toastPresenter.show(timeoutMessage, type: .info, duration: 3.0)
-            return
+        case .missingStreamResource:
+            errorMessage = serviceError.userFacingMessage
+            episode = nil
+            toastPresenter.showError(serviceError.userFacingMessage)
         }
+    }
 
-        errorMessage = error.localizedDescription
-        episode = nil
+    private func userFacingMessage(for error: Error) -> String {
+        (error as? AudioEpisodeServiceError)?.userFacingMessage
+            ?? AudioEpisodeServiceError.generationFailed.userFacingMessage
     }
 }
