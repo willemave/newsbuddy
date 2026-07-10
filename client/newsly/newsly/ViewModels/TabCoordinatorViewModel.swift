@@ -55,15 +55,12 @@ final class TabCoordinatorViewModel {
     init(
         shortNewsVM: ShortNewsListViewModel,
         longContentVM: LongContentListViewModel,
-        briefingVM: BriefingViewModel? = nil,
+        briefingVM: BriefingViewModel,
         initialTab: RootTab = .shortNews
     ) {
         self.shortNewsVM = shortNewsVM
         self.longContentVM = longContentVM
-        self.briefingVM = briefingVM ?? BriefingViewModel(
-            service: LiveBriefingService(),
-            snapshotStore: BriefingSnapshotStore.shared
-        )
+        self.briefingVM = briefingVM
         self.selectedTab = initialTab
         self.previousTab = initialTab
     }

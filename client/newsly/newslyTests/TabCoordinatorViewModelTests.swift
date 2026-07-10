@@ -17,6 +17,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         let coordinator = TabCoordinatorViewModel(
             shortNewsVM: shortViewModel,
             longContentVM: longViewModel,
+            briefingVM: makeTabBriefingViewModel(),
             initialTab: .longContent
         )
         var longFormRetapCount = 0
@@ -93,6 +94,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         let coordinator = TabCoordinatorViewModel(
             shortNewsVM: shortViewModel,
             longContentVM: longViewModel,
+            briefingVM: makeTabBriefingViewModel(),
             initialTab: .shortNews
         )
 
@@ -120,6 +122,7 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         let coordinator = TabCoordinatorViewModel(
             shortNewsVM: shortViewModel,
             longContentVM: longViewModel,
+            briefingVM: makeTabBriefingViewModel(),
             initialTab: .longContent
         )
 
@@ -482,7 +485,15 @@ final class TabCoordinatorViewModelTests: XCTestCase {
                 unreadCountService: .shared
             ),
             longContentVM: makeLongContentListViewModel(repository: FakeContentRepository()),
+            briefingVM: makeTabBriefingViewModel(),
             initialTab: initialTab
+        )
+    }
+
+    private func makeTabBriefingViewModel() -> BriefingViewModel {
+        BriefingViewModel(
+            service: LiveBriefingService(),
+            audioEpisodeService: AudioEpisodeService.shared
         )
     }
 
