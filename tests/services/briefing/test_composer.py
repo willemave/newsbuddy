@@ -13,6 +13,7 @@ from app.services.briefing.composer import (
     _parse_composer_layout_json,
     _source_payload,
     compose_window,
+    plan_windows,
     process_generated_layout,
 )
 from app.services.briefing.layout_models import FigureBlock, PassageBlock, PullquoteBlock
@@ -39,6 +40,42 @@ SCALAR_DUMP_BLOCKS = [
     {"type": "pullquote", "text": "normal"},
     {"type": "figure", "source_key": "normal", "caption": "normal"},
 ]
+
+
+@pytest.mark.parametrize(
+    ("source_count", "expected_sizes"),
+    [
+        (1, [1]),
+        (2, [2]),
+        (3, [3]),
+        (4, [4]),
+        (5, [3, 2]),
+        (6, [3, 3]),
+        (7, [4, 3]),
+        (8, [4, 4]),
+        (9, [3, 3, 3]),
+    ],
+)
+def test_plan_windows_balances_news_without_singleton_tails(
+    source_count: int,
+    expected_sizes: list[int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = composer.get_settings()
+    monkeypatch.setattr(settings, "briefing_news_window_max", 4)
+
+    windows = plan_windows(list(range(source_count)), tier="news", settings=settings)
+
+    assert [len(window) for window in windows] == expected_sizes
+
+
+def test_plan_windows_keeps_longform_chunking_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = composer.get_settings()
+    monkeypatch.setattr(settings, "briefing_window_max", 4)
+
+    windows = plan_windows(list(range(5)), tier="longform", settings=settings)
+
+    assert windows == [[0, 1, 2, 3], [4]]
 
 
 def test_compose_window_falls_back_after_llm_unavailable() -> None:
@@ -230,6 +267,124 @@ def test_compose_window_repairs_missing_coverage_without_retry() -> None:
     assert "coverage_repair:1" in segment.warnings
     assert segment.final_assessment is not None
     assert segment.final_assessment.layout_valid is True
+
+
+def test_news_compose_retries_until_links_share_one_paragraph() -> None:
+    attempts: list[int] = []
+    sources = [_news_source(1), _news_source(2)]
+
+    def fake_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
+        separator = "\n\n" if len(attempts) == 1 else " "
+        return [
+            {
+                "type": "passage",
+                "weight": "brief",
+                "markdown": (
+                    "[First](newsly://briefing/news/1) explains the first item."
+                    + separator
+                    + "[Second](newsly://briefing/news/2) explains the second item."
+                ),
+            }
+        ], None
+
+    segment = compose_window(
+        sources,
+        lens_key="news-test",
+        lens_title="Test News",
+        tier="news",
+        window_index=1,
+        use_llm=True,
+        layout_generator=fake_llm,
+    )
+
+    assert len(attempts) == 2
+    assert segment.model != "deterministic"
+    assert "llm_layout_policy_retry:1" in segment.warnings
+    assert "coverage_repair:1" not in segment.warnings
+    assert len(segment.blocks) == 1
+    assert len(segment.blocks[0]["paragraphs"]) == 1
+
+
+def test_news_compose_falls_back_cleanly_after_contract_failures() -> None:
+    attempts: list[int] = []
+    sources = [_news_source(1), _news_source(2)]
+
+    def invalid_news_layout(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
+        return [
+            {
+                "type": "passage",
+                "weight": "brief",
+                "markdown": "The first item and second item are both notable.",
+            }
+        ], None
+
+    segment = compose_window(
+        sources,
+        lens_key="news-test",
+        lens_title="Test News",
+        tier="news",
+        window_index=1,
+        use_llm=True,
+        layout_generator=invalid_news_layout,
+    )
+
+    assert len(attempts) == MAX_COMPOSE_ATTEMPTS
+    assert segment.model == "deterministic"
+    assert "news_layout_contract_fallback" in segment.warnings
+    assert not any(warning.startswith("coverage_repair:") for warning in segment.warnings)
+    assert len(segment.blocks) == 1
+    paragraphs = segment.blocks[0]["paragraphs"]
+    assert len(paragraphs) == 1
+    linked_keys = [
+        run["source_key"] for run in paragraphs[0]["runs"] if run["kind"] == "source_link"
+    ]
+    assert linked_keys == ["news:1", "news:2"]
+
+
+def test_news_compose_falls_back_cleanly_when_json_stays_invalid() -> None:
+    attempts: list[int] = []
+    sources = [_news_source(1), _news_source(2)]
+
+    def invalid_json(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
+        raise json.JSONDecodeError("Unterminated string", '{"blocks":[{"type":"passage"', 21)
+
+    segment = compose_window(
+        sources,
+        lens_key="news-test",
+        lens_title="Test News",
+        tier="news",
+        window_index=1,
+        use_llm=True,
+        layout_generator=invalid_json,
+    )
+
+    assert len(attempts) == MAX_COMPOSE_ATTEMPTS
+    assert segment.model == "deterministic"
+    assert "news_invalid_layout_fallback" in segment.warnings
+    assert len(segment.blocks) == 1
+    assert len(segment.blocks[0]["paragraphs"]) == 1
+
+
+def test_deterministic_news_layout_remains_one_paragraph_at_max_batch() -> None:
+    segment = compose_window(
+        [_news_source(index) for index in range(1, 5)],
+        lens_key="news-test",
+        lens_title="Test News",
+        tier="news",
+        window_index=1,
+        use_llm=False,
+    )
+
+    assert len(segment.blocks) == 1
+    paragraphs = segment.blocks[0]["paragraphs"]
+    assert len(paragraphs) == 1
+    linked_keys = [
+        run["source_key"] for run in paragraphs[0]["runs"] if run["kind"] == "source_link"
+    ]
+    assert linked_keys == [f"news:{index}" for index in range(1, 5)]
 
 
 def test_compose_window_repairs_unknown_optional_figure_without_retry() -> None:
@@ -473,4 +628,22 @@ def _source_with_context(
         published_at=datetime(2026, 1, 1, tzinfo=UTC),
         content_type=ContentType.ARTICLE,
         briefing_context=briefing_context,
+    )
+
+
+def _news_source(news_id: int) -> BriefingSource:
+    return BriefingSource(
+        source_key=f"news:{news_id}",
+        kind="news",
+        id=news_id,
+        tier="news",
+        lens_key="news-test",
+        title=f"News item {news_id}",
+        summary=f"News summary {news_id}.",
+        key_points=[],
+        url=f"https://example.com/news/{news_id}",
+        image_url=None,
+        thumbnail_url=None,
+        published_at=datetime(2026, 1, 1, tzinfo=UTC),
+        content_type=ContentType.NEWS,
     )

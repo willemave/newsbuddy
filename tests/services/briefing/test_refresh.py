@@ -665,6 +665,160 @@ def test_append_enqueue_coalesces_but_manual_refresh_pulls_pending_task_forward(
     assert task.available_at <= now + timedelta(seconds=5)
 
 
+def test_append_enqueue_moves_deadline_earlier_but_never_later(
+    db_session: Session,
+    test_user: User,
+) -> None:
+    assert test_user.id is not None
+    user_id = test_user.id
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    assert enqueue_briefing_refresh_task(
+        db_session,
+        user_id=user_id,
+        mode="sweep",
+        delay_seconds=1800,
+    )
+    assert not enqueue_briefing_refresh_task(
+        db_session,
+        user_id=user_id,
+        mode="sweep",
+        delay_seconds=2400,
+    )
+    assert enqueue_briefing_refresh_task(
+        db_session,
+        user_id=user_id,
+        mode="sweep",
+        delay_seconds=600,
+    )
+    task = (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.dedupe_key == f"briefing_refresh:{user_id}:sweep")
+        .one()
+    )
+
+    assert task.available_at is not None
+    assert now + timedelta(seconds=590) <= task.available_at <= now + timedelta(seconds=610)
+
+
+def test_three_unassigned_news_sources_compose_as_the_preferred_batch(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    monkeypatch.setattr(settings, "briefing_window_min", 3)
+    monkeypatch.setattr(settings, "briefing_new_lens_min_items", 3)
+    monkeypatch.setattr(settings, "briefing_news_window_max", 4)
+
+    items = [
+        news_item_factory(
+            visibility_scope="user",
+            owner_user_id=user_id,
+            article_title=f"Preferred Batch Story {index}",
+            summary_title=f"Preferred Batch Story {index}",
+        )
+        for index in range(3)
+    ]
+    db_session.add_all(
+        [
+            BriefingPendingSource(
+                user_id=user_id,
+                source_kind="news",
+                source_id=item.id,
+            )
+            for item in items
+        ]
+    )
+    db_session.commit()
+
+    result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="append",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert result.appended_segments == 1
+    assert db_session.query(BriefingPendingSource).filter_by(user_id=user_id).count() == 0
+    segment = db_session.query(BriefingSegment).filter_by(user_id=user_id).one()
+    assert segment.source_keys == [f"news:{item.id}" for item in items]
+
+
+def test_unassigned_news_waits_for_target_then_flushes_at_25_minute_deadline(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    monkeypatch.setattr(settings, "briefing_window_min", 3)
+    monkeypatch.setattr(settings, "briefing_pending_max_age_seconds", 1500)
+    monkeypatch.setattr(settings, "briefing_sweep_seconds", 3600)
+
+    item = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=user_id,
+        article_title="A low-volume deadline story",
+        summary_title="A low-volume deadline story",
+    )
+    enqueued_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=5)
+    pending = BriefingPendingSource(
+        user_id=user_id,
+        source_kind="news",
+        source_id=item.id,
+        enqueued_at=enqueued_at,
+    )
+    db_session.add(pending)
+    db_session.commit()
+
+    waiting_result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="append",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert waiting_result.appended_segments == 0
+    assert db_session.query(BriefingPendingSource).filter_by(user_id=user_id).count() == 1
+    sweep_task = (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.dedupe_key == f"briefing_refresh:{user_id}:sweep")
+        .one()
+    )
+    assert sweep_task.available_at is not None
+    expected_deadline = enqueued_at + timedelta(seconds=1500)
+    assert expected_deadline <= sweep_task.available_at <= expected_deadline + timedelta(seconds=2)
+
+    pending.enqueued_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1501)
+    db_session.commit()
+    deadline_result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="sweep",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert deadline_result.appended_segments == 1
+    assert db_session.query(BriefingPendingSource).filter_by(user_id=user_id).count() == 0
+    misc_lens = db_session.query(BriefingLens).filter_by(user_id=user_id, key="misc").one()
+    segment = db_session.query(BriefingSegment).filter_by(lens_id=misc_lens.id).one()
+    assert segment.source_keys == [f"news:{item.id}"]
+
+
 def _create_unread_article(
     content_factory,
     status_entry_factory,

@@ -704,7 +704,7 @@ def _assign_stale_misc_lens(
         (row.enqueued_at for row, _source in unassigned if row.enqueued_at is not None),
         default=now,
     )
-    if (now - oldest).total_seconds() < 86_400:
+    if (now - oldest).total_seconds() < settings.briefing_pending_max_age_seconds:
         return 0
 
     lens = _get_or_create_misc_lens_if_allowed(db, user_id=user_id, settings=settings)
@@ -751,7 +751,7 @@ def _assign_new_or_misc_lens(
             centroid_weight=len(sources) if centroid is not None else 0,
             centroid_model=settings.news_embedding_model if centroid is not None else None,
         )
-    elif should_make_new or age_seconds >= 86_400:
+    elif should_make_new or age_seconds >= settings.briefing_pending_max_age_seconds:
         lens = _get_or_create_misc_lens_if_allowed(db, user_id=user_id, settings=settings)
         if lens is None:
             return _assign_to_existing_news_lenses(

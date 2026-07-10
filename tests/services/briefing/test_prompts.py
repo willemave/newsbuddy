@@ -17,7 +17,6 @@ def test_briefing_layout_prompt_sections_render(tier: str) -> None:
     assert f"`{tier}` tier" in system_prompt
     assert "Never use em dashes" in system_prompt
     assert "roughly four to ten words" in system_prompt
-    assert "in the first paragraph, toward the beginning" in system_prompt
     assert "newsly://briefing/" in system_prompt
     assert "news://briefing/" not in system_prompt
     assert "Lens: AI desk" in user_prompt
@@ -41,8 +40,12 @@ def test_deep_tier_prompts_demand_substantive_treatment(tier: str) -> None:
 
 def test_news_tier_prompt_forbids_figures() -> None:
     system_prompt = render_prompt("briefing/layout_news#system")
+    normalized_prompt = " ".join(system_prompt.split())
 
-    assert "Do not include `figure` blocks" in system_prompt
+    assert "Return exactly one `passage` block" in system_prompt
+    assert "Do not include `figure` or `pullquote` blocks" in system_prompt
+    assert "Write exactly one compact paragraph of at most three sentences" in system_prompt
+    assert "link every provided source exactly once" in normalized_prompt
 
 
 def test_layout_prompt_name_rejects_unknown_tier() -> None:

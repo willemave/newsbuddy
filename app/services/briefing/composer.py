@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 import time
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -105,15 +107,25 @@ class ProcessedLayout:
         )
 
 
-def plan_windows(
-    sources: list[BriefingSource],
+def plan_windows[WindowItem](
+    sources: list[WindowItem],
     *,
     tier: str,
     settings: Settings | None = None,
-) -> list[list[BriefingSource]]:
+) -> list[list[WindowItem]]:
     settings = settings or get_settings()
     max_size = settings.briefing_news_window_max if tier == "news" else settings.briefing_window_max
     max_size = max(1, max_size)
+    if tier == "news" and sources:
+        window_count = (len(sources) + max_size - 1) // max_size
+        base_size, larger_windows = divmod(len(sources), window_count)
+        windows: list[list[WindowItem]] = []
+        start = 0
+        for window_index in range(window_count):
+            size = base_size + int(window_index < larger_windows)
+            windows.append(sources[start : start + size])
+            start += size
+        return windows
     return [sources[index : index + max_size] for index in range(0, len(sources), max_size)]
 
 
@@ -176,6 +188,9 @@ def compose_window(
                     },
                 )
                 if attempt >= MAX_COMPOSE_ATTEMPTS:
+                    if tier == "news":
+                        fallback_reason = "news_invalid_layout_fallback"
+                        break
                     raise BriefingCompositionInvalidOutput(
                         "Briefing LLM returned invalid layout JSON after retries"
                     ) from exc
@@ -200,6 +215,9 @@ def compose_window(
                     },
                 )
                 if attempt >= MAX_COMPOSE_ATTEMPTS:
+                    if tier == "news":
+                        fallback_reason = "news_invalid_layout_fallback"
+                        break
                     raise
                 warnings.append(f"llm_invalid_output_retry:{attempt}")
                 continue
@@ -239,7 +257,10 @@ def compose_window(
                 figure_budget=figure_budget,
                 ensure_source_figures=tier != "news",
             )
-            if candidate.accepted:
+            news_contract_issues = (
+                _news_layout_contract_issues(candidate, sources=sources) if tier == "news" else []
+            )
+            if candidate.accepted and not news_contract_issues:
                 processed = candidate
                 if usage:
                     input_tokens = usage.get("input_tokens")
@@ -264,10 +285,14 @@ def compose_window(
                             if candidate.final_assessment is not None
                             else []
                         ),
+                        "news_contract_issues": news_contract_issues,
                     },
                 },
             )
             if attempt >= MAX_COMPOSE_ATTEMPTS:
+                if tier == "news":
+                    fallback_reason = "news_layout_contract_fallback"
+                    break
                 raise BriefingCompositionInvalidOutput(
                     "Briefing LLM layout failed policy after retries"
                 )
@@ -407,6 +432,12 @@ def deterministic_layout(
     sentences = [_source_sentence(source, index=index) for index, source in enumerate(sources)]
     source_label = "source" if len(sources) == 1 else "sources"
     intro = f"**{lens_title}** opens with {len(sources)} unread {source_label}."
+    if tier == "news":
+        clauses = [re.sub(r"[.!?]+(?=\s|$)", ",", sentence).strip(" ,;") for sentence in sentences]
+        markdown = f"{intro.rstrip('.')}: " + "; ".join(clauses) + "."
+        return ComposerLayout(
+            blocks=[PassageBlock(type="passage", markdown=markdown, weight="feature")]
+        )
     markdown = intro + " " + " ".join(sentences)
     blocks: list[ComposerBlock] = [
         PassageBlock(type="passage", markdown=markdown, weight="feature")
@@ -434,6 +465,44 @@ def deterministic_layout(
             )
         )
     return ComposerLayout(blocks=blocks)
+
+
+def _news_layout_contract_issues(
+    processed: ProcessedLayout,
+    *,
+    sources: list[BriefingSource],
+) -> list[str]:
+    if len(processed.raw_blocks) != 1 or processed.raw_blocks[0].get("type") != "passage":
+        return ["news_requires_one_passage"]
+    raw_markdown = str(
+        processed.raw_blocks[0].get("markdown") or processed.raw_blocks[0].get("text") or ""
+    ).strip()
+    raw_paragraphs = [
+        paragraph for paragraph in re.split(r"\n\s*\n", raw_markdown) if paragraph.strip()
+    ]
+    if len(raw_paragraphs) != 1:
+        return ["news_requires_one_paragraph"]
+
+    normalized = processed.normalized
+    if normalized is None:
+        return ["missing_normalized_layout"]
+    if len(normalized.blocks) != 1 or normalized.blocks[0].get("type") != "passage":
+        return ["news_requires_one_passage"]
+
+    paragraphs = normalized.blocks[0].get("paragraphs")
+    if not isinstance(paragraphs, list) or len(paragraphs) != 1:
+        return ["news_requires_one_paragraph"]
+
+    linked_keys = [
+        str(run.get("source_key"))
+        for run in paragraphs[0].get("runs", [])
+        if isinstance(run, dict)
+        and run.get("kind") == "source_link"
+        and run.get("source_key") is not None
+    ]
+    if Counter(linked_keys) != Counter(source.source_key for source in sources):
+        return ["news_requires_each_source_linked_once"]
+    return []
 
 
 def _source_sentence(source: BriefingSource, *, index: int) -> str:

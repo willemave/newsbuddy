@@ -3,9 +3,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from math import ceil
 from typing import Literal
 
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
@@ -155,12 +156,16 @@ def enqueue_briefing_refresh_task(
     ).scalar_one_or_none()
     if inserted is not None:
         return True
-    if delay_seconds > 0:
-        return False
     updated = (
         db.query(ProcessingTask)
         .filter(ProcessingTask.dedupe_key == dedupe_key)
         .filter(ProcessingTask.status == TaskStatus.PENDING.value)
+        .filter(
+            or_(
+                ProcessingTask.available_at.is_(None),
+                ProcessingTask.available_at > available_at,
+            )
+        )
         .update({ProcessingTask.available_at: available_at}, synchronize_session=False)
     )
     return bool(updated)
@@ -248,12 +253,7 @@ def run_briefing_refresh(
         state.version = version
     if task_id is not None and mode == "sweep":
         _release_current_sweep_dedupe(db, task_id=task_id)
-    sweep_enqueued = enqueue_briefing_refresh_task(
-        db,
-        user_id=user_id,
-        mode="sweep",
-        delay_seconds=settings.briefing_sweep_seconds,
-    )
+    sweep_enqueued = _schedule_next_sweep(db, user_id=user_id, settings=settings)
     db.flush()
     return BriefingRefreshResult(
         user_id=user_id,
@@ -352,12 +352,7 @@ def _run_refresh_releasing_db(
         state.version = version
     if task_id is not None and mode == "sweep":
         _release_current_sweep_dedupe(db, task_id=task_id)
-    sweep_enqueued = enqueue_briefing_refresh_task(
-        db,
-        user_id=user_id,
-        mode="sweep",
-        delay_seconds=settings.briefing_sweep_seconds,
-    )
+    sweep_enqueued = _schedule_next_sweep(db, user_id=user_id, settings=settings)
     db.flush()
     return BriefingRefreshResult(
         user_id=user_id,
@@ -380,12 +375,7 @@ def _finish_empty_append_refresh(
 ) -> BriefingRefreshResult:
     state = ensure_state(db, user_id=user_id, settings=settings)
     state.last_sweep_at = datetime.now(UTC).replace(tzinfo=None)
-    sweep_enqueued = enqueue_briefing_refresh_task(
-        db,
-        user_id=user_id,
-        mode="sweep",
-        delay_seconds=settings.briefing_sweep_seconds,
-    )
+    sweep_enqueued = _schedule_next_sweep(db, user_id=user_id, settings=settings)
     db.flush()
     return BriefingRefreshResult(
         user_id=user_id,
@@ -412,6 +402,88 @@ def _release_current_sweep_dedupe(db: Session, *, task_id: int) -> None:
         ProcessingTask.task_type == TaskType.BRIEFING_REFRESH.value,
         ProcessingTask.status == TaskStatus.PROCESSING.value,
     ).update({ProcessingTask.dedupe_key: None}, synchronize_session=False)
+
+
+def _schedule_next_sweep(db: Session, *, user_id: int, settings: Settings) -> bool:
+    pending_delay = _next_pending_news_deadline_delay(db, user_id=user_id, settings=settings)
+    delay_seconds = settings.briefing_sweep_seconds
+    if pending_delay is not None:
+        delay_seconds = min(delay_seconds, pending_delay)
+    return enqueue_briefing_refresh_task(
+        db,
+        user_id=user_id,
+        mode="sweep",
+        delay_seconds=delay_seconds,
+    )
+
+
+def _next_pending_news_deadline_delay(
+    db: Session,
+    *,
+    user_id: int,
+    settings: Settings,
+) -> int | None:
+    rows = (
+        db.query(BriefingPendingSource)
+        .outerjoin(
+            BriefingLens,
+            (BriefingLens.user_id == BriefingPendingSource.user_id)
+            & (BriefingLens.key == BriefingPendingSource.lens_key),
+        )
+        .filter(
+            BriefingPendingSource.user_id == user_id,
+            BriefingPendingSource.source_kind == "news",
+            or_(
+                BriefingPendingSource.lens_key.is_(None),
+                (BriefingLens.status == "active") & (BriefingLens.tier == "news"),
+            ),
+        )
+        .order_by(BriefingPendingSource.enqueued_at.asc(), BriefingPendingSource.id.asc())
+        .all()
+    )
+    if not rows:
+        return None
+
+    oldest_by_lens: dict[str, datetime] = {}
+    counts_by_lens: dict[str, int] = {}
+    for row in rows:
+        lens_key = row.lens_key or "__unassigned__"
+        enqueued_at = row.enqueued_at
+        if not isinstance(enqueued_at, datetime):
+            continue
+        counts_by_lens[lens_key] = counts_by_lens.get(lens_key, 0) + 1
+        oldest_by_lens.setdefault(lens_key, enqueued_at)
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    delays = [
+        max(
+            0,
+            ceil(
+                (
+                    oldest + timedelta(seconds=settings.briefing_pending_max_age_seconds) - now
+                ).total_seconds()
+            ),
+        )
+        for lens_key, oldest in oldest_by_lens.items()
+        if counts_by_lens.get(lens_key, 0) < settings.briefing_window_min
+    ]
+    return min(delays) if delays else 0
+
+
+def _pending_rows_are_ready(
+    pending_rows: list[BriefingPendingSource],
+    *,
+    tier: str,
+    mode: RefreshMode,
+    settings: Settings,
+    now: datetime,
+) -> bool:
+    if tier != "news" or mode == "full" or len(pending_rows) >= settings.briefing_window_min:
+        return True
+    oldest = pending_rows[0].enqueued_at
+    if not isinstance(oldest, datetime):
+        return False
+    return (now - oldest).total_seconds() >= settings.briefing_pending_max_age_seconds
 
 
 def _seed_pending_from_unread(
@@ -471,6 +543,7 @@ def _plan_ready_windows(
         .order_by(BriefingLens.position.asc(), BriefingLens.id.asc())
         .all()
     )
+    now = datetime.now(UTC).replace(tzinfo=None)
     for lens in lenses:
         if lens.id is None:
             continue
@@ -482,6 +555,14 @@ def _plan_ready_windows(
             .all()
         )
         if not pending_rows:
+            continue
+        if not _pending_rows_are_ready(
+            pending_rows,
+            tier=str(lens.tier),
+            mode=mode,
+            settings=settings,
+            now=now,
+        ):
             continue
         source_keys = [f"{row.source_kind}:{row.source_id}" for row in pending_rows]
         source_map = sources_for_keys(db, user_id=user_id, source_keys=source_keys)
@@ -495,14 +576,10 @@ def _plan_ready_windows(
         ]
         if not source_rows:
             continue
-        max_size = (
-            settings.briefing_news_window_max
-            if str(lens.tier) == "news"
-            else settings.briefing_window_max
-        )
-        max_size = max(1, max_size)
-        for window_index, start in enumerate(range(0, len(source_rows), max_size), start=1):
-            window_rows = source_rows[start : start + max_size]
+        for window_index, window_rows in enumerate(
+            plan_windows(source_rows, tier=str(lens.tier), settings=settings),
+            start=1,
+        ):
             windows.append(
                 _PreparedWindow(
                     lens_id=int(lens.id),
@@ -640,6 +717,7 @@ def _append_ready_windows(
         .order_by(BriefingLens.position.asc(), BriefingLens.id.asc())
         .all()
     )
+    now = datetime.now(UTC).replace(tzinfo=None)
     for lens in lenses:
         pending_rows = (
             db.query(BriefingPendingSource)
@@ -649,6 +727,14 @@ def _append_ready_windows(
             .all()
         )
         if not pending_rows:
+            continue
+        if not _pending_rows_are_ready(
+            pending_rows,
+            tier=str(lens.tier),
+            mode=mode,
+            settings=settings,
+            now=now,
+        ):
             continue
         source_keys = [f"{row.source_kind}:{row.source_id}" for row in pending_rows]
         source_map = sources_for_keys(db, user_id=user_id, source_keys=source_keys)

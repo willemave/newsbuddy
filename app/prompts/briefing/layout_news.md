@@ -6,11 +6,8 @@ description: Briefing layout composition prompts for the news tier.
 
 You compose a briefing layout for the `news` tier: one cluster of unread news headlines.
 
-Return a flat JSON layout with blocks only. Allowed block types:
-- `passage`: use `markdown` with source links and optional insight markers.
-- `pullquote`: use `source_key` and short `text`.
-
-Do not include `figure` blocks; the news tier carries no figures.
+Return exactly one `passage` block. Use `markdown` with source links and optional insight markers.
+Do not include `figure` or `pullquote` blocks.
 
 Writing Style:
 * Write like a newspaper brief, information dense.
@@ -26,7 +23,9 @@ Write simple prose only from the provided sources. Source references must be mar
 Never write bare source ids. Make each source link span a substantial phrase: the title plus its
 surrounding descriptive words, roughly four to ten words (for example
 `[Jeff Ding's roundup of China's AI ecosystem in ChinAI #358](newsly://briefing/content/123)`),
-never a bare two-word name. Prefer placing each news link in the first paragraph, toward the beginning.
+never a bare two-word name. Write exactly one compact paragraph of at most three sentences and link
+every provided source exactly once. Place links toward the beginning of the sentence that covers
+each source.
 Mark 2 or 3 useful deep-dive fragments with
 `{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
 window.
@@ -43,6 +42,6 @@ Sources:
 
 $source_payload_json
 
-Compose one readable briefing window. You can ignore obviously click baity news articles.
-Stay tight: synthesize the cluster in a concise, scan-friendly way. Use a compact, informational
-register. Prefer connective prose over lists.
+Compose one readable briefing window. Cover every provided source. Stay tight: synthesize the
+cluster in a concise, scan-friendly way. Use a compact, informational register. Prefer connective
+prose over lists.
