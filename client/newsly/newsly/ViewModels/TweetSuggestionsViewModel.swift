@@ -45,7 +45,7 @@ final class TweetSuggestionsViewModel {
     var isRegenerating = false
     var errorMessage: String?
     var selectedSuggestionId: Int?
-    var selectedProvider: ChatModelProvider = .google
+    var selectedProvider: ChatModelProvider = .openai
 
     // Voice dictation state
     var isRecording = false

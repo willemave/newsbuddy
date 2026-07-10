@@ -79,11 +79,19 @@ def test_resolve_model_uses_gpt_5_5_for_openai_default() -> None:
     assert model_spec == "openai:gpt-5.5"
 
 
-def test_resolve_model_google_default_stays_on_gemini() -> None:
-    provider, model_spec = llm_models.resolve_model(llm_models.LLMProvider.GOOGLE, None)
+def test_resolve_model_google_requires_explicit_model_hint() -> None:
+    with pytest.raises(ValueError, match="Explicit model hint required for provider: google"):
+        llm_models.resolve_model(llm_models.LLMProvider.GOOGLE, None)
+
+
+def test_resolve_model_preserves_explicit_google_gla_prefix() -> None:
+    provider, model_spec = llm_models.resolve_model(
+        llm_models.LLMProvider.GOOGLE,
+        "google-gla:gemini-3.1-flash-lite-preview",
+    )
 
     assert provider == llm_models.LLMProvider.GOOGLE.value
-    assert model_spec == "google:gemini-3.1-flash-lite-preview"
+    assert model_spec == "google-gla:gemini-3.1-flash-lite-preview"
 
 
 def test_build_pydantic_model_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,7 +113,7 @@ def test_build_pydantic_model_google(monkeypatch: pytest.MonkeyPatch) -> None:
     model, model_settings = llm_models.build_pydantic_model("gemini-3.1-flash-lite-preview")
 
     assert isinstance(model, GoogleModel)
-    assert model._provider.name == "google-vertex"
+    assert model.model_name == "gemini-3.1-flash-lite-preview"
     assert model_settings is not None
     assert cast(dict[str, object], model_settings)["google_thinking_config"] == {
         "include_thoughts": False,
@@ -113,21 +121,7 @@ def test_build_pydantic_model_google(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
-def test_build_pydantic_model_google_gemini3(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(llm_models, "get_settings", lambda: _settings(google_api_key="test-key"))
-
-    model, model_settings = llm_models.build_pydantic_model("gemini-3.1-flash-lite-preview")
-
-    assert isinstance(model, GoogleModel)
-    assert model._provider.name == "google-vertex"
-    assert model_settings is not None
-    assert cast(dict[str, object], model_settings)["google_thinking_config"] == {
-        "include_thoughts": False,
-        "thinking_level": "low",
-    }
-
-
-def test_build_pydantic_model_google_uses_project_when_available(
+def test_build_pydantic_model_google_gla_prefix_uses_api_key_with_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -140,10 +134,63 @@ def test_build_pydantic_model_google_uses_project_when_available(
         ),
     )
 
-    model, _ = llm_models.build_pydantic_model("gemini-3-flash-preview")
+    model, model_settings = llm_models.build_pydantic_model(
+        "google-gla:gemini-3.1-flash-lite-preview"
+    )
 
     assert isinstance(model, GoogleModel)
-    assert model._provider.name == "google-vertex"
+    assert model.model_name == "gemini-3.1-flash-lite-preview"
+    assert model_settings is not None
+    assert cast(dict[str, object], model_settings)["google_thinking_config"] == {
+        "include_thoughts": False,
+        "thinking_level": "low",
+    }
+
+
+def test_google_provider_config_uses_gla_for_api_key() -> None:
+    config = llm_models.resolve_google_provider_config(
+        provider_prefix="google",
+        api_key_override=None,
+        platform_api_key="platform-key",
+        cloud_project=None,
+        cloud_location="global",
+    )
+
+    assert config.vertexai is False
+    assert config.api_key == "platform-key"
+    assert config.project is None
+    assert config.location is None
+
+
+def test_google_provider_config_uses_vertex_for_explicit_project() -> None:
+    config = llm_models.resolve_google_provider_config(
+        provider_prefix="google",
+        api_key_override=None,
+        platform_api_key="platform-key",
+        cloud_project="news-app-prod",
+        cloud_location="us-central1",
+    )
+
+    assert config.vertexai is True
+    assert config.api_key is None
+    assert config.project == "news-app-prod"
+    assert config.location == "us-central1"
+
+
+@pytest.mark.parametrize("provider_prefix", ["google", "google-gla"])
+def test_google_provider_config_uses_gla_for_api_key_override(provider_prefix: str) -> None:
+    config = llm_models.resolve_google_provider_config(
+        provider_prefix=provider_prefix,
+        api_key_override="user-key",
+        platform_api_key="platform-key",
+        cloud_project="news-app-prod",
+        cloud_location="us-central1",
+    )
+
+    assert config.vertexai is False
+    assert config.api_key == "user-key"
+    assert config.project is None
+    assert config.location is None
 
 
 def test_build_pydantic_model_openrouter_uses_native_json_schema_profile(

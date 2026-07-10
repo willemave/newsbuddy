@@ -83,7 +83,7 @@ struct ChatComposerDock: View {
                         Label("Switching unavailable in Council", systemImage: "person.3.sequence.fill")
                             .disabled(true)
                     } else {
-                        ForEach(ChatModelProvider.allCases.filter { !$0.isDeepResearch }, id: \.self) { provider in
+                        ForEach(ChatModelProvider.selectableProviders, id: \.self) { provider in
                             Button {
                                 onSwitchProvider(provider)
                             } label: {

@@ -61,12 +61,12 @@ Validation:
 
 Script generation:
 
-- Use the repo's Gemini Flash Lite model spec: `google:gemini-3.1-flash-lite-preview`.
+- Use the repo's dialogue model spec: `openrouter:deepseek/deepseek-v4-flash`.
 - Add a separate custom narration prompt path instead of reusing `CONTENT_COUNCIL_DISCUSSION_KIND`.
 - Do not use `_excerpt_longform_source_text(...)` for this path.
 - Build one prompt with all selected full source texts/transcripts, source metadata, and summaries.
 - Generate one structured script with dialogue turns.
-- Make script length limits kind-aware because the current `AudioEpisodeScript` schema is tuned for 60-90 second episodes.
+- Let the script use the natural number and length of turns required by the selected sources; provider-bound TTS chunking is handled after script generation.
 - Continue recording model usage with `feature="audio_episode_script"` and metadata kind `custom_narration`.
 
 Audio generation:

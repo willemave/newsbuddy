@@ -14,7 +14,7 @@ def _set_required_env(monkeypatch) -> None:
 
 
 def test_pdf_gemini_model_default(monkeypatch):
-    """Default model is gemini-3.1-flash-lite-preview."""
+    """Default model remains the explicitly configured PDF preview model."""
     _set_required_env(monkeypatch)
     monkeypatch.delenv("PDF_GEMINI_MODEL", raising=False)
     get_settings.cache_clear()

@@ -182,6 +182,16 @@ def test_estimate_vendor_cost_prices_openrouter_deepseek_flash() -> None:
     assert cost == 0.00028
 
 
+def test_estimate_vendor_cost_prices_explicit_gemini_flash_lite_preview() -> None:
+    cost = vendor_costs.estimate_vendor_cost_usd(
+        provider="google",
+        model="google-gla:gemini-3.1-flash-lite-preview",
+        usage={"input_tokens": 1_000, "output_tokens": 500},
+    )
+
+    assert cost == 0.001
+
+
 def test_estimate_vendor_cost_uses_long_context_rates(monkeypatch) -> None:
     monkeypatch.setattr(
         vendor_costs,

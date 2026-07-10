@@ -55,19 +55,6 @@ enum ChatModelProvider: String, Codable, CaseIterable {
         }
     }
 
-    var defaultModel: String {
-        switch self {
-        case .openai:
-            return "gpt-5.5"
-        case .anthropic:
-            return "claude-opus-4-6"
-        case .google:
-            return "gemini-3.1-flash-lite-preview"
-        case .deep_research:
-            return "o4-mini-deep-research-2025-06-26"
-        }
-    }
-
     var chatDisplayName: String {
         switch self {
         case .openai:
@@ -110,9 +97,13 @@ enum ChatModelProvider: String, Codable, CaseIterable {
         }
     }
 
-    /// Providers available for tweet generation (excludes deep research)
+    /// Providers offered for new conversations. Google remains decodable so
+    /// existing sessions keep their original provider label.
+    static let selectableProviders: [ChatModelProvider] = [.openai, .anthropic]
+
+    /// Providers available for tweet generation.
     static var tweetProviders: [ChatModelProvider] {
-        allCases.filter { !$0.isDeepResearch }
+        selectableProviders
     }
 }
 

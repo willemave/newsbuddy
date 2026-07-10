@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from enum import Enum, StrEnum
 from typing import Any, cast
 
@@ -26,7 +26,6 @@ from pydantic_ai.settings import ModelSettings
 from sqlalchemy.orm import Session
 
 from app.core.model_defaults import (
-    CHEAP_GOOGLE_MODEL_SPEC,
     DEEP_RESEARCH_MODEL_NAME,
     DEEP_RESEARCH_MODEL_SPEC,
     FAST_MODEL_SPEC,
@@ -62,7 +61,6 @@ PROVIDER_PREFIXES: dict[str, str] = {
 PROVIDER_DEFAULTS: dict[str, str] = {
     LLMProvider.OPENAI.value: SMART_MODEL_SPEC,
     LLMProvider.ANTHROPIC.value: SMART_ANTHROPIC_MODEL_SPEC,
-    LLMProvider.GOOGLE.value: CHEAP_GOOGLE_MODEL_SPEC,
     LLMProvider.CEREBRAS.value: FAST_MODEL_SPEC,
     LLMProvider.OPENROUTER.value: OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
     LLMProvider.DEEP_RESEARCH.value: DEEP_RESEARCH_MODEL_SPEC,
@@ -76,6 +74,7 @@ DEFAULT_MODEL = PROVIDER_DEFAULTS[DEFAULT_PROVIDER]
 PREFIX_TO_PROVIDER: dict[str, str] = {
     prefix: provider for provider, prefix in PROVIDER_PREFIXES.items()
 }
+PREFIX_TO_PROVIDER["google-gla"] = LLMProvider.GOOGLE.value
 OPENROUTER_MODEL_TIMEOUT_SECONDS = 120.0
 OPENROUTER_PROVIDER_SORT = "throughput"
 OPENROUTER_REASONING_CONFIG = {"enabled": True, "exclude": True}
@@ -114,12 +113,11 @@ def resolve_model(
         return PREFIX_TO_PROVIDER.get(raw, raw)
 
     provider_name = _normalize_provider_name(provider)
-
     if model_hint and ":" in model_hint:
         provider_prefix = model_hint.split(":", 1)[0]
         hinted_provider = PREFIX_TO_PROVIDER.get(provider_prefix, provider_prefix)
         canonical_provider = (
-            hinted_provider if hinted_provider in PROVIDER_DEFAULTS else provider_name
+            hinted_provider if hinted_provider in PROVIDER_PREFIXES else provider_name
         )
         return canonical_provider, model_hint
 
@@ -127,7 +125,10 @@ def resolve_model(
     if model_hint:
         return provider_name, f"{model_prefix}:{model_hint}"
 
-    return provider_name, PROVIDER_DEFAULTS.get(provider_name, DEFAULT_MODEL)
+    default_model_spec = PROVIDER_DEFAULTS.get(provider_name)
+    if default_model_spec is None:
+        raise ValueError(f"Explicit model hint required for provider: {provider_name}")
+    return provider_name, default_model_spec
 
 
 def resolve_model_provider(model_spec: str) -> str:
@@ -194,6 +195,50 @@ def _build_openai_responses_model_settings(
     return model_settings
 
 
+@dataclass(frozen=True)
+class GoogleProviderConfig:
+    """Owned transport decision passed to pydantic-ai's Google provider."""
+
+    vertexai: bool
+    api_key: str | None = field(default=None, repr=False)
+    project: str | None = None
+    location: str | None = None
+
+    def provider_kwargs(self) -> dict[str, Any]:
+        if self.vertexai:
+            return {
+                "project": self.project,
+                "location": self.location,
+                "vertexai": True,
+            }
+        return {"api_key": self.api_key, "vertexai": False}
+
+
+def resolve_google_provider_config(
+    *,
+    provider_prefix: str | None,
+    api_key_override: str | None,
+    platform_api_key: str | None,
+    cloud_project: str | None,
+    cloud_location: str,
+) -> GoogleProviderConfig:
+    """Choose GLA for API keys and Vertex only for explicit cloud projects."""
+    use_google_language_api = (
+        provider_prefix == "google-gla" or api_key_override is not None or not cloud_project
+    )
+    if use_google_language_api:
+        api_key = api_key_override or platform_api_key
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY not configured in settings.")
+        return GoogleProviderConfig(vertexai=False, api_key=api_key)
+
+    return GoogleProviderConfig(
+        vertexai=True,
+        project=cloud_project,
+        location=cloud_location,
+    )
+
+
 def build_pydantic_model(
     model_spec: str,
     *,
@@ -203,7 +248,7 @@ def build_pydantic_model(
     """Construct a pydantic-ai Model with explicit providers where required.
 
     Args:
-        model_spec: Full model spec string (e.g., ``google:gemini-3.1-flash-lite-preview``).
+        model_spec: Full model spec string (e.g., ``google:gemini-3-flash-preview``).
 
     Returns:
         Tuple of (model, model_settings). ``model`` is either a configured ``Model`` instance
@@ -211,7 +256,6 @@ def build_pydantic_model(
         is populated when a provider needs extra request settings.
     """
     settings = get_settings()
-
     provider_prefix = None
     model_name = model_spec
     if ":" in model_spec:
@@ -222,25 +266,19 @@ def build_pydantic_model(
         or model_spec.startswith("google-gla:")
         or model_spec.startswith("gemini")
     ):
-        resolved_api_key = api_key_override or settings.google_api_key
-        if not resolved_api_key and not settings.google_cloud_project:
-            raise ValueError("GOOGLE_API_KEY not configured in settings.")
         model_to_use = (
             model_name
             if provider_prefix
             else (model_spec.split(":", 1)[1] if ":" in model_spec else model_spec)
         )
-        if api_key_override:
-            provider = GoogleProvider(api_key=api_key_override, vertexai=True)
-        elif settings.google_cloud_project:
-            provider = GoogleProvider(
-                project=settings.google_cloud_project,
-                location=settings.google_cloud_location,
-            )
-        else:
-            if resolved_api_key is None:
-                raise ValueError("GOOGLE_API_KEY not configured in settings.")
-            provider = GoogleProvider(api_key=resolved_api_key, vertexai=True)
+        google_provider_config = resolve_google_provider_config(
+            provider_prefix=provider_prefix,
+            api_key_override=api_key_override,
+            platform_api_key=settings.google_api_key,
+            cloud_project=settings.google_cloud_project,
+            cloud_location=settings.google_cloud_location,
+        )
+        provider = GoogleProvider(**google_provider_config.provider_kwargs())
 
         model = GoogleModel(model_to_use, provider=provider)
         # Configure thinking for Google models – suppress thought traces and

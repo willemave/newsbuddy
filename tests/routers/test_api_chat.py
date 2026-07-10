@@ -1391,15 +1391,19 @@ def test_delete_chat_session_wrong_user(client: TestClient, db_session: Session)
 def test_different_llm_providers(client: TestClient, db_session: Session) -> None:
     """Test creating sessions with different LLM providers."""
     providers = [
-        ("openai", "openai:gpt-5.5"),
-        ("anthropic", "anthropic:claude-opus-4-6"),
-        ("google", "google:gemini-3.1-flash-lite-preview"),
+        ("openai", None, "openai:gpt-5.5"),
+        ("anthropic", None, "anthropic:claude-opus-4-6"),
+        (
+            "google",
+            "gemini-3.1-flash-lite-preview",
+            "google:gemini-3.1-flash-lite-preview",
+        ),
     ]
 
-    for provider, expected_model in providers:
+    for provider, model_hint, expected_model in providers:
         response = client.post(
             "/api/content/chat/sessions",
-            json={"llm_provider": provider},
+            json={"llm_provider": provider, "llm_model_hint": model_hint},
         )
         assert response.status_code == 200
 

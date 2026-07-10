@@ -19,8 +19,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
 from app.core.model_defaults import (
-    CHEAP_GOOGLE_MODEL_NAME,
     CHEAP_MODEL_SPEC,
+    GOOGLE_FLASH_LITE_PREVIEW_MODEL_NAME,
     IMAGE_GENERATION_MODEL_NAME,
     OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
     SMART_MODEL_SPEC,
@@ -318,7 +318,6 @@ class Settings(BaseSettings):
     briefing_pending_max_age_seconds: int = Field(default=2700, ge=60, le=86_400)
     briefing_max_segments_per_lens: int = Field(default=12, ge=1, le=100)
     briefing_dig_hourly_limit: int = Field(default=60, ge=0, le=1000)
-    briefing_narration_max_chars: int = Field(default=18_000, ge=500, le=100_000)
     briefing_discussion_strip_enabled: bool = True
     briefing_discussion_overview_max_chars: int = Field(default=280, ge=80, le=900)
 
@@ -428,7 +427,7 @@ class Settings(BaseSettings):
 
     # PDF extraction (Gemini)
     pdf_gemini_model: str = Field(
-        default=CHEAP_GOOGLE_MODEL_NAME,
+        default=GOOGLE_FLASH_LITE_PREVIEW_MODEL_NAME,
         description="Gemini model name for PDF extraction",
     )
 
