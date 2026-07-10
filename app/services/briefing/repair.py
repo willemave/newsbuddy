@@ -4,6 +4,14 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.services.briefing.layout_policy import (
+    BriefingBlockRepair,
+    BriefingBlockRepairAction,
+    BriefingLayoutAssessment,
+    BriefingLayoutDisposition,
+    assess_briefing_layout,
+    clean_pullquote_text,
+)
 from app.services.briefing.normalize import close_unpaired_insights, source_keys_in_markdown
 from app.services.briefing.sources import BriefingSource
 
@@ -17,6 +25,10 @@ class RepairResult:
     warnings: list[str]
 
 
+class BriefingLayoutRepairError(ValueError):
+    """Raised when deterministic repair would hide semantic corruption."""
+
+
 def repair_layout(
     blocks: list[dict[str, Any]],
     *,
@@ -25,68 +37,101 @@ def repair_layout(
     window_index: int,
     figure_budget: int,
     ensure_source_figures: bool = False,
+    assessment: BriefingLayoutAssessment | None = None,
 ) -> RepairResult:
     """Apply deterministic guardrails to an LLM-produced flat briefing layout."""
 
     source_by_key = {source.source_key: source for source in sources}
+    assessment = assessment or assess_briefing_layout(
+        blocks,
+        source_keys=set(source_by_key),
+        source_keys_with_images={
+            source.source_key for source in sources if source.image_url or source.thumbnail_url
+        },
+        figure_budget=figure_budget,
+    )
+    if assessment.disposition == BriefingLayoutDisposition.RETRY:
+        raise BriefingLayoutRepairError(
+            "Briefing layout requires regeneration: " + ", ".join(assessment.issues)
+        )
     repaired: list[dict[str, Any]] = []
     warnings: list[str] = []
     figures_used = 0
+    repairs_by_index: dict[int, list[BriefingBlockRepair]] = {}
+    for block_repair in assessment.block_repairs:
+        repairs_by_index.setdefault(block_repair.block_index, []).append(block_repair)
 
-    for raw in blocks:
+    for index, raw in enumerate(blocks):
         block = dict(raw)
+        block_repairs = repairs_by_index.get(index, [])
+        drop = next(
+            (
+                repair
+                for repair in block_repairs
+                if repair.action == BriefingBlockRepairAction.DROP_BLOCK
+            ),
+            None,
+        )
+        if drop is not None:
+            warnings.append(drop.warning)
+            continue
         block_type = str(block.get("type") or "").strip().lower()
         if block_type not in {"passage", "figure", "pullquote"}:
-            warnings.append(f"unknown_block_type:{block_type or 'missing'}")
-            continue
+            raise BriefingLayoutRepairError("Layout assessment allowed an unknown block type")
         block["type"] = block_type
         if block_type == "figure":
-            if not repaired:
-                warnings.append("leading_figure_dropped")
-                continue
             source_key = str(block.get("source_key") or "")
             source = source_by_key.get(source_key)
             if source is None:
-                warnings.append("figure_unknown_source")
-                continue
-            if not (source.image_url or source.thumbnail_url):
-                warnings.append("figure_source_without_image")
-                continue
-            if figures_used >= figure_budget:
-                warnings.append("figure_budget_exceeded")
-                continue
+                raise BriefingLayoutRepairError("Layout assessment allowed an unusable figure")
             # Product decision (2026-07): full-width figures overwhelm the page; inset only.
             block["placement"] = "inset"
             block["image_url"] = block.get("image_url") or source.image_url
             block["thumbnail_url"] = block.get("thumbnail_url") or source.thumbnail_url
-            if isinstance(block.get("caption"), str):
-                block["caption"] = _replace_em_dashes(block["caption"])
+            strip_caption = next(
+                (
+                    repair
+                    for repair in block_repairs
+                    if repair.action == BriefingBlockRepairAction.STRIP_CAPTION
+                ),
+                None,
+            )
+            if strip_caption is not None:
+                block["caption"] = None
+                warnings.append(strip_caption.warning)
+            elif isinstance(block.get("caption"), str):
+                caption = _clean_text(block["caption"])
+                if caption:
+                    block["caption"] = _replace_em_dashes(caption)
             figures_used += 1
         elif block_type == "pullquote":
             text = _clean_text(block.get("text"))
             if not text:
-                warnings.append("empty_pullquote")
-                continue
-            block["text"] = _replace_em_dashes(_strip_heading_noise(text)[:360])
-            source_key = str(block.get("source_key") or "")
-            if source_key and source_key not in source_by_key:
+                raise BriefingLayoutRepairError("Layout assessment allowed an empty pullquote")
+            text = clean_pullquote_text(text)
+            block["text"] = _replace_em_dashes(text[:360])
+            strip_source_key = next(
+                (
+                    repair
+                    for repair in block_repairs
+                    if repair.action == BriefingBlockRepairAction.STRIP_SOURCE_KEY
+                ),
+                None,
+            )
+            if strip_source_key is not None:
                 block["source_key"] = None
-                warnings.append("pullquote_unknown_source_stripped")
+                warnings.append(strip_source_key.warning)
         else:
             markdown = _clean_text(block.get("markdown") or block.get("text"))
             if not markdown:
-                warnings.append("empty_passage")
-                continue
+                raise BriefingLayoutRepairError("Layout assessment allowed an empty passage")
             block["markdown"] = _replace_em_dashes(close_unpaired_insights(markdown))
             if "markdown" not in raw and raw.get("text"):
                 warnings.append("passage_text_field_recovered")
         repaired.append(block)
 
-    cited = set()
-    for block in repaired:
-        if block.get("type") == "passage":
-            cited.update(source_keys_in_markdown(str(block.get("markdown") or "")))
-    missing = [source for source in sources if source.source_key not in cited]
+    missing_source_keys = set(assessment.coverage.missing_source_keys)
+    missing = [source for source in sources if source.source_key in missing_source_keys]
     if missing:
         repaired.append(
             {
@@ -187,10 +232,3 @@ def _clean_text(value: Any) -> str | None:
         return None
     cleaned = " ".join(value.split()).strip()
     return cleaned or None
-
-
-def _strip_heading_noise(value: str) -> str:
-    cleaned = value.strip()
-    while cleaned.startswith(("#", ">", "-", "Quote:", "Pullquote:")):
-        cleaned = cleaned.lstrip("#>- ").removeprefix("Quote:").removeprefix("Pullquote:").strip()
-    return cleaned

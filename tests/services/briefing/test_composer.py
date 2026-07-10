@@ -2,17 +2,25 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from app.models.contracts import ContentType
+from app.services.briefing import composer
 from app.services.briefing.composer import (
     MAX_COMPOSE_ATTEMPTS,
     BriefingCompositionError,
     BriefingCompositionInvalidOutput,
-    _blocks_look_malformed,
     _parse_composer_layout_json,
     _source_payload,
     compose_window,
+    process_generated_layout,
 )
+from app.services.briefing.layout_models import FigureBlock, PassageBlock, PullquoteBlock
+from app.services.briefing.layout_policy import (
+    BriefingLayoutDisposition,
+    assess_briefing_layout,
+)
+from app.services.briefing.normalize import NormalizedLayout
 from app.services.briefing.sources import BriefingSource
 
 MALFORMED_BLOCKS = [
@@ -26,16 +34,19 @@ WELL_FORMED_BLOCKS = [
         "markdown": "[A useful article](newsly://briefing/content/1) explains the thesis.",
     }
 ]
+SCALAR_DUMP_BLOCKS = [
+    {"type": "passage", "weight": "brief", "markdown": "normal"},
+    {"type": "pullquote", "text": "normal"},
+    {"type": "figure", "source_key": "normal", "caption": "normal"},
+]
 
 
-def test_compose_window_falls_back_after_llm_unavailable(monkeypatch) -> None:
+def test_compose_window_falls_back_after_llm_unavailable() -> None:
     attempts: list[int] = []
 
     def fail_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
         attempts.append(1)
         raise TimeoutError("model stalled")
-
-    monkeypatch.setattr("app.services.briefing.composer._compose_window_with_llm", fail_llm)
 
     segment = compose_window(
         [_source()],
@@ -44,24 +55,24 @@ def test_compose_window_falls_back_after_llm_unavailable(monkeypatch) -> None:
         tier="longform",
         window_index=1,
         use_llm=True,
+        layout_generator=fail_llm,
     )
 
     assert len(attempts) == MAX_COMPOSE_ATTEMPTS
     assert segment.model == "deterministic"
     assert "llm_error_retry:1" in segment.warnings
     assert "llm_unavailable_fallback:TimeoutError" in segment.warnings
+    assert segment.final_assessment is not None
+    assert segment.final_assessment.disposition == BriefingLayoutDisposition.ACCEPT
     assert segment.blocks
-    assert segment.blocks[0]["weight"] == "brief"
 
 
-def test_compose_window_raises_after_non_availability_errors(monkeypatch) -> None:
+def test_compose_window_raises_after_non_availability_errors() -> None:
     attempts: list[int] = []
 
     def fail_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
         attempts.append(1)
         raise ValueError("bad request")
-
-    monkeypatch.setattr("app.services.briefing.composer._compose_window_with_llm", fail_llm)
 
     with pytest.raises(BriefingCompositionError, match="composition failed"):
         compose_window(
@@ -71,27 +82,93 @@ def test_compose_window_raises_after_non_availability_errors(monkeypatch) -> Non
             tier="longform",
             window_index=1,
             use_llm=True,
+            layout_generator=fail_llm,
         )
 
     assert len(attempts) == MAX_COMPOSE_ATTEMPTS
 
 
-def test_blocks_look_malformed_detects_weight_dump() -> None:
-    assert _blocks_look_malformed(MALFORMED_BLOCKS) is True
-    assert _blocks_look_malformed([]) is True
-    assert _blocks_look_malformed(WELL_FORMED_BLOCKS) is False
-    assert _blocks_look_malformed([{"type": "figure", "source_key": "content:1"}]) is False
+def test_layout_policy_repairs_auxiliary_debris_and_missing_coverage() -> None:
+    blocks = [
+        *WELL_FORMED_BLOCKS,
+        {"type": "pullquote", "source_key": "content:1", "text": "normal"},
+    ]
+    sources = [_source(), _source(content_id=2)]
+
+    processed = process_generated_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+        ensure_source_figures=True,
+    )
+
+    assert processed.raw_assessment.disposition == BriefingLayoutDisposition.REPAIR
+    assert "low_signal_pullquote:1" in processed.raw_assessment.issues
+    assert processed.raw_assessment.coverage.missing_source_keys == ["content:2"]
+    assert processed.accepted is True
+    assert processed.final_assessment is not None
+    assert processed.final_assessment.disposition == BriefingLayoutDisposition.ACCEPT
+    assert "low_signal_pullquote_dropped" in processed.warnings
+    assert "coverage_repair:1" in processed.warnings
 
 
-def test_compose_window_retries_once_on_malformed_blocks(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("blocks", "expected_issue"),
+    [
+        (SCALAR_DUMP_BLOCKS, "missing_usable_passage"),
+        (
+            [
+                {
+                    "type": "passage",
+                    "markdown": (
+                        "[Unknown](newsly://briefing/content/999) makes an unsupported claim."
+                    ),
+                }
+            ],
+            "unknown_passage_source_references:content:999",
+        ),
+        (
+            [*WELL_FORMED_BLOCKS, {"type": "sidebar", "text": "Unexpected."}],
+            "unknown_block_type:1:sidebar",
+        ),
+    ],
+)
+def test_layout_policy_retries_semantic_corruption(
+    blocks: list[dict[str, object]],
+    expected_issue: str,
+) -> None:
+    assessment = assess_briefing_layout(blocks, source_keys={"content:1"})
+
+    assert assessment.disposition == BriefingLayoutDisposition.RETRY
+    assert expected_issue in assessment.issues
+
+
+def test_layout_policy_marks_unknown_auxiliary_references_repairable() -> None:
+    blocks = [
+        *WELL_FORMED_BLOCKS,
+        {
+            "type": "figure",
+            "source_key": "content:999",
+            "caption": "A useful contextual caption.",
+        },
+        {"type": "pullquote", "source_key": "content:998", "text": "A useful quote."},
+    ]
+
+    assessment = assess_briefing_layout(blocks, source_keys={"content:1"})
+
+    assert assessment.disposition == BriefingLayoutDisposition.REPAIR
+    assert assessment.unknown_source_keys == []
+    assert assessment.repairable_unknown_source_keys == ["content:998", "content:999"]
+
+
+def test_compose_window_retries_policy_failure_once() -> None:
     attempts: list[int] = []
 
     def fake_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
         attempts.append(1)
-        blocks = MALFORMED_BLOCKS if len(attempts) == 1 else WELL_FORMED_BLOCKS
-        return blocks, None
-
-    monkeypatch.setattr("app.services.briefing.composer._compose_window_with_llm", fake_llm)
+        return (MALFORMED_BLOCKS if len(attempts) == 1 else WELL_FORMED_BLOCKS), None
 
     segment = compose_window(
         [_source()],
@@ -100,20 +177,99 @@ def test_compose_window_retries_once_on_malformed_blocks(monkeypatch) -> None:
         tier="longform",
         window_index=1,
         use_llm=True,
+        layout_generator=fake_llm,
     )
 
     assert len(attempts) == 2
-    assert "llm_malformed_retry:1" in segment.warnings
-    assert segment.blocks
+    assert "llm_layout_policy_retry:1" in segment.warnings
+    assert segment.final_assessment is not None
+    assert segment.final_assessment.layout_valid is True
 
 
-def test_compose_window_raises_when_malformed_blocks_persist(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.services.briefing.composer._compose_window_with_llm",
-        lambda *_args, **_kwargs: (MALFORMED_BLOCKS, None),  # noqa: ANN002, ANN003
+def test_compose_window_retries_production_scalar_dump() -> None:
+    attempts: list[int] = []
+
+    def fake_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
+        return (SCALAR_DUMP_BLOCKS if len(attempts) == 1 else WELL_FORMED_BLOCKS), None
+
+    segment = compose_window(
+        [_source()],
+        lens_key="articles",
+        lens_title="Articles",
+        tier="longform",
+        window_index=1,
+        use_llm=True,
+        layout_generator=fake_llm,
     )
 
-    with pytest.raises(BriefingCompositionInvalidOutput, match="malformed layout blocks"):
+    assert len(attempts) == 2
+    assert "llm_layout_policy_retry:1" in segment.warnings
+    assert "normal" not in segment.narration_text.casefold()
+
+
+def test_compose_window_repairs_missing_coverage_without_retry() -> None:
+    attempts: list[int] = []
+
+    def fake_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
+        return WELL_FORMED_BLOCKS, None
+
+    segment = compose_window(
+        [_source(), _source(content_id=2)],
+        lens_key="articles",
+        lens_title="Articles",
+        tier="longform",
+        window_index=1,
+        use_llm=True,
+        layout_generator=fake_llm,
+    )
+
+    assert len(attempts) == 1
+    assert "layout_policy_repair" in segment.warnings
+    assert "coverage_repair:1" in segment.warnings
+    assert segment.final_assessment is not None
+    assert segment.final_assessment.layout_valid is True
+
+
+def test_compose_window_repairs_unknown_optional_figure_without_retry() -> None:
+    attempts: list[int] = []
+    blocks = [
+        *WELL_FORMED_BLOCKS,
+        {
+            "type": "figure",
+            "source_key": "content:999",
+            "caption": "A useful contextual caption.",
+        },
+    ]
+
+    def fake_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
+        return blocks, None
+
+    segment = compose_window(
+        [_source()],
+        lens_key="articles",
+        lens_title="Articles",
+        tier="longform",
+        window_index=1,
+        use_llm=True,
+        layout_generator=fake_llm,
+    )
+
+    assert len(attempts) == 1
+    assert "figure_unknown_source" in segment.warnings
+    assert not any(warning.startswith("llm_layout_policy_retry:") for warning in segment.warnings)
+
+
+def test_compose_window_raises_when_policy_failure_persists() -> None:
+    attempts: list[int] = []
+
+    def malformed_layout(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
+        return MALFORMED_BLOCKS, None
+
+    with pytest.raises(BriefingCompositionInvalidOutput, match="failed policy"):
         compose_window(
             [_source()],
             lens_key="articles",
@@ -121,17 +277,77 @@ def test_compose_window_raises_when_malformed_blocks_persist(monkeypatch) -> Non
             tier="longform",
             window_index=1,
             use_llm=True,
+            layout_generator=malformed_layout,
         )
 
+    assert len(attempts) == MAX_COMPOSE_ATTEMPTS
 
-def test_compose_window_raises_when_layout_json_stays_invalid(monkeypatch) -> None:
+
+def test_compose_window_retries_when_repaired_layout_still_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[int] = []
+
+    def fake_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        attempts.append(1)
+        return WELL_FORMED_BLOCKS, None
+
+    monkeypatch.setattr(
+        composer,
+        "normalize_layout",
+        lambda *_args, **_kwargs: NormalizedLayout(
+            blocks=[], narration_text="", markdown_raw="", warnings=["forced_empty"]
+        ),
+    )
+
+    with pytest.raises(BriefingCompositionInvalidOutput, match="failed policy"):
+        compose_window(
+            [_source()],
+            lens_key="articles",
+            lens_title="Articles",
+            tier="longform",
+            window_index=1,
+            use_llm=True,
+            layout_generator=fake_llm,
+        )
+
+    assert len(attempts) == MAX_COMPOSE_ATTEMPTS
+
+
+def test_process_generated_layout_emits_normalization_warning_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_normalize = composer.normalize_layout
+
+    def normalize_with_warning(*args, **kwargs):  # noqa: ANN002, ANN003
+        normalized = real_normalize(*args, **kwargs)
+        return NormalizedLayout(
+            blocks=normalized.blocks,
+            narration_text=normalized.narration_text,
+            markdown_raw=normalized.markdown_raw,
+            warnings=["one_normalization_warning"],
+        )
+
+    monkeypatch.setattr(composer, "normalize_layout", normalize_with_warning)
+
+    processed = process_generated_layout(
+        WELL_FORMED_BLOCKS,
+        sources=[_source()],
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+        ensure_source_figures=True,
+    )
+
+    assert processed.warnings.count("one_normalization_warning") == 1
+
+
+def test_compose_window_raises_when_layout_json_stays_invalid() -> None:
     attempts: list[int] = []
 
     def invalid_json(*_args, **_kwargs):  # noqa: ANN002, ANN003
         attempts.append(1)
         raise json.JSONDecodeError("Unterminated string", '{"blocks":[{"type":"passage"', 21)
-
-    monkeypatch.setattr("app.services.briefing.composer._compose_window_with_llm", invalid_json)
 
     with pytest.raises(BriefingCompositionInvalidOutput, match="invalid layout JSON"):
         compose_window(
@@ -141,59 +357,54 @@ def test_compose_window_raises_when_layout_json_stays_invalid(monkeypatch) -> No
             tier="longform",
             window_index=1,
             use_llm=True,
+            layout_generator=invalid_json,
         )
 
     assert len(attempts) == MAX_COMPOSE_ATTEMPTS
 
 
-def test_parse_composer_layout_json_accepts_object_wrapper() -> None:
-    layout = _parse_composer_layout_json(
-        '{"blocks":[{"type":"passage","weight":"feature","markdown":"A useful brief."}]}'
-    )
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"blocks":[{"type":"passage","weight":"feature","markdown":"A useful brief."}]}',
+        '{"layout":[{"type":"passage","weight":"feature","markdown":"A useful brief."}]}',
+        '[{"type":"passage","weight":"feature","markdown":"A useful brief."}]',
+        '```json\n[{"type":"passage","weight":"feature","markdown":"A useful brief."}]\n```',
+    ],
+)
+def test_parse_composer_layout_json_accepts_supported_wrappers(content: str) -> None:
+    layout = _parse_composer_layout_json(content)
 
     assert len(layout.blocks) == 1
     assert layout.blocks[0].type == "passage"
     assert layout.blocks[0].markdown == "A useful brief."
 
 
-def test_parse_composer_layout_json_accepts_layout_wrapper() -> None:
+def test_parse_composer_layout_json_coerces_legacy_content_fields() -> None:
     layout = _parse_composer_layout_json(
-        '{"layout":[{"type":"passage","weight":"feature","markdown":"A useful brief."}]}'
+        """
+        {
+          "blocks": [
+            {"type": "passage", "content": "A useful brief."},
+            {"type": "pullquote", "source_key": "content:1", "content": "A quote."},
+            {
+              "type": "figure",
+              "source_key": "content:1",
+              "content": "A caption.",
+              "placement": "inset"
+            }
+          ]
+        }
+        """
     )
 
-    assert len(layout.blocks) == 1
-    assert layout.blocks[0].type == "passage"
-    assert layout.blocks[0].markdown == "A useful brief."
-
-
-def test_parse_composer_layout_json_accepts_root_block_array() -> None:
-    layout = _parse_composer_layout_json(
-        '[{"type":"passage","weight":"feature","markdown":"A useful brief."}]'
-    )
-
-    assert len(layout.blocks) == 1
-    assert layout.blocks[0].type == "passage"
-    assert layout.blocks[0].markdown == "A useful brief."
-
-
-def test_parse_composer_layout_json_accepts_fenced_root_block_array() -> None:
-    layout = _parse_composer_layout_json(
-        '```json\n[{"type":"passage","weight":"feature","markdown":"A useful brief."}]\n```'
-    )
-
-    assert len(layout.blocks) == 1
-    assert layout.blocks[0].type == "passage"
-    assert layout.blocks[0].markdown == "A useful brief."
-
-
-def test_parse_composer_layout_json_coerces_passage_content_field() -> None:
-    layout = _parse_composer_layout_json(
-        '{"blocks":[{"type":"passage","weight":"feature","content":"A useful brief."}]}'
-    )
-
-    assert len(layout.blocks) == 1
-    assert layout.blocks[0].type == "passage"
-    assert layout.blocks[0].markdown == "A useful brief."
+    passage, pullquote, figure = layout.blocks
+    assert isinstance(passage, PassageBlock)
+    assert isinstance(pullquote, PullquoteBlock)
+    assert isinstance(figure, FigureBlock)
+    assert passage.markdown == "A useful brief."
+    assert pullquote.text == "A quote."
+    assert figure.caption == "A caption."
 
 
 def test_parse_composer_layout_json_recovers_weight_dumped_prose() -> None:
@@ -210,27 +421,26 @@ def test_parse_composer_layout_json_recovers_weight_dumped_prose() -> None:
         """
     )
 
-    assert layout.blocks[0].weight is None
+    passage = layout.blocks[0]
+    assert isinstance(passage, PassageBlock)
+    assert passage.weight == "brief"
     assert (
-        layout.blocks[0].markdown
-        == "[One source](newsly://briefing/content/1) explains the useful point."
+        passage.markdown == "[One source](newsly://briefing/content/1) explains the useful point."
     )
 
 
-def test_parse_composer_layout_json_coerces_non_passage_content_fields() -> None:
-    layout = _parse_composer_layout_json(
-        """
-        {
-          "blocks": [
-            {"type": "pullquote", "content": "A concise quote."},
-            {"type": "figure", "source_key": "content:1", "content": "A figure caption."}
-          ]
-        }
-        """
-    )
-
-    assert layout.blocks[0].text == "A concise quote."
-    assert layout.blocks[1].caption == "A figure caption."
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"blocks":[{"type":"passage","weight":"normal"}]}',
+        '{"blocks":[{"type":"pullquote","text":"A quote."}]}',
+        '{"blocks":[{"type":"figure","source_key":"content:1","caption":"Caption."}]}',
+        ('{"blocks":[{"type":"passage","markdown":"A brief.","source_key":"content:1"}]}'),
+    ],
+)
+def test_parse_composer_layout_json_rejects_missing_or_cross_type_fields(content: str) -> None:
+    with pytest.raises(ValidationError):
+        _parse_composer_layout_json(content)
 
 
 def test_source_payload_includes_briefing_context_when_available() -> None:
@@ -239,21 +449,25 @@ def test_source_payload_includes_briefing_context_when_available() -> None:
     assert payload["briefing_context"] == "Long-form source detail."
 
 
-def _source() -> BriefingSource:
-    return _source_with_context(None)
+def _source(*, content_id: int = 1) -> BriefingSource:
+    return _source_with_context(None, content_id=content_id)
 
 
-def _source_with_context(briefing_context: str | None) -> BriefingSource:
+def _source_with_context(
+    briefing_context: str | None,
+    *,
+    content_id: int = 1,
+) -> BriefingSource:
     return BriefingSource(
-        source_key="content:1",
+        source_key=f"content:{content_id}",
         kind="content",
-        id=1,
+        id=content_id,
         tier="longform",
         lens_key="articles",
-        title="A useful article",
+        title="A useful article" if content_id == 1 else "Another useful article",
         summary="A concise summary.",
         key_points=["A concrete point."],
-        url="https://example.com/article",
+        url=f"https://example.com/article/{content_id}",
         image_url=None,
         thumbnail_url=None,
         published_at=datetime(2026, 1, 1, tzinfo=UTC),

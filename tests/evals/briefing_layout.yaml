@@ -1,0 +1,100 @@
+suite: briefing_layout_v1
+
+cases:
+  - id: prod_segment_673_normal_scalar_dump
+    description: >
+      Replays the scalar-only passage and pullquote blocks persisted in production
+      Briefing segment 673 on 2026-07-08. The provider response itself was not
+      retained, so fixture_blocks reconstruct the pre-normalized blocks from the
+      persisted block types and visible text.
+    production_segment_id: 673
+    lens_key: articles
+    lens_title: Articles
+    tier: longform
+    window_index: 0
+    expected_disposition: retry
+    expected_low_signal_values:
+      - normal
+    sources:
+      - source_key: content:29566
+        kind: content
+        id: 29566
+        tier: longform
+        lens_key: articles
+        title: Some ideas for what comes next, May 2026
+        summary: >
+          Nathan Lambert argues that 2026 is becoming a no-break year for AI,
+          with frontier agent products pulling ahead while open models,
+          geopolitics, and public backlash reshape the field.
+        key_points: []
+        url: https://www.interconnects.ai/p/some-ideas-for-what-comes-next-may
+        image_url: /static/images/content/29566.png
+        thumbnail_url: /static/images/thumbnails/29566.png
+        published_at: 2026-05-26T00:00:00Z
+        content_type: article
+        briefing_context: >
+          Judge progress by agentic products, compute concentration, open-model
+          adoption, and political legitimacy rather than benchmark scores alone.
+      - source_key: content:29560
+        kind: content
+        id: 29560
+        tier: longform
+        lens_key: articles
+        title: "Import AI 458: Reckoning with the future; and a singularity story"
+        summary: >
+          Jack Clark argues that accelerating AI capabilities are already changing
+          individuals and organizations, so society must actively shape the
+          transition rather than deny it.
+        key_points: []
+        url: https://importai.substack.com/p/import-ai-458-reckoning-with-the
+        image_url: /static/images/content/29560.png
+        thumbnail_url: /static/images/thumbnails/29560.png
+        published_at: 2026-05-26T00:00:00Z
+        content_type: article
+        briefing_context: >
+          Clark asks how the world stays normal as capability gains reorganize
+          work, research, and the relationship between humans and automated labor.
+      - source_key: content:29558
+        kind: content
+        id: 29558
+        tier: longform
+        lens_key: articles
+        title: "Book Freak #212: Prometheus Rising - by Mark Frauenfelder"
+        summary: >
+          Mark Frauenfelder extracts Robert Anton Wilson's model of belief,
+          perception, and conditioning as a practical way to loosen certainty now.
+        key_points: []
+        url: https://bookfreak.substack.com/p/book-freak-212-prometheus-rising
+        image_url: /static/images/content/29558.png
+        thumbnail_url: /static/images/thumbnails/29558.png
+        published_at: 2026-05-26T00:00:00Z
+        content_type: article
+        briefing_context: >
+          The Thinker creates beliefs and the Prover finds confirming evidence;
+          deliberate exercises can loosen rigid reality tunnels.
+    fixture_blocks:
+      - type: passage
+        weight: brief
+        markdown: normal
+      - type: pullquote
+        text: normal
+      - type: figure
+        source_key: normal
+        caption: normal
+        placement: inset
+      - type: passage
+        weight: brief
+        markdown: normal
+      - type: pullquote
+        text: normal
+      - type: figure
+        source_key: normal
+        caption: normal
+        placement: inset
+      - type: passage
+        weight: brief
+        markdown: normal
+      - type: figure
+        source_key: normal
+        caption: normal
+        placement: inset

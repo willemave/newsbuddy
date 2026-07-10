@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from app.models.contracts import ContentType
-from app.services.briefing.repair import repair_layout
+from app.services.briefing.repair import BriefingLayoutRepairError, repair_layout
 from app.services.briefing.sources import BriefingSource
 
 
@@ -95,6 +97,102 @@ def test_backfill_uses_coverage_repair_passage_for_uncited_sources() -> None:
     assert types == ["passage", "figure", "passage", "figure"]
     assert result.blocks[3]["source_key"] == "content:2"
     assert "coverage_repair:1" in result.warnings
+
+
+def test_layout_with_no_usable_passage_is_not_repaired() -> None:
+    sources = [_source(1), _source(2)]
+    blocks = [
+        _passage("1.0"),
+        _passage("0.0"),
+        _passage("normal"),
+        _passage("{{protocol}}1.0{{/protocol}}"),
+    ]
+
+    with pytest.raises(BriefingLayoutRepairError, match="requires regeneration"):
+        repair_layout(
+            blocks,
+            sources=sources,
+            lens_key="articles",
+            window_index=0,
+            figure_budget=12,
+        )
+
+
+def test_short_source_linked_passage_is_not_dropped() -> None:
+    sources = [_source(1)]
+    blocks = [_passage("[First](newsly://briefing/content/1) ships.")]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+    )
+
+    assert result.blocks[0]["markdown"] == "[First](newsly://briefing/content/1) ships."
+    assert "low_signal_passage_dropped" not in result.warnings
+
+
+def test_short_unlinked_prose_is_not_mistaken_for_schema_debris() -> None:
+    sources = [_source(1)]
+    blocks = [
+        _passage("Why this matters now."),
+        _passage("[First](newsly://briefing/content/1) ships."),
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+    )
+
+    assert result.blocks[0]["markdown"] == "Why this matters now."
+    assert "low_signal_passage_dropped" not in result.warnings
+
+
+def test_low_signal_pullquotes_are_dropped() -> None:
+    sources = [_source(1)]
+    blocks = [
+        _passage("[First](newsly://briefing/content/1) ships."),
+        {"type": "pullquote", "source_key": "content:1", "text": "1.0"},
+        {"type": "pullquote", "source_key": "content:1", "text": "optional"},
+        {"type": "pullquote", "source_key": "content:1", "text": "content:29804"},
+        {"type": "pullquote", "text": 'source_key": "news:18021",'},
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+    )
+
+    assert [block["type"] for block in result.blocks] == ["passage"]
+    assert result.warnings.count("low_signal_pullquote_dropped") == 4
+
+
+def test_short_real_pullquote_is_not_dropped() -> None:
+    sources = [_source(1)]
+    blocks = [
+        _passage("[First](newsly://briefing/content/1) ships."),
+        {"type": "pullquote", "source_key": "content:1", "text": "Just learn SQL."},
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+    )
+
+    assert [block["type"] for block in result.blocks] == ["passage", "pullquote"]
+    assert result.blocks[1]["text"] == "Just learn SQL."
+    assert "low_signal_pullquote_dropped" not in result.warnings
 
 
 def test_full_placement_coerced_to_inset() -> None:

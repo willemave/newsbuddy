@@ -5,9 +5,8 @@ import json
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
-from app.core.settings import Settings, get_settings
 from app.models.api.audio_episodes import AudioEpisodeDelivery, AudioEpisodeResponse
 from app.models.contracts import AudioEpisodeKind
 from app.models.db import AudioEpisode, BriefingLens, BriefingSegment
@@ -16,7 +15,7 @@ from app.services.audio_episodes import (
 )
 from app.services.briefing.source_keys import parse_source_key
 
-BRIEFING_NARRATION_PROMPT_VERSION = 1
+BRIEFING_NARRATION_PROMPT_VERSION = 2
 
 
 def create_or_reuse_briefing_narration(
@@ -25,11 +24,10 @@ def create_or_reuse_briefing_narration(
     user_id: int,
     lens_key: str,
     delivery: AudioEpisodeDelivery,
-    settings: Settings | None = None,
 ) -> AudioEpisodeResponse:
-    settings = settings or get_settings()
     lens = (
         db.query(BriefingLens)
+        .options(load_only(BriefingLens.id, BriefingLens.key, BriefingLens.title))
         .filter(
             BriefingLens.user_id == user_id,
             BriefingLens.key == lens_key,
@@ -41,12 +39,19 @@ def create_or_reuse_briefing_narration(
         raise HTTPException(status_code=404, detail="Briefing lens not found")
     segments = (
         db.query(BriefingSegment)
+        .options(
+            load_only(
+                BriefingSegment.id,
+                BriefingSegment.narration_text,
+                BriefingSegment.source_keys,
+            )
+        )
         .filter(BriefingSegment.lens_id == lens.id)
         .filter(BriefingSegment.status.in_(("active", "degraded")))
         .order_by(BriefingSegment.created_at.desc(), BriefingSegment.id.desc())
         .all()
     )
-    script_text = _script_text(segments, max_chars=settings.briefing_narration_max_chars)
+    script_text = _script_text(segments)
     if not script_text:
         raise HTTPException(status_code=400, detail="No briefing narration is available")
     source_keys = _source_keys(segments)
@@ -98,18 +103,46 @@ def create_or_reuse_briefing_narration(
                 )
                 .one()
             )
-    elif episode.status == "failed":
-        episode.status = "pending"
-        episode.error_message = None
-        episode.started_at = None
-        episode.completed_at = None
+    _synchronize_episode(
+        episode,
+        title=f"{lens.title} briefing",
+        input_hash=input_hash,
+        source_snapshot=source_snapshot,
+        script_text=script_text,
+    )
     return commit_audio_episode_delivery(db, episode, delivery=delivery)
 
 
-def _script_text(segments: list[BriefingSegment], *, max_chars: int) -> str:
+def _synchronize_episode(
+    episode: AudioEpisode,
+    *,
+    title: str,
+    input_hash: str,
+    source_snapshot: dict[str, object],
+    script_text: str,
+) -> None:
+    """Apply current-hash content and make an exact failed episode retryable."""
+
+    episode.title = title
+    episode.input_hash = input_hash
+    episode.source_item_ids = []
+    episode.source_snapshot = source_snapshot
+    episode.script = _script_payload(title=title, text=script_text)
+    episode.script_text = script_text
+    episode.prompt_version = BRIEFING_NARRATION_PROMPT_VERSION
+    episode.model = "deterministic"
+    if episode.status == "failed":
+        episode.status = "pending"
+        episode.error_message = None
+        episode.audio_storage_path = None
+        episode.duration_seconds = None
+        episode.started_at = None
+        episode.completed_at = None
+
+
+def _script_text(segments: list[BriefingSegment]) -> str:
     parts = [str(segment.narration_text or "").strip() for segment in segments]
-    text = "\n\n".join(part for part in parts if part)
-    return text[:max_chars].strip()
+    return "\n\n".join(part for part in parts if part)
 
 
 def _source_keys(segments: list[BriefingSegment]) -> list[str]:

@@ -3,16 +3,32 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 from pydantic_ai.agent import AgentRunResult
 
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
-from app.services.briefing.normalize import NormalizedLayout, normalize_layout
+from app.services.briefing.layout_models import (
+    ComposerBlock,
+    ComposerLayout,
+    FigureBlock,
+    PassageBlock,
+    PullquoteBlock,
+)
+from app.services.briefing.layout_policy import (
+    BriefingLayoutAssessment,
+    BriefingLayoutDisposition,
+    assess_briefing_layout,
+    is_low_signal_generated_text,
+)
+from app.services.briefing.normalize import (
+    NormalizedLayout,
+    normalize_layout,
+)
 from app.services.briefing.repair import repair_layout
 from app.services.briefing.sources import BriefingSource
 from app.services.llm_agents import get_basic_agent
@@ -40,22 +56,18 @@ class BriefingCompositionInvalidOutput(BriefingCompositionError):
     """The LLM returned output that cannot produce a valid briefing segment."""
 
 
-class ComposerBlock(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: str
-    weight: str | None = None
-    markdown: str | None = None
-    source_key: str | None = None
-    caption: str | None = None
-    placement: str | None = None
-    text: str | None = None
-
-
-class ComposerLayout(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    blocks: list[ComposerBlock] = Field(default_factory=list, min_length=1)
+class LayoutGenerator(Protocol):
+    def __call__(
+        self,
+        sources: list[BriefingSource],
+        *,
+        lens_title: str,
+        tier: str,
+        model_spec: str,
+        timeout_seconds: int,
+        task_id: int | None,
+        user_id: int | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, int | None] | None]: ...
 
 
 @dataclass(frozen=True)
@@ -70,6 +82,27 @@ class ComposedSegment:
     output_tokens: int | None
     generation_ms: int
     warnings: list[str]
+    raw_blocks: list[dict[str, Any]] | None = None
+    raw_assessment: BriefingLayoutAssessment | None = None
+    final_assessment: BriefingLayoutAssessment | None = None
+    generation_attempts: int = 0
+
+
+@dataclass(frozen=True)
+class ProcessedLayout:
+    raw_blocks: list[dict[str, Any]]
+    raw_assessment: BriefingLayoutAssessment
+    normalized: NormalizedLayout | None
+    final_assessment: BriefingLayoutAssessment | None
+    warnings: list[str]
+
+    @property
+    def accepted(self) -> bool:
+        return (
+            self.normalized is not None
+            and self.final_assessment is not None
+            and self.final_assessment.disposition == BriefingLayoutDisposition.ACCEPT
+        )
 
 
 def plan_windows(
@@ -95,20 +128,27 @@ def compose_window(
     user_id: int | None = None,
     use_llm: bool = True,
     settings: Settings | None = None,
+    layout_generator: LayoutGenerator | None = None,
 ) -> ComposedSegment:
     settings = settings or get_settings()
+    layout_generator = layout_generator or generate_layout_with_llm
     started_at = time.perf_counter()
     model_spec = settings.briefing_model
     warnings: list[str] = []
     input_tokens: int | None = None
     output_tokens: int | None = None
-    blocks: list[dict[str, Any] | ComposerBlock] = []
+    processed: ProcessedLayout | None = None
+    generation_attempts = 0
+    figure_budget = (
+        settings.briefing_max_figures_news if tier == "news" else settings.briefing_max_figures_deep
+    )
 
     if use_llm:
         fallback_reason: str | None = None
         for attempt in range(1, MAX_COMPOSE_ATTEMPTS + 1):
+            generation_attempts = attempt
             try:
-                llm_blocks, usage = _compose_window_with_llm(
+                llm_blocks, usage = layout_generator(
                     sources,
                     lens_title=lens_title,
                     tier=tier,
@@ -191,16 +231,22 @@ def compose_window(
                     ) from exc
                 warnings.append(f"llm_error_retry:{attempt}")
                 continue
-            if not _blocks_look_malformed(llm_blocks):
-                blocks = list(llm_blocks)
+            candidate = process_generated_layout(
+                llm_blocks,
+                sources=sources,
+                lens_key=lens_key,
+                window_index=window_index,
+                figure_budget=figure_budget,
+                ensure_source_figures=tier != "news",
+            )
+            if candidate.accepted:
+                processed = candidate
                 if usage:
                     input_tokens = usage.get("input_tokens")
                     output_tokens = usage.get("output_tokens")
                 break
-            # If malformed blocks survive parser coercion, retry the LLM. Repair
-            # cannot recover blocks with no usable content or source reference.
             logger.warning(
-                "Briefing LLM returned malformed layout blocks",
+                "Briefing LLM layout policy requested a fresh generation",
                 extra={
                     "component": "briefing",
                     "operation": "compose_window",
@@ -211,14 +257,21 @@ def compose_window(
                         "tier": tier,
                         "window_index": window_index,
                         "attempt": attempt,
+                        "raw_disposition": candidate.raw_assessment.disposition.value,
+                        "raw_issues": candidate.raw_assessment.issues,
+                        "final_issues": (
+                            candidate.final_assessment.issues
+                            if candidate.final_assessment is not None
+                            else []
+                        ),
                     },
                 },
             )
             if attempt >= MAX_COMPOSE_ATTEMPTS:
                 raise BriefingCompositionInvalidOutput(
-                    "Briefing LLM returned malformed layout blocks after retries"
+                    "Briefing LLM layout failed policy after retries"
                 )
-            warnings.append(f"llm_malformed_retry:{attempt}")
+            warnings.append(f"llm_layout_policy_retry:{attempt}")
         if fallback_reason is not None:
             logger.warning(
                 "Briefing LLM composition fell back to deterministic layout",
@@ -235,76 +288,114 @@ def compose_window(
                     },
                 },
             )
-            blocks = list(deterministic_layout(sources, lens_title=lens_title, tier=tier).blocks)
             model_spec = "deterministic"
             warnings.append(fallback_reason)
-    else:
-        blocks = list(deterministic_layout(sources, lens_title=lens_title, tier=tier).blocks)
-        model_spec = "deterministic"
-
-    figure_budget = (
-        settings.briefing_max_figures_news if tier == "news" else settings.briefing_max_figures_deep
-    )
-    repaired = repair_layout(
-        [
-            block.model_dump(mode="json", exclude_none=True)
-            if isinstance(block, ComposerBlock)
-            else block
-            for block in blocks
-        ],
-        sources=sources,
-        lens_key=lens_key,
-        window_index=window_index,
-        figure_budget=figure_budget,
-        # Deep tiers guarantee each imaged source a figure even when the LLM skips them.
-        ensure_source_figures=tier != "news",
-    )
-    warnings.extend(repaired.warnings)
-    normalized: NormalizedLayout = normalize_layout(
-        repaired.blocks,
-        source_keys={source.source_key for source in sources},
-    )
-    warnings.extend(normalized.warnings)
-    status = "active" if normalized.blocks else "degraded"
-    if status == "degraded":
-        if use_llm:
-            raise BriefingCompositionInvalidOutput(
-                "Briefing LLM composition produced no normalized blocks"
+            processed = process_generated_layout(
+                deterministic_layout(sources, lens_title=lens_title, tier=tier).model_dump(
+                    mode="json"
+                )["blocks"],
+                sources=sources,
+                lens_key=lens_key,
+                window_index=window_index,
+                figure_budget=figure_budget,
+                ensure_source_figures=tier != "news",
             )
-        normalized = normalize_layout(
+    else:
+        model_spec = "deterministic"
+        processed = process_generated_layout(
             deterministic_layout(sources, lens_title=lens_title, tier=tier).model_dump(mode="json")[
                 "blocks"
             ],
-            source_keys={source.source_key for source in sources},
+            sources=sources,
+            lens_key=lens_key,
+            window_index=window_index,
+            figure_budget=figure_budget,
+            ensure_source_figures=tier != "news",
         )
-        warnings.append("degraded_deterministic_recovery")
+
+    if processed is None or not processed.accepted or processed.normalized is None:
+        raise BriefingCompositionInvalidOutput(
+            "Briefing composition did not produce a policy-valid normalized layout"
+        )
+
+    normalized = processed.normalized
+    warnings.extend(processed.warnings)
     generation_ms = round((time.perf_counter() - started_at) * 1000)
     return ComposedSegment(
         blocks=normalized.blocks,
         markdown_raw=normalized.markdown_raw,
         narration_text=normalized.narration_text,
-        status=status,
+        status="active",
         model=model_spec,
         prompt_version=PROMPT_VERSION,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         generation_ms=generation_ms,
         warnings=warnings,
+        raw_blocks=processed.raw_blocks,
+        raw_assessment=processed.raw_assessment,
+        final_assessment=processed.final_assessment,
+        generation_attempts=generation_attempts,
     )
 
 
-def _blocks_look_malformed(blocks: list[dict[str, Any]]) -> bool:
-    """True when no block carries usable content — the signature of a provider
-    that ignored the JSON schema (e.g. all prose dumped into `weight`)."""
+def process_generated_layout(
+    blocks: list[dict[str, Any]],
+    *,
+    sources: list[BriefingSource],
+    lens_key: str,
+    window_index: int,
+    figure_budget: int,
+    ensure_source_figures: bool,
+) -> ProcessedLayout:
+    """Run the same assessment, repair, normalization, and reassessment used in production."""
+    raw_blocks = [dict(block) for block in blocks]
+    source_keys = {source.source_key for source in sources}
+    source_keys_with_images = {
+        source.source_key for source in sources if source.image_url or source.thumbnail_url
+    }
+    raw_assessment = assess_briefing_layout(
+        raw_blocks,
+        source_keys=source_keys,
+        source_keys_with_images=source_keys_with_images,
+        figure_budget=figure_budget,
+    )
+    if raw_assessment.disposition == BriefingLayoutDisposition.RETRY:
+        return ProcessedLayout(
+            raw_blocks=raw_blocks,
+            raw_assessment=raw_assessment,
+            normalized=None,
+            final_assessment=None,
+            warnings=[],
+        )
 
-    for block in blocks:
-        markdown = block.get("markdown") or block.get("text")
-        if isinstance(markdown, str) and markdown.strip():
-            return False
-        source_key = block.get("source_key")
-        if isinstance(source_key, str) and source_key.strip():
-            return False
-    return True
+    repaired = repair_layout(
+        raw_blocks,
+        sources=sources,
+        lens_key=lens_key,
+        window_index=window_index,
+        figure_budget=figure_budget,
+        ensure_source_figures=ensure_source_figures,
+        assessment=raw_assessment,
+    )
+    normalized = normalize_layout(repaired.blocks, source_keys=source_keys)
+    final_assessment = assess_briefing_layout(
+        normalized.blocks,
+        source_keys=source_keys,
+        source_keys_with_images=source_keys_with_images,
+        figure_budget=figure_budget,
+    )
+    warnings = list(repaired.warnings)
+    if raw_assessment.disposition == BriefingLayoutDisposition.REPAIR:
+        warnings.insert(0, "layout_policy_repair")
+    warnings.extend(normalized.warnings)
+    return ProcessedLayout(
+        raw_blocks=raw_blocks,
+        raw_assessment=raw_assessment,
+        normalized=normalized,
+        final_assessment=final_assessment,
+        warnings=warnings,
+    )
 
 
 def deterministic_layout(
@@ -317,13 +408,15 @@ def deterministic_layout(
     source_label = "source" if len(sources) == 1 else "sources"
     intro = f"**{lens_title}** opens with {len(sources)} unread {source_label}."
     markdown = intro + " " + " ".join(sentences)
-    blocks: list[ComposerBlock] = [ComposerBlock(type="passage", markdown=markdown)]
+    blocks: list[ComposerBlock] = [
+        PassageBlock(type="passage", markdown=markdown, weight="feature")
+    ]
     first_image = next(
         (source for source in sources if source.image_url or source.thumbnail_url), None
     )
     if first_image is not None:
         blocks.append(
-            ComposerBlock(
+            FigureBlock(
                 type="figure",
                 source_key=first_image.source_key,
                 caption=first_image.title,
@@ -334,7 +427,7 @@ def deterministic_layout(
     pullquote_source = next((source for source in sources if source.key_points), None)
     if pullquote_source is not None:
         blocks.append(
-            ComposerBlock(
+            PullquoteBlock(
                 type="pullquote",
                 source_key=pullquote_source.source_key,
                 text=pullquote_source.key_points[0],
@@ -354,7 +447,7 @@ def _source_sentence(source: BriefingSource, *, index: int) -> str:
     )
 
 
-def _compose_window_with_llm(
+def generate_layout_with_llm(
     sources: list[BriefingSource],
     *,
     lens_title: str,
@@ -497,15 +590,18 @@ def _coerce_composer_block(block: Any) -> Any:
     coerced = dict(block)
     content = coerced.pop("content", None)
     _recover_weight_payload(coerced)
-    if not isinstance(content, str) or not content.strip():
-        return coerced
     block_type = str(coerced.get("type") or "").strip().lower()
-    if block_type == "pullquote" and not coerced.get("text"):
-        coerced["text"] = content
-    elif block_type == "figure" and not coerced.get("caption"):
-        coerced["caption"] = content
-    elif not coerced.get("markdown"):
-        coerced["markdown"] = content
+    if isinstance(content, str) and content.strip():
+        if block_type == "pullquote" and not coerced.get("text"):
+            coerced["text"] = content
+        elif block_type == "figure" and not coerced.get("caption"):
+            coerced["caption"] = content
+        elif not coerced.get("markdown"):
+            coerced["markdown"] = content
+    if block_type == "passage" and not coerced.get("markdown"):
+        legacy_text = coerced.pop("text", None)
+        if isinstance(legacy_text, str) and legacy_text.strip():
+            coerced["markdown"] = legacy_text
     return coerced
 
 
@@ -516,6 +612,10 @@ def _recover_weight_payload(block: dict[str, Any]) -> None:
     if raw_weight.strip().lower() in {"feature", "brief"}:
         return
     if _has_block_content(block):
+        block.pop("weight", None)
+        return
+    if is_low_signal_generated_text(raw_weight, allow_source_links=False):
+        block.pop("weight", None)
         return
 
     block_type = str(block.get("type") or "").strip().lower()
