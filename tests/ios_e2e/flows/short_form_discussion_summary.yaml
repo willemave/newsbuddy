@@ -17,9 +17,17 @@ appId: "${APP_ID}"
 - assertVisible:
     id: content.detail.screen
 - tapOn:
+    id: content.discussion.scroll_to_comments
+- extendedWaitUntil:
+    visible:
+      id: content.discussion.open
+    timeout: 10000
+- tapOn:
     id: content.discussion.open
-- assertVisible:
-    id: content.discussion.sheet
+- extendedWaitUntil:
+    visible:
+      id: content.discussion.sheet
+    timeout: 10000
 - assertVisible: "Community Summary"
 - assertVisible: "${SUMMARY_OVERVIEW}"
 - assertVisible: "Key Topics"

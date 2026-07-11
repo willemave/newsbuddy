@@ -12,29 +12,28 @@ appId: "${APP_ID}"
       newslyE2EUserId: "${USER_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
-      newslyE2EVisualNow: "${VISUAL_NOW}"
-      newslyE2EOpenContentType: news
-      newslyE2EOpenContentId: "${NEWS_ITEM_ID}"
+      newslyE2EReadingExperience: briefing
 - extendedWaitUntil:
     visible:
-      id: content.detail.screen
+      id: briefing.screen
     timeout: 15000
-- tapOn:
-    id: content.discussion.scroll_to_comments
+- assertVisible:
+    id: briefing.lens.podcasts
+- assertVisible:
+    id: briefing.lens.articles
 - extendedWaitUntil:
     visible:
-      id: content.discussion.open
-    timeout: 10000
-- tapOn:
-    id: content.discussion.open
-- extendedWaitUntil:
-    visible:
-      id: content.discussion.sheet
+      id: briefing.lens_page.podcasts
     timeout: 10000
 - assertVisible:
-    id: content.discussion.comment.${COMMENT_ID}
-- assertScreenshot:
-    path: "${BASELINE_DIR}/modal-discussion.png"
-    cropOn:
-      id: content.discussion.sheet
-    thresholdPercentage: 97
+    id: briefing.segment.${PODCAST_SEGMENT_ID}
+- assertVisible: "${PODCAST_TITLE}"
+- tapOn:
+    id: briefing.lens.articles
+- extendedWaitUntil:
+    visible:
+      id: briefing.lens_page.articles
+    timeout: 10000
+- assertVisible:
+    id: briefing.segment.${ARTICLE_SEGMENT_ID}
+- assertVisible: "${ARTICLE_TITLE}"
