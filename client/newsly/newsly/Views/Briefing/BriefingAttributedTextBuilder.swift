@@ -126,7 +126,7 @@ struct BriefingAttributedTextBuilder {
         if let count = chip.commentCount, count > 0 {
             // Narrow no-break space: the icon and count must wrap as one unit.
             output.append(NSAttributedString(
-                string: "\u{202F}\(Self.compactCount(count))",
+                string: "\u{202F}(\(Self.compactCount(count)))",
                 attributes: attributes
             ))
         }

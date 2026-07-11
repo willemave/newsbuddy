@@ -123,7 +123,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         }
 
         XCTAssertEqual(discussionLinkRanges.count, 1)
-        XCTAssertTrue(result.plainText.contains("64"))
+        XCTAssertTrue(result.plainText.contains("(64)"))
     }
 
     func testBriefingSourceLinkKeysIncludesStoredMarkdownSourceLinks() {
@@ -173,7 +173,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         }
 
         XCTAssertEqual(discussionLinkRanges.count, 1, "Chip should attach to the first link only")
-        XCTAssertTrue(result.plainText.contains("128"))
+        XCTAssertTrue(result.plainText.contains("(128)"))
     }
 
     func testBuildStripsLeftoverBoldMarkersAroundSourceLinks() {
