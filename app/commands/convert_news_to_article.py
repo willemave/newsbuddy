@@ -7,13 +7,71 @@ from typing import cast
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger
 from app.models.api.content_actions import ConvertNewsResponse
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content
+from app.models.db import Content, NewsItem
 from app.repositories import knowledge_repository
 from app.services import knowledge as knowledge_service
+from app.services.content_bodies import persist_content_body
+from app.services.news_article_bodies import get_news_item_article_body_resolver
 from app.services.queue import TaskType, get_queue_service
+from app.services.source_metadata import SOURCE_METADATA_KEY, dump_source_metadata
 from app.utils.url_utils import is_http_url, normalize_http_url
+
+logger = get_logger(__name__)
+
+
+def _seed_article_body_from_news_item(
+    db: Session,
+    *,
+    article: Content,
+    news_item: NewsItem,
+) -> bool:
+    """Reuse a news item's canonical article body when one is already stored."""
+    try:
+        resolved_body = get_news_item_article_body_resolver().resolve(
+            db,
+            news_item=news_item,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Failed to resolve reusable news-item article body",
+            extra={"news_item_id": news_item.id, "content_id": article.id},
+        )
+        return False
+
+    if resolved_body is None or article.id is None:
+        return False
+
+    try:
+        persist_content_body(
+            db,
+            content_id=article.id,
+            variant=resolved_body.variant,
+            text=resolved_body.text,
+            content_format=resolved_body.format,
+        )
+        metadata = dict(article.content_metadata or {})
+        metadata["content_type"] = resolved_body.format.value
+        metadata["final_url_after_redirects"] = article.url
+        news_metadata = news_item.raw_metadata if isinstance(news_item.raw_metadata, dict) else {}
+        source_metadata = dump_source_metadata(news_metadata.get(SOURCE_METADATA_KEY))
+        if source_metadata is not None:
+            metadata[SOURCE_METADATA_KEY] = source_metadata
+        article.content_metadata = metadata
+        article.status = ContentStatus.PROCESSING.value
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Failed to attach reusable news-item article body",
+            extra={"news_item_id": news_item.id, "content_id": article.id},
+        )
+        return False
+
+    return True
 
 
 def convert_article_url_to_content(
@@ -22,6 +80,7 @@ def convert_article_url_to_content(
     article_url: str,
     title: str | None,
     source: str | None,
+    news_item: NewsItem | None = None,
 ) -> tuple[Content, bool]:
     """Return an existing or newly created article content record.
 
@@ -30,6 +89,7 @@ def convert_article_url_to_content(
         article_url: Canonical article URL to persist.
         title: Article title when available.
         source: Source/domain label when available.
+        news_item: Source news item whose stored article body may be reused.
 
     Returns:
         A tuple of the article content row and whether it already existed.
@@ -53,6 +113,7 @@ def convert_article_url_to_content(
         platform=None,
         content_metadata={},
         classification=None,
+        publication_date=news_item.published_at if news_item is not None else None,
     )
     db.add(new_article)
 
@@ -72,7 +133,13 @@ def convert_article_url_to_content(
         raise
 
     db.refresh(new_article)
-    get_queue_service().enqueue(TaskType.PROCESS_CONTENT, content_id=new_article.id)
+    body_was_reused = news_item is not None and _seed_article_body_from_news_item(
+        db,
+        article=new_article,
+        news_item=news_item,
+    )
+    next_task = TaskType.SUMMARIZE if body_was_reused else TaskType.PROCESS_CONTENT
+    get_queue_service().enqueue(next_task, content_id=new_article.id)
     return new_article, False
 
 

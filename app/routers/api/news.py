@@ -206,6 +206,7 @@ def convert_news_item_to_article(
         article_url=canonical_article_url,
         title=get_news_article_title(item.raw_metadata) or item.article_title,
         source=item.article_domain,
+        news_item=item,
     )
     if item.id is None or article.id is None:
         raise HTTPException(status_code=500, detail="Converted content is missing required ids")

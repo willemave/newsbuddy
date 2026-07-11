@@ -10,9 +10,11 @@ from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, NewsItem, NewsItemReadStatus, UserScraperConfig
 from app.repositories import knowledge_repository
 from app.services import news_article_bodies
+from app.services.content_bodies import ContentBodyFormat, ContentBodyVariant
 from app.services.gateways.object_storage_gateway import ObjectStorageGateway, StoredObjectMetadata
 from app.services.news_article_bodies import (
     NewsItemArticleBodyResolver,
+    ResolvedNewsItemArticleBody,
     persist_news_item_article_body,
 )
 
@@ -754,6 +756,90 @@ def test_convert_news_item_to_article_queues_processing(
 
     article = db_session.query(Content).filter(Content.id == payload["new_content_id"]).one()
     assert article.url == "https://example.com/convert-1"
+
+
+def test_convert_news_item_to_article_reuses_stored_body_and_queues_summary(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
+    published_at = datetime(2026, 7, 3, 12, 0, tzinfo=UTC)
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="convert-with-body",
+        summary_title="Convert without extracting twice",
+        published_at=published_at,
+        raw_metadata={
+            "source_metadata": {
+                "schema_version": 1,
+                "kind": "research_paper",
+                "provider": "arxiv",
+                "source_id": "2607.00001",
+            }
+        },
+    )
+    db_session.commit()
+
+    class _FakeResolver:
+        def resolve(self, db, *, news_item):  # noqa: ANN001
+            del db, news_item
+            return ResolvedNewsItemArticleBody(
+                source="storage",
+                text="A complete article body that was extracted for the news item.",
+            )
+
+    persisted_bodies: list[dict] = []
+
+    def _persist_body(db, **kwargs):  # noqa: ANN001
+        del db
+        persisted_bodies.append(kwargs)
+
+    fake_queue = _FakeQueueService()
+    monkeypatch.setattr(
+        "app.commands.convert_news_to_article.get_news_item_article_body_resolver",
+        lambda: _FakeResolver(),
+    )
+    monkeypatch.setattr(
+        "app.commands.convert_news_to_article.persist_content_body",
+        _persist_body,
+    )
+    monkeypatch.setattr(
+        "app.commands.convert_news_to_article.get_queue_service",
+        lambda: fake_queue,
+    )
+
+    response = client.post(f"/api/news/items/{news_item.id}/convert-to-article")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert fake_queue.calls == [("summarize", payload["new_content_id"])]
+    assert persisted_bodies == [
+        {
+            "content_id": payload["new_content_id"],
+            "variant": ContentBodyVariant.SOURCE,
+            "text": "A complete article body that was extracted for the news item.",
+            "content_format": ContentBodyFormat.TEXT,
+        }
+    ]
+
+    db_session.expire_all()
+    article = db_session.query(Content).filter(Content.id == payload["new_content_id"]).one()
+    assert article.status == ContentStatus.PROCESSING.value
+    assert article.publication_date == published_at.replace(tzinfo=None)
+    assert article.content_metadata == {
+        "content_type": "text",
+        "final_url_after_redirects": "https://example.com/convert-with-body",
+        "source_metadata": {
+            "schema_version": 1,
+            "kind": "research_paper",
+            "provider": "arxiv",
+            "source_id": "2607.00001",
+            "authors": [],
+            "categories": [],
+        },
+    }
 
 
 def test_convert_news_item_to_article_ignores_unrelated_content_id_collision(
