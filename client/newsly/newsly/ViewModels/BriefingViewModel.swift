@@ -1,8 +1,20 @@
 import Foundation
+import OSLog
 import SwiftUI
 
 private let briefingReadFlushDebounceNanoseconds: UInt64 = 300_000_000
 private let briefingReadFlushRetryNanoseconds: UInt64 = 2_000_000_000
+private let briefingRefreshPollDelaysNanoseconds: [UInt64] = [
+    750_000_000,
+    1_500_000_000,
+    3_000_000_000,
+    5_000_000_000,
+    5_000_000_000,
+    5_000_000_000,
+    5_000_000_000,
+    5_000_000_000,
+]
+private let briefingRefreshLogger = Logger(subsystem: "com.newsly", category: "BriefingRefresh")
 
 protocol BriefingAudioEpisodeServicing: AnyObject {
     func waitForCompletedEpisode(
@@ -19,6 +31,10 @@ extension AudioEpisodeService: BriefingAudioEpisodeServicing {}
 final class BriefingViewModel: ObservableObject {
     private enum TaskKey: Hashable {
         case lens(String)
+        case index
+        case manualRefresh
+        case activation
+        case refreshPoll
         case readFlush
         case snapshotSave
     }
@@ -26,6 +42,11 @@ final class BriefingViewModel: ObservableObject {
     private enum NarrationPreparationOutcome {
         case ready(AudioEpisode)
         case failed(Error, cachedEpisode: AudioEpisode?)
+    }
+
+    private enum IndexLoadMode: Equatable {
+        case conditional
+        case forced
     }
 
     private struct NarrationPreparation {
@@ -41,10 +62,19 @@ final class BriefingViewModel: ObservableObject {
         case error(String)
     }
 
+    enum RefreshPhase: Equatable {
+        case idle
+        case requesting
+        case waitingForVersion
+        case failed(String)
+    }
+
     @Published private(set) var index: APIBriefingIndexResponse?
     @Published private(set) var orderedLenses: [APIBriefingLensSummary] = []
     @Published private(set) var lenses: [String: APIBriefingLensResponse] = [:]
     @Published private(set) var state: LoadState = .idle
+    @Published private(set) var refreshPhase: RefreshPhase = .idle
+    @Published private(set) var lensErrors: [String: String] = [:]
     @Published var selectedLensKey: String?
     @Published private(set) var narrationEpisodes: [String: AudioEpisode] = [:]
     /// True while the selected lens is scrolled into reading — the masthead
@@ -58,8 +88,10 @@ final class BriefingViewModel: ObservableObject {
     private let service: BriefingServicing
     private let audioEpisodeService: any BriefingAudioEpisodeServicing
     private let snapshotStore: BriefingSnapshotStoring?
+    private let refreshPollDelays: [UInt64]
     private var etag: String?
-    private var indexLoadTask: Task<Void, Never>?
+    private var indexLoadMode: IndexLoadMode?
+    private var isActive = false
     private let tasks = TaskBag<TaskKey>()
     private var pendingReadKeys: Set<String> = []
     private var staleLensKeys: Set<String> = []
@@ -74,11 +106,13 @@ final class BriefingViewModel: ObservableObject {
     init(
         service: BriefingServicing,
         audioEpisodeService: any BriefingAudioEpisodeServicing,
-        snapshotStore: BriefingSnapshotStoring? = nil
+        snapshotStore: BriefingSnapshotStoring? = nil,
+        refreshPollDelays: [UInt64] = briefingRefreshPollDelaysNanoseconds
     ) {
         self.service = service
         self.audioEpisodeService = audioEpisodeService
         self.snapshotStore = snapshotStore
+        self.refreshPollDelays = refreshPollDelays
     }
 
     deinit {
@@ -94,6 +128,10 @@ final class BriefingViewModel: ObservableObject {
     var selectedLens: APIBriefingLensResponse? {
         guard let selectedLensKey else { return nil }
         return lenses[selectedLensKey]
+    }
+
+    var isRefreshing: Bool {
+        refreshPhase == .requesting || refreshPhase == .waitingForVersion
     }
 
     var newsLenses: [APIBriefingLensSummary] {
@@ -127,8 +165,24 @@ final class BriefingViewModel: ObservableObject {
         orderedLenses.first { $0.key == selectedLensKey }
     }
 
-    func handleTabEntered() {
-        Task { await loadIndexIfNeeded() }
+    func setActive(_ active: Bool) {
+        guard isActive != active else { return }
+        isActive = active
+        briefingRefreshLogger.info("Briefing activity changed | active=\(active, privacy: .public)")
+        if active {
+            tasks.runReplacing(.activation) { [weak self] in
+                await self?.loadIndexIfNeeded()
+            }
+            return
+        }
+        tasks.cancel(.activation)
+        tasks.cancel(.manualRefresh)
+        tasks.cancel(.refreshPoll)
+        cancelIndexLoad()
+        cancelLensLoads()
+        if refreshPhase == .requesting || refreshPhase == .waitingForVersion {
+            refreshPhase = .idle
+        }
     }
 
     func loadIndexIfNeeded() async {
@@ -138,7 +192,7 @@ final class BriefingViewModel: ObservableObject {
         }
         // Cold start: paint the last briefing immediately, then revalidate
         // against the server via ETag; a version bump refetches the lenses.
-        if restoreFromSnapshot() {
+        if await restoreFromSnapshot() {
             await refreshIndex()
             return
         }
@@ -150,14 +204,50 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func pullToRefresh() async {
+        if let task = tasks.task(for: .manualRefresh) {
+            await task.value
+            return
+        }
+        guard !isRefreshing else { return }
+        let task = tasks.runReplacing(.manualRefresh) { [weak self] token in
+            await self?.performManualRefresh(token: token)
+        }
+        await task.value
+    }
+
+    private func performManualRefresh(token: TaskBag<TaskKey>.Token) async {
+        refreshPhase = .requesting
+        tasks.cancel(.refreshPoll)
+        tasks.cancel(.activation)
+        cancelIndexLoad()
+        cancelBackgroundLensLoads()
         tasks.cancel(.readFlush)
         await flushPendingReadMarks()
+        guard tasks.isCurrent(token), !Task.isCancelled else { return }
+        let startedAt = Date()
         do {
-            _ = try await service.requestRefresh()
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            await loadIndex(force: true)
+            let response = try await service.requestRefresh()
+            guard tasks.isCurrent(token), !Task.isCancelled else { return }
+            briefingRefreshLogger.info(
+                "Refresh accepted | duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public) baseline_version=\(response.version, privacy: .public)"
+            )
+            guard isActive else {
+                refreshPhase = .idle
+                return
+            }
+            refreshPhase = .waitingForVersion
+            startRefreshPolling(baselineVersion: response.version)
+        } catch where isNetworkCancellation(error) {
+            briefingRefreshLogger.info("Manual Briefing refresh cancelled")
+            if tasks.isCurrent(token) {
+                refreshPhase = .idle
+            }
         } catch {
-            state = .error(error.localizedDescription)
+            guard tasks.isCurrent(token) else { return }
+            briefingRefreshLogger.error(
+                "Manual Briefing refresh failed | error=\(error.localizedDescription, privacy: .private)"
+            )
+            refreshPhase = .failed(error.localizedDescription)
         }
     }
 
@@ -165,7 +255,7 @@ final class BriefingViewModel: ObservableObject {
         guard selectedLensKey != key else { return }
         selectedLensKey = key
         noteSelectionChanged()
-        loadLensIfNeeded(key: key)
+        loadWorkingSet()
     }
 
     /// Tapping the single News pill: return to the last-read category, or the
@@ -231,25 +321,43 @@ final class BriefingViewModel: ObservableObject {
               !tasks.isRunning(.lens(key)) else {
             return
         }
-        tasks.runReplacing(.lens(key)) { [weak self] in
+        lensErrors.removeValue(forKey: key)
+        let expectedVersion = index?.version
+        tasks.runReplacing(.lens(key)) { [weak self] token in
             guard let self else { return }
+            let startedAt = Date()
             do {
                 let response = try await service.fetchLens(key: key)
-                guard response.version >= (self.index?.version ?? 0) else {
+                guard self.tasks.isCurrent(token), !Task.isCancelled else {
+                    return
+                }
+                guard response.version == expectedVersion,
+                      response.version == self.index?.version else {
+                    if !Task.isCancelled {
+                        await self.refreshIndex()
+                    }
                     return
                 }
                 self.lenses[key] = response
                 self.staleLensKeys.remove(key)
+                self.lensErrors.removeValue(forKey: key)
+                briefingRefreshLogger.info(
+                    "Lens loaded | key=\(key, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public) version=\(response.version, privacy: .public) foreground=\(key == self.selectedLensKey, privacy: .public)"
+                )
                 self.scheduleSnapshotSave()
             } catch {
-                // Background prefetch failures stay silent — the page retries
-                // on appear. Only the lens the reader is looking at may take
-                // the whole tab into an error state.
-                if !isNetworkCancellation(error), key == self.selectedLensKey {
-                    self.state = .error(error.localizedDescription)
+                guard !isNetworkCancellation(error) else { return }
+                if key == self.selectedLensKey, self.lenses[key] == nil {
+                    self.lensErrors[key] = error.localizedDescription
                 }
             }
         }
+    }
+
+    func retryLens(key: String) {
+        lensErrors.removeValue(forKey: key)
+        tasks.cancel(.lens(key))
+        loadLensIfNeeded(key: key)
     }
 
     func markSegmentSeen(_ segment: APIBriefingSegment) {
@@ -440,86 +548,180 @@ final class BriefingViewModel: ObservableObject {
     }
 
     private func loadIndex(force: Bool) async {
-        if let indexLoadTask {
-            await indexLoadTask.value
-            return
+        let requestedMode: IndexLoadMode = force ? .forced : .conditional
+        if let indexTask = tasks.task(for: .index) {
+            if requestedMode == .forced, indexLoadMode == .conditional {
+                cancelIndexLoad()
+            } else {
+                await indexTask.value
+                return
+            }
         }
-        let task = Task { [weak self] in
+        indexLoadMode = requestedMode
+        let task = tasks.runReplacing(.index) { [weak self] token in
             guard let self else { return }
-            await self.performIndexLoad(force: force)
+            await self.performIndexLoad(force: force, token: token)
+            if self.tasks.isCurrent(token) {
+                self.indexLoadMode = nil
+            }
         }
-        indexLoadTask = task
         await task.value
-        indexLoadTask = nil
     }
 
-    private func performIndexLoad(force: Bool) async {
+    private func cancelIndexLoad() {
+        tasks.cancel(.index)
+        indexLoadMode = nil
+    }
+
+    private func performIndexLoad(force: Bool, token: TaskBag<TaskKey>.Token) async {
+        let startedAt = Date()
+        let priorVersion = index?.version
+        let priorETag = etag
         if index == nil {
             state = .loading
         }
         do {
             let result = try await service.fetchIndex(ifNoneMatch: force ? nil : etag)
+            guard tasks.isCurrent(token), !Task.isCancelled else { return }
             switch result {
             case .notModified:
+                briefingRefreshLogger.info(
+                    "Index loaded | generation=\(token.generation, privacy: .public) status=304 duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public) prior_version=\(priorVersion ?? -1, privacy: .public)"
+                )
                 state = orderedLenses.isEmpty ? .empty : .loaded
-                loadSelectedAndRemainingLenses()
+                loadWorkingSet()
             case .value(let response, let responseEtag):
-                guard shouldApply(response, force: force) else {
-                    state = orderedLenses.isEmpty ? .empty : .loaded
-                    return
-                }
-                markLensesStale(validLensKeys: Set(response.lenses.map(\.key)))
-                index = response
-                orderedLenses = Self.sortedLenses(response.lenses)
-                // A missing ETag header must not discard the last known validator.
-                etag = responseEtag ?? etag
-                state = response.lenses.isEmpty ? .empty : .loaded
-                if selectedLensKey == nil || !response.lenses.contains(where: { $0.key == selectedLensKey }) {
-                    selectedLensKey = orderedLenses.first?.key
-                }
-                noteSelectionChanged()
-                loadSelectedAndRemainingLenses()
-                scheduleSnapshotSave()
+                briefingRefreshLogger.info(
+                    "Index loaded | generation=\(token.generation, privacy: .public) status=200 duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public) prior_version=\(priorVersion ?? -1, privacy: .public) new_version=\(response.version, privacy: .public) etag_changed=\(responseEtag != nil && responseEtag != priorETag, privacy: .public)"
+                )
+                applyIndex(response, responseEtag: responseEtag)
             }
         } catch {
-            // With restored or previously loaded content on screen, a failed
-            // revalidation stays silent instead of replacing the briefing
-            // with a full-screen error (e.g. offline cold start).
+            guard tasks.isCurrent(token) else { return }
             if !isNetworkCancellation(error), orderedLenses.isEmpty {
                 state = .error(error.localizedDescription)
             }
         }
     }
 
-    // A read-mark can bump the version while an index fetch is in flight; never
-    // let the older snapshot overwrite the newer state. Forced loads (initial
-    // load, pull-to-refresh) accept the server as truth even if its version is
-    // lower — e.g. after the backing state was rebuilt.
-    private func shouldApply(_ response: APIBriefingIndexResponse, force: Bool) -> Bool {
-        guard !force, let current = index else { return true }
-        return response.version >= current.version
+    private func applyIndex(_ response: APIBriefingIndexResponse, responseEtag: String?) {
+        let versionChanged = index.map { $0.version != response.version } ?? false
+        if versionChanged {
+            markLensesStale(validLensKeys: Set(response.lenses.map(\.key)))
+        } else {
+            let validKeys = Set(response.lenses.map(\.key))
+            lenses = lenses.filter { validKeys.contains($0.key) }
+            staleLensKeys.formIntersection(validKeys)
+        }
+        index = response
+        orderedLenses = Self.sortedLenses(response.lenses)
+        etag = responseEtag ?? etag
+        state = response.lenses.isEmpty ? .empty : .loaded
+        if selectedLensKey == nil
+            || !response.lenses.contains(where: { $0.key == selectedLensKey }) {
+            selectedLensKey = orderedLenses.first?.key
+        }
+        noteSelectionChanged()
+        loadWorkingSet()
+        scheduleSnapshotSave()
     }
 
-    /// Warm every lens in the background so swiping between categories never
-    /// shows a loading page. Payloads are small and requests share the
-    /// connection, so this is cheaper than it looks.
-    private func prefetchRemainingLenses() {
-        for lens in orderedLenses where lens.key != selectedLensKey {
-            loadLensIfNeeded(key: lens.key)
+    private func loadWorkingSet() {
+        let workingSetKeys = workingSetLensKeys()
+        let workingSet = Set(workingSetKeys)
+        for key in Set(orderedLenses.map(\.key)).union(lenses.keys)
+            where !workingSet.contains(key) {
+            tasks.cancel(.lens(key))
+        }
+        for key in workingSetKeys {
+            loadLensIfNeeded(key: key)
         }
     }
 
-    private func loadSelectedAndRemainingLenses() {
-        if let selectedLensKey {
-            loadLensIfNeeded(key: selectedLensKey)
+    private func workingSetLensKeys() -> [String] {
+        guard let selectedLensKey else { return [] }
+        var keys = [selectedLensKey]
+        let pages = pagerLenses
+        guard let selectedIndex = pages.firstIndex(where: { $0.key == selectedLensKey }) else {
+            return keys
         }
-        prefetchRemainingLenses()
+        for neighborIndex in [selectedIndex - 1, selectedIndex + 1]
+            where pages.indices.contains(neighborIndex) {
+            keys.append(pages[neighborIndex].key)
+        }
+        return keys
+    }
+
+    private func cancelBackgroundLensLoads() {
+        let selectedKey = selectedLensKey
+        for key in orderedLenses.map(\.key) where key != selectedKey {
+            tasks.cancel(.lens(key))
+        }
+    }
+
+    private func cancelLensLoads() {
+        for key in Set(orderedLenses.map(\.key)).union(lenses.keys) {
+            tasks.cancel(.lens(key))
+        }
+    }
+
+    private func startRefreshPolling(baselineVersion: Int) {
+        guard isActive else {
+            refreshPhase = .idle
+            return
+        }
+        tasks.runReplacing(.refreshPoll) { [weak self] in
+            guard let self else { return }
+            var pollCount = 0
+            for delay in self.refreshPollDelays {
+                do {
+                    let jitter = UInt64.random(in: 0...min(delay / 10, 250_000_000))
+                    try await Task.sleep(nanoseconds: delay + jitter)
+                    pollCount += 1
+                    let result = try await self.service.fetchIndex(ifNoneMatch: self.etag)
+                    try Task.checkCancellation()
+                    switch result {
+                    case .notModified:
+                        continue
+                    case .value(let response, let responseEtag):
+                        self.applyIndex(response, responseEtag: responseEtag)
+                        if response.version != baselineVersion {
+                            briefingRefreshLogger.info(
+                                "Refresh poll completed | polls=\(pollCount, privacy: .public) baseline_version=\(baselineVersion, privacy: .public) new_version=\(response.version, privacy: .public)"
+                            )
+                            self.refreshPhase = .idle
+                            return
+                        }
+                    }
+                } catch where isNetworkCancellation(error) {
+                    briefingRefreshLogger.info(
+                        "Refresh poll cancelled | polls=\(pollCount, privacy: .public)"
+                    )
+                    if self.refreshPhase == .waitingForVersion {
+                        self.refreshPhase = .idle
+                    }
+                    return
+                } catch {
+                    briefingRefreshLogger.error(
+                        "Refresh poll failed | polls=\(pollCount, privacy: .public) error=\(error.localizedDescription, privacy: .private)"
+                    )
+                    self.refreshPhase = .failed(error.localizedDescription)
+                    return
+                }
+            }
+            if self.refreshPhase == .waitingForVersion {
+                briefingRefreshLogger.info(
+                    "Refresh poll deadline reached | polls=\(pollCount, privacy: .public) baseline_version=\(baselineVersion, privacy: .public)"
+                )
+                self.refreshPhase = .idle
+            }
+        }
     }
 
     /// Applies the persisted briefing so the tab renders without waiting on
     /// the network. Returns false when there is nothing usable to restore.
-    private func restoreFromSnapshot() -> Bool {
-        guard let snapshot = snapshotStore?.load(),
+    private func restoreFromSnapshot() async -> Bool {
+        guard let snapshot = await snapshotStore?.load(),
               !snapshot.index.lenses.isEmpty
         else { return false }
         index = snapshot.index
@@ -528,7 +730,11 @@ final class BriefingViewModel: ObservableObject {
         staleLensKeys.removeAll()
         etag = snapshot.etag
         state = .loaded
-        if selectedLensKey == nil || !snapshot.index.lenses.contains(where: { $0.key == selectedLensKey }) {
+        if let savedKey = snapshot.selectedLensKey,
+           snapshot.index.lenses.contains(where: { $0.key == savedKey }) {
+            selectedLensKey = savedKey
+        } else if selectedLensKey == nil
+                    || !snapshot.index.lenses.contains(where: { $0.key == selectedLensKey }) {
             selectedLensKey = orderedLenses.first?.key
         }
         noteSelectionChanged()
@@ -536,15 +742,25 @@ final class BriefingViewModel: ObservableObject {
     }
 
     private func scheduleSnapshotSave() {
-        guard snapshotStore != nil else { return }
+        guard let snapshotStore else { return }
         tasks.runReplacing(.snapshotSave) { [weak self] in
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            do {
+                try await Task.sleep(nanoseconds: 500_000_000)
+            } catch {
+                return
+            }
             guard let self, !Task.isCancelled, let index = self.index else { return }
-            self.snapshotStore?.save(
+            let workingSet = Set(self.workingSetLensKeys())
+            let snapshotLenses = self.lenses.filter {
+                workingSet.contains($0.key) && !self.staleLensKeys.contains($0.key)
+            }
+            await snapshotStore.save(
                 BriefingSnapshot(
+                    userID: snapshotStore.userID,
                     index: index,
                     etag: self.etag,
-                    lenses: self.lenses.filter { !self.staleLensKeys.contains($0.key) },
+                    selectedLensKey: self.selectedLensKey,
+                    lenses: snapshotLenses,
                     savedAt: AppClock.now
                 )
             )
@@ -561,8 +777,8 @@ final class BriefingViewModel: ObservableObject {
             tasks.cancel(.lens(key))
         }
         lenses = lenses.filter { validLensKeys.contains($0.key) }
-        staleLensKeys.formIntersection(validLensKeys)
-        staleLensKeys.formUnion(validLensKeys)
+        staleLensKeys = validLensKeys
+        lensErrors = lensErrors.filter { validLensKeys.contains($0.key) }
     }
 
     private func scheduleReadFlush(
@@ -584,6 +800,7 @@ final class BriefingViewModel: ObservableObject {
         guard !keys.isEmpty else { return }
         do {
             let response = try await service.markRead(sourceKeys: keys)
+            cancelIndexLoad()
             markCachedLensesStale(containing: keys)
             if var currentIndex = index {
                 currentIndex = APIBriefingIndexResponse(

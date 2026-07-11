@@ -6,6 +6,11 @@
 import Foundation
 
 final class TaskBag<Key: Hashable> {
+    struct Token {
+        fileprivate let key: Key
+        let generation: Int
+    }
+
     private var tasks: [Key: Task<Void, Never>] = [:]
     private var generations: [Key: Int] = [:]
 
@@ -17,6 +22,14 @@ final class TaskBag<Key: Hashable> {
         tasks[key] != nil
     }
 
+    func task(for key: Key) -> Task<Void, Never>? {
+        tasks[key]
+    }
+
+    func isCurrent(_ token: Token) -> Bool {
+        generations[token.key] == token.generation && tasks[token.key] != nil
+    }
+
     func cancel(_ key: Key) {
         generations[key, default: 0] += 1
         tasks[key]?.cancel()
@@ -24,11 +37,11 @@ final class TaskBag<Key: Hashable> {
     }
 
     func cancelAll() {
-        for task in tasks.values {
+        for (key, task) in tasks {
+            generations[key, default: 0] += 1
             task.cancel()
         }
         tasks.removeAll()
-        generations.removeAll()
     }
 
     @discardableResult
@@ -36,12 +49,23 @@ final class TaskBag<Key: Hashable> {
         _ key: Key,
         operation: @escaping @MainActor () async -> Void
     ) -> Task<Void, Never> {
-        cancel(key)
+        runReplacing(key) { _ in
+            await operation()
+        }
+    }
+
+    @discardableResult
+    func runReplacing(
+        _ key: Key,
+        operation: @escaping @MainActor (Token) async -> Void
+    ) -> Task<Void, Never> {
+        tasks[key]?.cancel()
         let generation = generations[key, default: 0] + 1
         generations[key] = generation
+        let token = Token(key: key, generation: generation)
 
         let task = Task { @MainActor [weak self] in
-            await operation()
+            await operation(token)
             self?.clear(key, generation: generation)
         }
         tasks[key] = task

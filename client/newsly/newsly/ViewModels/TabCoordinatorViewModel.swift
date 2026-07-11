@@ -106,8 +106,9 @@ final class TabCoordinatorViewModel {
                 rootTabFlowLogger.info("tab content already available | tab=long_form")
             }
         case .briefing:
-            rootTabFlowLogger.info("tab content load requested | tab=briefing")
-            briefingVM.handleTabEntered()
+            // ContentView owns the single Briefing active/inactive signal so
+            // tab selection and scene phase cannot start competing loads.
+            rootTabFlowLogger.info("tab became active | tab=briefing")
         case .knowledge, .more:
             rootTabFlowLogger.info(
                 "tab became active with no preload required | tab=\(tab.logName, privacy: .public)"

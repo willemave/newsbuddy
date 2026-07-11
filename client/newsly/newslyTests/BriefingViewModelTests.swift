@@ -12,7 +12,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
 
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(viewModel.selectedLensKey, "today")
@@ -33,7 +33,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
         viewModel.markSegmentSeen(segment)
 
         XCTAssertEqual(viewModel.selectedLensKey, "first")
@@ -54,10 +54,37 @@ final class BriefingViewModelTests: XCTestCase {
         let second = Task { await viewModel.loadIndexIfNeeded() }
         await first.value
         await second.value
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
 
         XCTAssertEqual(service.indexEtags, [nil])
         XCTAssertEqual(viewModel.state, .loaded)
+    }
+
+    func testOneActiveTransitionProducesOneIndexRequest() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(lenses: [makeLensSummary(key: "today")]), etag: nil)
+        ]
+        service.lensResponses["today"] = makeLens(key: "today")
+        let viewModel = BriefingViewModel(service: service)
+
+        viewModel.setActive(true)
+        viewModel.setActive(true)
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+
+        XCTAssertEqual(service.indexEtags.count, 1)
+    }
+
+    func testInitialIndexFailureIsFatalWithoutSnapshot() async {
+        let service = MockBriefingService()
+        service.indexError = URLError(.notConnectedToInternet)
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+
+        guard case .error = viewModel.state else {
+            return XCTFail("Expected initial index failure to be fatal")
+        }
     }
 
     func testRefreshUsesETagAndKeepsExistingIndexOnNotModified() async {
@@ -66,7 +93,7 @@ final class BriefingViewModelTests: XCTestCase {
             .value(makeIndex(version: 4, lenses: [makeLensSummary(key: "today")]), etag: "etag-4"),
             .notModified
         ]
-        service.lensResponses["today"] = makeLens(key: "today")
+        service.lensResponses["today"] = makeLens(key: "today", version: 4)
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
@@ -88,7 +115,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
         viewModel.markSegmentSeen(segment)
         XCTAssertEqual(viewModel.source(for: "content:1")?.read, true)
         XCTAssertEqual(viewModel.source(for: "news:2")?.read, true)
@@ -141,7 +168,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.lenses["today"] != nil && viewModel.lenses["later"] != nil }
+        await waitForBriefingCondition { viewModel.lenses["today"] != nil && viewModel.lenses["later"] != nil }
         viewModel.markSegmentSeen(segment)
 
         // All UI-facing state updates before any network flush happens.
@@ -171,7 +198,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
         viewModel.markSegmentSeen(segment)
 
         XCTAssertEqual(viewModel.index?.lenses.first?.unreadSourceCount, 0)
@@ -189,7 +216,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
         viewModel.markSegmentSeen(first)
         try? await Task.sleep(nanoseconds: 450_000_000)
 
@@ -207,11 +234,10 @@ final class BriefingViewModelTests: XCTestCase {
     func testIndexResponseWithoutEtagKeepsPreviousEtag() async {
         let service = MockBriefingService()
         service.indexResults = [
-            .value(makeIndex(version: 4, lenses: [makeLensSummary(key: "today")]), etag: "etag-4"),
-            .value(makeIndex(version: 5, lenses: [makeLensSummary(key: "today")]), etag: nil),
+            .value(makeIndex(version: 4, lenses: []), etag: "etag-4"),
+            .value(makeIndex(version: 5, lenses: []), etag: nil),
             .notModified
         ]
-        service.lensResponses["today"] = makeLens(key: "today")
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
@@ -232,7 +258,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens?.version == 1 }
+        await waitForBriefingCondition { viewModel.selectedLens?.version == 1 }
 
         service.lensResponses["today"] = makeLens(
             key: "today",
@@ -256,13 +282,41 @@ final class BriefingViewModelTests: XCTestCase {
             ]
         )
         await viewModel.refreshIndex()
-        await waitFor { viewModel.selectedLens?.version == 2 }
+        await waitForBriefingCondition { viewModel.selectedLens?.version == 2 }
 
         XCTAssertEqual(service.fetchLensKeys, ["today", "today"])
         XCTAssertEqual(viewModel.source(for: "news:2")?.discussion?.overview, "Commenters focused on deployment risk.")
     }
 
-    func testSameVersionIndexBodyRefetchesLoadedLens() async {
+    func testCancelledOldLensResponseCannotOverwriteNewGeneration() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
+            .value(makeIndex(version: 2, lenses: [makeLensSummary(key: "today")]), etag: "etag-2")
+        ]
+        service.lensResponses["today"] = makeLens(
+            key: "today",
+            version: 1,
+            segments: [makeSegment(id: 10)]
+        )
+        service.fetchLensDelayNanoseconds = 100_000_000
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { service.fetchLensKeys == ["today"] }
+        service.lensResponses["today"] = makeLens(
+            key: "today",
+            version: 2,
+            segments: [makeSegment(id: 20)]
+        )
+        await viewModel.refreshIndex()
+        await waitForBriefingCondition { viewModel.selectedLens?.version == 2 }
+
+        XCTAssertEqual(viewModel.selectedLens?.segments.first?.id, 20)
+        XCTAssertEqual(service.fetchLensKeys, ["today", "today"])
+    }
+
+    func testSameVersionIndexBodyKeepsLoadedLens() async {
         let service = MockBriefingService()
         service.indexResults = [
             .value(makeIndex(version: 8, lenses: [makeLensSummary(key: "today")]), etag: "etag-stale"),
@@ -276,7 +330,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens?.segments.first?.id == 10 }
+        await waitForBriefingCondition { viewModel.selectedLens?.segments.first?.id == 10 }
 
         service.lensResponses["today"] = makeLens(
             key: "today",
@@ -294,15 +348,15 @@ final class BriefingViewModelTests: XCTestCase {
             ]
         )
         await viewModel.refreshIndex()
-        await waitFor { viewModel.selectedLens?.segments.first?.id == 11 }
 
         XCTAssertEqual(service.indexEtags, [nil, "etag-stale"])
-        XCTAssertEqual(service.fetchLensKeys, ["today", "today"])
+        XCTAssertEqual(service.fetchLensKeys, ["today"])
+        XCTAssertEqual(viewModel.selectedLens?.segments.first?.id, 10)
     }
 
     func testReadMarkFlushKeepsAffectedLensVisibleAndOmitsItFromSnapshot() async {
         let service = MockBriefingService()
-        let snapshotStore = MockBriefingSnapshotStore()
+        let snapshotStore = MockBriefingSnapshotStore(userID: 42)
         let todaySegment = makeSegment(id: 10, sourceKeys: ["content:1"])
         service.indexResults = [
             .value(
@@ -334,19 +388,20 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service, snapshotStore: snapshotStore)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor {
+        await waitForBriefingCondition {
             viewModel.lenses["today"] != nil && viewModel.lenses["later"] != nil
         }
         viewModel.markSegmentSeen(todaySegment)
 
-        await waitFor { service.markReadCalls.count == 1 }
-        await waitFor(timeoutNanoseconds: 1_500_000_000) {
+        await waitForBriefingCondition { service.markReadCalls.count == 1 }
+        await waitForBriefingCondition(timeoutNanoseconds: 1_500_000_000) {
             snapshotStore.savedSnapshots.contains {
                 $0.index.version == 8 && $0.lenses["today"] == nil
             }
         }
 
         let saved = snapshotStore.savedSnapshots.last { $0.index.version == 8 }
+        XCTAssertEqual(saved?.userID, 42)
         XCTAssertEqual(viewModel.lenses["today"]?.version, 1)
         XCTAssertEqual(service.fetchLensKeys.filter { $0 == "today" }.count, 1)
         XCTAssertNil(saved?.lenses["today"])
@@ -355,8 +410,9 @@ final class BriefingViewModelTests: XCTestCase {
 
     func testRestoredSnapshotWithMissingLensLoadsItAfterNotModified() async {
         let service = MockBriefingService()
-        let snapshotStore = MockBriefingSnapshotStore()
+        let snapshotStore = MockBriefingSnapshotStore(userID: 1)
         snapshotStore.snapshotToLoad = BriefingSnapshot(
+            userID: 1,
             index: makeIndex(
                 version: 4,
                 lenses: [
@@ -365,6 +421,7 @@ final class BriefingViewModelTests: XCTestCase {
                 ]
             ),
             etag: "etag-4",
+            selectedLensKey: "alpha",
             lenses: ["zeta": makeLens(key: "zeta", version: 4, position: 1)],
             savedAt: Date(timeIntervalSince1970: 1_800_000_000)
         )
@@ -373,69 +430,67 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service, snapshotStore: snapshotStore)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens?.lens.key == "alpha" }
+        await waitForBriefingCondition { viewModel.selectedLens?.lens.key == "alpha" }
 
         XCTAssertEqual(service.indexEtags, ["etag-4"])
         XCTAssertEqual(service.fetchLensKeys, ["alpha"])
     }
 
-    func testPullToRefreshFlushesPendingReadMarksBeforeForceLoad() async {
+    func testOfflineRevalidationKeepsRestoredSnapshotReady() async {
         let service = MockBriefingService()
-        let segment = makeSegment(id: 10, sourceKeys: ["content:1"])
-        service.indexResults = [
-            .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
-            .value(makeIndex(version: 2, lenses: [makeLensSummary(key: "today")]), etag: "etag-2")
-        ]
-        service.lensResponses["today"] = makeLens(key: "today", version: 1, segments: [segment])
-        service.readMarkResponse = APIBriefingReadMarkResponse(marked: 1, version: 2)
+        let snapshotStore = MockBriefingSnapshotStore(userID: 1)
+        snapshotStore.snapshotToLoad = BriefingSnapshot(
+            userID: 1,
+            index: makeIndex(lenses: [makeLensSummary(key: "today")]),
+            etag: "etag-1",
+            selectedLensKey: "today",
+            lenses: ["today": makeLens(key: "today")],
+            savedAt: Date()
+        )
+        service.indexError = URLError(.notConnectedToInternet)
+        let viewModel = BriefingViewModel(service: service, snapshotStore: snapshotStore)
+
+        await viewModel.loadIndexIfNeeded()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertNotNil(viewModel.selectedLens)
+    }
+
+    func testInitialEntryLoadsOnlySelectedAndPagerNeighbor() async {
+        let service = MockBriefingService()
+        let summaries = (0..<5).map {
+            makeLensSummary(key: "news-\($0)", position: $0)
+        }
+        service.indexResults = [.value(makeIndex(lenses: summaries), etag: "etag-1")]
+        for summary in summaries {
+            service.lensResponses[summary.key] = makeLens(key: summary.key, position: summary.position)
+        }
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens?.segments.first?.id == 10 }
-        viewModel.markSegmentSeen(segment)
+        await waitForBriefingCondition { service.fetchLensKeys.count == 2 }
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
-        service.lensResponses["today"] = makeLens(key: "today", version: 2, segments: [])
-        await viewModel.pullToRefresh()
-        await waitFor { viewModel.selectedLens?.version == 2 }
-
-        XCTAssertEqual(service.markReadCalls, [["content:1"]])
-        XCTAssertEqual(service.indexEtags, [nil, nil])
-        let markReadIndex = service.events.firstIndex(of: "markRead:content:1")
-        let refreshIndex = service.events.firstIndex(of: "requestRefresh")
-        XCTAssertNotNil(markReadIndex)
-        XCTAssertNotNil(refreshIndex)
-        XCTAssertLessThan(markReadIndex!, refreshIndex!)
+        XCTAssertEqual(service.fetchLensKeys, ["news-0", "news-1"])
     }
 
-    func testPullToRefreshContinuesWhenReadMarkFlushFails() async {
+    func testFixedLensDoesNotPrefetchUnrelatedTiers() async {
         let service = MockBriefingService()
-        let segment = makeSegment(id: 10, sourceKeys: ["content:1"])
-        service.indexResults = [
-            .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
-            .value(makeIndex(version: 2, lenses: [makeLensSummary(key: "today")]), etag: "etag-2")
-        ]
-        service.lensResponses["today"] = makeLens(key: "today", version: 1, segments: [segment])
+        let fixed = makeLensSummary(key: "articles", position: 0, tier: .longform)
+        let news = makeLensSummary(key: "news", position: 1)
+        service.indexResults = [.value(makeIndex(lenses: [fixed, news]), etag: nil)]
+        service.lensResponses["articles"] = makeLens(key: "articles", position: 0, tier: .longform)
+        service.lensResponses["news"] = makeLens(key: "news", position: 1)
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens?.segments.first?.id == 10 }
-        viewModel.markSegmentSeen(segment)
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+        try? await Task.sleep(nanoseconds: 50_000_000)
 
-        service.markReadError = URLError(.notConnectedToInternet)
-        service.lensResponses["today"] = makeLens(key: "today", version: 2, segments: [])
-        await viewModel.pullToRefresh()
-        await waitFor { viewModel.selectedLens?.version == 2 }
-
-        XCTAssertEqual(service.markReadCalls.first, ["content:1"])
-        XCTAssertEqual(service.indexEtags, [nil, nil])
-        let markReadIndex = service.events.firstIndex(of: "markRead:content:1")
-        let refreshIndex = service.events.firstIndex(of: "requestRefresh")
-        XCTAssertNotNil(markReadIndex)
-        XCTAssertNotNil(refreshIndex)
-        XCTAssertLessThan(markReadIndex!, refreshIndex!)
+        XCTAssertEqual(service.fetchLensKeys, ["articles"])
     }
 
-    func testStaleIndexResponseDoesNotOverwriteNewerVersion() async {
+    func testLatestIndexResponseIsAuthoritativeEvenWhenVersionIsLower() async {
         let service = MockBriefingService()
         let segment = makeSegment(sourceKeys: ["content:1"])
         service.indexResults = [
@@ -447,13 +502,13 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
         viewModel.markSegmentSeen(segment)
         try? await Task.sleep(nanoseconds: 450_000_000)
         await viewModel.refreshIndex()
 
-        XCTAssertEqual(viewModel.index?.version, 8)
-        XCTAssertEqual(viewModel.index?.lenses.isEmpty, false)
+        XCTAssertEqual(viewModel.index?.version, 3)
+        XCTAssertEqual(viewModel.index?.lenses.isEmpty, true)
     }
 
     func testMastheadCompactTracksScrolledStateOfSelectedLens() async {
@@ -469,7 +524,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
         // Equal positions sort by key, so "articles" is auto-selected first.
         XCTAssertEqual(viewModel.selectedLensKey, "articles")
         XCTAssertFalse(viewModel.isMastheadCompact)
@@ -506,7 +561,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
 
         XCTAssertEqual(viewModel.newsLenses.map(\.key), ["news-tech", "news-world"])
         XCTAssertEqual(viewModel.fixedLenses.map(\.key), ["podcasts", "articles"])
@@ -536,7 +591,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
         XCTAssertEqual(viewModel.selectedLensKey, "podcasts")
         XCTAssertFalse(viewModel.isCategoryStripExpanded)
 
@@ -567,7 +622,7 @@ final class BriefingViewModelTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
-        await waitFor { viewModel.selectedLens != nil }
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
         XCTAssertTrue(viewModel.isCategoryStripExpanded)
 
         // Scrolling into the page collapses the strip with the masthead.
@@ -600,265 +655,4 @@ final class BriefingViewModelTests: XCTestCase {
         )
     }
 
-    private func waitFor(
-        timeoutNanoseconds: UInt64 = 500_000_000,
-        condition: @escaping @MainActor () -> Bool,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) async {
-        let startedAt = DispatchTime.now().uptimeNanoseconds
-        while !condition() {
-            if DispatchTime.now().uptimeNanoseconds - startedAt > timeoutNanoseconds {
-                XCTFail("Condition was not met before timeout", file: file, line: line)
-                return
-            }
-            try? await Task.sleep(nanoseconds: 10_000_000)
-        }
-    }
-}
-
-// Main-actor isolated: the view model prefetches every lens concurrently, so
-// an unisolated mock races on its recording arrays (fetchLensKeys & co).
-@MainActor
-final class MockBriefingService: BriefingServicing {
-    var indexResults: [BriefingIndexFetchResult] = []
-    var indexEtags: [String?] = []
-    var fetchIndexDelayNanoseconds: UInt64?
-    var lensResponses: [String: APIBriefingLensResponse] = [:]
-    var fetchLensKeys: [String] = []
-    var markReadCalls: [[String]] = []
-    var events: [String] = []
-    var readMarkResponse = APIBriefingReadMarkResponse(marked: 0, version: 1)
-    var markReadError: Error?
-    var narrationEpisode: AudioEpisode?
-    var narrationEpisodes: [AudioEpisode] = []
-    var narrationError: Error?
-    var narrationRequestDelayNanoseconds: UInt64?
-    var narrationWaitsForCancellation = false
-    var narrationLensKeys: [String] = []
-    private(set) var narrationCancellationCount = 0
-
-    func fetchIndex(ifNoneMatch etag: String?) async throws -> BriefingIndexFetchResult {
-        indexEtags.append(etag)
-        events.append("fetchIndex:\(etag ?? "nil")")
-        if let fetchIndexDelayNanoseconds {
-            try? await Task.sleep(nanoseconds: fetchIndexDelayNanoseconds)
-        }
-        guard !indexResults.isEmpty else {
-            return .value(makeIndex(lenses: []), etag: nil)
-        }
-        return indexResults.removeFirst()
-    }
-
-    func fetchLens(key: String) async throws -> APIBriefingLensResponse {
-        fetchLensKeys.append(key)
-        events.append("fetchLens:\(key)")
-        return lensResponses[key] ?? makeLens(key: key)
-    }
-
-    func markRead(sourceKeys: [String]) async throws -> APIBriefingReadMarkResponse {
-        markReadCalls.append(sourceKeys)
-        events.append("markRead:\(sourceKeys.joined(separator: ","))")
-        if let markReadError {
-            throw markReadError
-        }
-        return readMarkResponse
-    }
-
-    func requestRefresh() async throws -> APIBriefingRefreshResponse {
-        events.append("requestRefresh")
-        return APIBriefingRefreshResponse(enqueued: true, version: 1)
-    }
-
-    func digSearch(fragment: String) async throws -> APIBriefingDigSearchResponse {
-        APIBriefingDigSearchResponse(results: [], elapsedMs: 0)
-    }
-
-    func digSummarize(
-        fragment: String,
-        passageContext: String,
-        results: [APIBriefingDigSearchResult]
-    ) async throws -> APIBriefingDigSummarizeResponse {
-        APIBriefingDigSummarizeResponse(summary: "Summary", model: "test", elapsedMs: 0)
-    }
-
-    func requestNarration(lensKey: String) async throws -> AudioEpisode {
-        narrationLensKeys.append(lensKey)
-        if let narrationRequestDelayNanoseconds {
-            try await Task.sleep(nanoseconds: narrationRequestDelayNanoseconds)
-        }
-        if narrationWaitsForCancellation {
-            do {
-                try await Task.sleep(nanoseconds: 60_000_000_000)
-            } catch {
-                narrationCancellationCount += 1
-                throw error
-            }
-        }
-        if let narrationError {
-            throw narrationError
-        }
-        if !narrationEpisodes.isEmpty {
-            return narrationEpisodes.removeFirst()
-        }
-        return narrationEpisode ?? makeAudioEpisode(id: 1)
-    }
-}
-
-@MainActor
-final class MockBriefingAudioEpisodeService: BriefingAudioEpisodeServicing {
-    var waitResults: [Result<AudioEpisode, Error>] = []
-    private(set) var waitedEpisodeIDs: [Int] = []
-
-    func waitForCompletedEpisode(
-        _ episode: AudioEpisode,
-        pollIntervalNanoseconds: UInt64,
-        maxAttempts: Int
-    ) async throws -> AudioEpisode {
-        waitedEpisodeIDs.append(episode.id)
-        guard !waitResults.isEmpty else { return episode }
-        return try waitResults.removeFirst().get()
-    }
-
-    func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource {
-        throw AudioEpisodeServiceError.missingStreamResource
-    }
-}
-
-extension BriefingViewModel {
-    convenience init(
-        service: BriefingServicing,
-        snapshotStore: BriefingSnapshotStoring? = nil
-    ) {
-        self.init(
-            service: service,
-            audioEpisodeService: MockBriefingAudioEpisodeService(),
-            snapshotStore: snapshotStore
-        )
-    }
-}
-
-final class MockBriefingSnapshotStore: BriefingSnapshotStoring {
-    var snapshotToLoad: BriefingSnapshot?
-    private(set) var savedSnapshots: [BriefingSnapshot] = []
-    private(set) var clearCalls = 0
-
-    func load() -> BriefingSnapshot? {
-        snapshotToLoad
-    }
-
-    func save(_ snapshot: BriefingSnapshot) {
-        savedSnapshots.append(snapshot)
-    }
-
-    func clear() {
-        clearCalls += 1
-        snapshotToLoad = nil
-    }
-}
-
-func makeIndex(
-    version: Int = 1,
-    lenses: [APIBriefingLensSummary]
-) -> APIBriefingIndexResponse {
-    APIBriefingIndexResponse(
-        version: version,
-        mastheadTitle: "Today",
-        mastheadDeck: "What matters now",
-        generatedAt: Date(timeIntervalSince1970: 1_800_000_000),
-        lenses: lenses
-    )
-}
-
-func makeLensSummary(
-    key: String,
-    title: String = "Today",
-    position: Int = 0,
-    tier: APIBriefingTier = .news
-) -> APIBriefingLensSummary {
-    APIBriefingLensSummary(
-        key: key,
-        tier: tier,
-        title: title,
-        deck: "Latest unread reporting",
-        position: position,
-        segmentCount: 1,
-        unreadSourceCount: 2
-    )
-}
-
-func makeLens(
-    key: String,
-    version: Int = 1,
-    position: Int = 0,
-    segments: [APIBriefingSegment] = [makeSegment()],
-    sources: [APIBriefingSource]? = nil
-) -> APIBriefingLensResponse {
-    APIBriefingLensResponse(
-        version: version,
-        lens: makeLensSummary(key: key, position: position),
-        segments: segments,
-        sources: sources ?? [
-            APIBriefingSource(
-                sourceKey: "content:1",
-                kind: "content",
-                id: 1,
-                title: "Long report",
-                summary: "Report summary",
-                contentType: .article,
-                read: false
-            ),
-            APIBriefingSource(
-                sourceKey: "news:2",
-                kind: "news",
-                id: 2,
-                title: "News item",
-                summary: "News summary",
-                read: false
-            )
-        ]
-    )
-}
-
-func makeSegment(
-    id: Int = 10,
-    sourceKeys: [String] = ["content:1"]
-) -> APIBriefingSegment {
-    APIBriefingSegment(
-        id: id,
-        createdAt: Date(timeIntervalSince1970: 1_800_000_100),
-        status: "active",
-        narrationText: "Narration",
-        blocks: [
-            APIBriefingBlock(
-                type: .passage,
-                weight: "feature",
-                paragraphs: [
-                    APIBriefingParagraph(
-                        runs: [
-                            APIBriefingRun(kind: .text, text: "A useful passage.")
-                        ]
-                    )
-                ]
-            )
-        ],
-        sourceKeys: sourceKeys
-    )
-}
-
-func makeAudioEpisode(
-    id: Int,
-    status: APIAudioEpisodeStatus = .completed,
-    errorMessage: String? = nil
-) -> AudioEpisode {
-    AudioEpisode(
-        id: id,
-        kind: .briefing_narration,
-        status: status,
-        title: "Briefing",
-        sourceCount: 1,
-        sourceTitles: ["Long report"],
-        errorMessage: errorMessage,
-        createdAt: Date(timeIntervalSince1970: 1_800_000_200)
-    )
 }

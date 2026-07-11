@@ -8,6 +8,8 @@ import SwiftUI
 private let logger = Logger(subsystem: "com.newsly", category: "ContentView")
 
 struct ContentView: View {
+    private let authenticatedUserID: Int?
+
     @State private var tabCoordinator: TabCoordinatorViewModel
     @State private var knowledgeHubViewModel: KnowledgeHubViewModel
 
@@ -30,15 +32,20 @@ struct ContentView: View {
     @State private var longFormScrollToTopRequest = 0
     @State private var shortFormScrollToTopRequest = 0
     @State private var tabRetapFeedbackTrigger = 0
+    @State private var compactTabBarHeight: CGFloat = 0
     @Environment(\.scenePhase) private var scenePhase
 
     @MainActor
     init(userId: Int? = nil, tabCoordinator: TabCoordinatorViewModel? = nil) {
+        self.authenticatedUserID = userId
         let readStateCache = ReadStateCache()
         _readingStateStore = State(initialValue: ReadingStateStore(userId: userId))
         _readStateCache = State(initialValue: readStateCache)
         _tabCoordinator = State(
-            initialValue: tabCoordinator ?? RootDependencyFactory.makeTabCoordinator(readStateCache: readStateCache)
+            initialValue: tabCoordinator ?? RootDependencyFactory.makeTabCoordinator(
+                userID: userId,
+                readStateCache: readStateCache
+            )
         )
         _knowledgeHubViewModel = State(initialValue: RootDependencyFactory.makeKnowledgeHubViewModel())
         _submissionStatusViewModel = State(
@@ -80,6 +87,7 @@ struct ContentView: View {
                 path: $knowledgePath,
                 focusRequest: $knowledgeFocusRequest,
                 isBriefingExperience: isBriefingExperience,
+                persistentBottomBarHeight: isBriefingExperience ? compactTabBarHeight : 0,
                 viewModel: knowledgeHubViewModel,
                 readStateCache: readStateCache,
                 readingStateStore: readingStateStore,
@@ -101,6 +109,11 @@ struct ContentView: View {
                 isVisible: isBriefingExperience && isCompactTabBarVisible,
                 onSelect: tabSelection.select
             )
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { _, height in
+                compactTabBarHeight = max(height, 0)
+            }
         }
         .sheet(isPresented: $showMoreSheet) {
             NavigationStack {
@@ -123,15 +136,18 @@ struct ContentView: View {
             processingCountService.setPeriodicRefreshSuspended(scenePhase != .active)
             tabSelection.reconcile()
             tabCoordinator.ensureInitialLoads()
+            updateBriefingActivity()
             restoreIfNeeded()
             applyE2ERoutesIfNeeded()
         }
         .onChange(of: tabCoordinator.selectedTab) { _, newValue in
             logger.info("[TabChange] selectedTab=\(String(describing: newValue), privacy: .public)")
             tabCoordinator.handleTabChange(to: newValue)
+            updateBriefingActivity()
         }
         .onChange(of: settings.readingExperienceRaw) { _, _ in
             tabSelection.reconcile()
+            updateBriefingActivity()
         }
         .onChange(of: longFormPath.count) { oldValue, newValue in
             logger.info(
@@ -152,6 +168,7 @@ struct ContentView: View {
             chatSessionManager.setPollingSuspended(newPhase != .active)
             unreadCountService.setPeriodicRefreshSuspended(newPhase != .active)
             processingCountService.setPeriodicRefreshSuspended(newPhase != .active)
+            updateBriefingActivity()
             if newPhase == .active {
                 restoreIfNeeded()
                 applyE2ERoutesIfNeeded()
@@ -167,6 +184,9 @@ struct ContentView: View {
             await unreadCountService.refreshCounts()
             await submissionStatusViewModel.load()
         }
+        .onDisappear {
+            tabCoordinator.briefingVM.setActive(false)
+        }
     }
 
     private var contentTextSize: DynamicTypeSize {
@@ -175,6 +195,14 @@ struct ContentView: View {
 
     private var isBriefingExperience: Bool {
         settings.readingExperience == .briefing
+    }
+
+    private func updateBriefingActivity() {
+        let isActive = authenticatedUserID != nil
+            && isBriefingExperience
+            && tabCoordinator.selectedTab == .briefing
+            && scenePhase == .active
+        tabCoordinator.briefingVM.setActive(isActive)
     }
 
     private var longBadge: Int {

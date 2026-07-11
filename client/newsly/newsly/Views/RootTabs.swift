@@ -139,6 +139,7 @@ struct KnowledgeTab: View {
     @Binding var focusRequest: KnowledgeFocusRequest?
     @Namespace private var chatTransitionNamespace
     let isBriefingExperience: Bool
+    let persistentBottomBarHeight: CGFloat
     let viewModel: KnowledgeHubViewModel
     let readStateCache: ReadStateCache
     let readingStateStore: ReadingStateStore
@@ -163,7 +164,8 @@ struct KnowledgeTab: View {
                 readingStateStore: readingStateStore,
                 readStateCache: readStateCache,
                 contentTextSize: contentTextSize,
-                chatTransitionNamespace: chatTransitionNamespace
+                chatTransitionNamespace: chatTransitionNamespace,
+                persistentBottomBarHeight: persistentBottomBarHeight
             )
         }
         .toolbar(isBriefingExperience ? .hidden : .visible, for: .tabBar)

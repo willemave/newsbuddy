@@ -83,6 +83,11 @@ struct BriefingLensPageView: View {
                     viewModel.setHeaderPinned(pinned, forLens: lensSummary.key)
                 }
                 .accessibilityIdentifier("briefing.lens_page.\(lensSummary.key)")
+            } else if let error = viewModel.lensErrors[lensSummary.key] {
+                ErrorView(message: error) {
+                    viewModel.retryLens(key: lensSummary.key)
+                }
+                .accessibilityIdentifier("briefing.lens_error.\(lensSummary.key)")
             } else {
                 LoadingView()
                     .onAppear {

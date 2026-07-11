@@ -74,14 +74,12 @@ struct BriefingView: View {
                 .presentationContentInteraction(.resizes)
                 .presentationDragIndicator(.visible)
         }
-        .task {
-            await viewModel.loadIndexIfNeeded()
-        }
     }
 
     private var briefingContent: some View {
         VStack(spacing: 0) {
             headerChrome
+            refreshStatus
 
             TabView(selection: selectedLensBinding) {
                 ForEach(viewModel.pagerLenses, id: \.key) { lens in
@@ -105,6 +103,42 @@ struct BriefingView: View {
         }
         .animation(.easeInOut(duration: 0.22), value: viewModel.isMastheadCompact)
         .animation(.easeInOut(duration: 0.22), value: viewModel.isCategoryStripExpanded)
+    }
+
+    @ViewBuilder
+    private var refreshStatus: some View {
+        switch viewModel.refreshPhase {
+        case .waitingForVersion:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Refreshing briefing…")
+                    .font(.appCaption)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(Color.surfaceSecondary)
+            .accessibilityIdentifier("briefing.refresh.waiting")
+        case .failed(let message):
+            HStack(spacing: 10) {
+                Text(message)
+                    .font(.appCaption)
+                    .foregroundStyle(Color.statusDestructive)
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                Button("Retry") {
+                    Task { await viewModel.pullToRefresh() }
+                }
+                .font(.appCaption.weight(.semibold))
+            }
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.vertical, 7)
+            .background(Color.surfaceSecondary)
+            .accessibilityIdentifier("briefing.refresh.failed")
+        case .idle, .requesting:
+            EmptyView()
+        }
     }
 
     /// Everything above the pager — masthead, tier strip, category strip, and
@@ -225,12 +259,23 @@ struct BriefingView: View {
         EmptyStateView(
             icon: "newspaper",
             title: "No briefing yet",
-            subtitle: "Pull to refresh after new unread sources arrive.",
-            actionTitle: "Refresh",
+            subtitle: emptyStateSubtitle,
+            actionTitle: viewModel.isRefreshing ? "Refreshing…" : "Refresh",
             action: {
                 Task { await viewModel.pullToRefresh() }
             }
         )
+    }
+
+    private var emptyStateSubtitle: String {
+        switch viewModel.refreshPhase {
+        case .waitingForVersion:
+            "Your refresh is queued. This page will update when the new edition is ready."
+        case .failed(let message):
+            message
+        case .idle, .requesting:
+            "Pull to refresh after new unread sources arrive."
+        }
     }
 
     private func openSource(_ sourceKey: String) {

@@ -287,7 +287,10 @@ enum RootDependencyFactory {
         )
     }
 
-    static func makeTabCoordinator(readStateCache: ReadStateCache? = nil) -> TabCoordinatorViewModel {
+    static func makeTabCoordinator(
+        userID: Int? = nil,
+        readStateCache: ReadStateCache? = nil
+    ) -> TabCoordinatorViewModel {
         let readStateCache = readStateCache ?? ReadStateCache()
         let shortFeedRepository = ContentRepository(includeAvailableDates: false)
         let longFeedRepository = ContentRepository(includeAvailableDates: false)
@@ -312,7 +315,7 @@ enum RootDependencyFactory {
         let briefingViewModel = BriefingViewModel(
             service: LiveBriefingService(),
             audioEpisodeService: AudioEpisodeService.shared,
-            snapshotStore: BriefingSnapshotStore.shared
+            snapshotStore: userID.map { BriefingSnapshotStore(userID: $0) }
         )
 
         return TabCoordinatorViewModel(

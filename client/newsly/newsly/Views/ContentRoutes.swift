@@ -13,7 +13,8 @@ extension View {
         readStateCache: ReadStateCache,
         contentTextSize: DynamicTypeSize,
         contentTransitionNamespace: Namespace.ID? = nil,
-        chatTransitionNamespace: Namespace.ID? = nil
+        chatTransitionNamespace: Namespace.ID? = nil,
+        persistentBottomBarHeight: CGFloat = 0
     ) -> some View {
         navigationDestination(for: ContentDetailRoute.self) { route in
             ContentDetailView(
@@ -32,6 +33,7 @@ extension View {
         .navigationDestination(for: ChatSessionRoute.self) { route in
             ChatSessionView(
                 route: route,
+                persistentBottomBarHeight: persistentBottomBarHeight,
                 onShowHistory: tab == .knowledge
                     ? {
                         path.wrappedValue = NavigationPath()
