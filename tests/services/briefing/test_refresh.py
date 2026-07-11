@@ -1,4 +1,3 @@
-from concurrent.futures import Future
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -15,19 +14,15 @@ from app.models.db import (
     ProcessingTask,
 )
 from app.models.db.users import User
-from app.services.briefing.composer import ComposedSegment
 from app.services.briefing.read_marks import (
     bump_briefing_version_for_news_item,
     mark_briefing_sources_read,
 )
 from app.services.briefing.refresh import (
-    _compose_prepared_windows,
-    _PreparedWindow,
     _retire_finished_segments,
     enqueue_briefing_refresh_task,
     run_briefing_refresh,
 )
-from app.services.briefing.sources import BriefingSource
 
 
 def test_full_refresh_builds_segments_and_schedules_sweep(
@@ -148,7 +143,7 @@ def test_release_path_full_refresh_preserves_current_segments_when_compose_fails
     def fail_compose(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise TimeoutError("compose timed out")
 
-    monkeypatch.setattr("app.services.briefing.refresh.compose_window", fail_compose)
+    monkeypatch.setattr("app.services.briefing.window_composition.compose_window", fail_compose)
     with pytest.raises(TimeoutError, match="compose timed out"):
         run_briefing_refresh(
             db_session,
@@ -163,80 +158,6 @@ def test_release_path_full_refresh_preserves_current_segments_when_compose_fails
 
     assert existing_segment.status == "active"
     assert db_session.query(BriefingSegment).count() == 1
-
-
-def test_parallel_compose_uses_context_managed_executor(monkeypatch) -> None:
-    settings = get_settings()
-    monkeypatch.setattr(settings, "briefing_compose_parallelism", 2)
-    windows = [
-        _PreparedWindow(
-            lens_id=1,
-            lens_key="articles",
-            lens_title="Articles",
-            tier="longform",
-            window_index=0,
-            pending_row_ids=(1,),
-            sources=(_briefing_source(1),),
-        ),
-        _PreparedWindow(
-            lens_id=1,
-            lens_key="articles",
-            lens_title="Articles",
-            tier="longform",
-            window_index=1,
-            pending_row_ids=(2,),
-            sources=(_briefing_source(2),),
-        ),
-    ]
-
-    executors = []
-
-    class FakeExecutor:
-        def __init__(self, *, max_workers: int) -> None:
-            self.max_workers = max_workers
-            self.did_exit = False
-            executors.append(self)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args) -> None:  # noqa: ANN002
-            self.did_exit = True
-
-        def submit(self, fn, window):  # noqa: ANN001
-            future: Future = Future()
-            future.set_result(fn(window))
-            return future
-
-    def fake_compose_window(sources, **_kwargs):  # noqa: ANN001, ANN003
-        source = sources[0]
-        return ComposedSegment(
-            blocks=[{"type": "passage", "source_keys": [source.source_key]}],
-            markdown_raw=source.title,
-            narration_text=source.title,
-            status="active",
-            model="deterministic",
-            prompt_version="test",
-            input_tokens=None,
-            output_tokens=None,
-            generation_ms=1,
-            warnings=[],
-        )
-
-    monkeypatch.setattr("app.services.briefing.refresh.ThreadPoolExecutor", FakeExecutor)
-    monkeypatch.setattr("app.services.briefing.refresh.compose_window", fake_compose_window)
-
-    composed = _compose_prepared_windows(
-        windows,
-        user_id=1,
-        task_id=99,
-        use_llm=True,
-        settings=settings,
-    )
-
-    assert [result.prepared.window_index for result in composed] == [0, 1]
-    assert len(executors) == 1
-    assert executors[0].did_exit
 
 
 def test_release_path_append_without_pending_skips_planning(
@@ -853,24 +774,6 @@ def _create_lens(db_session: Session, *, user_id: int, key: str) -> BriefingLens
     db_session.add(lens)
     db_session.flush()
     return lens
-
-
-def _briefing_source(index: int) -> BriefingSource:
-    return BriefingSource(
-        source_key=f"content:{index}",
-        kind="content",
-        id=index,
-        tier="longform",
-        lens_key="articles",
-        title=f"Briefing source {index}",
-        summary=f"Summary {index}",
-        key_points=[f"Point {index}"],
-        url=f"https://example.com/{index}",
-        image_url=None,
-        thumbnail_url=None,
-        published_at=datetime.now(UTC).replace(tzinfo=None),
-        content_type=ContentType.ARTICLE,
-    )
 
 
 def _state_version(db_session: Session, user_id: int) -> int:

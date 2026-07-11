@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import ceil
@@ -21,13 +20,15 @@ from app.models.db import (
     ProcessingTask,
 )
 from app.pipeline.task_specs import get_task_spec
-from app.services.briefing.composer import ComposedSegment, compose_window, plan_windows
+from app.services.briefing import compaction, window_composition
+from app.services.briefing.composer import compose_window, plan_windows
 from app.services.briefing.lenses import (
     assign_pending_lenses,
     build_llm_lens_namer,
     ensure_base_lenses,
     retire_idle_lenses,
 )
+from app.services.briefing.segments import build_briefing_segment
 from app.services.briefing.sources import (
     BriefingSource,
     list_bootstrap_sources,
@@ -37,7 +38,6 @@ from app.services.briefing.sources import (
 from app.services.briefing.taxonomy import apply_taxonomy_if_needed
 
 RefreshMode = Literal["append", "sweep", "full"]
-COMPACTION_WINDOW_INDEX = 99
 ACTIVE_DEDUPE_WHERE = text("dedupe_key IS NOT NULL AND status IN ('pending', 'processing')")
 logger = get_logger(__name__)
 
@@ -62,12 +62,6 @@ class _PreparedWindow:
     window_index: int
     pending_row_ids: tuple[int, ...]
     sources: tuple[BriefingSource, ...]
-
-
-@dataclass(frozen=True)
-class _ComposedWindow:
-    prepared: _PreparedWindow
-    segment: ComposedSegment
 
 
 def is_briefing_enabled_for_user(user_id: int, *, settings: Settings | None = None) -> bool:
@@ -235,7 +229,7 @@ def run_briefing_refresh(
         settings=settings,
     )
     retired = _retire_finished_segments(db, user_id=user_id, settings=settings)
-    compacted = _compact_fragmented_lenses(
+    compacted = compaction.compact_fragmented_lenses(
         db,
         user_id=user_id,
         task_id=task_id,
@@ -322,10 +316,30 @@ def _run_refresh_releasing_db(
     if taxonomized:
         db.flush()
     prepared_windows = _plan_ready_windows(db, user_id=user_id, mode=mode, settings=settings)
+    reserved_segment_counts: dict[int, int] = {}
+    for window in prepared_windows:
+        reserved_segment_counts[window.lens_id] = reserved_segment_counts.get(window.lens_id, 0) + 1
+    prepared_compactions = (
+        []
+        if mode == "full"
+        else compaction.prepare_compactions(
+            db,
+            user_id=user_id,
+            settings=settings,
+            reserved_segment_counts=reserved_segment_counts,
+        )
+    )
     db.commit()
 
-    composed_windows = _compose_prepared_windows(
+    composed_windows = window_composition.compose_windows(
         prepared_windows,
+        user_id=user_id,
+        task_id=task_id,
+        use_llm=use_llm,
+        settings=settings,
+    )
+    composed_compactions = compaction.compose_compactions(
+        prepared_compactions,
         user_id=user_id,
         task_id=task_id,
         use_llm=use_llm,
@@ -339,8 +353,13 @@ def _run_refresh_releasing_db(
             BriefingSegment.status.in_(("active", "degraded"))
         ).update({BriefingSegment.status: "compacted"}, synchronize_session=False)
     appended = _persist_composed_windows(db, user_id=user_id, composed_windows=composed_windows)
+    compacted = compaction.persist_compactions(
+        db,
+        user_id=user_id,
+        plans=prepared_compactions,
+        composed_windows=composed_compactions,
+    )
     retired = _retire_finished_segments(db, user_id=user_id, settings=settings)
-    compacted = 0
     retired += retire_idle_lenses(db, user_id=user_id, idle_days=settings.briefing_lens_idle_days)
     state.last_sweep_at = datetime.now(UTC).replace(tzinfo=None)
     mutated = bool(pending_added or assigned or taxonomized or appended or retired or compacted)
@@ -594,103 +613,22 @@ def _plan_ready_windows(
     return windows
 
 
-def _compose_prepared_windows(
-    prepared_windows: list[_PreparedWindow],
-    *,
-    user_id: int,
-    task_id: int | None,
-    use_llm: bool,
-    settings: Settings,
-) -> list[_ComposedWindow]:
-    def compose_one(window: _PreparedWindow) -> _ComposedWindow:
-        segment = compose_window(
-            list(window.sources),
-            lens_key=window.lens_key,
-            lens_title=window.lens_title,
-            tier=window.tier,
-            window_index=window.window_index,
-            task_id=task_id,
-            user_id=user_id,
-            use_llm=use_llm,
-            settings=settings,
-        )
-        return _ComposedWindow(prepared=window, segment=segment)
-
-    max_workers = min(max(settings.briefing_compose_parallelism, 1), len(prepared_windows))
-    if max_workers <= 1:
-        return [compose_one(window) for window in prepared_windows]
-
-    composed: list[_ComposedWindow] = []
-    for start in range(0, len(prepared_windows), max_workers):
-        batch = prepared_windows[start : start + max_workers]
-        logger.info(
-            "Briefing composition batch started",
-            extra={
-                "component": "briefing",
-                "operation": "compose_batch",
-                "item_id": user_id,
-                "task_id": task_id,
-                "context_data": {
-                    "batch_start": start,
-                    "batch_size": len(batch),
-                    "window_count": len(prepared_windows),
-                },
-            },
-        )
-        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
-            futures = {executor.submit(compose_one, window): window for window in batch}
-            batch_results: list[_ComposedWindow] = []
-            for future in as_completed(futures):
-                batch_results.append(future.result())
-            result_by_key = {
-                (result.prepared.lens_id, result.prepared.window_index): result
-                for result in batch_results
-            }
-            composed.extend(
-                result_by_key[(window.lens_id, window.window_index)] for window in batch
-            )
-            logger.info(
-                "Briefing composition batch completed",
-                extra={
-                    "component": "briefing",
-                    "operation": "compose_batch",
-                    "item_id": user_id,
-                    "task_id": task_id,
-                    "context_data": {
-                        "batch_start": start,
-                        "batch_size": len(batch),
-                        "window_count": len(prepared_windows),
-                    },
-                },
-            )
-    return composed
-
-
 def _persist_composed_windows(
     db: Session,
     *,
     user_id: int,
-    composed_windows: list[_ComposedWindow],
+    composed_windows: list[window_composition.ComposedWindow[_PreparedWindow]],
 ) -> int:
     pending_row_ids: list[int] = []
     for composed in composed_windows:
         prepared = composed.prepared
         segment = composed.segment
         db.add(
-            BriefingSegment(
+            build_briefing_segment(
                 lens_id=prepared.lens_id,
                 user_id=user_id,
-                blocks=segment.blocks,
-                markdown_raw=segment.markdown_raw,
-                narration_text=segment.narration_text,
+                segment=segment,
                 source_keys=[source.source_key for source in prepared.sources],
-                status=segment.status,
-                model=segment.model[:64],
-                prompt_version=segment.prompt_version,
-                input_tokens=segment.input_tokens,
-                output_tokens=segment.output_tokens,
-                generation_ms=segment.generation_ms,
-                warnings=segment.warnings,
             )
         )
         pending_row_ids.extend(prepared.pending_row_ids)
@@ -789,20 +727,12 @@ def _compose_and_persist_segment(
         settings=settings,
     )
     db.add(
-        BriefingSegment(
+        build_briefing_segment(
             lens_id=lens_id,
             user_id=user_id,
-            blocks=segment.blocks,
-            markdown_raw=segment.markdown_raw,
-            narration_text=segment.narration_text,
+            segment=segment,
             source_keys=[source.source_key for source in window],
-            status=segment.status,
-            model=segment.model[:64],
-            prompt_version=segment.prompt_version,
-            input_tokens=segment.input_tokens,
-            output_tokens=segment.output_tokens,
-            generation_ms=segment.generation_ms,
-            warnings=[*segment.warnings, *extra_warnings],
+            extra_warnings=extra_warnings,
         )
     )
 
@@ -822,65 +752,6 @@ def _retire_finished_segments(db: Session, *, user_id: int, settings: Settings) 
             segment.status = "retired"
             retired += 1
     return retired
-
-
-def _compact_fragmented_lenses(
-    db: Session,
-    *,
-    user_id: int,
-    task_id: int | None,
-    use_llm: bool,
-    settings: Settings,
-) -> int:
-    read_keys = read_source_keys(db, user_id=user_id)
-    compacted = 0
-    lenses = db.query(BriefingLens).filter(BriefingLens.user_id == user_id).all()
-    for lens in lenses:
-        segments = (
-            db.query(BriefingSegment)
-            .filter(BriefingSegment.lens_id == lens.id)
-            .filter(BriefingSegment.status.in_(("active", "degraded")))
-            .order_by(BriefingSegment.created_at.desc(), BriefingSegment.id.desc())
-            .all()
-        )
-        if len(segments) <= settings.briefing_max_segments_per_lens:
-            small = [
-                segment
-                for segment in segments
-                if 0 < len(set(segment.source_keys or []) - read_keys) <= 2
-            ]
-            if len(small) < 3:
-                continue
-            donors = small
-        else:
-            donors = segments[settings.briefing_max_segments_per_lens - 1 :]
-        source_keys = sorted(
-            {key for donor in donors for key in (donor.source_keys or [])} - read_keys
-        )
-        if not source_keys:
-            for donor in donors:
-                donor.status = "retired"
-                compacted += 1
-            continue
-        source_map = sources_for_keys(db, user_id=user_id, source_keys=source_keys)
-        sources = [source_map[key] for key in source_keys if key in source_map]
-        if len(sources) < settings.briefing_window_min:
-            continue
-        _compose_and_persist_segment(
-            db,
-            lens=lens,
-            user_id=user_id,
-            window=sources[: settings.briefing_window_max],
-            window_index=COMPACTION_WINDOW_INDEX,
-            task_id=task_id,
-            use_llm=use_llm,
-            settings=settings,
-            extra_warnings=("compaction_segment",),
-        )
-        for donor in donors:
-            donor.status = "compacted"
-            compacted += 1
-    return compacted
 
 
 def _insert_pending_source(

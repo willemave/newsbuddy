@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from time import perf_counter
+
 from app.core.logging import get_logger
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
@@ -35,8 +38,10 @@ class BriefingRefreshHandler:
             return TaskResult.fail("Missing or invalid user_id", retryable=False)
 
         try:
+            handler_started_at = datetime.now(UTC)
+            runtime_started_at = perf_counter()
             with context.db_factory() as db:
-                run_briefing_refresh(
+                result = run_briefing_refresh(
                     db,
                     user_id=user_id,
                     mode=mode,
@@ -55,4 +60,33 @@ class BriefingRefreshHandler:
                 },
             )
             return TaskResult.fail(str(exc))
+        queue_wait_ms = None
+        if task.created_at is not None:
+            queue_observed_at = handler_started_at
+            created_at = task.created_at
+            if created_at.tzinfo is None:
+                queue_observed_at = queue_observed_at.replace(tzinfo=None)
+            queue_wait_ms = max(
+                int((queue_observed_at - created_at).total_seconds() * 1_000),
+                0,
+            )
+        logger.info(
+            "Briefing refresh completed",
+            extra={
+                "component": "briefing_refresh",
+                "operation": "handle",
+                "item_id": user_id,
+                "task_id": task.id,
+                "context_data": {
+                    "mode": mode,
+                    "queue_wait_ms": queue_wait_ms,
+                    "worker_runtime_ms": int((perf_counter() - runtime_started_at) * 1_000),
+                    "appended_segments": result.appended_segments,
+                    "retired_segments": result.retired_segments,
+                    "compacted_segments": result.compacted_segments,
+                    "pending_added": result.pending_added,
+                    "version": result.version,
+                },
+            },
+        )
         return TaskResult.ok()

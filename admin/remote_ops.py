@@ -243,6 +243,7 @@ def usage_by_content(
 def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
     """Return briefing edition health for one user."""
 
+    segment_cap = get_settings().briefing_max_segments_per_lens
     engine = create_engine(context.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     try:
@@ -254,22 +255,65 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                 .order_by(BriefingLens.position.asc(), BriefingLens.id.asc())
                 .all()
             )
-            lens_rows = []
-            for lens in lenses:
-                active_segments = int(
-                    session.query(func.count(BriefingSegment.id))
-                    .filter(BriefingSegment.lens_id == lens.id)
+            lens_ids = [int(lens.id) for lens in lenses if lens.id is not None]
+            active_segments_by_lens: defaultdict[int, list[BriefingSegment]] = defaultdict(list)
+            if lens_ids:
+                active_segment_rows = (
+                    session.query(BriefingSegment)
+                    .filter(BriefingSegment.lens_id.in_(lens_ids))
                     .filter(BriefingSegment.status.in_(("active", "degraded")))
-                    .scalar()
-                    or 0
+                    .order_by(
+                        BriefingSegment.lens_id.asc(),
+                        BriefingSegment.created_at.desc(),
+                        BriefingSegment.id.desc(),
+                    )
+                    .all()
                 )
-                pending_sources = int(
-                    session.query(func.count(BriefingPendingSource.id))
+                for segment in active_segment_rows:
+                    assert segment.lens_id is not None
+                    active_segments_by_lens[int(segment.lens_id)].append(segment)
+            pending_by_lens = {
+                str(lens_key): int(count)
+                for lens_key, count in (
+                    session.query(
+                        BriefingPendingSource.lens_key,
+                        func.count(BriefingPendingSource.id),
+                    )
                     .filter(BriefingPendingSource.user_id == user_id)
-                    .filter(BriefingPendingSource.lens_key == lens.key)
-                    .scalar()
-                    or 0
+                    .filter(BriefingPendingSource.lens_key.isnot(None))
+                    .group_by(BriefingPendingSource.lens_key)
+                    .all()
                 )
+            }
+            lens_rows = []
+            total_active_segments = 0
+            total_source_references = 0
+            total_stored_payload_bytes = 0
+            max_active_segments = 0
+            for lens in lenses:
+                assert lens.id is not None
+                active_segment_rows = active_segments_by_lens[int(lens.id)]
+                active_segments = len(active_segment_rows)
+                max_active_segments = max(max_active_segments, active_segments)
+                source_references = sum(
+                    len(segment.source_keys or []) for segment in active_segment_rows
+                )
+                stored_payload_bytes = sum(
+                    len(
+                        json.dumps(
+                            {
+                                "blocks": segment.blocks or [],
+                                "source_keys": segment.source_keys or [],
+                            },
+                            default=str,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    )
+                    for segment in active_segment_rows
+                )
+                total_active_segments += active_segments
+                total_source_references += source_references
+                total_stored_payload_bytes += stored_payload_bytes
                 lens_rows.append(
                     {
                         "key": lens.key,
@@ -278,7 +322,10 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                         "status": lens.status,
                         "position": lens.position,
                         "active_segments": active_segments,
-                        "pending_sources": pending_sources,
+                        "above_segment_cap": active_segments > segment_cap,
+                        "source_references": source_references,
+                        "stored_payload_bytes_estimate": stored_payload_bytes,
+                        "pending_sources": pending_by_lens.get(str(lens.key), 0),
                         "updated_at": lens.updated_at,
                     }
                 )
@@ -292,6 +339,16 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                     "last_sweep_at": state.last_sweep_at if state is not None else None,
                 },
                 "counts": status_counts(session, user_id=user_id),
+                "health": {
+                    "configured_segment_cap": segment_cap,
+                    "lenses_above_cap": [
+                        row["key"] for row in lens_rows if row["above_segment_cap"]
+                    ],
+                    "max_active_segments": max_active_segments,
+                    "total_active_segments": total_active_segments,
+                    "total_source_references": total_source_references,
+                    "stored_payload_bytes_estimate": total_stored_payload_bytes,
+                },
                 "lenses": lens_rows,
             }
     finally:
