@@ -1543,7 +1543,7 @@ The suite covers:
 - generated contract drift
 - admin CLI and operator tooling
 
-Architecture drift is guarded by CI, `scripts/architecture_guard.sh`, public contract checks, admin CLI tests, and supervisor queue tests. `tests/scripts/test_supervisor_queue_config.py` derives expected worker queues from `TaskQueue` and verifies host/Docker supervisor configs stay aligned.
+Architecture drift can be checked locally with `scripts/architecture_guard.sh`, public contract checks, admin CLI tests, and supervisor queue tests. `tests/scripts/test_supervisor_queue_config.py` derives expected worker queues from `TaskQueue` and verifies host/Docker supervisor configs stay aligned.
 
 ## 23. Known Constraints and Risks
 

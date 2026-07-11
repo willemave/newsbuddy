@@ -17,7 +17,6 @@
   <a href="#getting-started"><img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"></a>
   <a href="#cli"><img src="https://img.shields.io/badge/Go_CLI-1.26+-00add8?style=flat-square&logo=go&logoColor=white" alt="Go CLI"></a>
   <a href="#ios-app"><img src="https://img.shields.io/badge/SwiftUI-iOS_18.5+-007aff?style=flat-square&logo=swift&logoColor=white" alt="SwiftUI"></a>
-  <a href="https://github.com/willemave/newsbuddy/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/willemave/newsbuddy/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
   <a href="https://github.com/willemave/newsbuddy/actions"><img src="https://img.shields.io/github/actions/workflow/status/willemave/newsbuddy/docker-racknerd-deploy.yml?branch=main&style=flat-square&label=deploy" alt="Deploy"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/docs-architecture-8b5cf6?style=flat-square" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"></a>
@@ -379,7 +378,7 @@ A few of the engineering decisions that make Newsbuddy interesting:
 
 - **Postgres _is_ the queue.** The async task system is built directly on PostgreSQL — no Redis, Celery, or external broker. It claims jobs lock-free with `FOR UPDATE SKIP LOCKED`, wakes workers instantly via `LISTEN`/`NOTIFY` (with a polling fallback), dedupes with partial unique indexes, and holds time-based leases that a background thread renews so long-running jobs survive. A watchdog re-routes stale or misrouted tasks, and rotating retry buckets keep old failures from starving fresh work.
 
-- **One API spec, three clients, zero drift.** The FastAPI app is the single source of truth: it exports an OpenAPI schema that generates _both_ the Swift iOS client and the Go CLI. A pre-commit/CI check regenerates every artifact and diffs it against what's committed, so the server, app, and CLI can never silently fall out of sync.
+- **One API spec, three clients, zero drift.** The FastAPI app is the single source of truth: it exports an OpenAPI schema that generates _both_ the Swift iOS client and the Go CLI. A local contract check regenerates every artifact and diffs it against what's committed, making drift between the server, app, and CLI visible.
 
 - **Content-aware model routing.** Each piece of content picks its own model — cheap-and-fast for short news, stronger models for long-form articles and podcasts — across OpenAI, Anthropic, Google Gemini, Cerebras, OpenRouter, and DeepSeek. Provider errors and context-limit overflows fall back automatically, and users can bring their own (encrypted) API keys.
 
