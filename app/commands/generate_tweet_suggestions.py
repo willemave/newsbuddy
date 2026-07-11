@@ -31,7 +31,11 @@ async def execute(
     content = db.query(Content).filter(Content.id == content_id).first()
     if not content:
         raise HTTPException(status_code=404, detail="Content not found")
-    if content.status != ContentStatus.COMPLETED.value:
+    tweet_ready_statuses = {
+        ContentStatus.COMPLETED.value,
+        ContentStatus.FAILED.value,
+    }
+    if content.status not in tweet_ready_statuses:
         raise HTTPException(
             status_code=400,
             detail=f"Content not ready for tweets (status: {content.status})",

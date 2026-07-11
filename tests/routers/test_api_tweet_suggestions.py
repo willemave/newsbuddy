@@ -174,6 +174,45 @@ def test_tweet_suggestions_content_not_completed(client: TestClient, db_session:
     assert "not ready" in response.json()["detail"].lower()
 
 
+def test_tweet_suggestions_failed_content_still_generates(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    """A terminal processing failure should not block tweet generation fallbacks."""
+    article = Content(
+        url="https://example.com/failed-article",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.FAILED.value,
+        title="Article With Failed Processing",
+    )
+    db_session.add(article)
+    db_session.commit()
+    db_session.refresh(article)
+    article_id = _require_id(article.id)
+
+    mock_result = TweetSuggestionsResult(
+        content_id=article_id,
+        creativity=5,
+        length="medium",
+        model=TWEET_MODEL,
+        suggestions=[
+            TweetSuggestionData(id=1, text="Tweet 1", style_label="a"),
+            TweetSuggestionData(id=2, text="Tweet 2", style_label="b"),
+            TweetSuggestionData(id=3, text="Tweet 3", style_label="c"),
+        ],
+    )
+
+    with patch(TWEET_GENERATOR_PATCH_TARGET, return_value=mock_result) as mock_gen:
+        response = client.post(
+            f"/api/content/{article_id}/tweet-suggestions",
+            json={"creativity": 5},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["content_id"] == article_id
+    assert mock_gen.call_args.kwargs["content"].status == ContentStatus.FAILED
+
+
 def test_tweet_suggestions_podcast_supported(client: TestClient, db_session: Session) -> None:
     """Podcasts are now supported for tweet generation."""
     podcast = Content(
