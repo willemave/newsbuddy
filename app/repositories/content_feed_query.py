@@ -78,9 +78,17 @@ def build_user_feed_query(
                 ContentKnowledgeSave.user_id == user_id,
             ),
         )
-        .filter(Content.status == ContentStatus.COMPLETED.value)
-        .filter((Content.classification != "skip") | (Content.classification.is_(None)))
     )
+    if mode == "knowledge_library":
+        # An explicit save remains user-visible throughout processing and after
+        # a terminal failure. Otherwise the row appears to vanish immediately
+        # after the save action succeeds.
+        query = query.filter(ContentKnowledgeSave.id.is_not(None))
+    else:
+        query = query.filter(Content.status == ContentStatus.COMPLETED.value).filter(
+            (Content.classification != "skip") | (Content.classification.is_(None))
+        )
+
     if mode == "inbox":
         query = query.outerjoin(
             ContentStatusEntry,
@@ -96,8 +104,6 @@ def build_user_feed_query(
                 ContentStatusEntry.id.is_not(None),
             )
         )
-    elif mode == "knowledge_library":
-        query = query.filter(ContentKnowledgeSave.id.is_not(None))
     elif mode == "recently_read":
         query = query.filter(ContentReadStatus.id.is_not(None))
 

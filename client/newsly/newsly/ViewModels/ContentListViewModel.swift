@@ -231,6 +231,11 @@ final class ContentListViewModel {
         await feed.loadInitial()
     }
 
+    func refreshKnowledgeLibraryInBackground() async {
+        guard mode == .knowledgeLibrary else { return }
+        await feed.refreshInBackground()
+    }
+
     func loadRecentlyRead() async {
         actionErrorMessage = nil
         mode = .recentlyRead

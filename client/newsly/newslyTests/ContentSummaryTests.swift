@@ -135,11 +135,28 @@ final class ContentSummaryTests: XCTestCase {
         XCTAssertEqual(encoded?["key_takeaway"] as? String, summary.keyTakeaway)
     }
 
+    func testSavedLibraryStateTreatsNonterminalStatusesAsProcessing() {
+        for status: APIContentStatus in [.new, .pending, .processing, .awaiting_image] {
+            XCTAssertEqual(makeSummary(status: status).savedLibraryItemState, .processing)
+        }
+    }
+
+    func testSavedLibraryStateOnlyMakesCompletedContentReady() {
+        XCTAssertEqual(makeSummary(status: .completed).savedLibraryItemState, .ready)
+        XCTAssertEqual(makeSummary(status: .failed).savedLibraryItemState, .unavailable)
+        XCTAssertEqual(makeSummary(status: .skipped).savedLibraryItemState, .unavailable)
+        XCTAssertEqual(
+            makeSummary(status: .unknown("future_status")).savedLibraryItemState,
+            .unavailable
+        )
+    }
+
     private func makeSummary(
         contentType: APIContentType = .news,
-        createdAt: String,
-        processedAt: String?,
-        publicationDate: String?,
+        status: APIContentStatus = .completed,
+        createdAt: String = "2026-03-18T05:00:00Z",
+        processedAt: String? = nil,
+        publicationDate: String? = nil,
         shortSummary: String? = "Summary",
         newsSummary: String? = nil,
         keyTakeaway: String? = nil
@@ -151,7 +168,7 @@ final class ContentSummaryTests: XCTestCase {
             title: "Example story",
             source: "Example",
             platform: "Hacker News",
-            status: .completed,
+            status: status,
             shortSummary: shortSummary,
             createdAt: createdAt,
             processedAt: processedAt,

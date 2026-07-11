@@ -7,6 +7,12 @@
 
 import Foundation
 
+enum SavedLibraryItemState: Equatable {
+    case processing
+    case ready
+    case unavailable
+}
+
 struct ContentSummary: Codable, Identifiable, Equatable {
     struct TopComment: Codable, Equatable {
         let author: String
@@ -248,6 +254,17 @@ struct ContentSummary: Codable, Identifiable, Equatable {
 
     var displayTitle: String {
         title ?? "Untitled"
+    }
+
+    var savedLibraryItemState: SavedLibraryItemState {
+        switch status {
+        case .new, .pending, .processing, .awaiting_image:
+            return .processing
+        case .completed:
+            return .ready
+        case .failed, .skipped, .unknown:
+            return .unavailable
+        }
     }
 
     private static func normalizedText(_ value: String?) -> String? {

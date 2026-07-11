@@ -31,6 +31,12 @@ struct KnowledgeLibraryView: View {
         }
 
         return filtered.sorted { lhs, rhs in
+            let lhsIsProcessing = lhs.savedLibraryItemState == .processing
+            let rhsIsProcessing = rhs.savedLibraryItemState == .processing
+            if lhsIsProcessing != rhsIsProcessing {
+                return lhsIsProcessing
+            }
+
             switch selectedSort {
             case .newest:
                 if lhs.itemDate == rhs.itemDate {
@@ -62,6 +68,13 @@ struct KnowledgeLibraryView: View {
         selectedTypeFilter != .all
     }
 
+    private var processingContentIds: [Int] {
+        viewModel.contents
+            .filter { $0.savedLibraryItemState == .processing }
+            .map(\.id)
+            .sorted()
+    }
+
     var body: some View {
         Group {
             if viewModel.isLoading && viewModel.contents.isEmpty {
@@ -79,6 +92,10 @@ struct KnowledgeLibraryView: View {
         .background(Color.surfacePrimary)
         .navigationTitle(showNavigationTitle ? "Saved" : "")
         .task { await viewModel.loadKnowledgeLibrary() }
+        .task(id: processingContentIds) {
+            guard !processingContentIds.isEmpty else { return }
+            await refreshProcessingRowsUntilSettled()
+        }
     }
 
     // MARK: - Empty State
@@ -109,7 +126,9 @@ struct KnowledgeLibraryView: View {
 
     private var contentList: some View {
         let displayedContents = visibleContents
-        let displayedContentIds = displayedContents.map(\.id)
+        let navigableContentIds = displayedContents
+            .filter { $0.savedLibraryItemState == .ready }
+            .map(\.id)
 
         return List {
             libraryControls(visibleCount: displayedContents.count)
@@ -119,40 +138,7 @@ struct KnowledgeLibraryView: View {
             }
 
             ForEach(displayedContents) { content in
-                NavigationLink(destination: ContentDetailView(
-                    contentId: content.id,
-                    contentType: content.contentType,
-                    allContentIds: displayedContentIds,
-                    navigationSurface: .savedLibrary,
-                    readStateCache: readStateCache
-                )) {
-                    SavedLibraryRow(content: content)
-                }
-                .buttonStyle(.plain)
-                .appListRow()
-                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                    if !content.isRead {
-                        Button {
-                            Task { await viewModel.markAsRead(content.id) }
-                        } label: {
-                            Label("Mark as Read", systemImage: "checkmark.circle.fill")
-                        }
-                        .tint(Color.brandPrimary)
-                    }
-                }
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button {
-                        Task {
-                            await viewModel.toggleKnowledgeSave(content.id)
-                            withAnimation(AppMotion.panel) {
-                                viewModel.contents.removeAll { $0.id == content.id }
-                            }
-                        }
-                    } label: {
-                        Label("Remove", systemImage: "books.vertical.fill")
-                    }
-                    .tint(Color.statusDestructive)
-                }
+                libraryEntry(content, navigableContentIds: navigableContentIds)
             }
 
             if viewModel.isLoadingMore {
@@ -171,6 +157,66 @@ struct KnowledgeLibraryView: View {
             await viewModel.loadMoreContent()
         }
         .refreshable { await viewModel.loadKnowledgeLibrary() }
+    }
+
+    private func libraryEntry(
+        _ content: ContentSummary,
+        navigableContentIds: [Int]
+    ) -> some View {
+        Group {
+            if content.savedLibraryItemState == .ready {
+                NavigationLink(destination: ContentDetailView(
+                    contentId: content.id,
+                    contentType: content.contentType,
+                    allContentIds: navigableContentIds,
+                    navigationSurface: .savedLibrary,
+                    readStateCache: readStateCache
+                )) {
+                    SavedLibraryRow(content: content)
+                }
+            } else {
+                SavedLibraryRow(content: content)
+            }
+        }
+        .buttonStyle(.plain)
+        .appListRow()
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if content.savedLibraryItemState == .ready && !content.isRead {
+                Button {
+                    Task { await viewModel.markAsRead(content.id) }
+                } label: {
+                    Label("Mark as Read", systemImage: "checkmark.circle.fill")
+                }
+                .tint(Color.brandPrimary)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                Task {
+                    await viewModel.toggleKnowledgeSave(content.id)
+                    withAnimation(AppMotion.panel) {
+                        viewModel.contents.removeAll { $0.id == content.id }
+                    }
+                }
+            } label: {
+                Label("Remove", systemImage: "books.vertical.fill")
+            }
+            .tint(Color.statusDestructive)
+        }
+    }
+
+    @MainActor
+    private func refreshProcessingRowsUntilSettled() async {
+        while !Task.isCancelled && !processingContentIds.isEmpty {
+            do {
+                try await Task.sleep(for: .seconds(4))
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            await viewModel.refreshKnowledgeLibraryInBackground()
+        }
     }
 
     private func libraryControls(visibleCount: Int) -> some View {
@@ -317,7 +363,20 @@ private struct SavedLibraryRow: View {
                     .lineLimit(2)
                     .truncationMode(.tail)
 
-                if let sourceText {
+                if content.savedLibraryItemState == .processing {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+
+                        Text("Preparing article…")
+                    }
+                    .font(.terracottaBodySmall)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                } else if content.savedLibraryItemState == .unavailable {
+                    Label("Couldn’t prepare article", systemImage: "exclamationmark.triangle.fill")
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.statusDestructive)
+                } else if let sourceText {
                     Text(sourceText)
                         .font(.terracottaBodySmall)
                         .foregroundStyle(Color.onSurfaceSecondary)

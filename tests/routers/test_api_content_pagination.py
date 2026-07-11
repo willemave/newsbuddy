@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content, ContentStatusEntry
+from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry
 from app.models.db.users import User
 from app.utils.image_paths import get_content_images_dir
 from app.utils.pagination import PaginationCursor
@@ -397,6 +397,59 @@ class TestKnowledgeLibraryPagination:
         assert len(data["contents"]) == 0
         assert data["meta"]["has_more"] is False
         assert data["meta"]["next_cursor"] is None
+
+    def test_explicit_saves_remain_visible_across_processing_states(
+        self,
+        client,
+        db_session: Session,
+        test_user: User,
+    ) -> None:
+        """Saved rows stay visible while processing and after a failure."""
+        statuses = [
+            ContentStatus.NEW,
+            ContentStatus.PENDING,
+            ContentStatus.PROCESSING,
+            ContentStatus.AWAITING_IMAGE,
+            ContentStatus.COMPLETED,
+            ContentStatus.FAILED,
+            ContentStatus.SKIPPED,
+        ]
+        contents = [
+            Content(
+                url=f"https://example.com/saved-{status.value}",
+                title=f"Saved {status.value}",
+                content_type=ContentType.ARTICLE.value,
+                status=status.value,
+                classification="skip" if status == ContentStatus.COMPLETED else None,
+            )
+            for status in statuses
+        ]
+        db_session.add_all(contents)
+        db_session.flush()
+        db_session.add_all(
+            ContentKnowledgeSave(user_id=test_user.id, content_id=content.id)
+            for content in contents
+        )
+        db_session.add(
+            ContentStatusEntry(
+                user_id=test_user.id,
+                content_id=contents[0].id,
+                status="inbox",
+            )
+        )
+        db_session.commit()
+
+        response = client.get("/api/content/knowledge/list")
+        assert response.status_code == 200
+
+        returned_statuses = {item["id"]: item["status"] for item in response.json()["contents"]}
+        assert returned_statuses == {
+            content.id: status.value for content, status in zip(contents, statuses, strict=True)
+        }
+
+        inbox_response = client.get("/api/content/")
+        assert inbox_response.status_code == 200
+        assert contents[0].id not in {item["id"] for item in inbox_response.json()["contents"]}
 
 
 class TestPaginationStability:
