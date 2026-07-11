@@ -11,6 +11,32 @@ import OSLog
 
 private let briefingSnapshotLogger = Logger(subsystem: "com.newsly", category: "BriefingSnapshot")
 
+private final class BriefingSnapshotStorageLock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation = 0
+
+    func currentGeneration() -> Int {
+        lock.withLock { generation }
+    }
+
+    func accessIfCurrent<T>(
+        _ expectedGeneration: Int,
+        operation: () -> T?
+    ) -> T? {
+        lock.withLock {
+            guard generation == expectedGeneration else { return nil }
+            return operation()
+        }
+    }
+
+    func invalidate(operation: () -> Void) {
+        lock.withLock {
+            generation += 1
+            operation()
+        }
+    }
+}
+
 struct BriefingSnapshot: Codable {
     static let currentSchemaVersion = 2
 
@@ -48,16 +74,17 @@ protocol BriefingSnapshotStoring: AnyObject {
     func clear() async
 }
 
-final class BriefingSnapshotStore: BriefingSnapshotStoring {
+actor BriefingSnapshotStore: BriefingSnapshotStoring {
     /// Briefings regenerate daily; older snapshots are not useful enough to
     /// flash before the fresh index replaces them.
     private static let maxSnapshotAge: TimeInterval = 60 * 60 * 48
 
-    let userID: Int
+    private nonisolated static let storageLock = BriefingSnapshotStorageLock()
+
+    nonisolated let userID: Int
 
     private let fileURL: URL
-    private let queue: DispatchQueue
-    private var logoutObserver: NSObjectProtocol?
+    private let storageGeneration: Int
 
     init(userID: Int, directory: URL? = nil) {
         self.userID = userID
@@ -69,75 +96,65 @@ final class BriefingSnapshotStore: BriefingSnapshotStoring {
             .appendingPathComponent("Briefing", isDirectory: true)
             .appendingPathComponent(String(userID), isDirectory: true)
             .appendingPathComponent("snapshot.json")
-        self.queue = DispatchQueue(
-            label: "com.newsly.briefing-snapshot.\(userID)",
-            qos: .utility
-        )
-        logoutObserver = NotificationCenter.default.addObserver(
-            forName: .authDidLogOut,
-            object: nil,
-            queue: nil
-        ) { [weak self] _ in
-            Task { await self?.clear() }
-        }
+        self.storageGeneration = Self.storageLock.currentGeneration()
     }
 
-    deinit {
-        if let logoutObserver {
-            NotificationCenter.default.removeObserver(logoutObserver)
+    nonisolated static func invalidateAllSnapshots(in directory: URL? = nil) {
+        let baseDirectory = directory ?? FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+        storageLock.invalidate {
+            try? FileManager.default.removeItem(
+                at: baseDirectory.appendingPathComponent("Briefing", isDirectory: true)
+            )
         }
     }
 
     func load() async -> BriefingSnapshot? {
-        await withCheckedContinuation {
-            (continuation: CheckedContinuation<BriefingSnapshot?, Never>) in
-            queue.async { [fileURL, userID] in
-                let startedAt = Date()
-                guard let data = try? Data(contentsOf: fileURL),
-                      let snapshot = try? JSONDecoder().decode(BriefingSnapshot.self, from: data),
-                      snapshot.schemaVersion == BriefingSnapshot.currentSchemaVersion,
-                      snapshot.userID == userID,
-                      AppClock.now.timeIntervalSince(snapshot.savedAt) < Self.maxSnapshotAge
-                else {
-                    briefingSnapshotLogger.info(
-                        "Snapshot cache miss | user_id=\(userID, privacy: .private) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
-                    )
-                    continuation.resume(returning: nil)
-                    return
-                }
-                briefingSnapshotLogger.info(
-                    "Snapshot loaded | user_id=\(userID, privacy: .private) bytes=\(data.count, privacy: .public) lenses=\(snapshot.lenses.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
-                )
-                continuation.resume(returning: snapshot)
-            }
+        let startedAt = Date()
+        let stored: (Data, BriefingSnapshot)? = Self.storageLock.accessIfCurrent(storageGeneration) {
+            guard let data = try? Data(contentsOf: self.fileURL),
+                  let snapshot = try? JSONDecoder().decode(BriefingSnapshot.self, from: data),
+                  snapshot.schemaVersion == BriefingSnapshot.currentSchemaVersion,
+                  snapshot.userID == self.userID,
+                  AppClock.now.timeIntervalSince(snapshot.savedAt) < Self.maxSnapshotAge
+            else { return nil }
+            return (data, snapshot)
         }
+        guard let (data, snapshot) = stored else {
+            briefingSnapshotLogger.info(
+                "Snapshot cache miss | user_id=\(self.userID, privacy: .private) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
+            )
+            return nil
+        }
+        briefingSnapshotLogger.info(
+            "Snapshot loaded | user_id=\(self.userID, privacy: .private) bytes=\(data.count, privacy: .public) lenses=\(snapshot.lenses.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
+        )
+        return snapshot
     }
 
     func save(_ snapshot: BriefingSnapshot) async {
         guard snapshot.userID == userID else { return }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            queue.async { [fileURL] in
-                let startedAt = Date()
-                defer { continuation.resume() }
-                guard let data = try? JSONEncoder().encode(snapshot) else { return }
-                try? FileManager.default.createDirectory(
-                    at: fileURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try? data.write(to: fileURL, options: .atomic)
-                briefingSnapshotLogger.info(
-                    "Snapshot saved | user_id=\(snapshot.userID, privacy: .private) bytes=\(data.count, privacy: .public) lenses=\(snapshot.lenses.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
-                )
-            }
+        let startedAt = Date()
+        let data: Data? = Self.storageLock.accessIfCurrent(storageGeneration) {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return nil }
+            try? FileManager.default.createDirectory(
+                at: self.fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? data.write(to: self.fileURL, options: .atomic)
+            return data
         }
+        guard let data else { return }
+        briefingSnapshotLogger.info(
+            "Snapshot saved | user_id=\(snapshot.userID, privacy: .private) bytes=\(data.count, privacy: .public) lenses=\(snapshot.lenses.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
+        )
     }
 
     func clear() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            queue.async { [fileURL] in
-                try? FileManager.default.removeItem(at: fileURL)
-                continuation.resume()
-            }
+        Self.storageLock.accessIfCurrent(storageGeneration) {
+            try? FileManager.default.removeItem(at: self.fileURL)
         }
     }
 }

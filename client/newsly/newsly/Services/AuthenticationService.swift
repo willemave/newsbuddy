@@ -96,6 +96,7 @@ final class AuthenticationService: NSObject {
 
     /// Logout user (clear all tokens)
     func logout() {
+        BriefingSnapshotStore.invalidateAllSnapshots()
         KeychainManager.shared.clearAll()
         SharedContainer.userDefaults.removeObject(forKey: "accessToken")
         NotificationCenter.default.post(name: .authDidLogOut, object: nil)

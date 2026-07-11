@@ -36,4 +36,36 @@ final class BriefingSnapshotStoreTests: XCTestCase {
         let expiredSnapshot = await userOneStore.load()
         XCTAssertNil(expiredSnapshot)
     }
+
+    func testLogoutInvalidationDeletesSnapshotsAndRejectsWritesFromOldStores() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let oldStore = BriefingSnapshotStore(userID: 1, directory: directory)
+        let snapshot = BriefingSnapshot(
+            userID: 1,
+            index: makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]),
+            etag: "etag-1",
+            selectedLensKey: "today",
+            lenses: ["today": makeLens(key: "today")],
+            savedAt: Date()
+        )
+        await oldStore.save(snapshot)
+        let snapshotURL = directory
+            .appendingPathComponent("Briefing", isDirectory: true)
+            .appendingPathComponent("1", isDirectory: true)
+            .appendingPathComponent("snapshot.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: snapshotURL.path))
+
+        BriefingSnapshotStore.invalidateAllSnapshots(in: directory)
+        await oldStore.save(snapshot)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshotURL.path))
+
+        let currentStore = BriefingSnapshotStore(userID: 1, directory: directory)
+        await currentStore.save(snapshot)
+        await oldStore.clear()
+        let restored = await currentStore.load()
+        XCTAssertEqual(restored?.index.version, 1)
+    }
 }
