@@ -8,6 +8,17 @@
 import SwiftUI
 import UIKit
 
+private struct PersistentBottomChromeInsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    var persistentBottomChromeInset: CGFloat {
+        get { self[PersistentBottomChromeInsetKey.self] }
+        set { self[PersistentBottomChromeInsetKey.self] = newValue }
+    }
+}
+
 enum AppChrome {
     static func configure() {
         let chromeAccent = UIColor.appChromeAccent

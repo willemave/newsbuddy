@@ -23,6 +23,7 @@ private enum ChatSessionSheetDestination: Identifiable {
 struct ChatSessionView: View {
     @Environment(AuthenticationViewModel.self) private var authViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.persistentBottomChromeInset) private var persistentBottomChromeInset
     @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: ChatSessionViewModel
     let onShowHistory: (() -> Void)?
@@ -33,19 +34,16 @@ struct ChatSessionView: View {
     @State private var edgeBackSwipeFeedbackTrigger = 0
     private let route: ChatSessionRoute
     private let dependencies: ChatDependencies
-    private let persistentBottomBarHeight: CGFloat
 
     @MainActor
     init(
         route: ChatSessionRoute,
         dependencies: ChatDependencies? = nil,
-        persistentBottomBarHeight: CGFloat = 0,
         onShowHistory: (() -> Void)? = nil
     ) {
         let resolvedDependencies = dependencies ?? .live
         self.route = route
         self.dependencies = resolvedDependencies
-        self.persistentBottomBarHeight = persistentBottomBarHeight
         _viewModel = State(initialValue: ChatSessionViewModel(route: route, dependencies: resolvedDependencies))
         self.onShowHistory = onShowHistory
     }
@@ -205,7 +203,7 @@ struct ChatSessionView: View {
         }
         .padding(.top, 6)
         .padding(.bottom, 6)
-        .padding(.bottom, persistentBottomBarHeight)
+        .padding(.bottom, persistentBottomChromeInset)
     }
 
     private var composerDock: some View {

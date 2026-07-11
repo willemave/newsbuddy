@@ -87,7 +87,6 @@ struct ContentView: View {
                 path: $knowledgePath,
                 focusRequest: $knowledgeFocusRequest,
                 isBriefingExperience: isBriefingExperience,
-                persistentBottomBarHeight: isBriefingExperience ? compactTabBarHeight : 0,
                 viewModel: knowledgeHubViewModel,
                 readStateCache: readStateCache,
                 readingStateStore: readingStateStore,
@@ -103,6 +102,10 @@ struct ContentView: View {
                 )
             }
         }
+        .environment(
+            \.persistentBottomChromeInset,
+            isBriefingExperience ? compactTabBarHeight : 0
+        )
         .safeAreaInset(edge: .bottom, spacing: 0) {
             BriefingCompactTabBarInset(
                 selectedTab: tabCoordinator.selectedTab,
