@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
@@ -30,6 +31,21 @@ from app.services.briefing.refresh import enqueue_briefing_refresh_task, ensure_
 router = APIRouter(tags=["briefing"])
 
 
+def _briefing_etag(*, user_id: int, version: int) -> str:
+    """Return an opaque validator scoped to one user's briefing representation."""
+
+    digest = hashlib.sha256(f"briefing:{user_id}:v{version}".encode()).hexdigest()[:24]
+    return f'W/"{digest}"'
+
+
+def _briefing_cache_headers(*, etag: str) -> dict[str, str]:
+    return {
+        "ETag": etag,
+        "Cache-Control": "private, no-cache",
+        "Vary": "Authorization",
+    }
+
+
 @router.get("/briefing", response_model=BriefingIndexResponse)
 def get_index(
     response: Response,
@@ -39,10 +55,12 @@ def get_index(
 ) -> BriefingIndexResponse | Response:
     user_id = require_user_id(current_user)
     index = get_briefing_index(db, user_id=user_id)
-    etag = f'W/"v{index.version}"'
-    response.headers["ETag"] = etag
+    etag = _briefing_etag(user_id=user_id, version=index.version)
+    headers = _briefing_cache_headers(etag=etag)
+    for name, value in headers.items():
+        response.headers[name] = value
     if if_none_match == etag:
-        return Response(status_code=304, headers={"ETag": etag})
+        return Response(status_code=304, headers=headers)
     return index
 
 

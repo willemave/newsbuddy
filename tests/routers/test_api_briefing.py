@@ -36,11 +36,35 @@ def test_briefing_index_honors_etag(
     assert payload["version"] == 1
     assert payload["lenses"][1]["key"] == "articles"
     etag = response.headers["etag"]
+    assert response.headers["cache-control"] == "private, no-cache"
+    assert "Authorization" in response.headers["vary"].split(", ")
 
     not_modified = client.get("/api/briefing", headers={"If-None-Match": etag})
 
     assert not_modified.status_code == 304
     assert not_modified.headers["etag"] == etag
+    assert not_modified.headers["cache-control"] == "private, no-cache"
+    assert "Authorization" in not_modified.headers["vary"].split(", ")
+
+
+def test_briefing_etag_is_scoped_to_authenticated_user(
+    client_factory,
+    user_factory,
+) -> None:
+    first_user = user_factory(email="briefing-etag-one@example.com")
+    second_user = user_factory(email="briefing-etag-two@example.com")
+
+    with client_factory(user=first_user) as first_client:
+        first_response = first_client.get("/api/briefing")
+    with client_factory(user=second_user) as second_client:
+        second_response = second_client.get(
+            "/api/briefing",
+            headers={"If-None-Match": first_response.headers["etag"]},
+        )
+
+    assert first_response.json()["version"] == second_response.json()["version"] == 0
+    assert first_response.headers["etag"] != second_response.headers["etag"]
+    assert second_response.status_code == 200
 
 
 def test_briefing_refresh_endpoint_enqueues_append_task(
