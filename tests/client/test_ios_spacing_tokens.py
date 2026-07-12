@@ -206,17 +206,19 @@ def test_content_text_size_reaches_feeds_detail_and_chat() -> None:
     assert "AppTextSize(index: settings.appTextSizeIndex)" not in history_view
 
 
-def test_knowledge_library_sheets_use_single_model_destination() -> None:
-    knowledge_source = (VIEWS_ROOT / "KnowledgeView.swift").read_text()
+def test_learning_sheets_use_model_destinations() -> None:
+    learning_source = (VIEWS_ROOT / "LearningView.swift").read_text()
     learning_deck_sheet_source = (VIEWS_ROOT / "Components/LearningDeckListSheet.swift").read_text()
 
-    assert "private enum KnowledgeSheetDestination" in knowledge_source
-    assert "@State private var activeSheet: KnowledgeSheetDestination?" in knowledge_source
-    assert ".sheet(item: $activeSheet)" in knowledge_source
-    assert "showNarrationList" not in knowledge_source
-    assert "showLearningDeckList" not in knowledge_source
-    assert "DispatchQueue.main.async" not in knowledge_source
-    assert "LearningDeckListSheet(viewModel: learningDecksViewModel)" in knowledge_source
+    assert "private enum LearningSheetDestination" in learning_source
+    assert "@State private var activeSheet: LearningSheetDestination?" in learning_source
+    assert ".sheet(item: $activeSheet)" in learning_source
+    assert (
+        "@State private var deckReaderDestination: LearningDeckReaderDestination?"
+        in learning_source
+    )
+    assert ".fullScreenCover(item: $deckReaderDestination)" in learning_source
+    assert "DispatchQueue.main.async" not in learning_source
     assert "@Environment(\\.dismiss) private var dismiss" in learning_deck_sheet_source
     assert "private enum LearningDeckListSheetDestination" in learning_deck_sheet_source
     assert (
@@ -431,7 +433,6 @@ def test_shared_controls_use_motion_tokens_for_common_state_animation() -> None:
         VIEWS_ROOT / "Components/ExpandableSection.swift",
         VIEWS_ROOT / "Components/LearningDeckReaderView.swift",
         VIEWS_ROOT / "Components/LearningDeckRow.swift",
-        VIEWS_ROOT / "Library/FavoritesView.swift",
         VIEWS_ROOT / "Components/DiscussionSheet.swift",
         VIEWS_ROOT / "KnowledgeView.swift",
         VIEWS_ROOT / "RecentlyReadView.swift",

@@ -113,7 +113,7 @@ def test_voice_dictation_view_models_use_event_coordinator() -> None:
 
     expected_coordinator_users = [
         VIEW_MODELS_ROOT / "ChatSessionViewModel.swift",
-        VIEW_MODELS_ROOT / "KnowledgeHubViewModel.swift",
+        VIEW_MODELS_ROOT / "LearningHubViewModel.swift",
         VIEW_MODELS_ROOT / "OnboardingViewModel.swift",
         VIEW_MODELS_ROOT / "DiscoveryPersonalizeViewModel.swift",
         VIEW_MODELS_ROOT / "LearningDeckFocusRecorder.swift",

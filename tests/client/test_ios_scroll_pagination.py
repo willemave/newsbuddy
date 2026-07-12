@@ -15,7 +15,7 @@ def test_scroll_pagination_uses_shared_threshold_modifier() -> None:
     expected_usages = {
         VIEWS_ROOT / "ShortFormView.swift": "await viewModel.loadNextPage()",
         VIEWS_ROOT / "LongFormView.swift": "await viewModel.loadNextPage()",
-        VIEWS_ROOT / "Library/FavoritesView.swift": "await viewModel.loadMoreContent()",
+        VIEWS_ROOT / "KnowledgeView.swift": "await viewModel.loadMoreContent()",
         VIEWS_ROOT / "RecentlyReadView.swift": "await viewModel.loadMoreContent()",
         VIEWS_ROOT / "SubmissionsView.swift": "await viewModel.loadMore()",
     }
@@ -28,12 +28,12 @@ def test_scroll_pagination_uses_shared_threshold_modifier() -> None:
 
 
 def test_secondary_lists_do_not_paginate_from_last_row_on_appear() -> None:
-    saved_source = (VIEWS_ROOT / "Library/FavoritesView.swift").read_text()
+    saved_source = (VIEWS_ROOT / "KnowledgeView.swift").read_text()
     recently_read_source = (VIEWS_ROOT / "RecentlyReadView.swift").read_text()
     submissions_source = (VIEWS_ROOT / "SubmissionsView.swift").read_text()
 
     assert 'Label("Load more", systemImage: "chevron.down")' not in saved_source
-    assert "Task { await viewModel.loadMoreContent() }" not in saved_source
+    assert "content.id == viewModel.contents.last?.id" not in saved_source
     assert "content.id == viewModel.contents.last?.id" not in recently_read_source
     assert "Task { await viewModel.loadMoreContent() }" not in recently_read_source
     assert "submission.id == viewModel.submissions.last?.id" not in submissions_source
