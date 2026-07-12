@@ -35,7 +35,6 @@ def test_release_path_compacts_every_unread_donor_source_without_loss(
         user_id=user_id,
         mode="sweep",
         use_llm=False,
-        release_db_during_compose=True,
         settings=settings,
     )
     db_session.commit()
@@ -81,7 +80,6 @@ def test_release_path_leaves_donors_active_when_compaction_coverage_is_incomplet
         user_id=user_id,
         mode="sweep",
         use_llm=False,
-        release_db_during_compose=True,
         settings=settings,
     )
     db_session.commit()
@@ -134,7 +132,6 @@ def test_release_path_aborts_compaction_when_global_version_changes_during_compo
         user_id=user_id,
         mode="sweep",
         use_llm=False,
-        release_db_during_compose=True,
         settings=settings,
     )
     db_session.commit()
@@ -208,7 +205,6 @@ def test_release_path_reserves_capacity_for_planned_append(
         user_id=user_id,
         mode="sweep",
         use_llm=False,
-        release_db_during_compose=True,
         settings=settings,
     )
     db_session.commit()

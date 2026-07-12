@@ -8,18 +8,16 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-import httpx
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
 from app.models.db import BriefingLens, BriefingPendingSource, BriefingSegment
+from app.services.briefing.openrouter import request_openrouter_json_schema, strip_json_code_fence
 from app.services.briefing.sources import BriefingSource, sources_for_keys
 from app.services.llm_agents import get_basic_agent
-from app.services.llm_models import OPENROUTER_PROVIDER_SORT, OPENROUTER_REASONING_CONFIG
-from app.services.news_embeddings import encode_news_texts, encode_texts_with_embedding_model
+from app.services.news_embeddings import encode_texts_with_embedding_model
 from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
@@ -169,13 +167,6 @@ def assign_pending_lenses(
             settings=settings,
         )
         remaining = [(row, source) for row, source in unassigned_news if row.lens_key is None]
-        changed += _assign_by_centroid(
-            db,
-            user_id=user_id,
-            pending_sources=remaining,
-            settings=settings,
-        )
-        remaining = [(row, source) for row, source in unassigned_news if row.lens_key is None]
         changed += _assign_new_or_misc_lens(
             db,
             user_id=user_id,
@@ -270,69 +261,6 @@ def _get_or_create_lens(
     db.add(lens)
     db.flush()
     return lens
-
-
-def _assign_by_centroid(
-    db: Session,
-    *,
-    user_id: int,
-    pending_sources: list[tuple[BriefingPendingSource, BriefingSource]],
-    settings: Settings,
-) -> int:
-    if not settings.briefing_centroid_assignment_enabled:
-        return 0
-    sources = [(row, source) for row, source in pending_sources if row.lens_key is None]
-    if not sources:
-        return 0
-    lenses = (
-        db.query(BriefingLens)
-        .filter(BriefingLens.user_id == user_id)
-        .filter(BriefingLens.tier == "news")
-        .filter(BriefingLens.status == "active")
-        .all()
-    )
-    centroid_lenses = [lens for lens in lenses if isinstance(lens.centroid, list)]
-    if not centroid_lenses:
-        return 0
-
-    try:
-        vectors = encode_news_texts([_embedding_text(source) for _row, source in sources])
-    except Exception:
-        logger.exception(
-            "Briefing centroid assignment embedding failed; leaving sources unassigned",
-            extra={"user_id": user_id, "source_count": len(sources)},
-        )
-        return 0
-    if vectors.size == 0:
-        return 0
-
-    changed = 0
-    for index, (row, _source) in enumerate(sources):
-        vector = [float(value) for value in vectors[index].tolist()]
-        best_lens = None
-        best_score = -1.0
-        for lens in centroid_lenses:
-            centroid = lens.centroid
-            if not isinstance(centroid, list):
-                continue
-            score = _cosine(vector, [float(value) for value in centroid])
-            if score > best_score:
-                best_score = score
-                best_lens = lens
-        if best_lens is None or best_score < settings.briefing_category_similarity:
-            continue
-        row.lens_key = best_lens.key
-        best_centroid = best_lens.centroid
-        if not isinstance(best_centroid, list):
-            continue
-        _update_lens_centroid(
-            best_lens,
-            vector,
-            settings=settings,
-            model_spec=settings.news_embedding_model,
-        )
-        changed += 1
-    return changed
 
 
 def _assign_by_semantic_categories(
@@ -738,7 +666,6 @@ def _assign_new_or_misc_lens(
     if should_make_new and under_cap:
         sources = [source for _row, source in unassigned[: settings.briefing_news_window_max]]
         name = naming_fn(sources) if naming_fn else _default_lens_name(sources)
-        centroid = _centroid_for_sources(sources, settings=settings)
         lens = _get_or_create_lens(
             db,
             user_id=user_id,
@@ -747,9 +674,6 @@ def _assign_new_or_misc_lens(
             title=name.title,
             deck=name.deck,
             position=_next_news_position(db, user_id=user_id),
-            centroid=centroid,
-            centroid_weight=len(sources) if centroid is not None else 0,
-            centroid_model=settings.news_embedding_model if centroid is not None else None,
         )
     elif should_make_new or age_seconds >= settings.briefing_pending_max_age_seconds:
         lens = _get_or_create_misc_lens_if_allowed(db, user_id=user_id, settings=settings)
@@ -913,62 +837,23 @@ def _name_lens_with_openrouter(
     source_count: int,
     generation_started_at: float,
 ) -> LensName:
-    api_key = settings.openrouter_api_key
-    if not api_key:
-        raise ValueError("OPENROUTER_API_KEY not configured in settings.")
-    model_name = model_spec.split(":", 1)[1]
-    request_timeout = httpx.Timeout(
-        timeout_seconds,
-        connect=10.0,
-        read=float(timeout_seconds),
-        write=10.0,
-        pool=10.0,
+    response = request_openrouter_json_schema(
+        model_spec=model_spec,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        schema_name="LensNameOutput",
+        schema=LensNameOutput.model_json_schema(),
+        timeout_seconds=timeout_seconds,
+        settings=settings,
     )
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
-        timeout=request_timeout,
-        max_retries=0,
-        http_client=httpx.Client(timeout=request_timeout),
-    )
-    try:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "LensNameOutput",
-                    "strict": True,
-                    "schema": LensNameOutput.model_json_schema(),
-                },
-            },
-            extra_body={
-                "provider": {
-                    "require_parameters": True,
-                    "sort": OPENROUTER_PROVIDER_SORT,
-                },
-                "reasoning": OPENROUTER_REASONING_CONFIG,
-            },
-            timeout=request_timeout,
-        )
-    finally:
-        client.close()
-    content = response.choices[0].message.content
-    if not content:
-        raise RuntimeError("OpenRouter returned an empty lens name response")
-    output = LensNameOutput.model_validate_json(_strip_json_code_fence(content))
-    usage = _usage_from_openrouter_response(response)
+    output = LensNameOutput.model_validate_json(strip_json_code_fence(response.content))
     record_vendor_usage_out_of_band(
         provider="openrouter",
         model=model_spec,
         feature="briefing_lens_naming",
         operation="briefing.name_lens",
         source="queue" if task_id else "api",
-        usage=usage,
+        usage=response.usage,
         task_id=task_id,
         user_id=user_id,
         metadata={
@@ -977,34 +862,6 @@ def _name_lens_with_openrouter(
         },
     )
     return LensName(key=output.key, title=output.title, deck=output.deck)
-
-
-def _strip_json_code_fence(content: str) -> str:
-    stripped = content.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    lines = stripped.splitlines()
-    if not lines or not lines[0].strip().startswith("```"):
-        return stripped
-    if lines[-1].strip() != "```":
-        return stripped
-    return "\n".join(lines[1:-1]).strip()
-
-
-def _usage_from_openrouter_response(response: object) -> dict[str, int | None] | None:
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        return None
-    input_tokens = getattr(usage, "prompt_tokens", None)
-    output_tokens = getattr(usage, "completion_tokens", None)
-    total_tokens = getattr(usage, "total_tokens", None)
-    if input_tokens is None and output_tokens is None and total_tokens is None:
-        return None
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }
 
 
 def _source_payload(source: BriefingSource) -> dict[str, object]:
@@ -1174,28 +1031,6 @@ def _lens_profile_text(lens: BriefingLens) -> str:
         for part in [str(lens.title or ""), str(lens.deck or ""), str(lens.routing_rule or "")]
         if part
     )
-
-
-def _centroid_for_sources(
-    sources: list[BriefingSource],
-    *,
-    settings: Settings,
-) -> list[float] | None:
-    if not settings.briefing_centroid_assignment_enabled:
-        return None
-    if not sources:
-        return None
-    try:
-        vectors = encode_news_texts([_embedding_text(source) for source in sources])
-    except Exception:
-        logger.exception(
-            "Briefing lens centroid embedding failed; creating lens without centroid",
-            extra={"source_count": len(sources)},
-        )
-        return None
-    if vectors.size == 0:
-        return None
-    return [float(value) for value in vectors.mean(axis=0).tolist()]
 
 
 def _cosine(left: list[float], right: list[float]) -> float:

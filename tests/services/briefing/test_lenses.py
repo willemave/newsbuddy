@@ -48,11 +48,6 @@ def test_stale_low_volume_news_uses_misc_lens_without_embedding(
     db_session.add(pending)
     db_session.flush()
 
-    def fail_encode(_texts):  # noqa: ANN001
-        raise AssertionError("stale single-item lens assignment should not embed")
-
-    monkeypatch.setattr("app.services.briefing.lenses.encode_news_texts", fail_encode)
-
     changed = assign_pending_lenses(db_session, user_id=user_id, settings=settings)
 
     assert changed == 1
@@ -65,7 +60,7 @@ def test_stale_low_volume_news_uses_misc_lens_without_embedding(
     assert misc_lens.title == "Briefs"
 
 
-def test_new_news_lens_skips_centroid_embedding_by_default(
+def test_new_news_lens_does_not_use_legacy_embedding_path(
     db_session: Session,
     test_user: User,
     news_item_factory,
@@ -74,7 +69,6 @@ def test_new_news_lens_skips_centroid_embedding_by_default(
     settings = get_settings()
     monkeypatch.setattr(settings, "briefing_new_lens_min_items", 4)
     monkeypatch.setattr(settings, "briefing_semantic_category_assignment_enabled", False)
-    monkeypatch.setattr(settings, "briefing_centroid_assignment_enabled", False)
     assert test_user.id is not None
     user_id = test_user.id
     items = [
@@ -96,19 +90,9 @@ def test_new_news_lens_skips_centroid_embedding_by_default(
             )
         )
     db_session.flush()
-    encode_calls = 0
-
-    def track_encode(_texts):  # noqa: ANN001
-        nonlocal encode_calls
-        encode_calls += 1
-        raise AssertionError("briefing lens assignment should not embed by default")
-
-    monkeypatch.setattr("app.services.briefing.lenses.encode_news_texts", track_encode)
-
     changed = assign_pending_lenses(db_session, user_id=user_id, settings=settings)
 
     assert changed == 4
-    assert encode_calls == 0
     lens = db_session.query(BriefingLens).filter(BriefingLens.user_id == user_id).one()
     assert lens.key == "news-vector"
     assert lens.centroid is None
@@ -479,7 +463,6 @@ def test_no_llm_capped_news_assignment_uses_existing_news_lenses(
 ) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "briefing_semantic_category_assignment_enabled", False)
-    monkeypatch.setattr(settings, "briefing_centroid_assignment_enabled", False)
     monkeypatch.setattr(settings, "briefing_new_lens_min_items", 2)
     monkeypatch.setattr(settings, "briefing_max_news_lenses", 2)
     assert test_user.id is not None
@@ -525,11 +508,6 @@ def test_no_llm_capped_news_assignment_uses_existing_news_lenses(
             )
         )
     db_session.flush()
-
-    def fail_encode(_texts):  # noqa: ANN001
-        raise AssertionError("no-llm capped assignment should not embed")
-
-    monkeypatch.setattr("app.services.briefing.lenses.encode_news_texts", fail_encode)
 
     changed = assign_pending_lenses(db_session, user_id=user_id, settings=settings)
 

@@ -9,17 +9,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
 from app.models.db import BriefingLens, BriefingPendingSource, BriefingSegment
+from app.services.briefing.openrouter import request_openrouter_json_schema, strip_json_code_fence
 from app.services.briefing.sources import BriefingSource, sources_for_keys
 from app.services.llm_agents import get_basic_agent
-from app.services.llm_models import OPENROUTER_PROVIDER_SORT, OPENROUTER_REASONING_CONFIG
 from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
@@ -318,60 +316,23 @@ def _plan_taxonomy_with_openrouter(
     lens_count: int,
     generation_started_at: float,
 ) -> TaxonomyPlan:
-    api_key = settings.openrouter_api_key
-    if not api_key:
-        raise ValueError("OPENROUTER_API_KEY not configured in settings.")
-    request_timeout = httpx.Timeout(
-        timeout_seconds,
-        connect=10.0,
-        read=float(timeout_seconds),
-        write=20.0,
-        pool=10.0,
+    response = request_openrouter_json_schema(
+        model_spec=model_spec,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        schema_name="TaxonomyPlan",
+        schema=TaxonomyPlan.model_json_schema(),
+        timeout_seconds=timeout_seconds,
+        settings=settings,
     )
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
-        timeout=request_timeout,
-        max_retries=0,
-        http_client=httpx.Client(timeout=request_timeout),
-    )
-    try:
-        response = client.chat.completions.create(
-            model=model_spec.split(":", 1)[1],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "TaxonomyPlan",
-                    "strict": True,
-                    "schema": TaxonomyPlan.model_json_schema(),
-                },
-            },
-            extra_body={
-                "provider": {
-                    "require_parameters": True,
-                    "sort": OPENROUTER_PROVIDER_SORT,
-                },
-                "reasoning": OPENROUTER_REASONING_CONFIG,
-            },
-            timeout=request_timeout,
-        )
-    finally:
-        client.close()
-    content = response.choices[0].message.content
-    if not content:
-        raise RuntimeError("OpenRouter returned an empty taxonomy response")
-    output = TaxonomyPlan.model_validate_json(_strip_json_code_fence(content))
+    output = TaxonomyPlan.model_validate_json(strip_json_code_fence(response.content))
     record_vendor_usage_out_of_band(
         provider="openrouter",
         model=model_spec,
         feature="briefing_taxonomy_planning",
         operation="briefing.plan_taxonomy",
         source="queue" if task_id else "api",
-        usage=_usage_from_openrouter_response(response),
+        usage=response.usage,
         task_id=task_id,
         user_id=user_id,
         metadata={
@@ -604,34 +565,6 @@ def _normalize_lens_key(value: str) -> str:
     if not slug:
         slug = "updates"
     return f"news-{slug}"[:64].rstrip("-")
-
-
-def _strip_json_code_fence(content: str) -> str:
-    stripped = content.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    lines = stripped.splitlines()
-    if not lines or not lines[0].strip().startswith("```"):
-        return stripped
-    if lines[-1].strip() != "```":
-        return stripped
-    return "\n".join(lines[1:-1]).strip()
-
-
-def _usage_from_openrouter_response(response: object) -> dict[str, int | None] | None:
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        return None
-    input_tokens = getattr(usage, "prompt_tokens", None)
-    output_tokens = getattr(usage, "completion_tokens", None)
-    total_tokens = getattr(usage, "total_tokens", None)
-    if input_tokens is None and output_tokens is None and total_tokens is None:
-        return None
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }
 
 
 def _cosine(left: list[float], right: list[float]) -> float:

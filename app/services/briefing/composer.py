@@ -7,8 +7,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-import httpx
-from openai import OpenAI
 from pydantic import ValidationError
 from pydantic_ai.agent import AgentRunResult
 
@@ -31,11 +29,11 @@ from app.services.briefing.normalize import (
     NormalizedLayout,
     normalize_layout,
 )
+from app.services.briefing.openrouter import request_openrouter_json_schema, strip_json_code_fence
 from app.services.briefing.repair import repair_layout
 from app.services.briefing.sources import BriefingSource
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_errors import is_llm_unavailable_error
-from app.services.llm_models import OPENROUTER_REASONING_CONFIG, openrouter_provider_config
 from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
@@ -577,53 +575,19 @@ def _compose_window_with_openrouter(
     task_id: int | None,
     user_id: int | None,
 ) -> tuple[list[dict[str, Any]], dict[str, int | None] | None]:
-    settings = get_settings()
-    api_key = settings.openrouter_api_key
-    if not api_key:
-        raise ValueError("OPENROUTER_API_KEY not configured in settings.")
-    model_name = model_spec.split(":", 1)[1]
-    request_timeout = httpx.Timeout(
-        timeout_seconds,
-        connect=10.0,
-        read=float(timeout_seconds),
-        write=10.0,
-        pool=10.0,
-    )
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
-        timeout=request_timeout,
-        max_retries=0,
-        http_client=httpx.Client(timeout=request_timeout),
-    )
     try:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "ComposerLayout",
-                    "strict": True,
-                    "schema": ComposerLayout.model_json_schema(),
-                },
-            },
-            extra_body={
-                "provider": openrouter_provider_config(),
-                "reasoning": OPENROUTER_REASONING_CONFIG,
-            },
-            timeout=request_timeout,
+        response = request_openrouter_json_schema(
+            model_spec=model_spec,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            schema_name="ComposerLayout",
+            schema=ComposerLayout.model_json_schema(),
+            timeout_seconds=timeout_seconds,
         )
-    finally:
-        client.close()
-    content = response.choices[0].message.content
-    if not content:
-        raise BriefingCompositionInvalidOutput("OpenRouter returned an empty briefing response")
-    layout = _parse_composer_layout_json(content)
-    usage = _usage_from_openrouter_response(response)
+    except RuntimeError as exc:
+        raise BriefingCompositionInvalidOutput(str(exc)) from exc
+    layout = _parse_composer_layout_json(response.content)
+    usage = response.usage
     record_vendor_usage_out_of_band(
         provider="openrouter",
         model=model_spec,
@@ -641,7 +605,7 @@ def _compose_window_with_openrouter(
 
 
 def _parse_composer_layout_json(content: str) -> ComposerLayout:
-    payload = json.loads(_strip_json_code_fence(content))
+    payload = json.loads(strip_json_code_fence(content))
     if isinstance(payload, list):
         return ComposerLayout(blocks=[_coerce_composer_block(block) for block in payload])
     if isinstance(payload, dict):
@@ -703,36 +667,6 @@ def _has_block_content(block: dict[str, Any]) -> bool:
         if isinstance(value, str) and value.strip():
             return True
     return False
-
-
-def _strip_json_code_fence(content: str) -> str:
-    stripped = content.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    lines = stripped.splitlines()
-    if not lines or not lines[0].strip().startswith("```"):
-        return stripped
-    if lines[-1].strip() != "```":
-        return stripped
-    return "\n".join(lines[1:-1]).strip()
-
-
-def _usage_from_openrouter_response(response: object) -> dict[str, int | None] | None:
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        return None
-    input_tokens = getattr(usage, "prompt_tokens", None)
-    output_tokens = getattr(usage, "completion_tokens", None)
-    total_tokens = getattr(usage, "total_tokens", None)
-    if input_tokens is None and output_tokens is None and total_tokens is None:
-        return None
-    return {
-        "input_tokens": input_tokens,
-        "cache_read_tokens": None,
-        "cache_write_tokens": None,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }
 
 
 def _run_agent(

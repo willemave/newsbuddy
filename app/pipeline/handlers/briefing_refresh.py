@@ -46,7 +46,6 @@ class BriefingRefreshHandler:
                     user_id=user_id,
                     mode=mode,
                     task_id=task.id,
-                    release_db_during_compose=True,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.exception(

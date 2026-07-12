@@ -98,7 +98,6 @@ def test_release_path_full_refresh_builds_segments_and_schedules_sweep(
         user_id=user_id,
         mode="full",
         use_llm=False,
-        release_db_during_compose=True,
         settings=settings,
     )
     db_session.commit()
@@ -150,7 +149,6 @@ def test_release_path_full_refresh_preserves_current_segments_when_compose_fails
             user_id=user_id,
             mode="full",
             use_llm=True,
-            release_db_during_compose=True,
             settings=settings,
         )
     db_session.rollback()
@@ -183,7 +181,6 @@ def test_release_path_append_without_pending_skips_planning(
         user_id=user_id,
         mode="full",
         use_llm=False,
-        release_db_during_compose=True,
         settings=settings,
     )
     db_session.commit()
@@ -198,7 +195,6 @@ def test_release_path_append_without_pending_skips_planning(
         db_session,
         user_id=user_id,
         mode="append",
-        release_db_during_compose=True,
         settings=settings,
     )
     db_session.commit()
@@ -232,7 +228,6 @@ def test_append_composes_low_volume_uncovered_sources_immediately(
         user_id=user_id,
         mode="full",
         use_llm=False,
-        release_db_during_compose=True,
         settings=settings,
     )
     db_session.commit()
@@ -249,7 +244,6 @@ def test_append_composes_low_volume_uncovered_sources_immediately(
         user_id=user_id,
         mode="append",
         use_llm=False,
-        release_db_during_compose=True,
         settings=settings,
     )
     db_session.commit()
@@ -470,7 +464,7 @@ def test_bump_briefing_version_for_news_item_only_updates_matching_enabled_activ
 ) -> None:
     enabled_user = user_factory(email="briefing-enabled@example.com")
     other_enabled_user = user_factory(email="briefing-other-enabled@example.com")
-    disabled_user = user_factory(email="briefing-disabled@example.com")
+    disabled_user = user_factory(email="briefing-disabled@example.com", is_active=False)
     assert enabled_user.id is not None
     assert other_enabled_user.id is not None
     assert disabled_user.id is not None

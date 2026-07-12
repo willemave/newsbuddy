@@ -7,7 +7,6 @@ from collections.abc import Iterable
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
-from app.models.contracts import ReadingExperience
 from app.models.db import User
 
 
@@ -26,7 +25,7 @@ def briefing_enabled_user_ids(
         if not candidates:
             return configured
 
-    query = db.query(User.id).filter(User.reading_experience == ReadingExperience.BRIEFING.value)
+    query = db.query(User.id).filter(User.is_active.is_(True))
     if candidate_user_ids is not None:
         query = query.filter(User.id.in_(candidates))
     configured.update(int(user_id) for (user_id,) in query.all())
