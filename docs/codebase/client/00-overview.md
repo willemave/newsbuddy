@@ -25,7 +25,6 @@ Folder-by-folder reference for the SwiftUI app, share extension, generated contr
 | `83-views-settings.md` | `client/newsly/newsly/Views/Settings` | Settings, reader palette, X integration, CLI link, and settings-row/card helpers. |
 | `84-views-shared.md` | `client/newsly/newsly/Views/Shared` | Cross-feature design tokens and presentation primitives. |
 | `85-views-sources.md` | `client/newsly/newsly/Views/Sources` | Feed and podcast source-management screens. |
-| `86-views-library.md` | `client/newsly/newsly/Views/Library` | Library/Favorites screens. |
 | `87-views-chat.md` | `client/newsly/newsly/Views/Chat` | Chat message list, composer dock, assistant/council bubbles, feed options, preview fixtures, and chat-specific subviews. |
 | `88-views-briefing.md` | `client/newsly/newsly/Views/Briefing` | Native Briefing tab renderer, passage text bridge, dig panel, source sheets, and narration bar. |
 | `90-share-extension.md` | `client/newsly/ShareExtension` | Share extension modes for content, Learning Decks, links, feeds, and chat. |

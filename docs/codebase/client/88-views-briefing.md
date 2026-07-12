@@ -25,6 +25,6 @@ and audio narration controls.
 | `BriefingAttributedTextBuilder.swift` | Attributed string builder for source links and insight run metadata. |
 
 ## Integration points
-- `ContentView` swaps Classic Long/Fast tabs for the Briefing tab when `AppSettings.readingExperience == .briefing`.
+- `AuthenticatedRootView` resolves production sessions to Briefing even when a legacy server profile still says Classic. `ContentView` retains the Classic Long/Fast shell only for explicit fallback and E2E coverage.
 - `BriefingViewModel` provides index/lens/read/narration state.
 - `BriefingService` owns HTTP calls to `/api/briefing*`.

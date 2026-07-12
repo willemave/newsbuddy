@@ -16,7 +16,7 @@ iOS unit and UI tests for models, services, view models, routing, onboarding, ch
 | `ChatTimelineReconcilerTests.swift` | Chat timeline reconciliation. |
 | `ContentDetailTests.swift`, `ContentDetailViewModelTests.swift` | Content detail models and view model behavior. |
 | `ContentDiscussionTests.swift`, `ContentSummaryTests.swift`, `ContentTimestampFormatterTests.swift` | Content discussion/summary/timestamp behavior. |
-| `KnowledgeHubViewModelTests.swift` | Knowledge hub state. |
+| `LearningHubViewModelTests.swift`, `LearningTimelineItemTests.swift` | Learning chat composition and merged timeline behavior. |
 | `NarrationPlaybackSpeedOptionTests.swift` | Narration playback-rate options. |
 | `OnboardingStateStoreTests.swift` | Onboarding state persistence. |
 | `ShareURLRoutingTests.swift` | Share extension/app URL routing. |
