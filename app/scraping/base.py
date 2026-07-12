@@ -93,6 +93,7 @@ class BaseScraper(ABC):
             stats.duplicates = save_stats["duplicates"]
             stats.errors = save_stats["errors"]
             stats.error_details = save_stats["error_details"]
+            stats.processed_by_config_id = save_stats["processed_by_config_id"]
 
             logger.info(
                 f"Saved {stats.saved} new items from {self.name} "
@@ -112,6 +113,7 @@ class BaseScraper(ABC):
         duplicate_count = 0
         error_count = 0
         error_details = []
+        processed_by_config_id: dict[int, int] = {}
 
         with get_db() as db:
             active_user_ids: list[int] | None = None
@@ -150,6 +152,7 @@ class BaseScraper(ABC):
                             saved_count += 1
                         else:
                             duplicate_count += 1
+                        _record_processed_config_item(processed_by_config_id, item)
                         continue
 
                     raw_url = item.get("source_url") or item["url"]
@@ -213,6 +216,7 @@ class BaseScraper(ABC):
                             enqueue_visible_long_form_image_if_needed(db, existing)
                         logger.debug(f"URL already exists: {item['url']}")
                         duplicate_count += 1
+                        _record_processed_config_item(processed_by_config_id, item)
                         continue
 
                     # Create new content
@@ -261,12 +265,14 @@ class BaseScraper(ABC):
                         self.queue_service.enqueue(TaskType.FETCH_DISCUSSION, content_id=content.id)
 
                     saved_count += 1
+                    _record_processed_config_item(processed_by_config_id, item)
 
                 except Exception as e:
                     db.rollback()
                     if "UNIQUE constraint failed" in str(e) or "duplicate key value" in str(e):
                         logger.debug(f"URL already exists (race condition): {item['url']}")
                         duplicate_count += 1
+                        _record_processed_config_item(processed_by_config_id, item)
                     else:
                         logger.error(f"Error saving item {item['url']}: {e}")
                         error_count += 1
@@ -278,6 +284,7 @@ class BaseScraper(ABC):
             "duplicates": duplicate_count,
             "errors": error_count,
             "error_details": error_details,
+            "processed_by_config_id": processed_by_config_id,
         }
 
     def _normalize_url(self, url: str) -> str:
@@ -290,3 +297,9 @@ class BaseScraper(ABC):
             url = url.replace("http://", "https://", 1)
 
         return url
+
+
+def _record_processed_config_item(counts: dict[int, int], item: dict[str, Any]) -> None:
+    config_id = item.get("user_scraper_config_id")
+    if isinstance(config_id, int):
+        counts[config_id] = counts.get(config_id, 0) + 1

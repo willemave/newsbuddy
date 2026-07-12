@@ -54,6 +54,8 @@ from app.models.db.users import User
 from app.models.internal.feed_backfill import FeedBatchBackfillRequest
 from app.models.internal.scraper_configs import CreateUserScraperConfig
 from app.repositories.content_repository import apply_visibility_filters, build_visibility_context
+from app.services.briefing.first_run import complete_first_edition, start_first_edition
+from app.services.briefing.refresh import enqueue_briefing_refresh_task
 from app.services.exa_client import ExaSearchResult, exa_search
 from app.services.feed_detection import FeedDetector
 from app.services.feed_resolution import resolve_feed_candidate
@@ -702,6 +704,9 @@ def complete_onboarding(
         if should_update_twitter_username and user.twitter_username != normalized_username:
             user.twitter_username = normalized_username
         user.has_completed_onboarding = True
+        user.reading_experience = "briefing"
+        start_first_edition(db, user_id=user_id)
+        enqueue_briefing_refresh_task(db, user_id=user_id, mode="append", delay_seconds=0)
     db.commit()
 
     queue_gateway = get_task_queue_gateway()
@@ -1041,6 +1046,7 @@ def mark_tutorial_complete(db: Session, user_id: int) -> bool:
     if not user:
         return False
     user.has_completed_new_user_tutorial = True
+    complete_first_edition(db, user_id=user_id)
     db.commit()
     return True
 

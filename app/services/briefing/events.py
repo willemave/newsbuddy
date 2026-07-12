@@ -11,6 +11,7 @@ from app.models.db import (
     ContentStatusEntry,
     NewsItem,
     NewsItemReadStatus,
+    User,
 )
 from app.services.briefing.refresh import enqueue_ready_source, is_briefing_enabled_for_user
 from app.services.news_feed import get_visible_news_item
@@ -44,7 +45,7 @@ def enqueue_content_for_briefing_if_ready(
     for (user_id,) in user_rows:
         if not isinstance(user_id, int):
             continue
-        if not is_briefing_enabled_for_user(user_id, settings=settings):
+        if not is_briefing_enabled_for_user(user_id, db=db, settings=settings):
             continue
         is_read = db.execute(
             select(
@@ -81,8 +82,12 @@ def enqueue_news_item_for_briefing_if_ready(
         return 0
 
     enqueued = 0
-    for raw_user_id in settings.briefing_enabled_user_ids:
-        user_id = int(raw_user_id)
+    eligible_user_ids = {int(value) for value in settings.briefing_enabled_user_ids}
+    eligible_user_ids.update(
+        int(user_id)
+        for (user_id,) in db.query(User.id).filter(User.reading_experience == "briefing").all()
+    )
+    for user_id in sorted(eligible_user_ids):
         if get_visible_news_item(db, user_id=user_id, news_item_id=news_item_id) is None:
             continue
         is_read = db.execute(

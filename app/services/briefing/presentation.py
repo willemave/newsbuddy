@@ -12,6 +12,7 @@ from app.models.api.briefing import (
 )
 from app.models.contracts import BriefingTier
 from app.models.db import BriefingLens, BriefingSegment
+from app.services.briefing.first_run import get_first_run_progress
 from app.services.briefing.refresh import ensure_state
 from app.services.briefing.sources import read_source_keys_for, sources_for_keys
 
@@ -39,6 +40,16 @@ def get_briefing_index(db: Session, *, user_id: int) -> BriefingIndexResponse:
         )
         for lens in lenses
     ]
+    first_run = get_first_run_progress(db, user_id=user_id)
+    if first_run is not None:
+        summaries_by_key = {
+            summary.key: summary for summary in summaries if summary.segment_count > 0
+        }
+        summaries = [
+            summaries_by_key[key]
+            for key in first_run.ready_category_keys
+            if key in summaries_by_key
+        ]
     generated_at = max(
         [segment.created_at for segment in active_segments if segment.created_at],
         default=None,
@@ -49,6 +60,7 @@ def get_briefing_index(db: Session, *, user_id: int) -> BriefingIndexResponse:
         masthead_deck=str(state.masthead_deck),
         generated_at=generated_at,
         lenses=summaries,
+        first_run=first_run,
     )
 
 

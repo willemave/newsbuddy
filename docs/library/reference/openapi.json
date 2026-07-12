@@ -1420,8 +1420,90 @@
         "title": "BriefingDiscussionDto",
         "type": "object"
       },
+      "BriefingFirstRunPhase": {
+        "description": "Visible state of the temporary Start Here briefing.",
+        "enum": [
+          "active",
+          "ready",
+          "waiting_for_content"
+        ],
+        "title": "BriefingFirstRunPhase",
+        "type": "string"
+      },
+      "BriefingFirstRunProgress": {
+        "properties": {
+          "active_sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Active Sources",
+            "type": "array"
+          },
+          "completed_sources": {
+            "items": {
+              "$ref": "#/components/schemas/BriefingFirstRunSourceProgress"
+            },
+            "title": "Completed Sources",
+            "type": "array"
+          },
+          "connected_source_count": {
+            "title": "Connected Source Count",
+            "type": "integer"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/BriefingFirstRunPhase"
+          },
+          "ready_category_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ready Category Keys",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "phase",
+          "connected_source_count"
+        ],
+        "title": "BriefingFirstRunProgress",
+        "type": "object"
+      },
+      "BriefingFirstRunSourceProgress": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "processed_item_count": {
+            "minimum": 0.0,
+            "title": "Processed Item Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "display_name",
+          "processed_item_count"
+        ],
+        "title": "BriefingFirstRunSourceProgress",
+        "type": "object"
+      },
       "BriefingIndexResponse": {
         "properties": {
+          "first_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BriefingFirstRunProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "generated_at": {
             "anyOf": [
               {
@@ -4312,6 +4394,18 @@
               }
             ],
             "title": "Has Completed Onboarding"
+          },
+          "reading_experience": {
+            "anyOf": [
+              {
+                "pattern": "^(classic|briefing)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reading Experience"
           },
           "user_id": {
             "anyOf": [
@@ -8953,6 +9047,11 @@
           "is_admin": {
             "title": "Is Admin",
             "type": "boolean"
+          },
+          "reading_experience": {
+            "default": "classic",
+            "title": "Reading Experience",
+            "type": "string"
           },
           "twitter_username": {
             "anyOf": [

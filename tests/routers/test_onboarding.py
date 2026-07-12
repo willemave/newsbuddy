@@ -11,6 +11,8 @@ from app.models.db import (
     OnboardingDiscoveryLane,
     OnboardingDiscoveryRun,
     OnboardingDiscoverySuggestion,
+    OnboardingFirstEditionRun,
+    OnboardingFirstEditionSource,
     UserScraperConfig,
 )
 from app.services.queue import TaskType
@@ -91,6 +93,24 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     db_session.refresh(test_user)
     assert test_user.twitter_username == "willem_aw"
     assert test_user.has_completed_onboarding is True
+    assert test_user.reading_experience == "briefing"
+    first_run = (
+        db_session.query(OnboardingFirstEditionRun)
+        .filter(OnboardingFirstEditionRun.user_id == test_user.id)
+        .one()
+    )
+    assert first_run.status == "active"
+    assert first_run.connected_source_count == 3
+    first_run_sources = (
+        db_session.query(OnboardingFirstEditionSource)
+        .filter(OnboardingFirstEditionSource.run_id == first_run.id)
+        .all()
+    )
+    assert {source.display_name for source in first_run_sources} == {
+        "Example Substack",
+        "Example Podcast",
+        "r/MachineLearning",
+    }
 
 
 @pytest.mark.usefixtures("stub_valid_feed_url")
@@ -265,9 +285,20 @@ def test_onboarding_complete_rejects_invalid_twitter_username(client):
 
 
 def test_onboarding_tutorial_complete(client, db_session, test_user):
+    run = OnboardingFirstEditionRun(
+        user_id=test_user.id,
+        status="active",
+        revision=1,
+        connected_source_count=0,
+        ready_category_keys=[],
+    )
+    db_session.add(run)
+    db_session.commit()
     response = client.post("/api/onboarding/tutorial-complete")
     assert response.status_code == 200
     assert response.json()["has_completed_new_user_tutorial"] is True
+    db_session.refresh(run)
+    assert run.status == "completed"
 
     db_session.refresh(test_user)
     assert test_user.has_completed_new_user_tutorial is True

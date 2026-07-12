@@ -8,6 +8,8 @@ from app.models.db.briefing import (
     BriefingPendingSource,
     BriefingSegment,
     BriefingState,
+    OnboardingFirstEditionRun,
+    OnboardingFirstEditionSource,
 )
 from app.models.db.chat import ChatMessage, ChatSession
 from app.models.db.cli import CliLinkSession

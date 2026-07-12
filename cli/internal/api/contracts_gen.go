@@ -245,6 +245,23 @@ func (v BriefingTier) Known() bool {
 	}
 }
 
+type BriefingFirstRunPhase string
+
+const (
+	BriefingFirstRunPhaseActive BriefingFirstRunPhase = "active"
+	BriefingFirstRunPhaseReady BriefingFirstRunPhase = "ready"
+	BriefingFirstRunPhaseWaitingForContent BriefingFirstRunPhase = "waiting_for_content"
+)
+
+func (v BriefingFirstRunPhase) Known() bool {
+	switch v {
+	case BriefingFirstRunPhaseActive, BriefingFirstRunPhaseReady, BriefingFirstRunPhaseWaitingForContent:
+		return true
+	default:
+		return false
+	}
+}
+
 type BriefingBlockType string
 
 const (
@@ -438,6 +455,16 @@ type BriefingIndexResponse struct {
 	MastheadDeck string `json:"masthead_deck"`
 	GeneratedAt *time.Time `json:"generated_at,omitempty"`
 	Lenses []BriefingLensSummary `json:"lenses,omitempty"`
+	FirstRun *BriefingFirstRunProgress `json:"first_run,omitempty"`
+}
+
+type BriefingFirstRunProgress struct {
+	Revision int `json:"revision"`
+	Phase BriefingFirstRunPhase `json:"phase"`
+	ConnectedSourceCount int `json:"connected_source_count"`
+	CompletedSources []BriefingFirstRunSourceProgress `json:"completed_sources,omitempty"`
+	ActiveSources []string `json:"active_sources,omitempty"`
+	ReadyCategoryKeys []string `json:"ready_category_keys,omitempty"`
 }
 
 type BriefingLensSummary struct {
@@ -731,6 +758,11 @@ type SubmissionStatusResponse struct {
 	Outcome *SubmissionOutcome `json:"outcome,omitempty"`
 	DetectedFeed *DetectedFeed `json:"detected_feed,omitempty"`
 	FeedSubscription *SubmissionFeedSubscriptionResponse `json:"feed_subscription,omitempty"`
+}
+
+type BriefingFirstRunSourceProgress struct {
+	DisplayName string `json:"display_name"`
+	ProcessedItemCount int `json:"processed_item_count"`
 }
 
 type BriefingBlock struct {

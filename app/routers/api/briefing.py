@@ -31,10 +31,12 @@ from app.services.briefing.refresh import enqueue_briefing_refresh_task, ensure_
 router = APIRouter(tags=["briefing"])
 
 
-def _briefing_etag(*, user_id: int, version: int) -> str:
+def _briefing_etag(*, user_id: int, version: int, first_run_revision: int = 0) -> str:
     """Return an opaque validator scoped to one user's briefing representation."""
 
-    digest = hashlib.sha256(f"briefing:{user_id}:v{version}".encode()).hexdigest()[:24]
+    digest = hashlib.sha256(
+        f"briefing:{user_id}:v{version}:o{first_run_revision}".encode()
+    ).hexdigest()[:24]
     return f'W/"{digest}"'
 
 
@@ -55,7 +57,11 @@ def get_index(
 ) -> BriefingIndexResponse | Response:
     user_id = require_user_id(current_user)
     index = get_briefing_index(db, user_id=user_id)
-    etag = _briefing_etag(user_id=user_id, version=index.version)
+    etag = _briefing_etag(
+        user_id=user_id,
+        version=index.version,
+        first_run_revision=index.first_run.revision if index.first_run else 0,
+    )
     headers = _briefing_cache_headers(etag=etag)
     for name, value in headers.items():
         response.headers[name] = value

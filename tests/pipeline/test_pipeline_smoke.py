@@ -35,6 +35,7 @@ class DummyScraper(BaseScraper):
                 "url": "https://example.com/smoke",
                 "title": "Smoke Article",
                 "content_type": ContentType.ARTICLE,
+                "user_scraper_config_id": 99,
                 "metadata": {"platform": "dummy", "source": "example.com"},
             }
         ]
@@ -65,6 +66,7 @@ def test_scrape_to_completion_smoke(db_session, monkeypatch) -> None:
     scraper = DummyScraper()
     stats = scraper.run_with_stats()
     assert stats.saved == 1
+    assert stats.processed_by_config_id == {99: 1}
 
     queue_service = QueueService()
 

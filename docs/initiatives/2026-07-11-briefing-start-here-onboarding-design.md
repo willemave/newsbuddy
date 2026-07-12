@@ -22,9 +22,10 @@ Example progression:
 ```text
 We connected 12 sources. Reading Techmeme…
 
-We connected 12 sources. Techmeme is in. Reading Hacker News…
+We connected 12 sources. Techmeme is in — 28 items processed. Reading Hacker News…
 
-We connected 12 sources. Techmeme is in. Hacker News is in.
+We connected 12 sources. Techmeme is in — 28 items processed.
+Hacker News is in — 34 items processed.
 Reading Stratechery and Decoder…
 
 We connected 12 sources. Techmeme is in. Hacker News is in.
@@ -44,7 +45,8 @@ continue processing. Entering the first real category completes the tutorial and
 - Make Briefing the first view shown after onboarding is complete.
 - Teach Briefing through the real product instead of a detached tutorial.
 - Give the user honest, legible feedback during a potentially long first-edition generation.
-- Append processed source names as prose without presenting a task checklist.
+- Append processed source names and item totals as prose without presenting a task checklist.
+- Introduce Knowledge saves, search, and narration below the live source prose.
 - Make every real category usable as soon as its first segment is ready.
 - Let categories continue arriving while the user reads.
 - Preserve resume behavior if the user backgrounds or relaunches the app.
@@ -54,7 +56,7 @@ continue processing. Entering the first real category completes the tutorial and
 
 - Do not redesign the source-selection screens that precede onboarding completion.
 - Do not remove the pre-selection discovery wait when suggestions do not yet exist.
-- Do not show per-article processing, queue names, model names, task IDs, or technical stages.
+- Do not show per-article rows, queue names, model names, task IDs, or technical stages.
 - Do not estimate a completion percentage or remaining duration.
 - Do not create disabled or ghost category pills before content is readable.
 - Do not create a real onboarding row in `briefing_lenses`.
@@ -109,16 +111,15 @@ server lens counts and has no lens detail endpoint.
 
 ### 3. Write the explanatory passage
 
-The page uses normal editorial typography rather than cards or feature bullets.
+The page uses normal editorial typography rather than cards or a detached tutorial surface.
 
 Recommended first-run copy:
 
-> Welcome to your Briefing.
+> Your sources become one briefing.
 >
-> Newsly reads what's new across the sources you chose. When several sources cover the same story,
-> it brings the reporting together into one clear account.
->
-> Linked phrases open the original source. New categories appear above as soon as they're ready.
+> Newsly reads across the sources you chose, connects different coverage of the same story, and
+> writes the useful context into one briefing. Categories appear as patterns emerge, then keep
+> updating as new reporting comes in.
 
 The initial copy reveals by phrase or sentence. It must not use a slow character-by-character
 typewriter effect. The user should be able to finish a sentence at a natural reading speed.
@@ -128,8 +129,8 @@ depend on an LLM response or source-processing success.
 
 ### 4. Append source progress as prose
 
-Below the explanatory passage, use the small editorial eyebrow `LIVE DESK` followed by one flowing
-paragraph. There are no rows, checkmarks, bullets, timestamps, or connector lines.
+Below the explanatory passage, use one flowing paragraph with no `LIVE DESK` eyebrow. There are no
+source rows, checkmarks, timestamps, or connector lines.
 
 The paragraph has two logical parts that render as one continuous block:
 
@@ -139,7 +140,8 @@ The paragraph has two logical parts that render as one continuous block:
 Example:
 
 ```text
-We connected 12 sources. Techmeme is in. Hacker News is in.
+We connected 12 sources. Techmeme is in — 28 items processed.
+Hacker News is in — 34 items processed.
 AI & Product is ready. Reading Stratechery and Decoder…
 ```
 
@@ -151,14 +153,15 @@ When an active source completes:
 4. any newly ready category sentence appends at the same point its pill becomes usable.
 
 The progress unit is a top-level source chosen during onboarding, not every article discovered from
-that source. Each source appends at most one completion sentence.
+that source. Each source appends at most one completion sentence and includes the number of items
+that completed the source's first ingestion pass.
 
 User-facing copy should translate internal outcomes:
 
 | Internal outcome | User-facing treatment |
 | --- | --- |
-| First ingest produced usable content | `<Source> is in.` |
-| Source connected successfully but had no new content | `<Source> is connected.` |
+| First ingest produced usable content | `<Source> is in — <N> items processed.` |
+| First ingest completed with no usable items | `<Source> is in — 0 items processed.` |
 | One or more sources actively processing | `Reading <Source list>…` |
 | A lens gained its first readable segment | `<Category> is ready.` |
 | A source is retrying | Keep it in the active tail; do not expose retry jargon |
@@ -167,6 +170,13 @@ User-facing copy should translate internal outcomes:
 The active source list uses normal localized list formatting. When many sources process concurrently,
 show at most three names and summarize the remainder, for example:
 `Reading Stratechery, Decoder, and 3 more…`.
+
+After the source paragraph, show a compact `With Newsly, you can also:` list. It is explanatory
+content, not progress UI, and remains stable while the source sentence updates:
+
+- **Save to Knowledge.** Keep the stories and ideas worth remembering.
+- **Search Newsly.** Find a story or detail across everything Newsly has read.
+- **Listen instead.** Turn the Briefing into narration away from the screen.
 
 ### 5. Append real categories
 
@@ -251,6 +261,7 @@ Recommended tables:
 - `status`: `active`, `ready`, `completed`, or `expired`
 - `revision`: monotonically increasing integer for polling/ETag invalidation
 - `connected_source_count`
+- `ready_category_keys`: append-only JSON array in first-ready order
 - `started_at`
 - `first_category_ready_at`
 - `completed_at`
@@ -265,11 +276,16 @@ Recommended tables:
 - `source_kind`
 - `position`: original onboarding display order
 - `status`: `queued`, `processing`, `ready`, `empty`, `retrying`, or `unavailable`
+- `completion_sequence`: nullable run-local sequence assigned on the first terminal transition
+- `processed_item_count`: successful saved-or-deduplicated items from the source's first pass
 - `completed_at`
 - unique constraint on `(run_id, source_key)`
 
 Source status updates must be idempotent. A duplicate worker callback cannot append the same source
-twice or advance the run revision more than once for the same transition.
+twice or advance the run revision more than once for the same transition. Assign
+`completion_sequence` transactionally so `completed_sources` reflects actual completion order and
+remains stable across polling, concurrent workers, snapshots, and relaunches. Use original
+`position` only as a deterministic tie-break for sources completed in the same transaction.
 
 ### Source-completion meaning
 
@@ -301,22 +317,15 @@ Add an optional `first_run` object to `BriefingIndexResponse`:
     "connected_source_count": 12,
     "completed_sources": [
       {
-        "key": "aggregator:techmeme",
         "display_name": "Techmeme",
-        "outcome": "ready"
+        "processed_item_count": 28
       },
       {
-        "key": "feed:hacker-news",
         "display_name": "Hacker News",
-        "outcome": "ready"
+        "processed_item_count": 34
       }
     ],
-    "active_sources": [
-      {
-        "key": "feed:stratechery",
-        "display_name": "Stratechery"
-      }
-    ],
+    "active_sources": ["Stratechery"],
     "ready_category_keys": []
   }
 }
@@ -325,9 +334,13 @@ Add an optional `first_run` object to `BriefingIndexResponse`:
 Contract rules:
 
 - `first_run` is absent after tutorial completion.
-- `completed_sources` is ordered and append-only for a run.
+- `phase` is `active` while sources are progressing, `ready` after the first readable category, and
+  `waiting_for_content` if initial source work is terminal but no category is readable.
+- `completed_sources` is ordered by `completion_sequence` and append-only for a run.
+- each completed source carries its non-negative first-pass `processed_item_count`.
 - `active_sources` may change in place and is not treated as history.
-- `ready_category_keys` contains only keys also present as readable entries in `lenses`.
+- `ready_category_keys` is append-only in first-ready order and contains only keys also present as
+  readable entries in `lenses`.
 - the client derives prose from structured fields; the backend does not send arbitrary UI sentences.
 - adding `first_run` is backward-compatible for older clients.
 
@@ -371,8 +384,8 @@ rather than treating the whole task as one source event.
 Normal ready-content events continue to populate `briefing_pending_sources` and enqueue debounced
 LLM refreshes. When the first active segment for a lens is persisted:
 
-- increment the first-edition run revision;
-- add the lens key to the derived ready-category set;
+- append the lens key to `ready_category_keys` and increment the first-edition run revision in the
+  same transaction that persists the segment;
 - change the run from `active` to `ready` when this is the first readable lens.
 
 Briefing source coverage still comes from real active segments. The onboarding progress model must
@@ -429,6 +442,7 @@ Create a dedicated `BriefingStartHereView` under `Views/Briefing/` with small su
 - deterministic explanatory prose;
 - stable accumulated progress text;
 - mutable active tail;
+- stable feature bullets for Knowledge, search, and narration;
 - ready-state closing text and inline category action.
 
 The body should remain a normal scrollable Briefing page. Do not put progress in a floating card,
@@ -564,14 +578,15 @@ window, unavailable sources, and time to first readable category.
 
 ### Phase 4: Start Here UI and motion
 
-- Build `BriefingStartHereView` with deterministic copy and flowing progress prose.
+- Build `BriefingStartHereView` with deterministic copy, counted progress prose, and feature bullets.
 - Add phrase-level reveal, active-tail crossfade, and category insertion motion.
 - Add reduced-motion and Dynamic Type behavior.
 - Verify light and dark appearances against the current Briefing surface.
 
 ### Phase 5: End-to-end validation and rollout
 
-- Add seeded first-run fixtures for initial, mid-processing, ready, delayed, and resumed states.
+- Add seeded first-run fixtures for initial, one-source, mid-processing, ready, delayed, and resumed
+  states with deterministic item totals.
 - Add Maestro flows and screenshots for initial Start Here, appended source prose, and first category
   arrival.
 - Validate app background/foreground behavior and interrupted network requests.

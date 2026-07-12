@@ -10,3 +10,4 @@ class ScraperStats:
     duplicates: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
+    processed_by_config_id: dict[int, int] = field(default_factory=dict)

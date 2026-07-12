@@ -21,6 +21,7 @@ class DebugUserSessionRequest(BaseModel):
     user_id: int | None = Field(default=None, ge=1)
     has_completed_onboarding: bool | None = None
     has_completed_new_user_tutorial: bool | None = None
+    reading_experience: str | None = Field(default=None, pattern="^(classic|briefing)$")
 
 
 class TokenResponse(BaseModel):

@@ -10,6 +10,7 @@ from app.core.logging import get_logger
 from app.models.internal.feed_backfill import FeedBackfillRequest, FeedBatchBackfillRequest
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.services.briefing.first_run import mark_feed_sources_complete
 from app.services.feed_backfill import backfill_feed_for_config
 from app.services.queue import TaskType
 
@@ -25,8 +26,6 @@ class BackfillFeedsHandler:
 
     def handle(self, task: TaskEnvelope, context: TaskContext) -> TaskResult:
         """Run feed backfills in parallel for one onboarding request."""
-        del context
-
         try:
             request = FeedBatchBackfillRequest.model_validate(task.payload or {})
         except ValidationError as exc:
@@ -35,6 +34,8 @@ class BackfillFeedsHandler:
         unique_config_ids = list(dict.fromkeys(request.config_ids))
         max_workers = min(ONBOARDING_FEED_BACKFILL_MAX_WORKERS, len(unique_config_ids))
         successes = 0
+        successful_config_ids: list[int] = []
+        processed_item_counts: dict[int, int] = {}
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_config_id = {
@@ -54,6 +55,11 @@ class BackfillFeedsHandler:
                 try:
                     result = future.result()
                     successes += 1
+                    successful_config_ids.append(config_id)
+                    processed_item_counts[config_id] = max(
+                        int(result.saved) + int(result.duplicates),
+                        0,
+                    )
                     logger.info(
                         "Completed onboarding feed backfill",
                         extra={
@@ -86,5 +92,22 @@ class BackfillFeedsHandler:
                     )
 
         if successes > 0:
+            try:
+                with context.db_factory() as db:
+                    mark_feed_sources_complete(
+                        db,
+                        user_id=request.user_id,
+                        config_ids=successful_config_ids,
+                        processed_item_counts=processed_item_counts,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Could not record onboarding feed progress",
+                    extra={
+                        "component": "feed_backfill",
+                        "operation": "record_onboarding_progress",
+                        "context_data": {"user_id": request.user_id},
+                    },
+                )
             return TaskResult.ok()
         return TaskResult.fail("All onboarding feed backfills failed")

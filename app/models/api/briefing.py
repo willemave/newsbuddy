@@ -4,7 +4,13 @@ from pydantic import BaseModel, Field
 
 from app.models.api.audio_episodes import AudioEpisodeResponse
 from app.models.api.base import UTCDateTime
-from app.models.contracts import BriefingBlockType, BriefingRunKind, BriefingTier, ContentType
+from app.models.contracts import (
+    BriefingBlockType,
+    BriefingFirstRunPhase,
+    BriefingRunKind,
+    BriefingTier,
+    ContentType,
+)
 
 BRIEFING_DIG_FRAGMENT_MAX_LENGTH = 2000
 
@@ -19,12 +25,27 @@ class BriefingLensSummary(BaseModel):
     unread_source_count: int
 
 
+class BriefingFirstRunSourceProgress(BaseModel):
+    display_name: str
+    processed_item_count: int = Field(ge=0)
+
+
+class BriefingFirstRunProgress(BaseModel):
+    revision: int
+    phase: BriefingFirstRunPhase
+    connected_source_count: int
+    completed_sources: list[BriefingFirstRunSourceProgress] = Field(default_factory=list)
+    active_sources: list[str] = Field(default_factory=list)
+    ready_category_keys: list[str] = Field(default_factory=list)
+
+
 class BriefingIndexResponse(BaseModel):
     version: int
     masthead_title: str
     masthead_deck: str
     generated_at: UTCDateTime | None = None
     lenses: list[BriefingLensSummary] = Field(default_factory=list)
+    first_run: BriefingFirstRunProgress | None = None
 
 
 class BriefingRunDto(BaseModel):

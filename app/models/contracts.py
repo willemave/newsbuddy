@@ -284,6 +284,14 @@ class BriefingTier(StrEnum):
     NEWS = "news"
 
 
+class BriefingFirstRunPhase(StrEnum):
+    """Visible state of the temporary Start Here briefing."""
+
+    ACTIVE = "active"
+    READY = "ready"
+    WAITING_FOR_CONTENT = "waiting_for_content"
+
+
 class BriefingBlockType(StrEnum):
     """Briefing document block kinds."""
 

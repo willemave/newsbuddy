@@ -220,6 +220,8 @@ def debug_create_user(
         user.has_completed_onboarding = payload.has_completed_onboarding
     if payload.has_completed_new_user_tutorial is not None:
         user.has_completed_new_user_tutorial = payload.has_completed_new_user_tutorial
+    if payload.reading_experience is not None:
+        user.reading_experience = payload.reading_experience
 
     db.commit()
     db.refresh(user)

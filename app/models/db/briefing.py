@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.db import Base
@@ -96,3 +96,54 @@ class BriefingState(Base):
     masthead_deck = Column(Text, nullable=False, default="")
     last_append_at = Column(DateTime, nullable=True)
     last_sweep_at = Column(DateTime, nullable=True)
+
+
+class OnboardingFirstEditionRun(Base):
+    """Durable state for the temporary Start Here briefing experience."""
+
+    __tablename__ = "onboarding_first_edition_runs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="active", index=True)
+    revision = Column(Integer, nullable=False, default=1)
+    connected_source_count = Column(Integer, nullable=False, default=0)
+    ready_category_keys = Column(JSONB, nullable=False, default=list)
+    started_at = Column(DateTime, default=_utcnow, nullable=False)
+    ready_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_onboarding_first_edition_active_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("status IN ('active', 'ready')"),
+        ),
+    )
+
+
+class OnboardingFirstEditionSource(Base):
+    """One configured source whose initial crawl is reflected in Start Here."""
+
+    __tablename__ = "onboarding_first_edition_sources"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, nullable=False, index=True)
+    source_key = Column(String(160), nullable=False)
+    display_name = Column(String(255), nullable=False)
+    source_kind = Column(String(32), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    status = Column(String(16), nullable=False, default="queued", index=True)
+    completion_sequence = Column(Integer, nullable=True)
+    processed_item_count = Column(Integer, nullable=False, default=0)
+    completed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "source_key",
+            name="uq_onboarding_first_edition_sources_run_source",
+        ),
+        Index("idx_onboarding_first_edition_sources_run_position", "run_id", "position"),
+    )

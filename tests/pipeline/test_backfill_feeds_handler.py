@@ -1,5 +1,6 @@
 """Tests for onboarding feed backfill handler."""
 
+from contextlib import nullcontext
 from unittest.mock import Mock
 
 from app.pipeline.handlers.backfill_feeds import BackfillFeedsHandler
@@ -10,6 +11,7 @@ from app.services.queue import TaskType
 
 def test_backfill_feeds_handler_runs_batch(monkeypatch) -> None:
     calls: list[tuple[int, int, int]] = []
+    recorded_progress: dict[str, object] = {}
 
     class FakeResult:
         def __init__(self, config_id: int) -> None:
@@ -28,6 +30,15 @@ def test_backfill_feeds_handler_runs_batch(monkeypatch) -> None:
         fake_backfill,
     )
 
+    def fake_mark_complete(_db, **kwargs):
+        recorded_progress.update(kwargs)
+        return len(kwargs["config_ids"])
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.backfill_feeds.mark_feed_sources_complete",
+        fake_mark_complete,
+    )
+
     handler = BackfillFeedsHandler()
     task = TaskEnvelope(
         id=1,
@@ -40,12 +51,18 @@ def test_backfill_feeds_handler_runs_batch(monkeypatch) -> None:
         settings=Mock(),
         llm_service=Mock(),
         worker_id="test",
+        db_factory=lambda: nullcontext(Mock()),
     )
 
     result = handler.handle(task, context)
 
     assert result.success is True
     assert sorted(calls) == [(7, 11, 2), (7, 12, 2)]
+    assert recorded_progress == {
+        "user_id": 7,
+        "config_ids": [11, 12],
+        "processed_item_counts": {11: 3, 12: 3},
+    }
 
 
 def test_backfill_feeds_handler_rejects_invalid_payload() -> None:

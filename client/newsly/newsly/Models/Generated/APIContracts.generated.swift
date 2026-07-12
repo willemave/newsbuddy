@@ -627,6 +627,12 @@ enum APIBriefingTier: String, Codable, CaseIterable {
     case news = "news"
 }
 
+enum APIBriefingFirstRunPhase: String, Codable, CaseIterable {
+    case active = "active"
+    case ready = "ready"
+    case waiting_for_content = "waiting_for_content"
+}
+
 enum APIBriefingBlockType: String, Codable, CaseIterable {
     case passage = "passage"
     case figure = "figure"
