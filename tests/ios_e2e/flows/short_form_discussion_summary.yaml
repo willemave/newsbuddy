@@ -16,12 +16,11 @@ appId: "${APP_ID}"
       newslyE2EOpenContentId: "${CONTENT_ID}"
 - assertVisible:
     id: content.detail.screen
-- tapOn:
-    id: content.discussion.scroll_to_comments
-- extendedWaitUntil:
-    visible:
+- scrollUntilVisible:
+    element:
       id: content.discussion.open
-    timeout: 10000
+    direction: DOWN
+    centerElement: true
 - tapOn:
     id: content.discussion.open
 - extendedWaitUntil:

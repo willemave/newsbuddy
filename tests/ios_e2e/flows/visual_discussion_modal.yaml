@@ -19,12 +19,11 @@ appId: "${APP_ID}"
     visible:
       id: content.detail.screen
     timeout: 15000
-- tapOn:
-    id: content.discussion.scroll_to_comments
-- extendedWaitUntil:
-    visible:
+- scrollUntilVisible:
+    element:
       id: content.discussion.open
-    timeout: 10000
+    direction: DOWN
+    centerElement: true
 - tapOn:
     id: content.discussion.open
 - extendedWaitUntil:

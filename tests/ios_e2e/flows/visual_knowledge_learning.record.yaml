@@ -12,39 +12,33 @@ appId: "${APP_ID}"
       newslyE2EUserId: "${USER_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
-- tapOn:
-    id: tab.long_form
-- extendedWaitUntil:
-    visible:
-      id: long.screen
-    timeout: 15000
-- tapOn:
-    id: tab.more
-- extendedWaitUntil:
-    visible:
-      id: more.screen
-    timeout: 10000
-- tapOn:
-    id: more.settings
-- extendedWaitUntil:
-    visible:
-      id: settings.screen
-    timeout: 10000
-- scrollUntilVisible:
-    element:
-      id: settings.reading_experience
-    direction: DOWN
-    centerElement: true
-- tapOn:
-    id: settings.reading_experience
-    point: "75%,50%"
-- extendedWaitUntil:
-    visible:
-      id: tab.briefing
-    timeout: 15000
-- tapOn:
-    id: tab.briefing
+      newslyE2EVisualNow: "${VISUAL_NOW}"
 - extendedWaitUntil:
     visible:
       id: briefing.screen
     timeout: 15000
+- tapOn:
+    id: tab.knowledge
+- extendedWaitUntil:
+    visible:
+      id: knowledge.screen
+    timeout: 15000
+- assertVisible: Recently Saved
+- assertVisible:
+    id: knowledge.saved.${LONG_CONTENT_ID}
+- waitForAnimationToEnd
+- takeScreenshot:
+    path: "${BASELINE_DIR}/redesign-knowledge"
+- tapOn:
+    id: tab.learning
+- extendedWaitUntil:
+    visible:
+      id: learning.screen
+    timeout: 15000
+- assertVisible:
+    id: learning.chat.${CHAT_SESSION_ID}
+- assertVisible: Learning Deck
+- assertVisible: Narration
+- waitForAnimationToEnd
+- takeScreenshot:
+    path: "${BASELINE_DIR}/redesign-learning"

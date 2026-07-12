@@ -9,7 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from app.models.db import BriefingLens, BriefingSegment, BriefingState, NewsItem
+from app.models.db import (
+    AudioEpisode,
+    BriefingLens,
+    BriefingSegment,
+    BriefingState,
+    ChatSession,
+    ContentKnowledgeSave,
+    LearningDeck,
+    LearningDeckRun,
+    NewsItem,
+)
 from app.services.briefing.source_keys import build_source_key
 from app.utils.image_paths import get_content_images_dir, get_thumbnails_dir
 
@@ -30,11 +40,16 @@ BASELINE_FILES = {
         "main-long.png",
         "main-fast.png",
         "main-knowledge.png",
+        "main-learning.png",
         "main-more.png",
     ],
     "visual_briefing": [
         "briefing-articles.png",
         "briefing-news.png",
+    ],
+    "visual_knowledge_learning": [
+        "redesign-knowledge.png",
+        "redesign-learning.png",
     ],
     "visual_content_modals": [
         "detail-article.png",
@@ -123,6 +138,99 @@ def _seed_article_visual_artwork(content) -> None:
         FIXTURES_DIR / "visual-thumbnail-article.png",
         thumbnails_dir / f"{content.id}.png",
     )
+
+
+def _seed_visual_knowledge_and_learning(db_session, *, user_id: int, content) -> int:
+    """Populate the redesigned tabs with stable, representative item types."""
+    saved_at = _utc_naive(VISUAL_NOW - timedelta(minutes=18))
+    db_session.add(
+        ContentKnowledgeSave(
+            user_id=user_id,
+            content_id=content.id,
+            saved_at=saved_at,
+            created_at=saved_at,
+        )
+    )
+
+    chat_session = ChatSession(
+        user_id=user_id,
+        content_id=content.id,
+        title="How should small teams evaluate AI products?",
+        session_type="knowledge_chat",
+        llm_model="openai:gpt-5.5",
+        llm_provider="openai",
+        created_at=_utc_naive(VISUAL_NOW - timedelta(hours=2)),
+        updated_at=_utc_naive(VISUAL_NOW - timedelta(minutes=12)),
+        last_message_at=_utc_naive(VISUAL_NOW - timedelta(minutes=12)),
+    )
+    db_session.add(chat_session)
+
+    deck_created_at = _utc_naive(VISUAL_NOW - timedelta(hours=3))
+    deck = LearningDeck(
+        user_id=user_id,
+        source_kind="content",
+        source_identity=f"content:{content.id}",
+        source_url=content.url,
+        source_content_id=content.id,
+        source_title=content.title,
+        source_metadata={"content_type": "article"},
+        title="A practical playbook for evaluating AI systems",
+        artifact_object_keys=[],
+        share_enabled=False,
+        created_at=deck_created_at,
+        updated_at=_utc_naive(VISUAL_NOW - timedelta(minutes=42)),
+    )
+    db_session.add(deck)
+    db_session.flush()
+    deck_run = LearningDeckRun(
+        deck_id=deck.id,
+        user_id=user_id,
+        status="completed",
+        source_snapshot={
+            "source_kind": "content",
+            "source_identity": deck.source_identity,
+            "source_url": deck.source_url,
+            "source_title": deck.source_title,
+            "source_metadata": deck.source_metadata,
+        },
+        timeline=[],
+        artifact_object_keys=[],
+        created_at=deck_created_at,
+        updated_at=_utc_naive(VISUAL_NOW - timedelta(minutes=42)),
+        completed_at=_utc_naive(VISUAL_NOW - timedelta(minutes=42)),
+    )
+    db_session.add(deck_run)
+    db_session.flush()
+    deck.latest_run_id = deck_run.id
+    deck.latest_successful_run_id = deck_run.id
+    db_session.flush()
+    deck.updated_at = _utc_naive(VISUAL_NOW - timedelta(minutes=42))
+
+    db_session.add(
+        AudioEpisode(
+            user_id=user_id,
+            kind="custom_narration",
+            status="completed",
+            title="The evaluation loop, narrated",
+            input_hash="ios-visual-learning-narration",
+            source_item_ids=[],
+            source_snapshot={
+                "kind": "custom_narration",
+                "content_ids": [content.id],
+                "news_item_ids": [],
+                "source_count": 1,
+                "items": [{"content_id": content.id, "title": content.title}],
+            },
+            prompt_version=1,
+            duration_seconds=488,
+            created_at=_utc_naive(VISUAL_NOW - timedelta(days=1, hours=1)),
+            updated_at=_utc_naive(VISUAL_NOW - timedelta(days=1)),
+        )
+    )
+    db_session.commit()
+    db_session.refresh(chat_session)
+    assert chat_session.id is not None
+    return int(chat_session.id)
 
 
 def _create_user_visible_news_item(
@@ -369,6 +477,11 @@ def test_primary_tabs_match_visual_baselines(
     long_content = create_sample_content(sample_article_long)
     long_content = _apply_article_visual_timestamps(db_session, long_content)
     _seed_article_visual_artwork(long_content)
+    chat_session_id = _seed_visual_knowledge_and_learning(
+        db_session,
+        user_id=test_user.id,
+        content=long_content,
+    )
     news_item = _create_user_visible_news_item(
         db_session,
         user_id=test_user.id,
@@ -382,6 +495,7 @@ def test_primary_tabs_match_visual_baselines(
             **_baseline_env(),
             "LONG_CONTENT_ID": str(long_content.id),
             "NEWS_ITEM_ID": str(news_item.id),
+            "CHAT_SESSION_ID": str(chat_session_id),
         },
     )
 
@@ -395,6 +509,7 @@ def test_briefing_experience_matches_visual_baselines(
 ) -> None:
     """Briefing article and news lenses should keep their known visual shape."""
     _prepare_baselines("visual_briefing")
+    test_user.reading_experience = "briefing"
     content = create_sample_content(sample_article_long)
     content = _apply_article_visual_timestamps(db_session, content)
     _seed_article_visual_artwork(content)
@@ -417,6 +532,35 @@ def test_briefing_experience_matches_visual_baselines(
             **_baseline_env(),
             "ARTICLE_SEGMENT_ID": str(article_segment_id),
             "NEWS_SEGMENT_ID": str(news_segment_id),
+        },
+    )
+
+
+def test_knowledge_learning_tabs_match_visual_baselines(
+    run_ios_flow,
+    create_sample_content,
+    sample_article_long,
+    db_session,
+    test_user,
+) -> None:
+    """The Briefing experience should expose the visual Knowledge and Learning roots."""
+    _prepare_baselines("visual_knowledge_learning")
+    test_user.reading_experience = "briefing"
+    content = create_sample_content(sample_article_long)
+    content = _apply_article_visual_timestamps(db_session, content)
+    _seed_article_visual_artwork(content)
+    chat_session_id = _seed_visual_knowledge_and_learning(
+        db_session,
+        user_id=test_user.id,
+        content=content,
+    )
+
+    run_ios_flow(
+        _flow_name("visual_knowledge_learning"),
+        extra_env={
+            **_baseline_env(),
+            "LONG_CONTENT_ID": str(content.id),
+            "CHAT_SESSION_ID": str(chat_session_id),
         },
     )
 

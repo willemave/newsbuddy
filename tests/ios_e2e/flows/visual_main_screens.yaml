@@ -45,11 +45,28 @@ appId: "${APP_ID}"
     visible:
       id: knowledge.screen
     timeout: 15000
-- assertVisible: Actions
+- assertVisible: Recently Saved
+- assertVisible:
+    id: knowledge.saved.${LONG_CONTENT_ID}
 - assertScreenshot:
     path: "${BASELINE_DIR}/main-knowledge.png"
     cropOn:
       id: knowledge.screen
+    thresholdPercentage: 94
+- tapOn:
+    id: tab.learning
+- extendedWaitUntil:
+    visible:
+      id: learning.screen
+    timeout: 15000
+- assertVisible:
+    id: learning.chat.${CHAT_SESSION_ID}
+- assertVisible: Learning Deck
+- assertVisible: Narration
+- assertScreenshot:
+    path: "${BASELINE_DIR}/main-learning.png"
+    cropOn:
+      id: learning.screen
     thresholdPercentage: 94
 - tapOn:
     id: tab.more

@@ -27,6 +27,7 @@ def test_briefing_routes_article_and_podcast_fixtures_to_their_lenses(
     assert article.id is not None
     assert podcast.id is not None
     assert test_user.id is not None
+    test_user.reading_experience = "briefing"
 
     settings = get_settings().model_copy(
         update={
