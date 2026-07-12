@@ -19,6 +19,7 @@ enum RootTab: Hashable {
     case shortNews
     case briefing
     case knowledge
+    case learning
     case more
 
     var logName: String {
@@ -31,6 +32,8 @@ enum RootTab: Hashable {
             return "briefing"
         case .knowledge:
             return "knowledge"
+        case .learning:
+            return "learning"
         case .more:
             return "more"
         }
@@ -56,7 +59,7 @@ final class TabCoordinatorViewModel {
         shortNewsVM: ShortNewsListViewModel,
         longContentVM: LongContentListViewModel,
         briefingVM: BriefingViewModel,
-        initialTab: RootTab = .shortNews
+        initialTab: RootTab = .briefing
     ) {
         self.shortNewsVM = shortNewsVM
         self.longContentVM = longContentVM
@@ -109,7 +112,7 @@ final class TabCoordinatorViewModel {
             // ContentView owns the single Briefing active/inactive signal so
             // tab selection and scene phase cannot start competing loads.
             rootTabFlowLogger.info("tab became active | tab=briefing")
-        case .knowledge, .more:
+        case .knowledge, .learning, .more:
             rootTabFlowLogger.info(
                 "tab became active with no preload required | tab=\(tab.logName, privacy: .public)"
             )

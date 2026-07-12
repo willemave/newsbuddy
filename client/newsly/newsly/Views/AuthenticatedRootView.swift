@@ -47,7 +47,7 @@ struct AuthenticatedRootView: View {
             }
         }
         .onAppear {
-            applyServerReadingExperience()
+            applyPrimaryReadingExperience()
             updatePresentation()
         }
         .onChange(of: user.id) { _, _ in
@@ -60,7 +60,7 @@ struct AuthenticatedRootView: View {
             updatePresentation()
         }
         .onChange(of: user.readingExperience) { _, _ in
-            applyServerReadingExperience()
+            applyPrimaryReadingExperience()
         }
     }
 
@@ -73,8 +73,13 @@ struct AuthenticatedRootView: View {
         presentationState = .content
     }
 
-    private func applyServerReadingExperience() {
-        AppSettings.shared.setReadingExperience(user.readingExperience)
+    private func applyPrimaryReadingExperience() {
+        AppSettings.shared.setReadingExperience(
+            ReadingExperiencePolicy.presentationExperience(
+                serverExperience: user.readingExperience,
+                allowsClassicFallback: E2ETestLaunch.isEnabled
+            )
+        )
     }
 
     private func updatedUserOnboardingFlag(_ completed: Bool) -> User {

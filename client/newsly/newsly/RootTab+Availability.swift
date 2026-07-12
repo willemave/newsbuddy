@@ -14,7 +14,7 @@ extension RootTab {
             return .briefing
         case .more:
             return .knowledge
-        case .briefing, .knowledge:
+        case .briefing, .knowledge, .learning:
             return self
         }
     }

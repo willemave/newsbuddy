@@ -1,5 +1,5 @@
 //
-//  KnowledgeHubViewModel.swift
+//  LearningHubViewModel.swift
 //  newsly
 //
 
@@ -8,7 +8,7 @@ import Observation
 import SwiftUI
 
 @MainActor
-protocol KnowledgeHubChatServicing: AnyObject {
+protocol LearningHubChatServicing: AnyObject {
     func listSessionsPage(
         contentId: Int?,
         newsItemId: Int?,
@@ -23,11 +23,11 @@ protocol KnowledgeHubChatServicing: AnyObject {
     ) async throws -> AssistantTurnResponse
 }
 
-extension ChatService: KnowledgeHubChatServicing {}
+extension ChatService: LearningHubChatServicing {}
 
 @MainActor
 @Observable
-final class KnowledgeHubViewModel {
+final class LearningHubViewModel {
     var sessions: [ChatSessionSummary] = []
     var isLoading = false
     var isLoadingMore = false
@@ -42,7 +42,7 @@ final class KnowledgeHubViewModel {
     private(set) var completedVoiceRoute: ChatSessionRoute?
 
     @ObservationIgnored
-    private let chatService: any KnowledgeHubChatServicing
+    private let chatService: any LearningHubChatServicing
     @ObservationIgnored
     private let transcriptionService: any SpeechTranscribing
     @ObservationIgnored
@@ -59,7 +59,7 @@ final class KnowledgeHubViewModel {
     private var hasConfiguredVoiceCallbacks = false
 
     init(
-        chatService: any KnowledgeHubChatServicing,
+        chatService: any LearningHubChatServicing,
         transcriptionService: (any SpeechTranscribing)? = nil,
         refreshTranscriptionAvailability: @escaping () async -> Bool = { false },
         initialVoiceDictationAvailable: Bool = false
@@ -72,7 +72,7 @@ final class KnowledgeHubViewModel {
         self.voiceDictationAvailable = initialVoiceDictationAvailable
     }
 
-    func loadHub() async {
+    func loadLearning() async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -125,8 +125,8 @@ final class KnowledgeHubViewModel {
         }
     }
 
-    func startSearchChat(message: String) async -> ChatSessionRoute? {
-        await startHubAssistantTurn(message: message)
+    func startChat(message: String) async -> ChatSessionRoute? {
+        await startAssistantTurn(message: message)
     }
 
     func checkAndRefreshVoiceDictation() async {
@@ -165,56 +165,7 @@ final class KnowledgeHubViewModel {
         isVoiceActionInFlight = false
     }
 
-    func startSummaryChat() async -> ChatSessionRoute? {
-        await startHubAssistantTurn(
-            message: (
-                "Give me a summary of the last day's content from my feed, "
-                + "including recent news items and articles. "
-                + "What are the key themes and most important takeaways?"
-            ),
-            screenContext: makeHubContext(
-                query: "recent news items and articles from my feed",
-                note: (
-                    "Summarize recent in-app feed content. Include both short-form news "
-                    + "items and longer articles. Prefer in-app content before web search."
-                )
-            )
-        )
-    }
-
-    func startCommentsChat() async -> ChatSessionRoute? {
-        await startHubAssistantTurn(
-            message: (
-                "What are the most interesting and insightful comments from the "
-                + "news items and articles in my feed recently? "
-                + "Highlight any surprising perspectives or debates."
-            )
-        )
-    }
-
-    func startInterestingUnreadNewsChat() async -> ChatSessionRoute? {
-        await startHubAssistantTurn(
-            message: InterestingUnreadNewsAssistantAction.prompt,
-            screenContext: InterestingUnreadNewsAssistantAction.screenContext(
-                screenType: "knowledge_hub",
-                screenTitle: "Knowledge"
-            )
-        )
-    }
-
-    func startFindArticlesChat() async -> ChatSessionRoute? {
-        await startHubAssistantTurn(
-            message: "Find a few new articles or sources I should read next based on what I've been reading."
-        )
-    }
-
-    func startFindFeedsChat() async -> ChatSessionRoute? {
-        await startHubAssistantTurn(
-            message: "Recommend a few feeds, newsletters, or podcasts I should add based on what I've been reading."
-        )
-    }
-
-    private func startHubAssistantTurn(
+    private func startAssistantTurn(
         message: String,
         screenContext: AssistantScreenContext? = nil
     ) async -> ChatSessionRoute? {
@@ -227,7 +178,7 @@ final class KnowledgeHubViewModel {
             let response = try await chatService.createAssistantTurn(
                 message: message,
                 sessionId: nil,
-                screenContext: screenContext ?? makeHubContext()
+                screenContext: screenContext ?? makeLearningContext()
             )
             prependSession(response.session)
             return ChatSessionRoute(
@@ -244,13 +195,13 @@ final class KnowledgeHubViewModel {
         }
     }
 
-    private func makeHubContext(
+    private func makeLearningContext(
         query: String? = nil,
         note: String? = nil
     ) -> AssistantScreenContext {
         AssistantScreenContext(
-            screenType: "knowledge_hub",
-            screenTitle: "Knowledge",
+            screenType: "learning",
+            screenTitle: "Learning",
             query: query,
             note: note
         )
@@ -321,7 +272,7 @@ final class KnowledgeHubViewModel {
         }
 
         errorMessage = nil
-        return await startHubAssistantTurn(message: trimmedTranscript)
+        return await startAssistantTurn(message: trimmedTranscript)
     }
 
     private func configureTranscriptionCallbacks() {

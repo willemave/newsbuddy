@@ -113,6 +113,23 @@ final class PaginatedFeedTests: XCTestCase {
 
         XCTAssertEqual(feed.items.map(\.id), [1, 2])
     }
+
+    func testResetClearsItemsAndPaginationState() {
+        let feed = PaginatedFeed<TestFeedItem>(
+            items: [TestFeedItem(id: 1)],
+            phase: .loaded,
+            nextCursor: "next",
+            hasMore: false,
+            loadPage: { _ in Page(items: [], nextCursor: nil, hasMore: false) }
+        )
+
+        feed.reset()
+
+        XCTAssertEqual(feed.items, [])
+        XCTAssertNil(feed.nextCursor)
+        XCTAssertTrue(feed.hasMore)
+        XCTAssertEqual(feed.phase, .idle)
+    }
 }
 
 private struct TestFeedItem: Identifiable, Equatable, Sendable {

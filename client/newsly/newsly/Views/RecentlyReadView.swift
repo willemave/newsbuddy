@@ -122,7 +122,7 @@ struct RecentlyReadView: View {
                 )
             }
         }
-        .navigationTitle("Recently Read")
+        .appNavigationTitle("Recently Read")
     }
 }
 

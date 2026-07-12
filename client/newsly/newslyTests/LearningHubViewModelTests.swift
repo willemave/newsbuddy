@@ -3,13 +3,13 @@ import XCTest
 @testable import newsly
 
 @MainActor
-final class KnowledgeHubViewModelTests: XCTestCase {
+final class LearningHubViewModelTests: XCTestCase {
     func testVoiceMicStopsRecordingAndStartsAssistantTurnWithTranscript() async {
-        let transcriptionService = MockKnowledgeSpeechTranscriber(transcript: "What should I read next?")
-        let chatService = MockKnowledgeHubChatService(
+        let transcriptionService = MockLearningSpeechTranscriber(transcript: "What should I read next?")
+        let chatService = MockLearningHubChatService(
             turnResponses: [.success(makeAssistantTurnResponse(sessionId: 91))]
         )
-        let viewModel = KnowledgeHubViewModel(
+        let viewModel = LearningHubViewModel(
             chatService: chatService,
             transcriptionService: transcriptionService,
             initialVoiceDictationAvailable: true
@@ -23,7 +23,7 @@ final class KnowledgeHubViewModelTests: XCTestCase {
 
         XCTAssertEqual(route?.sessionId, 91)
         XCTAssertEqual(chatService.receivedMessages, ["What should I read next?"])
-        XCTAssertEqual(chatService.receivedScreenTypes, ["knowledge_hub"])
+        XCTAssertEqual(chatService.receivedScreenTypes, ["learning"])
         XCTAssertEqual(transcriptionService.startCallCount, 1)
         XCTAssertEqual(transcriptionService.stopCallCount, 1)
         XCTAssertFalse(viewModel.isVoiceRecording)
@@ -34,11 +34,11 @@ final class KnowledgeHubViewModelTests: XCTestCase {
     }
 
     func testVoiceSilenceAutoStopPublishesCompletedRoute() async {
-        let transcriptionService = MockKnowledgeSpeechTranscriber(transcript: "Summarize my unread stories")
-        let chatService = MockKnowledgeHubChatService(
+        let transcriptionService = MockLearningSpeechTranscriber(transcript: "Summarize my unread stories")
+        let chatService = MockLearningHubChatService(
             turnResponses: [.success(makeAssistantTurnResponse(sessionId: 92))]
         )
-        let viewModel = KnowledgeHubViewModel(
+        let viewModel = LearningHubViewModel(
             chatService: chatService,
             transcriptionService: transcriptionService,
             initialVoiceDictationAvailable: true
@@ -56,9 +56,9 @@ final class KnowledgeHubViewModelTests: XCTestCase {
     }
 
     func testCancelVoiceRecordingResetsTranscriberAndState() async {
-        let transcriptionService = MockKnowledgeSpeechTranscriber(transcript: "Ignore this")
-        let viewModel = KnowledgeHubViewModel(
-            chatService: MockKnowledgeHubChatService(turnResponses: []),
+        let transcriptionService = MockLearningSpeechTranscriber(transcript: "Ignore this")
+        let viewModel = LearningHubViewModel(
+            chatService: MockLearningHubChatService(turnResponses: []),
             transcriptionService: transcriptionService,
             initialVoiceDictationAvailable: true
         )
@@ -72,13 +72,13 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isVoiceActionInFlight)
     }
 
-    func testStartSearchChatCreatesAssistantTurnWithKnowledgeContext() async {
-        let chatService = MockKnowledgeHubChatService(
+    func testStartChatCreatesAssistantTurnWithLearningContext() async {
+        let chatService = MockLearningHubChatService(
             turnResponses: [.success(makeAssistantTurnResponse(sessionId: 91))]
         )
-        let viewModel = KnowledgeHubViewModel(chatService: chatService)
+        let viewModel = LearningHubViewModel(chatService: chatService)
 
-        let route = await viewModel.startSearchChat(message: "What changed this week?")
+        let route = await viewModel.startChat(message: "What changed this week?")
 
         XCTAssertEqual(route?.sessionId, 91)
         XCTAssertEqual(route?.initialUserMessageText, "Prompt")
@@ -86,94 +86,21 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         XCTAssertEqual(route?.pendingMessageId, 291)
         XCTAssertEqual(chatService.receivedMessages, ["What changed this week?"])
         XCTAssertEqual(chatService.receivedSessionIds, [nil])
-        XCTAssertEqual(chatService.receivedScreenTypes, ["knowledge_hub"])
-        XCTAssertEqual(chatService.receivedScreenTitles, ["Knowledge"])
+        XCTAssertEqual(chatService.receivedScreenTypes, ["learning"])
+        XCTAssertEqual(chatService.receivedScreenTitles, ["Learning"])
         XCTAssertEqual(chatService.receivedQueries, [nil])
         XCTAssertEqual(chatService.receivedNotes, [nil])
         XCTAssertEqual(chatService.receivedAssistantActions, [nil])
         XCTAssertEqual(viewModel.sessions.map(\.id), [91])
     }
 
-    func testSeededActionsUseExpectedPrompts() async {
-        let chatService = MockKnowledgeHubChatService(
-            turnResponses: [
-                .success(makeAssistantTurnResponse(sessionId: 10)),
-                .success(makeAssistantTurnResponse(sessionId: 11)),
-                .success(makeAssistantTurnResponse(sessionId: 12)),
-                .success(makeAssistantTurnResponse(sessionId: 13)),
-            ]
-        )
-        let viewModel = KnowledgeHubViewModel(chatService: chatService)
-
-        _ = await viewModel.startSummaryChat()
-        _ = await viewModel.startCommentsChat()
-        _ = await viewModel.startFindArticlesChat()
-        _ = await viewModel.startFindFeedsChat()
-
-        XCTAssertEqual(
-            chatService.receivedMessages,
-            [
-                "Give me a summary of the last day's content from my feed, including recent news items and articles. What are the key themes and most important takeaways?",
-                "What are the most interesting and insightful comments from the news items and articles in my feed recently? Highlight any surprising perspectives or debates.",
-                "Find a few new articles or sources I should read next based on what I've been reading.",
-                "Recommend a few feeds, newsletters, or podcasts I should add based on what I've been reading.",
-            ]
-        )
-        XCTAssertEqual(
-            chatService.receivedQueries,
-            [
-                "recent news items and articles from my feed",
-                nil,
-                nil,
-                nil,
-            ]
-        )
-        XCTAssertEqual(
-            chatService.receivedNotes,
-            [
-                "Summarize recent in-app feed content. Include both short-form news items and longer articles. Prefer in-app content before web search.",
-                nil,
-                nil,
-                nil,
-            ]
-        )
-        XCTAssertEqual(chatService.receivedAssistantActions, [nil, nil, nil, nil])
-    }
-
-    func testInterestingUnreadNewsActionUsesAssistantActionIntent() async {
-        let chatService = MockKnowledgeHubChatService(
-            turnResponses: [.success(makeAssistantTurnResponse(sessionId: 14))]
-        )
-        let viewModel = KnowledgeHubViewModel(chatService: chatService)
-
-        _ = await viewModel.startInterestingUnreadNewsChat()
-
-        XCTAssertEqual(
-            chatService.receivedMessages,
-            [
-                "Look at my unread fast-news items and pick the most interesting stories I should pay attention to."
-            ]
-        )
-        XCTAssertEqual(chatService.receivedQueries, ["most interesting unread fast-news items"])
-        XCTAssertEqual(
-            chatService.receivedNotes,
-            [
-                "Use the unread fast-news tool result as the candidate set. Do not rely on currently visible rows only."
-            ]
-        )
-        XCTAssertEqual(
-            chatService.receivedAssistantActions,
-            [AssistantActionIntent.pickInterestingUnreadNews]
-        )
-    }
-
-    func testLoadHubStoresFirstHistoryPageAndPagination() async {
+    func testLoadLearningStoresFirstHistoryPageAndPagination() async {
         let sessions = [
             makeSession(id: 1),
             makeSession(id: 2),
             makeSession(id: 3),
         ]
-        let chatService = MockKnowledgeHubChatService(
+        let chatService = MockLearningHubChatService(
             pageResponses: [
                 .success(
                     makeSessionListResponse(
@@ -185,9 +112,9 @@ final class KnowledgeHubViewModelTests: XCTestCase {
             ],
             turnResponses: []
         )
-        let viewModel = KnowledgeHubViewModel(chatService: chatService)
+        let viewModel = LearningHubViewModel(chatService: chatService)
 
-        await viewModel.loadHub()
+        await viewModel.loadLearning()
 
         XCTAssertEqual(chatService.requestedPageLimits, [20])
         XCTAssertEqual(chatService.requestedPageCursors, [nil])
@@ -196,8 +123,8 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
-    func testLoadHubIgnoresCancelledRefreshAndKeepsCurrentSessions() async {
-        let chatService = MockKnowledgeHubChatService(
+    func testLoadLearningIgnoresCancelledRefreshAndKeepsCurrentSessions() async {
+        let chatService = MockLearningHubChatService(
             pageResponses: [
                 .success(
                     makeSessionListResponse(
@@ -210,10 +137,10 @@ final class KnowledgeHubViewModelTests: XCTestCase {
             ],
             turnResponses: []
         )
-        let viewModel = KnowledgeHubViewModel(chatService: chatService)
+        let viewModel = LearningHubViewModel(chatService: chatService)
 
-        await viewModel.loadHub()
-        await viewModel.loadHub()
+        await viewModel.loadLearning()
+        await viewModel.loadLearning()
 
         XCTAssertEqual(chatService.requestedPageCursors, [nil, nil])
         XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2])
@@ -222,7 +149,7 @@ final class KnowledgeHubViewModelTests: XCTestCase {
     }
 
     func testLoadMoreAppendsUniqueSessions() async {
-        let chatService = MockKnowledgeHubChatService(
+        let chatService = MockLearningHubChatService(
             pageResponses: [
                 .success(
                     makeSessionListResponse(
@@ -241,9 +168,9 @@ final class KnowledgeHubViewModelTests: XCTestCase {
             ],
             turnResponses: []
         )
-        let viewModel = KnowledgeHubViewModel(chatService: chatService)
+        let viewModel = LearningHubViewModel(chatService: chatService)
 
-        await viewModel.loadHub()
+        await viewModel.loadLearning()
         await viewModel.loadMoreSessions()
 
         XCTAssertEqual(chatService.requestedPageCursors, [nil, "next-page"])
@@ -252,13 +179,13 @@ final class KnowledgeHubViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.hasLoadMoreError)
     }
 
-    func testStartSearchChatStoresErrorWhenAssistantTurnFails() async {
-        let chatService = MockKnowledgeHubChatService(
-            turnResponses: [.failure(MockKnowledgeHubChatService.MockError.boom)]
+    func testStartChatStoresErrorWhenAssistantTurnFails() async {
+        let chatService = MockLearningHubChatService(
+            turnResponses: [.failure(MockLearningHubChatService.MockError.boom)]
         )
-        let viewModel = KnowledgeHubViewModel(chatService: chatService)
+        let viewModel = LearningHubViewModel(chatService: chatService)
 
-        let route = await viewModel.startSearchChat(message: "Find me something new")
+        let route = await viewModel.startChat(message: "Find me something new")
 
         XCTAssertNil(route)
         XCTAssertEqual(viewModel.errorMessage, "Boom")
@@ -321,7 +248,7 @@ final class KnowledgeHubViewModelTests: XCTestCase {
 }
 
 @MainActor
-private final class MockKnowledgeSpeechTranscriber: SpeechTranscribing {
+private final class MockLearningSpeechTranscriber: SpeechTranscribing {
     var onTranscriptDelta: ((String) -> Void)?
     var onTranscriptFinal: ((String) -> Void)?
     var onError: ((String) -> Void)?
@@ -384,7 +311,7 @@ private final class MockKnowledgeSpeechTranscriber: SpeechTranscribing {
 }
 
 @MainActor
-private final class MockKnowledgeHubChatService: KnowledgeHubChatServicing {
+private final class MockLearningHubChatService: LearningHubChatServicing {
     enum MockError: LocalizedError {
         case boom
 

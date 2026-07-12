@@ -11,7 +11,6 @@ struct SettingsSectionStack: View {
     let isFeedbackVisible: Bool
     let xConnection: XConnectionResponse?
     let settings: AppSettings
-    let isSavingReadingExperience: Bool
     let councilPersonas: [CouncilPersona]
     @Binding var newExpertName: String
     let isSavingCouncilPersonas: Bool
@@ -25,7 +24,6 @@ struct SettingsSectionStack: View {
     let onSaveCouncilPersonas: () -> Void
     let onMarkAll: () -> Void
     let onOpenDebugMenu: () -> Void
-    let onReadingExperienceChanged: (ReadingExperience) -> Void
 
     var body: some View {
         VStack(spacing: 24) {
@@ -41,11 +39,7 @@ struct SettingsSectionStack: View {
                 onGiveFeedback: onGiveFeedback
             )
             SettingsTwitterSection(authState: authState, xConnection: xConnection)
-            SettingsDisplaySection(
-                settings: settings,
-                isSavingReadingExperience: isSavingReadingExperience,
-                onReadingExperienceChanged: onReadingExperienceChanged
-            )
+            SettingsDisplaySection(settings: settings)
             SettingsCouncilSection(
                 personas: councilPersonas,
                 newExpertName: $newExpertName,

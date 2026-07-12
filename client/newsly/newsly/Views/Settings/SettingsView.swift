@@ -31,7 +31,6 @@ struct SettingsView: View {
     @State private var newExpertName = ""
     @State private var hasUnsavedCouncilPersonaEdits = false
     @State private var isSavingCouncilPersonas = false
-    @State private var isSavingReadingExperience = false
     @State private var xConnection: XConnectionResponse?
 
     init(scrollToCouncilOnAppear: Bool = false) {
@@ -47,7 +46,6 @@ struct SettingsView: View {
                     isFeedbackVisible: authViewModel.authState.authenticatedUser != nil,
                     xConnection: xConnection,
                     settings: settings,
-                    isSavingReadingExperience: isSavingReadingExperience,
                     councilPersonas: councilPersonasDraft,
                     newExpertName: $newExpertName,
                     isSavingCouncilPersonas: isSavingCouncilPersonas,
@@ -58,10 +56,9 @@ struct SettingsView: View {
                     onGiveFeedback: { activeSheet = .feedback },
                     onAddExpert: addExpert,
                     onRemoveExpert: removeExpert,
-                    onSaveCouncilPersonas: { Task { await saveCouncilPersonas() } },
+                    onSaveCouncilPersonas: saveCouncilPersonasIncludingPending,
                     onMarkAll: { showMarkAllDialog = true },
-                    onOpenDebugMenu: { activeSheet = .debugMenu },
-                    onReadingExperienceChanged: updateReadingExperience
+                    onOpenDebugMenu: { activeSheet = .debugMenu }
                 )
             }
             .onAppear {
@@ -77,8 +74,7 @@ struct SettingsView: View {
         .background(Color.surfacePrimary.ignoresSafeArea())
         .accessibilityIdentifier("settings.screen")
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
+        .appNavigationTitle("Settings")
         .alert("Settings", isPresented: $showingAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -146,6 +142,14 @@ struct SettingsView: View {
         hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
     }
 
+    private func saveCouncilPersonasIncludingPending() {
+        if !newExpertName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            addExpert()
+            guard newExpertName.isEmpty else { return }
+        }
+        Task { await saveCouncilPersonas() }
+    }
+
     @MainActor
     private func approveCLILink(scannedCode: String) async {
         guard !isApprovingCLILink else { return }
@@ -207,27 +211,6 @@ struct SettingsView: View {
         } catch {
             alertMessage = "Failed to save experts: \(error.localizedDescription)"
             showingAlert = true
-        }
-    }
-
-    @MainActor
-    private func updateReadingExperience(_ experience: ReadingExperience) {
-        guard !isSavingReadingExperience, settings.readingExperience != experience else { return }
-        let previous = settings.readingExperience
-        settings.setReadingExperience(experience)
-        isSavingReadingExperience = true
-        Task {
-            defer { isSavingReadingExperience = false }
-            do {
-                let user = try await AuthenticationService.shared.updateCurrentUserProfile(
-                    readingExperience: experience
-                )
-                authViewModel.updateUser(user)
-            } catch {
-                settings.setReadingExperience(previous)
-                alertMessage = "Failed to save reading experience: \(error.localizedDescription)"
-                showingAlert = true
-            }
         }
     }
 

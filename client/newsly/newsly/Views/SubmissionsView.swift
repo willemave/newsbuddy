@@ -26,8 +26,7 @@ struct SubmissionsView: View {
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
-        .navigationTitle("Submissions")
-        .navigationBarTitleDisplayMode(.inline)
+        .appNavigationTitle("Submissions")
         .onAppear {
             viewModel.markCurrentSubmissionsViewed()
         }
@@ -49,7 +48,9 @@ struct SubmissionsView: View {
                     SubmissionStatusRow(submission: submission)
                 }
                 .buttonStyle(.plain)
-                .appListRow()
+                .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 12))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             }
 
             if viewModel.isLoadingMore {
@@ -64,6 +65,7 @@ struct SubmissionsView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .contentMargins(.horizontal, 0, for: .scrollContent)
         .onPaginationThresholdReached {
             await viewModel.loadMore()
         }

@@ -785,7 +785,11 @@ private final class StubContentSummaryListService: ContentSummaryListServicing {
         throw StubContentSummaryListServiceError.unexpectedCall
     }
 
-    func fetchKnowledgeLibrary(cursor: String?, limit: Int) async throws -> ContentListResponse {
+    func fetchKnowledgeLibrary(
+        query: String?,
+        cursor: String?,
+        limit: Int
+    ) async throws -> ContentListResponse {
         throw StubContentSummaryListServiceError.unexpectedCall
     }
 

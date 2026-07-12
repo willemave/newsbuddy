@@ -136,10 +136,7 @@ struct BriefingTab: View {
 
 struct KnowledgeTab: View {
     @Binding var path: NavigationPath
-    @Binding var focusRequest: KnowledgeFocusRequest?
-    @Namespace private var chatTransitionNamespace
     let isBriefingExperience: Bool
-    let viewModel: KnowledgeHubViewModel
     let readStateCache: ReadStateCache
     let readingStateStore: ReadingStateStore
     let contentTextSize: DynamicTypeSize
@@ -148,22 +145,23 @@ struct KnowledgeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             KnowledgeView(
-                focusRequest: focusRequest,
-                onFocusHandled: clearFocusRequest,
-                onSelectSession: pushSession,
-                onShowKnowledgeLibrary: pushKnowledgeLibrary,
+                onSelectContent: pushContent,
+                onSearch: { path.append(KnowledgeSearchRoute()) },
                 onOpenMore: isBriefingExperience ? onOpenMore : nil,
-                viewModel: viewModel,
-                readStateCache: readStateCache,
-                chatTransitionNamespace: chatTransitionNamespace
+                readStateCache: readStateCache
             )
+            .navigationDestination(for: KnowledgeSearchRoute.self) { _ in
+                KnowledgeSearchView(
+                    onSelectContent: pushContent,
+                    readStateCache: readStateCache
+                )
+            }
             .withContentRoutes(
                 tab: .knowledge,
                 path: $path,
                 readingStateStore: readingStateStore,
                 readStateCache: readStateCache,
-                contentTextSize: contentTextSize,
-                chatTransitionNamespace: chatTransitionNamespace
+                contentTextSize: contentTextSize
             )
         }
         .toolbar(isBriefingExperience ? .hidden : .visible, for: .tabBar)
@@ -174,19 +172,57 @@ struct KnowledgeTab: View {
         }
     }
 
-    private func clearFocusRequest(_ request: KnowledgeFocusRequest) {
-        if focusRequest == request {
-            focusRequest = nil
+    private func pushContent(_ route: ContentDetailRoute) {
+        path.append(route)
+    }
+}
+
+struct LearningTab: View {
+    @Binding var path: NavigationPath
+    @Binding var focusRequest: LearningFocusRequest?
+    @Namespace private var chatTransitionNamespace
+    let isBriefingExperience: Bool
+    let viewModel: LearningHubViewModel
+    let readStateCache: ReadStateCache
+    let readingStateStore: ReadingStateStore
+    let contentTextSize: DynamicTypeSize
+    let onOpenMore: () -> Void
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            LearningView(
+                focusRequest: focusRequest,
+                onFocusHandled: clearFocusRequest,
+                onSelectSession: pushSession,
+                onOpenMore: isBriefingExperience ? onOpenMore : nil,
+                viewModel: viewModel,
+                readStateCache: readStateCache,
+                chatTransitionNamespace: chatTransitionNamespace
+            )
+            .withContentRoutes(
+                tab: .learning,
+                path: $path,
+                readingStateStore: readingStateStore,
+                readStateCache: readStateCache,
+                contentTextSize: contentTextSize,
+                chatTransitionNamespace: chatTransitionNamespace
+            )
         }
+        .toolbar(isBriefingExperience ? .hidden : .visible, for: .tabBar)
+        .tag(RootTab.learning)
+        .tabItem {
+            Label("Learning", systemImage: "sparkles")
+                .accessibilityIdentifier("tab.learning")
+        }
+    }
+
+    private func clearFocusRequest(_ request: LearningFocusRequest) {
+        if focusRequest == request { focusRequest = nil }
     }
 
     private func pushSession(_ route: ChatSessionRoute) {
         path = NavigationPath()
         path.append(route)
-    }
-
-    private func pushKnowledgeLibrary() {
-        path.append(KnowledgeLibraryRoute())
     }
 }
 
@@ -238,6 +274,12 @@ struct BriefingCompactTabBarInset: View {
             label: "Knowledge",
             icon: "books.vertical.fill",
             accessibilityIdentifier: "tab.knowledge"
+        ),
+        CompactTabBar.Item(
+            tab: .learning,
+            label: "Learning",
+            icon: "sparkles",
+            accessibilityIdentifier: "tab.learning"
         )
     ]
 }

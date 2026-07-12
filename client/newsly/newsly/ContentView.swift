@@ -11,7 +11,7 @@ struct ContentView: View {
     private let authenticatedUserID: Int?
 
     @State private var tabCoordinator: TabCoordinatorViewModel
-    @State private var knowledgeHubViewModel: KnowledgeHubViewModel
+    @State private var learningHubViewModel: LearningHubViewModel
 
     @State private var readingStateStore: ReadingStateStore
     @State private var readStateCache: ReadStateCache
@@ -26,8 +26,9 @@ struct ContentView: View {
     @State private var shortFormPath = NavigationPath()
     @State private var briefingPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
+    @State private var learningPath = NavigationPath()
     @State private var isRestoringPath = false
-    @State private var knowledgeFocusRequest: KnowledgeFocusRequest?
+    @State private var learningFocusRequest: LearningFocusRequest?
     @State private var showMoreSheet = false
     @State private var longFormScrollToTopRequest = 0
     @State private var shortFormScrollToTopRequest = 0
@@ -47,7 +48,7 @@ struct ContentView: View {
                 readStateCache: readStateCache
             )
         )
-        _knowledgeHubViewModel = State(initialValue: RootDependencyFactory.makeKnowledgeHubViewModel())
+        _learningHubViewModel = State(initialValue: RootDependencyFactory.makeLearningHubViewModel())
         _submissionStatusViewModel = State(
             initialValue: RootDependencyFactory.makeSubmissionStatusViewModel()
         )
@@ -85,9 +86,18 @@ struct ContentView: View {
 
             KnowledgeTab(
                 path: $knowledgePath,
-                focusRequest: $knowledgeFocusRequest,
                 isBriefingExperience: isBriefingExperience,
-                viewModel: knowledgeHubViewModel,
+                readStateCache: readStateCache,
+                readingStateStore: readingStateStore,
+                contentTextSize: contentTextSize,
+                onOpenMore: { showMoreSheet = true }
+            )
+
+            LearningTab(
+                path: $learningPath,
+                focusRequest: $learningFocusRequest,
+                isBriefingExperience: isBriefingExperience,
+                viewModel: learningHubViewModel,
                 readStateCache: readStateCache,
                 readingStateStore: readingStateStore,
                 contentTextSize: contentTextSize,
@@ -104,7 +114,7 @@ struct ContentView: View {
         }
         .environment(
             \.persistentBottomChromeInset,
-            isBriefingExperience ? compactTabBarHeight : 0
+            isBriefingExperience && isCompactTabBarVisible ? compactTabBarHeight : 0
         )
         .safeAreaInset(edge: .bottom, spacing: 0) {
             BriefingCompactTabBarInset(
@@ -165,6 +175,11 @@ struct ContentView: View {
         .onChange(of: knowledgePath.count) { oldValue, newValue in
             logger.info(
                 "[Navigation] pathChanged tab=knowledge oldCount=\(oldValue, privacy: .public) newCount=\(newValue, privacy: .public)"
+            )
+        }
+        .onChange(of: learningPath.count) { oldValue, newValue in
+            logger.info(
+                "[Navigation] pathChanged tab=learning oldCount=\(oldValue, privacy: .public) newCount=\(newValue, privacy: .public)"
             )
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -232,7 +247,16 @@ struct ContentView: View {
     }
 
     private var isCompactTabBarVisible: Bool {
-        tabCoordinator.selectedTab != .briefing || briefingPath.isEmpty
+        switch tabCoordinator.selectedTab {
+        case .briefing:
+            briefingPath.isEmpty
+        case .knowledge:
+            knowledgePath.isEmpty
+        case .learning:
+            learningPath.isEmpty
+        case .longContent, .shortNews, .more:
+            true
+        }
     }
 
     private func restoreIfNeeded() {
@@ -247,15 +271,15 @@ struct ContentView: View {
     }
 
     private func openChatSession(route: ChatSessionRoute) {
-        tabCoordinator.selectedTab = .knowledge
-        knowledgePath = NavigationPath()
-        knowledgePath.append(route)
+        tabCoordinator.selectedTab = .learning
+        learningPath = NavigationPath()
+        learningPath.append(route)
     }
 
     private func openKnowledgeNarrations() {
-        knowledgePath = NavigationPath()
-        knowledgeFocusRequest = KnowledgeFocusRequest(target: .narrations)
-        tabCoordinator.selectedTab = .knowledge
+        learningPath = NavigationPath()
+        learningFocusRequest = LearningFocusRequest(target: .narrations)
+        tabCoordinator.selectedTab = .learning
     }
 
     private func openContentRoute(_ route: ContentDetailRoute) {

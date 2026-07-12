@@ -7,18 +7,12 @@ import SwiftUI
 
 struct SettingsDisplaySection: View {
     let settings: AppSettings
-    let isSavingReadingExperience: Bool
-    let onReadingExperienceChanged: (ReadingExperience) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(title: "Display")
 
             VStack(spacing: 0) {
-                readingExperienceRow
-
-                RowDivider()
-
                 textSizeRow
             }
             .settingsCard()
@@ -50,30 +44,6 @@ struct SettingsDisplaySection: View {
                 ),
                 range: 0...4
             )
-        }
-    }
-
-    private var readingExperienceRow: some View {
-        SettingsRow(
-            icon: "newspaper",
-            iconColor: .brandPrimary,
-            title: "Reading Experience"
-        ) {
-            Picker(
-                "Reading Experience",
-                selection: Binding(
-                    get: { settings.readingExperience },
-                    set: onReadingExperienceChanged
-                )
-            ) {
-                ForEach(ReadingExperience.allCases) { experience in
-                    Text(experience.title).tag(experience)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 190)
-            .disabled(isSavingReadingExperience)
-            .accessibilityIdentifier("settings.reading_experience")
         }
     }
 

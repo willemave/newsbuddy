@@ -31,6 +31,8 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     let articleUrl: String?
     let articleSummary: String?
     let articleSource: String?
+    let articleImageUrl: String?
+    let articleThumbnailUrl: String?
     let hasPendingMessage: Bool?
     private let savedToKnowledgeValue: Bool?
     let hasMessages: Bool?
@@ -56,6 +58,8 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         case articleUrl = "article_url"
         case articleSummary = "article_summary"
         case articleSource = "article_source"
+        case articleImageUrl = "article_image_url"
+        case articleThumbnailUrl = "article_thumbnail_url"
         case hasPendingMessage = "has_pending_message"
         case savedToKnowledgeValue = "is_saved_to_knowledge"
         case hasMessages = "has_messages"
@@ -81,6 +85,8 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         articleUrl: String?,
         articleSummary: String?,
         articleSource: String?,
+        articleImageUrl: String? = nil,
+        articleThumbnailUrl: String? = nil,
         hasPendingMessage: Bool?,
         isSavedToKnowledge: Bool?,
         hasMessages: Bool?,
@@ -104,6 +110,8 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         self.articleUrl = articleUrl
         self.articleSummary = articleSummary
         self.articleSource = articleSource
+        self.articleImageUrl = articleImageUrl
+        self.articleThumbnailUrl = articleThumbnailUrl
         self.hasPendingMessage = hasPendingMessage
         self.savedToKnowledgeValue = isSavedToKnowledge
         self.hasMessages = hasMessages
@@ -131,6 +139,8 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
             articleUrl: response.articleUrl,
             articleSummary: response.articleSummary,
             articleSource: response.articleSource,
+            articleImageUrl: response.articleImageUrl,
+            articleThumbnailUrl: response.articleThumbnailUrl,
             hasPendingMessage: response.hasPendingMessage,
             isSavedToKnowledge: response.isSavedToKnowledge,
             hasMessages: response.hasMessages,
@@ -165,6 +175,8 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         try container.encodeIfPresent(articleUrl, forKey: .articleUrl)
         try container.encodeIfPresent(articleSummary, forKey: .articleSummary)
         try container.encodeIfPresent(articleSource, forKey: .articleSource)
+        try container.encodeIfPresent(articleImageUrl, forKey: .articleImageUrl)
+        try container.encodeIfPresent(articleThumbnailUrl, forKey: .articleThumbnailUrl)
         try container.encodeIfPresent(hasPendingMessage, forKey: .hasPendingMessage)
         try container.encodeIfPresent(savedToKnowledgeValue, forKey: .savedToKnowledgeValue)
         try container.encodeIfPresent(hasMessages, forKey: .hasMessages)

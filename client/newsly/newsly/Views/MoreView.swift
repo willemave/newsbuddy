@@ -21,7 +21,7 @@ struct MoreView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorialMastheadHeader(title: "Settings")
+            EditorialMastheadHeader(title: "More", showsDate: false)
 
             List {
                 Section {

@@ -118,6 +118,15 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         items = newItems
     }
 
+    func reset() {
+        requestGeneration += 1
+        isLoading = false
+        items.removeAll()
+        phase = .idle
+        nextCursor = nil
+        hasMore = true
+    }
+
     func isCurrentRequest(_ generation: Int) -> Bool {
         generation == requestGeneration
     }

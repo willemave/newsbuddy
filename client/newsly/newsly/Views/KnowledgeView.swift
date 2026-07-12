@@ -2,66 +2,34 @@
 //  KnowledgeView.swift
 //  newsly
 //
-//  Created by Assistant on 11/28/25.
-//
 
 import SwiftUI
 
-enum KnowledgeFocusTarget: Hashable {
-    case narrations
-}
-
-struct KnowledgeFocusRequest: Equatable {
-    let id = UUID()
-    let target: KnowledgeFocusTarget
-}
-
-private enum KnowledgeSheetDestination: String, Identifiable {
-    case narrationList
-    case learningDeckList
-
-    var id: String { rawValue }
-}
+struct KnowledgeSearchRoute: Hashable {}
 
 struct KnowledgeView: View {
-    let focusRequest: KnowledgeFocusRequest?
-    let onFocusHandled: ((KnowledgeFocusRequest) -> Void)?
-    let onSelectSession: ((ChatSessionRoute) -> Void)?
-    let onShowKnowledgeLibrary: (() -> Void)?
-    let chatTransitionNamespace: Namespace.ID?
-    var onOpenMore: (() -> Void)? = nil
+    let onSelectContent: (ContentDetailRoute) -> Void
+    let onSearch: () -> Void
+    var onOpenMore: (() -> Void)?
 
-    @State private var viewModel: KnowledgeHubViewModel
-    @State private var customNarrationLibrary: CustomNarrationLibraryViewModel
-    @State private var learningDecksViewModel = RootDependencyFactory.makeLearningDecksViewModel()
+    @State private var viewModel: ContentListViewModel
     @State private var settings = AppSettings.shared
-    @State private var searchText = ""
-    @State private var activeSheet: KnowledgeSheetDestination?
-    @State private var runningActionID: HubActionID?
-    @FocusState private var isSearchFocused: Bool
 
     init(
-        focusRequest: KnowledgeFocusRequest? = nil,
-        onFocusHandled: ((KnowledgeFocusRequest) -> Void)? = nil,
-        onSelectSession: ((ChatSessionRoute) -> Void)? = nil,
-        onShowKnowledgeLibrary: (() -> Void)? = nil,
+        onSelectContent: @escaping (ContentDetailRoute) -> Void,
+        onSearch: @escaping () -> Void,
         onOpenMore: (() -> Void)? = nil,
-        viewModel: KnowledgeHubViewModel? = nil,
-        readStateCache: ReadStateCache? = nil,
-        chatTransitionNamespace: Namespace.ID? = nil
+        viewModel: ContentListViewModel? = nil,
+        readStateCache: ReadStateCache? = nil
     ) {
-        let readStateCache = readStateCache ?? ReadStateCache()
-        self.focusRequest = focusRequest
-        self.onFocusHandled = onFocusHandled
-        self.onSelectSession = onSelectSession
-        self.onShowKnowledgeLibrary = onShowKnowledgeLibrary
+        self.onSelectContent = onSelectContent
+        self.onSearch = onSearch
         self.onOpenMore = onOpenMore
-        self.chatTransitionNamespace = chatTransitionNamespace
         self._viewModel = State(
-            initialValue: viewModel ?? RootDependencyFactory.makeKnowledgeHubViewModel()
-        )
-        self._customNarrationLibrary = State(
-            initialValue: RootDependencyFactory.makeCustomNarrationLibraryViewModel(readStateCache: readStateCache)
+            initialValue: viewModel ?? RootDependencyFactory.makeContentListViewModel(
+                defaultReadFilter: "all",
+                readStateCache: readStateCache ?? ReadStateCache()
+            )
         )
     }
 
@@ -70,227 +38,401 @@ struct KnowledgeView: View {
     }
 
     var body: some View {
-        ScrollViewReader { scrollProxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    headerSection
-                    searchFieldSection
-                    errorBannerSection
-                    KnowledgeLibrarySection(
-                        onShowKnowledgeLibrary: onShowKnowledgeLibrary,
-                        onShowNarrations: { activeSheet = .narrationList },
-                        onShowLearningDecks: { activeSheet = .learningDeckList }
-                    )
-                        .id(KnowledgeFocusTarget.narrations)
-                    KnowledgeActionsSection(
-                        viewModel: viewModel,
-                        runningActionID: $runningActionID,
-                        onSelectSession: onSelectSession
-                    )
-                    KnowledgeChatHistorySection(
-                        viewModel: viewModel,
-                        onSelectSession: onSelectSession,
-                        chatTransitionNamespace: chatTransitionNamespace
-                    )
-                }
-                .padding(.bottom, 32)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                EditorialMastheadHeader(
+                    title: "Knowledge",
+                    trailingAccessory: AnyView(headerActions)
+                )
+
+                Text("RECENTLY SAVED")
+                    .kicker()
+                    .accessibilityLabel("Recently Saved")
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
+                    .padding(.bottom, 12)
+
+                libraryContent
             }
-            .accessibilityIdentifier("knowledge.screen")
-            .refreshable {
-                await loadKnowledgeScreen()
-            }
-            .onAppear {
-                scrollToFocusRequest(focusRequest, proxy: scrollProxy)
-            }
-            .onChange(of: focusRequest) { _, request in
-                scrollToFocusRequest(request, proxy: scrollProxy)
-            }
+            .padding(.bottom, 32)
         }
+        .accessibilityIdentifier("knowledge.screen")
+        .onPaginationThresholdReached {
+            await viewModel.loadMoreContent()
+        }
+        .refreshable { await viewModel.loadKnowledgeLibrary() }
         .topScreenEdgeFade()
+        .bottomScreenEdgeFade()
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $activeSheet) { destination in
-            switch destination {
-            case .narrationList:
-                CustomNarrationListSheet(
-                    viewModel: customNarrationLibrary,
-                    playbackService: customNarrationLibrary.playbackService
-                )
-            case .learningDeckList:
-                LearningDeckListSheet(viewModel: learningDecksViewModel)
+        .task { await viewModel.loadKnowledgeLibrary() }
+    }
+
+    private var headerActions: some View {
+        HStack(spacing: 2) {
+            Button(action: onSearch) {
+                Image(systemName: "magnifyingglass")
+                    .font(.appSymbol(size: 19, weight: .semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .accessibilityLabel("Search saved knowledge")
+            .accessibilityIdentifier("knowledge.search")
+
+            if let onOpenMore {
+                Button(action: onOpenMore) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.appSymbol(size: 19, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Settings and more")
+                .accessibilityIdentifier("knowledge.more_menu")
             }
         }
-        .onChange(of: viewModel.completedVoiceRoute) { _, route in
-            guard let route else { return }
-            viewModel.clearCompletedVoiceRoute()
-            onSelectSession?(route)
-        }
-        .task {
-            await loadKnowledgeScreen()
-            await viewModel.checkAndRefreshVoiceDictation()
-        }
-        .onDisappear {
-            viewModel.cancelVoiceRecording()
+        .foregroundStyle(Color.onSurface)
+    }
+
+    @ViewBuilder
+    private var libraryContent: some View {
+        if viewModel.isLoading && viewModel.contents.isEmpty {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Loading saved articles")
+                    .font(.terracottaBodyMedium)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+            }
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.vertical, 20)
+        } else if let errorMessage = viewModel.errorMessage, viewModel.contents.isEmpty {
+            StateView(
+                role: .error(message: errorMessage),
+                actionTitle: "Try Again",
+                action: { Task { await viewModel.loadKnowledgeLibrary() } }
+            )
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.vertical, 28)
+        } else if viewModel.contents.isEmpty {
+            EmptyStateView(
+                icon: "bookmark",
+                title: "Nothing saved yet",
+                subtitle: "Articles you save will appear here with their artwork."
+            )
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.vertical, 28)
+        } else {
+            ForEach(viewModel.contents) { content in
+                KnowledgeSavedContentButton(
+                    content: content,
+                    allContentIds: readyContentIDs,
+                    accessibilityIdentifier: "knowledge.saved.\(content.id)",
+                    onSelectContent: onSelectContent,
+                    onRemove: { Task { await viewModel.toggleKnowledgeSave(content.id) } }
+                )
+
+                if content.id != viewModel.contents.last?.id {
+                    Divider()
+                        .padding(.leading, Spacing.appHorizontalMargin + 104)
+                        .padding(.trailing, Spacing.appHorizontalMargin)
+                }
+            }
+
+            if viewModel.isLoadingMore {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            }
         }
     }
 
-    // MARK: - Header
+    private var readyContentIDs: [Int] {
+        viewModel.contents.compactMap { content in
+            content.savedLibraryItemState == .ready ? content.id : nil
+        }
+    }
+}
 
-    private var headerSection: some View {
-        EditorialMastheadHeader(
-            title: "Knowledge",
-            trailingAccessory: onOpenMore.map { action in AnyView(moreMenuButton(action)) }
+struct KnowledgeSearchView: View {
+    let onSelectContent: (ContentDetailRoute) -> Void
+
+    @State private var viewModel: ContentListViewModel
+    @State private var query = ""
+    @FocusState private var isSearchFocused: Bool
+
+    init(
+        onSelectContent: @escaping (ContentDetailRoute) -> Void,
+        readStateCache: ReadStateCache
+    ) {
+        self.onSelectContent = onSelectContent
+        self._viewModel = State(
+            initialValue: RootDependencyFactory.makeContentListViewModel(
+                defaultReadFilter: "all",
+                readStateCache: readStateCache
+            )
         )
     }
 
-    private func moreMenuButton(_ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: "line.3.horizontal")
-                .font(.appSymbol(size: 26, weight: .semibold))
-                .frame(width: 48, height: 48, alignment: .trailing)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.onSurface)
-        .accessibilityLabel("Settings and more")
-        .accessibilityIdentifier("knowledge.more_menu")
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: - Search Field
+    var body: some View {
+        VStack(spacing: 0) {
+            searchField
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.vertical, 10)
 
-    private var trimmedSearchText: String {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+            Divider()
 
-    private var searchFieldSection: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "text.bubble")
-                .font(.appSymbol(size: 16, weight: .medium))
-                .foregroundColor(.onSurfaceSecondary)
-                .accessibilityHidden(true)
-
-            TextField("Ask anything...", text: $searchText)
-                .font(.terracottaBodyLarge)
-                .focused($isSearchFocused)
-                .submitLabel(.send)
-                .onSubmit {
-                    sendSearchQuery()
-                }
-                .padding(.vertical, 11)
-                .padding(.horizontal, 4)
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                .background(Color.surfaceContainer.opacity(0.001))
-                .accessibilityLabel("Ask Knowledge")
-                .accessibilityIdentifier("knowledge.search.input")
-
-            if !trimmedSearchText.isEmpty && !viewModel.isVoiceRecording {
-                Button {
-                    sendSearchQuery()
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.appSymbol(size: 28))
-                        .foregroundColor(viewModel.isCreatingSession ? .onSurfaceSecondary : .terracottaPrimary)
-                        .frame(width: 44, height: 44)
-                }
-                .disabled(viewModel.isCreatingSession)
-                .contentShape(Circle())
-                .accessibilityLabel("Send question")
-                .accessibilityIdentifier("knowledge.search.send")
-            } else {
-                composerMicButton
-            }
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 8)
-        .background(Color.surfaceContainer)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
-        .padding(.horizontal, Spacing.appHorizontalMargin)
-        .padding(.bottom, 24)
-    }
-
-    private var composerMicButton: some View {
-        TapToTalkMicButton(
-            isEnabled: viewModel.isVoiceRecording ||
-                (!viewModel.isCreatingSession && !viewModel.isVoiceActionInFlight && !viewModel.isVoiceTranscribing),
-            isRecording: viewModel.isVoiceRecording,
-            isTranscribing: viewModel.isVoiceTranscribing,
-            isBusy: !viewModel.isVoiceRecording &&
-                (viewModel.isCreatingSession || viewModel.isVoiceActionInFlight || viewModel.isVoiceTranscribing),
-            size: 36,
-            action: {
-                Task {
-                    if let route = await viewModel.toggleVoiceRecording() {
-                        onSelectSession?(route)
+            List {
+                if trimmedQuery.count < 2 {
+                    EmptyStateView(
+                        icon: "magnifyingglass",
+                        title: "Search your saves",
+                        subtitle: "Search by title, source, or URL."
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                } else if viewModel.isLoading {
+                    ProgressView("Searching")
+                        .font(.appSubheadline)
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } else if viewModel.contents.isEmpty {
+                    EmptyStateView(
+                        icon: "magnifyingglass",
+                        title: "No results",
+                        subtitle: "No saved items match “\(trimmedQuery)”."
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                } else {
+                    ForEach(viewModel.contents) { content in
+                        KnowledgeSavedContentButton(
+                            content: content,
+                            allContentIds: readyContentIDs,
+                            accessibilityIdentifier: "knowledge.search.result.\(content.id)",
+                            onSelectContent: onSelectContent,
+                            onRemove: { Task { await viewModel.toggleKnowledgeSave(content.id) } }
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
                     }
                 }
             }
-        )
-        .frame(width: 44, height: 44)
-        .opacity(viewModel.voiceDictationAvailable || viewModel.isVoiceRecording ? 1 : 0.72)
-        .accessibilityIdentifier("knowledge.new_chat_mic")
-        .accessibilityLabel(viewModel.isVoiceRecording ? "Stop voice chat" : "Start voice chat")
-        .accessibilityHint(viewModel.isVoiceRecording ? "Stop recording and start a chat" : "Record a question and start a chat")
-    }
-
-    private var errorBannerSection: some View {
-        Group {
-            if let errorMessage = viewModel.errorMessage {
-                Text(errorMessage)
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(Color.statusDestructive)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(Color.statusDestructive.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
-                    .padding(.horizontal, Spacing.appHorizontalMargin)
-                    .padding(.bottom, 24)
-            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
         }
-    }
-
-    private func scrollToFocusRequest(
-        _ request: KnowledgeFocusRequest?,
-        proxy: ScrollViewProxy
-    ) {
-        guard let request else { return }
-
-        Task { @MainActor in
+        .background(Color.surfacePrimary)
+        .onPaginationThresholdReached {
+            await viewModel.loadMoreContent()
+        }
+        .appNavigationTitle("Search Knowledge")
+        .task {
             await Task.yield()
-            withAnimation(AppMotion.subtle) {
-                proxy.scrollTo(request.target, anchor: .top)
+            isSearchFocused = true
+        }
+        .task(id: trimmedQuery) {
+            guard trimmedQuery.count >= 2 else {
+                viewModel.clearKnowledgeLibrary()
+                return
             }
-            if request.target == .narrations {
-                activeSheet = .narrationList
-            }
-            onFocusHandled?(request)
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await viewModel.loadKnowledgeLibrary(query: trimmedQuery)
         }
     }
 
-    private func sendSearchQuery() {
-        let trimmed = trimmedSearchText
-        guard !trimmed.isEmpty else { return }
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.appSymbol(size: 15, weight: .semibold))
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .accessibilityHidden(true)
 
-        isSearchFocused = false
-        let query = trimmed
-        searchText = ""
+            TextField("Search saved knowledge", text: $query)
+                .font(.appBody)
+                .focused($isSearchFocused)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .accessibilityIdentifier("knowledge.search.input")
 
-        Task {
-            if let route = await viewModel.startSearchChat(message: query) {
-                onSelectSession?(route)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                    isSearchFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.appSymbol(size: 16))
+                        .foregroundStyle(Color.onSurfaceTertiary)
+                        .frame(width: 32, height: 44)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Clear search")
             }
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, query.isEmpty ? 14 : 6)
+        .frame(minHeight: 48)
+        .background(Color.surfaceContainerHighest)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+                .stroke(Color.outlineVariant.opacity(0.35), lineWidth: 1)
         }
     }
 
-    @MainActor
-    private func loadKnowledgeScreen() async {
-        await viewModel.loadHub()
-        await customNarrationLibrary.load()
-        await learningDecksViewModel.load()
+    private var readyContentIDs: [Int] {
+        viewModel.contents.compactMap { content in
+            content.savedLibraryItemState == .ready ? content.id : nil
+        }
+    }
+}
+
+private struct KnowledgeSavedContentButton: View {
+    let content: ContentSummary
+    let allContentIds: [Int]
+    let accessibilityIdentifier: String
+    let onSelectContent: (ContentDetailRoute) -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        Button {
+            guard content.savedLibraryItemState == .ready else { return }
+            onSelectContent(
+                ContentDetailRoute(
+                    summary: content,
+                    allContentIds: allContentIds,
+                    navigationSurface: .savedLibrary
+                )
+            )
+        } label: {
+            KnowledgeSavedRow(content: content)
+        }
+        .buttonStyle(.plain)
+        .disabled(content.savedLibraryItemState != .ready)
+        .contextMenu {
+            Button(role: .destructive, action: onRemove) {
+                Label("Remove from Knowledge", systemImage: "bookmark.slash")
+            }
+        }
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+}
+
+private struct KnowledgeSavedRow: View {
+    let content: ContentSummary
+
+    private let imageSize = CGSize(width: 92, height: 76)
+
+    private var hasStalled: Bool {
+        guard content.savedLibraryItemState == .processing,
+              let createdAt = ContentTimestampFormatter.parse(content.createdAt)
+        else { return false }
+        return AppClock.now.timeIntervalSince(createdAt) > 24 * 60 * 60
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            artwork
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(content.displayTitle)
+                    .font(.terracottaHeadlineSmall)
+                    .foregroundStyle(Color.onSurface)
+                    .lineLimit(3)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if hasStalled {
+                    Label("Preparation stalled", systemImage: "exclamationmark.circle")
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.statusDestructive)
+                } else if content.savedLibraryItemState == .processing {
+                    Label("Preparing", systemImage: "hourglass")
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                } else if content.savedLibraryItemState == .unavailable {
+                    Label("Unavailable", systemImage: "exclamationmark.circle")
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.statusDestructive)
+                } else if let summary = content.summaryDisplayText {
+                    Text(summary)
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(2)
+                }
+
+                HStack(spacing: 5) {
+                    Text(content.source ?? content.platform ?? "Saved")
+                        .lineLimit(1)
+                    if let relativeTime = content.relativeTimeDisplay {
+                        Text("·")
+                        Text(relativeTime)
+                    }
+                }
+                .font(.terracottaLabelSmall)
+                .foregroundStyle(Color.onSurfaceTertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.right")
+                .font(.appSymbol(size: 11, weight: .semibold))
+                .foregroundStyle(Color.onSurfaceTertiary)
+                .padding(.top, 4)
+                .opacity(content.savedLibraryItemState == .ready ? 1 : 0)
+        }
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+
+    private var artwork: some View {
+        CachedAsyncImage(
+            url: content.imageUrl.flatMap(ServerImageURL.resolve),
+            thumbnailUrl: content.thumbnailUrl.flatMap(ServerImageURL.resolve),
+            targetSize: imageSize
+        ) { image in
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: imageSize.width, height: imageSize.height)
+                .clipped()
+        } placeholder: {
+            ZStack {
+                Color.surfaceSecondary
+                if hasStalled {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.appSymbol(size: 18, weight: .medium))
+                        .foregroundStyle(Color.statusDestructive)
+                } else if content.savedLibraryItemState == .processing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "photo")
+                        .font(.appSymbol(size: 18))
+                        .foregroundStyle(Color.onSurfaceTertiary)
+                }
+            }
+            .frame(width: imageSize.width, height: imageSize.height)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.outlineVariant.opacity(0.45), lineWidth: 0.5)
+        }
     }
 }
 
 #Preview {
-    KnowledgeView()
+    NavigationStack {
+        KnowledgeView(onSelectContent: { _ in }, onSearch: {})
+    }
 }

@@ -26,7 +26,11 @@ protocol ContentSummaryListServicing: AnyObject {
         limit: Int
     ) async throws -> ContentListResponse
 
-    func fetchKnowledgeLibrary(cursor: String?, limit: Int) async throws -> ContentListResponse
+    func fetchKnowledgeLibrary(
+        query: String?,
+        cursor: String?,
+        limit: Int
+    ) async throws -> ContentListResponse
     func fetchRecentlyReadList(
         contentType: String?,
         date: String?,
@@ -54,7 +58,7 @@ final class ContentListViewModel {
         get {
             readStateCache.applying(
                 to: feed.items,
-                removeReadItems: selectedReadFilter == "unread"
+                removeReadItems: mode == .content && selectedReadFilter == "unread"
             )
         }
         set { feed.replaceItems(newValue) }
@@ -110,6 +114,7 @@ final class ContentListViewModel {
     }
 
     private var mode: Mode = .content
+    private var knowledgeQuery: String?
 
     @ObservationIgnored
     private var feed: PaginatedFeed<ContentSummary>!
@@ -151,7 +156,7 @@ final class ContentListViewModel {
         case .recentlyRead:
             await loadRecentlyRead()
         case .knowledgeLibrary:
-            await loadKnowledgeLibrary()
+            await loadKnowledgeLibrary(query: knowledgeQuery)
         case .content:
             await loadContent()
         }
@@ -225,10 +230,19 @@ final class ContentListViewModel {
         }
     }
 
-    func loadKnowledgeLibrary() async {
+    func loadKnowledgeLibrary(query: String? = nil) async {
         actionErrorMessage = nil
         mode = .knowledgeLibrary
+        let trimmedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines)
+        knowledgeQuery = trimmedQuery?.isEmpty == false ? trimmedQuery : nil
         await feed.loadInitial()
+    }
+
+    func clearKnowledgeLibrary() {
+        mode = .knowledgeLibrary
+        knowledgeQuery = nil
+        actionErrorMessage = nil
+        feed.reset()
     }
 
     func refreshKnowledgeLibraryInBackground() async {
@@ -297,7 +311,11 @@ final class ContentListViewModel {
         case .content:
             response = try await loadDefaultContentPage(cursor: cursor)
         case .knowledgeLibrary:
-            response = try await contentService.fetchKnowledgeLibrary(cursor: cursor, limit: 25)
+            response = try await contentService.fetchKnowledgeLibrary(
+                query: knowledgeQuery,
+                cursor: cursor,
+                limit: 25
+            )
         case .recentlyRead:
             response = try await contentService.fetchRecentlyReadList(
                 contentType: selectedContentType,

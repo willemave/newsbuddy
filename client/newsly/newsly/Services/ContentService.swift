@@ -472,10 +472,18 @@ class ContentService {
         try await client.request(APIEndpoints.removeFromKnowledge(id: id), method: "DELETE")
     }
 
-    func fetchKnowledgeLibrary(cursor: String? = nil, limit: Int = 25) async throws -> ContentListResponse {
+    func fetchKnowledgeLibrary(
+        query: String? = nil,
+        cursor: String? = nil,
+        limit: Int = 25
+    ) async throws -> ContentListResponse {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: String(limit))
         ]
+
+        if let query, !query.isEmpty {
+            queryItems.append(URLQueryItem(name: "q", value: query))
+        }
 
         if let cursor = cursor {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
